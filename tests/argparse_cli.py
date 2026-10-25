@@ -9,6 +9,15 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "numbers": [
+        [], ["--help"], ["-i", "１２_３"], ["-i", "123456789012345678901234567890"],
+        ["-i", "bad", "-i", "1"], ["-i", "bad", "--help"], ["--help", "-i", "bad"],
+        ["--scale=-0.0"], ["--scale", "1e-1000"], ["--scale=inf"], ["--scale=nan"],
+        ["--scale", "1", "--scale", "bad"],
+        ["--ids", "-02", "0_4"], ["--ids", "3", "bad"], ["--ids", "3", "2"],
+        ["--choice=0.0"], ["--choice=2"], ["--maybe"], ["--maybe=01"], ["--maybe=42"],
+        ["--unit", "ab"], ["--unit=c", "-.１２"],
+    ],
     "counts": [
         [], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
         ["--", "a", "b"], ["a", "--", "--", "b"], ["a", "b", "-v", "c"],
@@ -102,7 +111,7 @@ REJECTED = {
     "invalid_arity": 'parser.add_argument("input", nargs="bad")',
     "zero_arity": 'parser.add_argument("input", nargs=0)',
     "mixed_positionals": 'parser.add_argument("input", "--other")',
-    "foreign_converter": 'parser.add_argument("--number", type=int)',
+    "foreign_converter": 'parser.add_argument("--number", type=complex)',
     "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
     "duplicate_destination": 'parser.add_argument("--a-b")\n    parser.add_argument("--a_b")',
     "escaped_builder": "copy = parser",

@@ -93,7 +93,7 @@ impl OptionSpec {
     }
 
     fn label(&self, summary: bool, color: bool) -> String {
-        let mut metavar = if self.choices.is_empty() {
+        let mut metavar = if !self.has_choices {
             if self.positional() {
                 self.dest()
             } else {
@@ -608,7 +608,7 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                 ("default", Some(option)) => option.default.as_deref().unwrap_or("None").to_owned(),
                 ("const", Some(option)) => option.constant.as_deref().unwrap_or("None").to_owned(),
                 ("choices", Some(option)) => {
-                    if option.choices.is_empty() {
+                    if !option.has_choices {
                         "None".into()
                     } else {
                         option.choices.join(", ")

@@ -112,6 +112,65 @@ fn enum_class(
         .map(|_| class)
 }
 
+/// Encode signed numeric literals without evaluating declaration expressions.
+fn numeric_literal(expr: &ast::Expr, ty: Type) -> Option<String> {
+    let (expr, neg) = match expr {
+        ast::Expr::UnaryOp(op) if matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub) => {
+            (&*op.operand, op.op == ast::UnaryOp::USub)
+        }
+        expr => (expr, false),
+    };
+    let ast::Expr::NumberLiteral(number) = expr else {
+        return None;
+    };
+    match (&number.value, ty) {
+        (ast::Number::Int(value), Type::Int) => {
+            let value = value.to_string();
+            Some(if neg && value != "0" {
+                format!("-{value}")
+            } else {
+                value
+            })
+        }
+        (ast::Number::Float(value), Type::Float) => {
+            Some(format!("{:?}", if neg { -*value } else { *value }))
+        }
+        _ => None,
+    }
+}
+
+/// A bounded constant range can be serialized in its iteration order, including
+/// descending choices. Reject a larger expansion before allocating the schema.
+fn range_choices(call: &ast::ExprCall) -> Option<Vec<String>> {
+    if !call.arguments.keywords.is_empty() {
+        return None;
+    }
+    let args = call
+        .arguments
+        .args
+        .iter()
+        .map(|arg| numeric_literal(arg, Type::Int)?.parse::<i64>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let (mut n, stop, step) = match args.as_slice() {
+        [stop] => (0, *stop, 1),
+        [start, stop] => (*start, *stop, 1),
+        [start, stop, step] if *step != 0 => (*start, *stop, *step),
+        _ => return None,
+    };
+    let mut choices = Vec::new();
+    while if step > 0 { n < stop } else { n > stop } {
+        if choices.len() == 4096 {
+            return None;
+        }
+        choices.push(n.to_string());
+        let Some(next) = n.checked_add(step) else {
+            break;
+        };
+        n = next;
+    }
+    Some(choices)
+}
+
 fn option(
     call: &ast::ExprCall,
     graph: &SourceGraph,
@@ -178,11 +237,17 @@ fn option(
     }
     let mut element = Type::Str;
     if let Some(&ty) = kw.get("type") {
-        if graph.resolve(id, ty) == Some(Binding::Intrinsic(Intrinsic::Path)) {
-            element = Type::Path;
-        } else if !names(ty, "str") {
-            return Err(module.error(ty, "argparse type must be str or pathlib.Path"));
-        }
+        element = match graph.resolve(id, ty) {
+            Some(Binding::Intrinsic(Intrinsic::Path)) => Type::Path,
+            None if names(ty, "str") => Type::Str,
+            None if names(ty, "int") => Type::Int,
+            None if names(ty, "float") => Type::Float,
+            _ => {
+                return Err(
+                    module.error(ty, "argparse type must be str, int, float or pathlib.Path")
+                );
+            }
+        };
     }
     let nargs = match kw.get("nargs").copied() {
         None | Some(ast::Expr::NoneLiteral(_)) => json!("one"),
@@ -229,16 +294,29 @@ fn option(
             _ => return Err(module.error(action, "unsupported argparse action or action keywords")),
         }
     }
+    let constant_number;
     let constant = match kw.get("const").copied() {
         None if element == Type::Bool => Some("True"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
-        Some(value) if nargs == "optional" => Some(literal(value, module)?),
+        Some(value) if nargs == "optional" && value.is_string_literal_expr() => {
+            Some(literal(value, module)?)
+        }
+        Some(value) if nargs == "optional" => {
+            constant_number = numeric_literal(value, element).ok_or_else(|| {
+                module.error(
+                    value,
+                    "argparse constant requires a literal of the option type",
+                )
+            })?;
+            Some(constant_number.as_str())
+        }
         Some(value) => return Err(module.error(value, "argparse const requires nargs='?'")),
     };
     let choices = if let Some(&choices) = kw.get("choices") {
-        let choices = match choices {
+        match choices {
             ast::Expr::ListComp(comp)
-                if let [clause] = comp.generators.as_slice()
+                if element == Type::Str
+                    && let [clause] = comp.generators.as_slice()
                     && !clause.is_async
                     && clause.ifs.is_empty()
                     && let ast::Expr::Name(target) = &clause.target
@@ -253,43 +331,65 @@ fn option(
                     .unwrap()
                     .values
                     .iter()
-                    .map(|(_, value)| value.as_str())
+                    .map(|(_, value)| value.to_string())
                     .collect()
+            }
+            ast::Expr::StringLiteral(_) if element == Type::Str => literal(choices, module)?
+                .chars()
+                .map(|ch| ch.to_string())
+                .collect(),
+            ast::Expr::Call(range)
+                if element == Type::Int
+                    && names(&range.func, "range")
+                    && graph.resolve(id, &range.func).is_none() =>
+            {
+                range_choices(range).ok_or_else(|| {
+                    module.error(choices, "argparse choices require a bounded literal range")
+                })?
             }
             items => {
                 let items = match items {
                     ast::Expr::List(list) => list.elts.as_slice(),
                     ast::Expr::Tuple(tuple) => tuple.elts.as_slice(),
-                    _ => return Err(module.error(
-                        choices,
-                        "argparse choices require literal strings or the values of a sealed enum",
-                    )),
+                    _ => return Err(module.error(choices, "argparse choices require literal values, a bounded integer range, or the values of a sealed enum")),
                 };
                 items
                     .iter()
-                    .map(|item| literal(item, module))
+                    .map(|item| match element {
+                        Type::Str => Ok(literal(item, module)?.to_owned()),
+                        Type::Int | Type::Float => {
+                            numeric_literal(item, element).ok_or_else(|| {
+                                module.error(item, "argparse choices must match the option type")
+                            })
+                        }
+                        _ => Err(module.error(item, "unsupported argparse choice type")),
+                    })
                     .collect::<Result<Vec<_>, _>>()?
             }
-        };
-        if element != Type::Str || choices.is_empty() {
-            return Err(module.error(
-                call,
-                "argparse choices require nonempty string choices and type str",
-            ));
         }
-        choices
     } else {
         Vec::new()
     };
     let mut enum_default = None;
     let enum_default_text;
+    let default_number;
     let default = match kw.get("default").copied() {
         None if element == Type::Bool => Some("False"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
         Some(expr @ ast::Expr::StringLiteral(_))
-            if element == Type::Str || !many && element == Type::Path =>
+            if element == Type::Str
+                || !many && matches!(element, Type::Path | Type::Int | Type::Float) =>
         {
             Some(literal(expr, module)?)
+        }
+        Some(value) if !many && matches!(element, Type::Int | Type::Float) => {
+            default_number = numeric_literal(value, element).ok_or_else(|| {
+                module.error(
+                    value,
+                    "argparse default requires a literal of the option type",
+                )
+            })?;
+            Some(default_number.as_str())
         }
         Some(ast::Expr::BooleanLiteral(value)) if element == Type::Bool => {
             Some(if value.value { "True" } else { "False" })
@@ -345,14 +445,22 @@ fn option(
     ) {
         return Err(module.error(call, "unsupported argparse help substitution"));
     }
-    let converter = kw
-        .get("type")
-        .map(|_| if element == Type::Path { "Path" } else { "str" });
     let kind = match element {
         Type::Str => "str",
+        Type::Int => "int",
+        Type::Float => "float",
         Type::Path => "path",
         Type::Bool => "bool",
         _ => unreachable!(),
+    };
+    let converter = kw
+        .get("type")
+        .map(|_| if element == Type::Path { "Path" } else { kind });
+    let float_literal = |name| {
+        element == Type::Float
+            && kw
+                .get(name)
+                .is_some_and(|v| numeric_literal(v, element).is_some())
     };
     let optional = (!required && default.is_none() && !(positional && nargs == "zero_or_more"))
         || (!positional && nargs == "optional" && constant.is_none());
@@ -370,7 +478,7 @@ fn option(
         types
             .union(&[Type::Str, Type::Enum(class)])
             .ok_or_else(|| module.error(call, "argparse requires a sealed string/enum field"))?
-    } else if !choices.is_empty() {
+    } else if element == Type::Str && !choices.is_empty() {
         let values = choices
             .iter()
             .map(|s| s.to_string())
@@ -386,7 +494,7 @@ fn option(
         annotation: flag.clone(),
         ty: if optional { types.optional(ty) } else { ty },
         option: json!({ "flag": flag_name, "aliases": aliases, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
-            "choices": choices, "converter": converter, "default": default, "path_default": path_default, "help": help, "optional": optional }),
+            "choices": choices, "has_choices": kw.contains_key("choices"), "float_default":float_literal("default"), "float_constant":float_literal("const"), "converter": converter, "default": default, "path_default": path_default, "help": help, "optional": optional }),
     })
 }
 

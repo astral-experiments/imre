@@ -868,15 +868,25 @@ pub unsafe extern "C" fn imre_optional_str_equal(a: usize, b: usize) -> u32 {
 pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
     // SAFETY: the caller keeps the immutable string alive.
     let original = unsafe { &*value };
+    finish(
+        parse_decimal_int(original)
+            .map(Int::into_raw)
+            .ok_or_else(|| integer_text::invalid_literal(original)),
+        1,
+    )
+}
+
+/// Parses a decimal integer without setting a pending Python exception. Callers
+/// such as argparse can report conversion failures in their own error context.
+fn parse_decimal_int(original: &str) -> Option<Int> {
     let source = original.trim();
-    let invalid = || integer_text::invalid_literal(original);
     // Rust's signed decimal parser accepts a subset of our grammar. Ordinary
     // small inputs need neither normalization nor temporary BigInt allocations;
     // separators and larger values still take the checked path below.
     if let Ok(value) = source.parse::<i64>()
         && let Some(value) = Int::small(value)
     {
-        return value.into_raw();
+        return Some(value);
     }
     let source = if source.is_ascii() {
         Cow::Borrowed(source)
@@ -888,13 +898,13 @@ pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
             } else if let Some(digit) = integer_text::decimal_digit(character) {
                 normalized.push(char::from(b'0' + digit));
             } else {
-                return invalid().returning(1);
+                return None;
             }
         }
         if let Ok(value) = normalized.parse::<i64>()
             && let Some(value) = Int::small(value)
         {
-            return value.into_raw();
+            return Some(value);
         }
         Cow::Owned(normalized)
     };
@@ -905,14 +915,9 @@ pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
         || digits.contains("__")
         || !digits.bytes().all(|c| c.is_ascii_digit() || c == b'_')
     {
-        return invalid().returning(1);
+        return None;
     }
-    finish(
-        BigInt::parse_bytes(source.replace('_', "").as_bytes(), 10)
-            .map(|value| Int::new(value).into_raw())
-            .ok_or_else(invalid),
-        1,
-    )
+    BigInt::parse_bytes(source.replace('_', "").as_bytes(), 10).map(Int::new)
 }
 
 #[unsafe(no_mangle)]
