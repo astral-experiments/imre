@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import select
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,14 @@ FIXTURE = ('Original CPython LoggerAdapterTest setUp, root recording handler, sh
            'fresh native root with matching threshold, recording handler and default adapter.')
 OPERATION = 'Native adapter creation, process, record forwarding and live record attributes'
 CAPTURE = (HERE / 'adapter_event_driver.py').read_text().split('def context()', 1)[0]
+CAPTURE += """
+def install(recording: Recording, level: int) -> logging.Logger:
+    logger = logging.root
+    logger.setLevel(level)
+    logger.addHandler(recording)
+    return logger
+"""
+
 SETUP = '''
     logger: logging.Logger
     recording: Recording
@@ -34,10 +43,8 @@ SETUP = '''
 
     def __init__(self) -> None:
         super().__init__()
-        self.logger = logging.root
-        self.logger.setLevel(THRESHOLD)
         self.recording = Recording()
-        self.logger.addHandler(self.recording)
+        self.logger = install(self.recording, THRESHOLD)
         self.adapter = logging.LoggerAdapter(logger=self.logger)
 '''
 # The concrete instance branch of CPython TestCase's two attribute assertions.
@@ -76,6 +83,9 @@ def host_method(binary, case, original_method):
                 raise ValueError('fixture used a multiline protocol operand')
             child.stdin.write('\n'.join(lines) + '\n')
             child.stdin.flush()
+            if not select.select([child.stdout], [], [], 20)[0]:
+                child.kill()
+                raise AssertionError(f'native adapter did not answer {op}')
             value = child.stdout.readline()
             if not value:
                 raise AssertionError(f'native {op}: {child.stderr.read()}')
