@@ -51,7 +51,7 @@ pub(crate) struct Class {
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
     /// Field writes required of every override called during construction.
-    pub(crate) init_hooks: HashMap<String, Vec<String>>,
+    pub(crate) init_hooks: init_hooks::Hooks,
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
@@ -638,11 +638,20 @@ fn collect_class(
     let mut init_hooks = base
         .map(|(_, parent)| parent.init_hooks.clone())
         .unwrap_or_default();
+    let hook_writes = |name: &str, inherited: Option<&init_hooks::Hook>| {
+        init_hooks::method_writes(
+            graph,
+            &methods,
+            &method_kinds,
+            &method_origins,
+            name,
+            inherited,
+        )
+    };
     for (name, expected) in &init_hooks {
         if names.contains(name) {
-            let actual =
-                init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name);
-            if actual.transpose()?.as_ref() != Some(expected) {
+            let actual = hook_writes(name, Some(expected));
+            if actual.transpose()?.as_ref() != Some(&expected.writes) {
                 return Err(module.error(
                     node,
                     "an initializer hook override must initialize the same fields",
@@ -664,7 +673,7 @@ fn collect_class(
             },
             exception_layout,
             &mut init_hooks,
-            |name| init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name),
+            |name| hook_writes(name, None),
         )?;
     }
     Ok(Class {
@@ -849,7 +858,7 @@ fn check_initializer(
         .iter()
         .map(|field| field.name.as_str())
         .collect::<HashSet<_>>();
-    let mut initialized = HashSet::new();
+    let mut initialized: HashSet<&str> = HashSet::new();
     let mut called_super = false;
     let mut called_exception_base = false;
     for statement in &initializer.body {
@@ -878,6 +887,7 @@ fn check_initializer(
             && let Some(writes) = lookup(name)
         {
             let writes = writes?;
+            let before = initialized.iter().copied().map(str::to_owned).collect();
             for field in &writes {
                 let Some(&declared_field) = declared.get(field.as_str()) else {
                     return Err(
@@ -891,7 +901,13 @@ fn check_initializer(
                     ));
                 }
             }
-            hooks.insert(name.to_owned(), writes);
+            hooks.insert(
+                name.to_owned(),
+                init_hooks::Hook {
+                    initialized: before,
+                    writes,
+                },
+            );
             continue;
         }
         let assignment = match statement {
