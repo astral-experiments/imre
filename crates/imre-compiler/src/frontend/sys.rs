@@ -120,14 +120,14 @@ impl Checker<'_> {
             );
         };
         let value = self.expr(argument)?;
+        if !query {
+            self.graph.checked_overload(self.module, call.range());
+        }
         if value.ty == Type::Str {
             return Ok(Expr {
                 ty: result,
                 kind: ExprKind::Builtin(op, vec![value]),
             });
-        }
-        if !query {
-            self.graph.checked_overload(self.module, call.range());
         }
         if let Type::StrEnum(class) = value.ty {
             if query {
