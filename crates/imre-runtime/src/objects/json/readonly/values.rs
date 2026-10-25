@@ -17,9 +17,7 @@ impl View {
     }
 
     pub(in crate::objects) fn equal(&self, right: &Self) -> bool {
-        if let (Some(left), Some(right)) =
-            (self.nodes.root_items(), right.nodes.root_items())
-        {
+        if let (Some(left), Some(right)) = (self.nodes.root_items(), right.nodes.root_items()) {
             // Preserve Python list identity shortcuts for the root and shared elements.
             // SAFETY: both objects are rooted lists with JsonValue element storage.
             return unsafe {
