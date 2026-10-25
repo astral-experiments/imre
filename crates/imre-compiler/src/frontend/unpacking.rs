@@ -762,9 +762,9 @@ impl Checker<'_> {
 }
 
 impl Checker<'_> {
-    /// A struct sequence's result shape is known for constant slice bounds. Capture
+    /// A fixed tuple's result shape is known for constant slice bounds. Capture
     /// the receiver once, even when the selected fields are empty or out of order.
-    pub(super) fn struct_sequence_slice(
+    pub(super) fn fixed_tuple_slice(
         &mut self,
         receiver: Expr,
         fields: &[Type],

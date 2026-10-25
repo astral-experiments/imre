@@ -2831,8 +2831,8 @@ impl<'a> Checker<'a> {
     /// Captures the receiver before ordered bounds. Nullable integer operands
     /// preserve omitted bounds without allocating a general slice object.
     fn slice(&mut self, receiver: Expr, slice: &ast::ExprSlice) -> Result<Expr, String> {
-        if let Some(fields) = self.types.struct_sequence_fields(receiver.ty) {
-            return self.struct_sequence_slice(receiver, &fields, slice);
+        if let Some(fields) = self.types.library_tuple_fields(receiver.ty) {
+            return self.fixed_tuple_slice(receiver, &fields, slice);
         }
         if !matches!(receiver.ty, Type::Str | Type::Bytes)
             && self.types.element(receiver.ty).is_none()
@@ -5944,9 +5944,7 @@ impl<'a> Checker<'a> {
                 if let Some(flag) = self.command_flag(attribute)? {
                     return Ok(flag);
                 }
-                if let Some(Binding::Definition(definition)) = self.resolve(&attribute.value)
-                    && let Some(declaration) = self.types.namedtuple(definition)
-                {
+                if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
                     return self.namedtuple_class_attribute(attribute, &declaration);
                 }
                 if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
@@ -6491,10 +6489,8 @@ impl<'a> Checker<'a> {
         key_view: Option<&mut bool>,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
-        if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
-            && let Some(declaration) = self.types.namedtuple(definition)
-        {
-            return self.namedtuple_call(definition, &declaration, call);
+        if let Some((origin, declaration)) = self.namedtuple_factory(&call.func) {
+            return self.namedtuple_call(origin, &declaration, call);
         }
         if let Some((method, name)) = crate::classes::super_method(call)
             && self.unshadowed_builtin(name, "super")

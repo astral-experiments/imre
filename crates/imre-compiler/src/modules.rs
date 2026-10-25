@@ -180,6 +180,7 @@ pub(crate) enum Intrinsic {
     InspectSentinel,
     WrapperAttributes(WrapperAttributes),
     FunctionCache,
+    CacheInfo,
     LruCache,
     CachedProperty,
     NewType,
@@ -548,6 +549,7 @@ impl IntrinsicModule {
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
+            (Self::Functools, "_CacheInfo") => Intrinsic::CacheInfo,
             (Self::Functools, "WRAPPER_ASSIGNMENTS") => {
                 Intrinsic::WrapperAttributes(WrapperAttributes::Assigned)
             }

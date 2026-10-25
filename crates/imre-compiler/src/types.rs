@@ -56,10 +56,14 @@ pub(crate) struct CachePolicy {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum TupleOrigin {
+pub(crate) enum TupleOrigin {
     Declaration(DefinitionId),
     StructSequence(&'static str, &'static [&'static str]),
+    LibraryNamedTuple(&'static str, &'static [&'static str]),
 }
+
+pub(crate) const CACHE_INFO: TupleOrigin =
+    TupleOrigin::LibraryNamedTuple("CacheInfo", &["hits", "misses", "maxsize", "currsize"]);
 
 #[derive(Clone)]
 pub(crate) struct NamedException {
@@ -676,11 +680,8 @@ impl Types {
         self.0.borrow().named_tuples.get(&definition).cloned()
     }
 
-    pub(crate) fn namedtuple_layout(&self, definition: DefinitionId, fields: Vec<Type>) -> Type {
-        Type::Tuple(self.intern(Shape::NamedTuple(
-            TupleOrigin::Declaration(definition),
-            fields,
-        )))
+    pub(crate) fn namedtuple_layout(&self, origin: TupleOrigin, fields: Vec<Type>) -> Type {
+        Type::Tuple(self.intern(Shape::NamedTuple(origin, fields)))
     }
 
     /// A native struct sequence shares the tuple descriptor but has no Python declaration.
@@ -691,44 +692,47 @@ impl Types {
         fields: Vec<Type>,
     ) -> Type {
         assert_eq!(names.len(), fields.len());
-        Type::Tuple(self.intern(Shape::NamedTuple(
-            TupleOrigin::StructSequence(name, names),
-            fields,
-        )))
+        self.namedtuple_layout(TupleOrigin::StructSequence(name, names), fields)
     }
 
-    pub(crate) fn tuple_metadata(&self, ty: Type) -> Option<Rc<NamedTuple>> {
+    pub(crate) fn tuple_origin(&self, ty: Type) -> Option<TupleOrigin> {
         let Type::Tuple(id) = ty else { return None };
-        let storage = self.0.borrow();
-        match &storage.shapes[id] {
-            Shape::NamedTuple(TupleOrigin::Declaration(id), _) => {
-                storage.named_tuples.get(id).cloned()
-            }
-            Shape::NamedTuple(TupleOrigin::StructSequence(name, fields), _) => {
-                Some(Rc::new(NamedTuple {
-                    name: name.to_string(),
-                    fields: fields.iter().map(|v| v.to_string()).collect(),
-                }))
-            }
+        match self.0.borrow().shapes[id] {
+            Shape::NamedTuple(origin, _) => Some(origin),
             _ => None,
         }
     }
 
-    /// Slicing a struct sequence materializes a plain tuple of its visible fields.
-    pub(crate) fn struct_sequence_fields(&self, ty: Type) -> Option<Vec<Type>> {
+    pub(crate) fn namedtuple_metadata(&self, origin: TupleOrigin) -> Option<Rc<NamedTuple>> {
+        match origin {
+            TupleOrigin::Declaration(id) => self.namedtuple(id),
+            TupleOrigin::StructSequence(name, fields)
+            | TupleOrigin::LibraryNamedTuple(name, fields) => Some(Rc::new(NamedTuple {
+                name: name.to_string(),
+                fields: fields.iter().map(|v| v.to_string()).collect(),
+            })),
+        }
+    }
+
+    pub(crate) fn tuple_metadata(&self, ty: Type) -> Option<Rc<NamedTuple>> {
+        self.namedtuple_metadata(self.tuple_origin(ty)?)
+    }
+
+    /// Library tuple subclasses expose only their sequence slots to slicing.
+    pub(crate) fn library_tuple_fields(&self, ty: Type) -> Option<Vec<Type>> {
         let Type::Tuple(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
-            Shape::NamedTuple(TupleOrigin::StructSequence(..), fields) => Some(fields.clone()),
+            Shape::NamedTuple(
+                TupleOrigin::StructSequence(..) | TupleOrigin::LibraryNamedTuple(..),
+                fields,
+            ) => Some(fields.clone()),
             _ => None,
         }
     }
 
     pub(crate) fn namedtuple_definition(&self, ty: Type) -> Option<DefinitionId> {
-        let Type::Tuple(id) = ty else {
-            return None;
-        };
-        match self.0.borrow().shapes[id] {
-            Shape::NamedTuple(TupleOrigin::Declaration(definition), _) => Some(definition),
+        match self.tuple_origin(ty)? {
+            TupleOrigin::Declaration(definition) => Some(definition),
             _ => None,
         }
     }
