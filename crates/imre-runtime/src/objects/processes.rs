@@ -7,7 +7,7 @@
 use std::ffi::{CStr, CString, OsStr};
 use std::fs;
 use std::io::{self, Read};
-use std::os::fd::{AsFd, AsRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -519,20 +519,44 @@ impl Launch {
     }
 
     fn spawn(self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
-        self.spawn_tagged(cwd, streams)
+        self.spawn_tagged(cwd, streams, [-1; 3])
             .map_err(|err| launch_error::decode(err).1)
     }
 
-    fn spawn_tagged(mut self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
+    fn spawn_tagged(
+        mut self,
+        cwd: Option<&CString>,
+        streams: u32,
+        descriptors: [RawFd; 3],
+    ) -> io::Result<Child> {
+        // Check the original descriptor table before duplicating anything. A
+        // duplicate for stdout must not make a closed stderr descriptor valid.
+        for fd in descriptors.into_iter().filter(|&fd| fd >= 0) {
+            // SAFETY: fcntl validates the supplied integer even when it is closed.
+            if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
         // Duplicate the parent's explicit descriptors before setting up either
         // child stream. stderr=STDOUT instead follows the child's chosen stdout.
-        fn output(mode: u32) -> io::Result<Stdio> {
+        fn output(mode: u32, descriptor: RawFd) -> io::Result<Stdio> {
             Ok(match mode {
                 0 | 5 => Stdio::inherit(),
                 1 => Stdio::piped(),
                 2 => Stdio::null(),
                 3 => Stdio::from(io::stdout().as_fd().try_clone_to_owned()?),
                 4 => Stdio::from(io::stderr().as_fd().try_clone_to_owned()?),
+                6 | 7 => {
+                    // SAFETY: fcntl validates the source and returns a new owned
+                    // descriptor with the same open file description (and offset).
+                    let fd = unsafe { libc::fcntl(descriptor, libc::F_DUPFD_CLOEXEC, 3) };
+                    if fd < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    // SAFETY: only the new descriptor is transferred to Command.
+                    Stdio::from(unsafe { OwnedFd::from_raw_fd(fd) })
+                }
+                8 => Stdio::from(io::stdin().as_fd().try_clone_to_owned()?),
                 _ => fail("SystemError", "invalid subprocess stream mode"),
             })
         }
@@ -543,9 +567,9 @@ impl Launch {
         let mut command = Command::new(OsStr::from_bytes(program.as_bytes()));
         let stderr = (streams >> 4) & 15;
         command
-            .stdin(output((streams >> 12) & 15)?)
-            .stdout(output(streams & 15)?)
-            .stderr(output(stderr)?);
+            .stdin(output((streams >> 12) & 15, descriptors[0])?)
+            .stdout(output(streams & 15, descriptors[1])?)
+            .stderr(output(stderr, descriptors[2])?);
         let cwd = cwd.cloned();
         // SAFETY: this private closure contains only owned immutable native data;
         // exec_child performs no allocation, locking, callback, or language drop.
@@ -1124,7 +1148,7 @@ unsafe fn spawn_list(
     let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
     // SAFETY: the original configuration remains rooted while spawn reports any error.
-    unsafe { launch_error::spawn(&cmd, &config, streams) }
+    unsafe { launch_error::spawn(&cmd, &config, streams, [-1; 3]) }
 }
 
 /// # Safety
