@@ -2,6 +2,16 @@
 
 The `upstream` directory contains the complete, unmodified CPython 3.14.5 test modules and packages used by these benchmarks. The [manifest](UPSTREAM.json) records the release commit and each unmodified Git blob. [Upstream source](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test) · [CPython license](upstream/LICENSE)
 
+## Native string line boundaries and whitespace
+
+With CPython 3.14.5's `Lib/test` on the import path, run
+`tests/text_line_methods_upstream.py --compiler ... --runtime ...`. It runs the
+unmodified `StrTest.test_splitlines` assertions on 11 native results and
+`StrTest.test_isspace` on 12 native results plus six direct CPython literals.
+The original Unicode invariant checks native results for all 1,112,064 Unicode
+scalars; its 2,048 surrogate code points run on CPython. Both compiler modes
+and optimization levels 0 and 3 are checked.
+
 ## Native regex substitution tests
 
 The text suite also compiles three complete CPython `ReTests` methods:
