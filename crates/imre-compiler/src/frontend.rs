@@ -6807,6 +6807,10 @@ impl<'a> Checker<'a> {
                         return Ok(value);
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
+                        "characters_written" => (
+                            Type::Int,
+                            Builtin::Process(ir::ProcessOperation::OsErrorField(4)),
+                        ),
                         name @ ("errno" | "strerror" | "filename" | "filename2") => {
                             let (index, ty) = match name {
                                 "errno" => (0, Type::Int),

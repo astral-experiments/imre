@@ -143,20 +143,35 @@ pub unsafe extern "C" fn imre_os_error_field(value: *const Object, field: u32) -
     let result = unsafe {
         object(value).0.with(|storage| {
             let exception = storage.exception();
-            if !exception.kind.matches(Kind::OSError) {
-                let name = ["errno", "strerror", "filename", "filename2"][field as usize];
+            if !exception.kind.matches(Kind::OSError)
+                || field == 4 && exception.kind != Kind::BlockingIOError
+            {
+                let name = [
+                    "errno",
+                    "strerror",
+                    "filename",
+                    "filename2",
+                    "characters_written",
+                ][field as usize];
                 return Err(Error::new(
                     Kind::AttributeError,
                     format!("'{}' object has no attribute '{name}'", exception.name()),
                 ));
             }
             let Payload::Arguments(arguments) = &exception.payload else {
-                return Ok(0);
+                return if field == 4 {
+                    Err(Error::new(Kind::AttributeError, "characters_written"))
+                } else {
+                    Ok(0)
+                };
             };
-            // errno and strerror are exactly the two arguments used for repr.
+            // Buffered write errors retain a third repr argument: the accepted byte count.
             // A filename is a separate original path owner, never a parsed message.
             Ok(match field {
-                0 | 1 if arguments.args.len() == 2 => {
+                0 | 1
+                    if arguments.args.len() == 2
+                        || exception.kind == Kind::BlockingIOError && arguments.args.len() == 3 =>
+                {
                     arguments.args[field as usize].clone().into_word()
                 }
                 0 | 1 => 0,
@@ -169,6 +184,10 @@ pub unsafe extern "C" fn imre_os_error_field(value: *const Object, field: u32) -
                     .as_ref()
                     .and_then(|p| p.second.as_ref())
                     .map_or(Ok(0), Filename::union_word)?,
+                4 => match arguments.args.get(2) {
+                    Some(word) if word.kind.raw() == 2 => word.clone().into_word(),
+                    _ => return Err(Error::new(Kind::AttributeError, "characters_written")),
+                },
                 _ => unreachable!(),
             })
         })
