@@ -534,18 +534,11 @@ fn len_argument_class(types: &Types, ty: Type) -> Option<(&'static str, Option<&
         Type::Int => ("int", None),
         Type::Bool => ("bool", None),
         Type::None => ("NoneType", None),
-        Type::ListInt => ("list", Some("list")),
-        Type::List(_) | Type::Dict(_) | Type::Set(_) => {
-            for child in types.children(ty) {
-                len_argument_class(types, child)?;
-            }
-            let class = match ty {
-                Type::List(_) => "list",
-                Type::Dict(_) => "dict",
-                _ => "set",
-            };
-            (class, Some(class))
-        }
+        // The container supplies its own length and is itself unhashable;
+        // neither operation visits its elements.
+        Type::ListInt | Type::List(_) => ("list", Some("list")),
+        Type::Dict(_) => ("dict", Some("dict")),
+        Type::Set(_) => ("set", Some("set")),
         Type::Tuple(_)
             if !types.is_partial_frame(ty)
                 && !types.is_len_argument(ty)

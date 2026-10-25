@@ -88,5 +88,29 @@ def exercise() -> None:
     print(uncached.cache_info() == (0, 1, 0, 0))
 
 
+class Marker:
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+
+def mutable_elements() -> None:
+    values = [Marker(7)]
+    entries = {"x": values[0]}
+    original = builtins.len
+    print(original(values))
+    print(original(entries))
+    cache = functools.lru_cache(2)(original)
+    try:
+        print(cache((values,)))
+    except TypeError as error:
+        print(str(error))
+    try:
+        print(cache(entries))
+    except TypeError as error:
+        print(str(error))
+    print(cache.cache_info() == (0, 0, 2, 0))
+
+
 exercise()
 pipeline()
+mutable_elements()
