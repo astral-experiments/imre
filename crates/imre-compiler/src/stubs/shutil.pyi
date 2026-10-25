@@ -1,6 +1,8 @@
 from os import PathLike
 from typing import Callable, Protocol, TypeVar, overload
 
+__all__: list[str]
+
 _S = TypeVar("_S", str, bytes)
 _D = TypeVar("_D", bound=str | bytes | PathLike[str] | PathLike[bytes])
 _TextPath = TypeVar("_TextPath", bound=PathLike[str])
