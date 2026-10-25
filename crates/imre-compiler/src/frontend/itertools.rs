@@ -268,6 +268,7 @@ impl Checker<'_> {
                 | Type::Dict(_)
                 | Type::Set(_)
                 | Type::TextIO
+                | Type::StringIO
                 | Type::CsvReader
                 | Type::Cursor(_)
                 | Type::Union(_)

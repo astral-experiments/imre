@@ -1,7 +1,8 @@
 """Exercise live data and selector cursors, including the last unsuccessful pull."""
 
 import csv
-from itertools import batched, compress, count, islice
+from io import StringIO
+from itertools import batched, compress, count, islice, repeat
 
 
 def rhs() -> list[int]:
@@ -47,6 +48,22 @@ try:
     compress(None, rhs())
 except TypeError as err:
     print(str(err))
+
+# Stream objects are true even when closed. Testing their truth must not read
+# from them, while using the same stream for both inputs pulls two lines.
+shared_text = StringIO('A\n1\nB\n2\n')
+print(''.join(compress('xy', repeat(shared_text, 2))))
+print(shared_text.tell())
+paired = compress(shared_text, shared_text)
+print(repr(next(paired)))
+print(repr(shared_text.readline()))
+print(next(paired, 'ended'))
+shared_text.close()
+print(''.join(compress('z', repeat(shared_text, 1))))
+try:
+    compress('never read', shared_text)
+except ValueError as error:
+    print(str(error))
 
 # Selecting an iterator calls its truth test without consuming it.
 empty_cursor = islice('hi', 0)
