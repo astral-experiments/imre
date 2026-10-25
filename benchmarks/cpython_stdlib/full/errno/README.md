@@ -25,7 +25,9 @@ absent from the module must fail `assertHasAttr`. Their messages are compared
 with CPython. Three unused from-import controls (a target-absent symbol, a long absent name,
 and a close spelling) must raise ImportError before a later child initializer.
 The uncaught display suggests a target export only when CPython would; a
-caught exception keeps its original arguments, string, name, and name_from. A separate program compares every forward name and reverse
+caught exception keeps its original arguments, string, name, and name_from. Three
+additional modes pass optional module/attribute strings and verify the hint
+requires both present values. A separate program compares every forward name and reverse
 entry, aliases, dictionary mutation, static and dynamic lookup, metadata and
 missing-name behavior with CPython on the machine under test.
 

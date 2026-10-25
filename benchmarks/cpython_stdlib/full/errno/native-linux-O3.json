@@ -22,6 +22,7 @@
     "unknown-unused-import": "matched",
     "absent-target-unused-import": "matched",
     "close-spelling-import-hint": "matched",
+    "optional-import-hints": "matched",
     "caught-import-fields": "matched"
   },
   "registry_observations": 758
