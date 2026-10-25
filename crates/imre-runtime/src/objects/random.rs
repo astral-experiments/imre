@@ -151,6 +151,8 @@ pub extern "C" fn imre_random_seed_none() {
     *shared() = Generator::from_entropy();
 }
 
+/// # Safety
+/// The seed must be a live tagged Python integer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_random_seed_int(seed: usize) {
     // SAFETY: the compiler roots this Python integer for the call.
@@ -164,12 +166,16 @@ fn seed_bytes(bytes: &[u8]) {
     *shared() = Generator::from_key(&BigUint::from_bytes_be(&data).to_u32_digits());
 }
 
+/// # Safety
+/// The seed must point to a live native string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_random_seed_str(seed: *const Str) {
     // SAFETY: the compiler roots this string for the call.
     seed_bytes(unsafe { &*seed }.as_bytes());
 }
 
+/// # Safety
+/// The seed must point to a live native byte vector.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_random_seed_bytes(seed: *const Bytes) {
     // SAFETY: the compiler roots these bytes for the call.
@@ -188,6 +194,8 @@ fn integer_result(result: Result<BigInt>) -> usize {
     finish(result.map(|v| Int::new(v).into_raw()), 1)
 }
 
+/// # Safety
+/// The bit count must be a live tagged Python integer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_random_bits(count: usize) -> usize {
     // SAFETY: the compiler roots this Python integer for the call.
@@ -206,6 +214,8 @@ pub unsafe extern "C" fn imre_random_bits(count: usize) -> usize {
 }
 
 /// Sample a native sequence index after its length has been checked.
+/// # Safety
+/// The length must be a live, nonnegative Python integer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_random_choice_index(length: usize) -> usize {
     // SAFETY: the compiler roots the result of len().
@@ -280,6 +290,8 @@ fn progression(start: &BigInt, stop: &BigInt, step: &BigInt, mode: u32) -> Resul
     Ok(start + step * BigInt::from(shared().below(&count)?))
 }
 
+/// # Safety
+/// The bounds and step must be live Python integers; the mode selects the checked public operation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_random_progression(
     start: usize,

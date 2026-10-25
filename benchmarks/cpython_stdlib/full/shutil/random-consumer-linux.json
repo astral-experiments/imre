@@ -1,0 +1,218 @@
+{
+  "compiler_sha256": "ffd7dd844095bab0f43e2aafc3e698a1c363880c414c1fc33a5f0a03d9446837",
+  "runtime_sha256": "e2a2bb95c6a7f80a1d8848d8bd23457d4451184eaee065ceab59a38721673a18",
+  "cases": {
+    "shutil-expression": {
+      "source_sha256": "ea820a95bdd1faceeeb4a6fa99fcb853089bb959ce7b83b1393212a388b8da0c",
+      "cpython": {
+        "returncode": 0,
+        "stdout_sha256": "ed3457d3ee8c24828889588fe64d041d1e3de292595956c1b02d53602b4b55c7",
+        "stdout_lines": 10000,
+        "stderr": "",
+        "fixture_sha256": null
+      },
+      "levels": {
+        "0": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "ed3457d3ee8c24828889588fe64d041d1e3de292595956c1b02d53602b4b55c7",
+            "stdout_lines": 10000,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        },
+        "3": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "ed3457d3ee8c24828889588fe64d041d1e3de292595956c1b02d53602b4b55c7",
+            "stdout_lines": 10000,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        }
+      }
+    },
+    "shutil-write-test-file": {
+      "source_sha256": "218c8eff3302f5686eb05e402ca69785721d52ecd84016da874e861114ab3c44",
+      "cpython": {
+        "returncode": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_lines": 0,
+        "stderr": "",
+        "fixture_sha256": "6cbb7f4621a0638ee1eaf7d7cb1519cc9af467854b32ad3daf602b6626611bc1"
+      },
+      "levels": {
+        "0": {
+          "status": "compile-blocked",
+          "diagnostic": " Compiling case.py (-O0)\ncase.py:6:5: Imre: local functions require annotated parameters and return types\n"
+        },
+        "3": {
+          "status": "compile-blocked",
+          "diagnostic": " Compiling case.py (-O3)\ncase.py:6:5: Imre: local functions require annotated parameters and return types\n"
+        }
+      }
+    },
+    "bits-and-floats": {
+      "source_sha256": "144940dece40f0e54c36d690dca84d39d4b41a4c30638aa92c39606c24df6ceb",
+      "cpython": {
+        "returncode": 0,
+        "stdout_sha256": "596c47b6caae5c839579e74f6d20df772673f53bb43df926dec6485bfbb0e2bc",
+        "stdout_lines": 1320,
+        "stderr": "",
+        "fixture_sha256": null
+      },
+      "levels": {
+        "0": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "596c47b6caae5c839579e74f6d20df772673f53bb43df926dec6485bfbb0e2bc",
+            "stdout_lines": 1320,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        },
+        "3": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "596c47b6caae5c839579e74f6d20df772673f53bb43df926dec6485bfbb0e2bc",
+            "stdout_lines": 1320,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        }
+      }
+    },
+    "functools-ranges": {
+      "source_sha256": "8dfd27e92f560703d6f679f45aea52f0a961a4c7412abaf76410d90a595b2261",
+      "cpython": {
+        "returncode": 0,
+        "stdout_sha256": "0285c686d50945aee98890c5e0da4028172e386fae9cb56c8a3125e0d659402c",
+        "stdout_lines": 1000,
+        "stderr": "",
+        "fixture_sha256": null
+      },
+      "levels": {
+        "0": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "0285c686d50945aee98890c5e0da4028172e386fae9cb56c8a3125e0d659402c",
+            "stdout_lines": 1000,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        },
+        "3": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "0285c686d50945aee98890c5e0da4028172e386fae9cb56c8a3125e0d659402c",
+            "stdout_lines": 1000,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        }
+      }
+    },
+    "sequence-choice": {
+      "source_sha256": "16fe3a9e1aa857850deae451eb243b40cd9797c494b68c813a4ae9ad575a4ddf",
+      "cpython": {
+        "returncode": 0,
+        "stdout_sha256": "527c55faf4dbd2463411a5aa0b4436413bb3884d247aa876e91b624081daf85c",
+        "stdout_lines": 241,
+        "stderr": "",
+        "fixture_sha256": null
+      },
+      "levels": {
+        "0": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "527c55faf4dbd2463411a5aa0b4436413bb3884d247aa876e91b624081daf85c",
+            "stdout_lines": 241,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        },
+        "3": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "527c55faf4dbd2463411a5aa0b4436413bb3884d247aa876e91b624081daf85c",
+            "stdout_lines": 241,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        }
+      }
+    },
+    "single-evaluation": {
+      "source_sha256": "e8d59cd6753c1523badf1d08bfe8731faa465124fb9578544747ded600c704a9",
+      "cpython": {
+        "returncode": 0,
+        "stdout_sha256": "704130e62ad348a1e089106f34c0719ead41737a2e2aadf65d94afb1e7eb2762",
+        "stdout_lines": 22,
+        "stderr": "",
+        "fixture_sha256": null
+      },
+      "levels": {
+        "0": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "704130e62ad348a1e089106f34c0719ead41737a2e2aadf65d94afb1e7eb2762",
+            "stdout_lines": 22,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        },
+        "3": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "704130e62ad348a1e089106f34c0719ead41737a2e2aadf65d94afb1e7eb2762",
+            "stdout_lines": 22,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        }
+      }
+    },
+    "error-state": {
+      "source_sha256": "3de465430b3ae2c80e8cc4ca801b9930a5f65f56fddd9424a4e099cdc839bea0",
+      "cpython": {
+        "returncode": 0,
+        "stdout_sha256": "c12d6636ab72cc29dd8ec6a5a96fb3b4b8cd6560f2934c77d8c499ae5efe3f44",
+        "stdout_lines": 10,
+        "stderr": "",
+        "fixture_sha256": null
+      },
+      "levels": {
+        "0": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "c12d6636ab72cc29dd8ec6a5a96fb3b4b8cd6560f2934c77d8c499ae5efe3f44",
+            "stdout_lines": 10,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        },
+        "3": {
+          "status": "pass",
+          "observed": {
+            "returncode": 0,
+            "stdout_sha256": "c12d6636ab72cc29dd8ec6a5a96fb3b4b8cd6560f2934c77d8c499ae5efe3f44",
+            "stdout_lines": 10,
+            "stderr": "",
+            "fixture_sha256": null
+          }
+        }
+      }
+    }
+  }
+}
