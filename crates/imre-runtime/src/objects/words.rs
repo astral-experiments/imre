@@ -21,9 +21,10 @@ pub(super) struct WordKind(u16);
 impl WordKind {
     // Private to Words. A deferred list stores a plan instead of element words.
     const DEFERRED: Self = Self(u16::MAX);
+    const STRUCT_ROWS: Self = Self(u16::MAX - 1);
 
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 10 {
+        if kind & !NULLABLE > 12 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind as u16)
@@ -33,7 +34,11 @@ impl WordKind {
         u32::from(self.0)
     }
 
-    fn base(self) -> u32 {
+    pub(super) fn can_queue_release(self) -> bool {
+        matches!(self.base(), 5 | 6 | 9)
+    }
+
+    pub(super) fn base(self) -> u32 {
         self.raw() & !NULLABLE
     }
 
@@ -46,7 +51,7 @@ impl WordKind {
     /// `field` is an aligned, readable record slot stored using this descriptor's
     /// LLVM representation, or its initial all-zero state.
     pub(super) unsafe fn read_record_field(self, field: *const usize) -> usize {
-        if matches!(self.0, 3..=6 | 8) {
+        if matches!(self.0, 3..=6 | 8 | 11 | 12) {
             // SAFETY: this exact descriptor denotes a pointer-typed field.
             unsafe { field.cast::<*const ()>().read() as usize }
         } else if self.0 == 7 {
@@ -65,7 +70,7 @@ impl WordKind {
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
-            2..=6 | 8..=10 => word != 0 || nullable,
+            2..=6 | 8..=12 => word != 0 || nullable,
             7 => true,
             _ => unreachable!(),
         };
@@ -99,10 +104,10 @@ impl WordKind {
                         Rc::increment_strong_count(word as *const num_bigint::BigInt);
                     }
                 }
-                3 => Rc::increment_strong_count(word as *const Str),
+                3 | 11 => Rc::increment_strong_count(word as *const Str),
                 4 => Rc::increment_strong_count(word as *const List),
                 5 => Rc::increment_strong_count(word as *const Object),
-                6 => records::imre_record_retain(word as *const usize),
+                6 | 12 => records::imre_record_retain(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::increment_strong_count(word as *const Bytes),
@@ -124,10 +129,10 @@ impl WordKind {
             match self.base() {
                 0 | 1 | 10 => {}
                 2 => drop(Int(word)),
-                3 => Rc::decrement_strong_count(word as *const Str),
+                3 | 11 => Rc::decrement_strong_count(word as *const Str),
                 4 => crate::imre_list_release(word as *const List),
                 5 => records::release_object_word(Rc::from_raw(word as *const Object)),
-                6 => records::imre_record_release(word as *const usize),
+                6 | 12 => records::imre_record_release(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::decrement_strong_count(word as *const Bytes),
@@ -145,6 +150,23 @@ pub(super) struct OwnedWord {
 }
 
 impl OwnedWord {
+    /// Transfers this owner into a fresh record field using the LLVM slot type.
+    ///
+    /// # Safety
+    /// The destination is an uninitialized slot of this exact descriptor.
+    pub(super) unsafe fn initialize_record_field(self, field: *mut usize) {
+        let kind = self.kind.raw();
+        let word = self.into_word();
+        // SAFETY: this is the inverse of WordKind::read_record_field.
+        unsafe {
+            match kind {
+                3..=6 | 8 => field.cast::<*const ()>().write(word as *const ()),
+                7 => field.cast::<f64>().write(f64::from_bits(word as u64)),
+                _ => field.write(word),
+            }
+        }
+    }
+
     pub(super) fn into_word(self) -> usize {
         ManuallyDrop::new(self).word
     }
@@ -187,6 +209,7 @@ pub(super) struct Words {
     pub(super) kind: WordKind,
     // Fits beside the nine-bit word kind without growing a sequence handle.
     string_order: Cell<StringOrder>,
+    pub(super) mock_call_list: Cell<bool>,
     pub(super) values: SmallVec<[usize; 3]>,
 }
 
@@ -196,6 +219,7 @@ impl Words {
             header: 1,
             kind: WordKind::new(kind),
             string_order: Cell::new(StringOrder::Unknown),
+            mock_call_list: Cell::new(false),
             values: SmallVec::new(),
         }
     }
@@ -210,6 +234,28 @@ impl Words {
         words
     }
 
+    pub(super) fn from_rows(rows: super::structs::Rows) -> Self {
+        let mut words = Self::new(6);
+        words.kind = WordKind::STRUCT_ROWS;
+        words.values.push(Box::into_raw(Box::new(rows)) as usize);
+        words.update_header();
+        words
+    }
+
+    pub(super) fn rows(&self) -> Option<&super::structs::Rows> {
+        (self.kind == WordKind::STRUCT_ROWS).then(|| {
+            // SAFETY: only from_rows installs this sentinel and owned box.
+            unsafe { &*(self.values[0] as *const super::structs::Rows) }
+        })
+    }
+
+    pub(super) fn rows_mut(&mut self) -> Option<&mut super::structs::Rows> {
+        (self.kind == WordKind::STRUCT_ROWS).then(|| {
+            // SAFETY: the unique Words borrow exclusively owns this box.
+            unsafe { &mut *(self.values[0] as *mut super::structs::Rows) }
+        })
+    }
+
     pub(super) fn plan(&self) -> Option<&Deferred> {
         if self.kind == WordKind::DEFERRED {
             debug_assert_eq!(self.header, u32::MAX);
@@ -222,13 +268,18 @@ impl Words {
     }
 
     pub(super) fn resolved(&self) -> &Self {
+        if let Some(rows) = self.rows() {
+            return rows.boxed();
+        }
         self.plan().map_or(self, Deferred::ordered)
     }
 
     /// A mutating alias gets its own ordinary buffer. Copies share only the
     /// immutable snapshot and retain independent list identities and contents.
     pub(super) fn resolve_mut(&mut self) {
-        if let Some(plan) = self.plan() {
+        if let Some(rows) = self.rows_mut() {
+            *self = rows.take_boxed();
+        } else if let Some(plan) = self.plan() {
             *self = plan.ordered().copy_strings();
         }
     }
@@ -274,11 +325,33 @@ impl Words {
     }
 
     pub(super) fn is_sorting_empty(&self) -> bool {
-        self.header == 0 && !self.values.spilled()
+        self.header == 0 && self.values.is_empty() && !self.values.spilled()
     }
 
     /// Publish a fully initialized buffer after bulk initialization by a decoder or splitter.
+    /// Bulk producers build initialized, owned record words before publication.
+    /// Convert homogeneous struct outputs too, including schema-decoded lists.
+    pub(super) fn pack_structs(&mut self) -> super::exceptions::Result<()> {
+        if self.kind.raw() != 6 || self.values.is_empty() {
+            return Ok(());
+        }
+        // SAFETY: kind six guarantees initialized, rooted native record payloads.
+        let layout = unsafe { records::descriptor(self.values[0] as *const usize) };
+        if !layout.is_value_struct() {
+            return Ok(());
+        }
+        let mut rows = super::structs::Rows::new(layout);
+        for &word in &self.values {
+            // SAFETY: all words share the immutable exact class and are rooted by self.
+            rows.append(unsafe { rows.payload(word as *const usize) })?;
+        }
+        *self = Self::from_rows(rows);
+        Ok(())
+    }
+
     pub(super) fn into_object(mut self) -> Rc<Object> {
+        // The original boxed list remains usable if optional packing cannot allocate.
+        let _ = self.pack_structs();
         if self.kind != WordKind::DEFERRED {
             self.update_header();
         }
@@ -290,7 +363,11 @@ impl Words {
     /// A saturated header defers to the full-width buffer length in the runtime.
     pub(super) fn update_header(&mut self) {
         debug_assert_ne!(self.kind, WordKind::DEFERRED);
-        self.header = Self::header_for(self.values.len(), !self.values.spilled());
+        self.header = if let Some(rows) = self.rows() {
+            Self::header_for(rows.len(), false)
+        } else {
+            Self::header_for(self.values.len(), !self.values.spilled())
+        };
     }
 
     fn header_for(length: usize, inline: bool) -> u32 {
@@ -373,8 +450,19 @@ pub struct SequenceLayout {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_seq_layout() -> SequenceLayout {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    crate::run_start::wait_for_cleanup();
+    let _ = crate::run_start::wait_for_cleanup(false);
+    sequence_layout()
+}
 
+/// Request the launcher's unmodified OS arguments before releasing its socket.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_seq_layout_with_orig_argv() -> SequenceLayout {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    super::args::save_launcher_arguments(crate::run_start::wait_for_cleanup(true));
+    sequence_layout()
+}
+
+fn sequence_layout() -> SequenceLayout {
     let mut sample = Words::new(0);
     sample.values.push(0);
     // One non-owning word fits inline and needs no destructor.
@@ -391,9 +479,18 @@ pub extern "C" fn imre_seq_layout() -> SequenceLayout {
 
 impl Drop for Words {
     fn drop(&mut self) {
+        if self.kind == WordKind::STRUCT_ROWS {
+            // SAFETY: the sentinel transfers the unique Rows allocation back to Box.
+            drop(unsafe { Box::from_raw(self.values[0] as *mut super::structs::Rows) });
+            return;
+        }
         if self.kind == WordKind::DEFERRED {
             // SAFETY: the deferred header owns exactly this one boxed plan.
             drop(unsafe { Box::from_raw(self.values[0] as *mut Deferred) });
+            return;
+        }
+        if self.values.spilled() && self.kind.can_queue_release() {
+            records::release_sequence_words(self.kind, std::mem::take(&mut self.values).into_vec());
             return;
         }
         for word in self.values.drain(..).rev() {

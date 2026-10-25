@@ -18,7 +18,11 @@ use super::records::{RecordBatch, RecordDescriptor, imre_record_new};
 use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
+mod binary;
+mod decoder;
 mod encode;
+#[cfg(test)]
+pub(super) use encode::imre_json_dumps;
 pub(super) mod readonly;
 mod syntax;
 mod toml;
@@ -89,7 +93,7 @@ impl Field {
         unsafe { &*self.schema }
     }
 
-    fn missing<E: serde::de::Error>(&self) -> Result<OwnedWord, E> {
+    fn missing<E: serde::de::Error>(&self, allocation: &mut Option<Error>) -> Result<OwnedWord, E> {
         match self.default_kind {
             0 => Err(E::custom(format!("missing field {:?}", self.name()))),
             1 => {
@@ -100,7 +104,7 @@ impl Field {
                         self.default_len,
                     ))
                 };
-                decode(text, self.schema()).map_err(E::custom)
+                decode(text, self.schema(), allocation).map_err(E::custom)
             }
             2 => Ok(empty_list(self.schema())),
             _ => unreachable!("compiler emitted an invalid JSON default"),
@@ -144,6 +148,7 @@ type StringSlots = [Option<Rc<Str>>; 64];
 /// Raw numeric tokens and ignored containers can bypass serde's recursion
 /// budget. Check the full document once before admitting such values.
 struct DecodeState<'a> {
+    allocation: &'a mut Option<Error>,
     text: &'a str,
     checked: bool,
     strings: Option<&'a mut StringSlots>,
@@ -151,6 +156,11 @@ struct DecodeState<'a> {
 }
 
 impl DecodeState<'_> {
+    fn array_allocation<E: serde::de::Error>(&mut self) -> E {
+        *self.allocation = Some(Error::allocation());
+        E::custom("array allocation failed")
+    }
+
     fn check<E: serde::de::Error>(&mut self) -> Result<(), E> {
         if !self.checked {
             check_depth(self.text).map_err(E::custom)?;
@@ -312,6 +322,9 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
         if self.0.word_kind == 4 {
             let mut values = Vec::new();
             while let Some(value) = sequence.next_element_seed(Seed(child, self.1))? {
+                values
+                    .try_reserve(1)
+                    .map_err(|_| self.1.array_allocation::<A::Error>())?;
                 values.push(Int(value.into_word()));
             }
             // SAFETY: the schema is list[int], and every element owns an exact Int.
@@ -325,6 +338,10 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
             // and drops both the suspended cursor and this array's partial owners.
             let outer = self.1.records.take();
             while let Some(value) = sequence.next_element_seed(Seed(child, self.1))? {
+                values
+                    .values
+                    .try_reserve(1)
+                    .map_err(|_| self.1.array_allocation::<A::Error>())?;
                 values.values.push(value.into_word());
                 if values.values.len() == values.values.inline_size() + 1 {
                     // Once the array spills its inline slots, pack subsequent records.
@@ -335,6 +352,10 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
             self.1.records = outer;
         } else {
             while let Some(value) = sequence.next_element_seed(Seed(child, self.1))? {
+                values
+                    .values
+                    .try_reserve(1)
+                    .map_err(|_| self.1.array_allocation::<A::Error>())?;
                 values.values.push(value.into_word());
             }
         }
@@ -352,12 +373,20 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
                 let pointer = Rc::into_raw(Rc::new(Str::from(key.as_ref()))) as usize;
                 // SAFETY: this temporary transfers one newly allocated string owner.
                 let key = unsafe { OwnedWord::from_owned(pointer, WordKind::new(3)) };
-                if !mapping.insert_unique(key, value) {
+                let inserted = match mapping.insert_unique(key, value) {
+                    Ok(inserted) => inserted,
+                    Err(error) => {
+                        drop(mapping);
+                        *self.1.allocation = Some(error);
+                        return Err(serde::de::Error::custom("mapping allocation failed"));
+                    }
+                };
+                if !inserted {
                     return Err(A::Error::custom("duplicate JSON dictionary key"));
                 }
             }
             let pointer = Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-                Box::new(mapping),
+                crate::objects::mappings::TableOwner::new(mapping),
             ))))) as usize;
             // SAFETY: the new dictionary owns every successfully decoded entry.
             return Ok(unsafe { OwnedWord::from_owned(pointer, self.0.storage()) });
@@ -401,7 +430,7 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
         }
         for (index, field) in fields.iter().enumerate() {
             if seen.insert(index) {
-                let value = field.missing()?;
+                let value = field.missing(self.1.allocation)?;
                 // SAFETY: the missing slot is still zero and the default has its exact type.
                 unsafe { store(pointer.add(index), value) };
             }
@@ -561,8 +590,12 @@ fn check_depth(text: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn decode(text: &str, schema: &Schema) -> Result<OwnedWord, serde_json::Error> {
-    decode_with_depth(text, schema, true)
+fn decode(
+    text: &str,
+    schema: &Schema,
+    allocation: &mut Option<Error>,
+) -> Result<OwnedWord, serde_json::Error> {
+    decode_with_depth(text, schema, true, allocation)
 }
 
 /// Starts with serde's recursion budget unless the caller already checked all
@@ -571,6 +604,7 @@ fn decode_with_depth(
     text: &str,
     schema: &Schema,
     checked: bool,
+    allocation: &mut Option<Error>,
 ) -> Result<OwnedWord, serde_json::Error> {
     // Even malformed input this short cannot open more than MAX_DEPTH containers.
     let checked = checked || text.len() <= MAX_DEPTH;
@@ -590,6 +624,7 @@ fn decode_with_depth(
     let value = Seed(
         schema,
         &mut DecodeState {
+            allocation,
             text,
             checked,
             strings,
@@ -612,11 +647,17 @@ fn decode_with_depth(
 pub unsafe extern "C" fn imre_json_decode(text: *const Str, schema: *const Schema) -> *const usize {
     // SAFETY: the caller roots the input and supplies valid static metadata.
     let (text, schema) = unsafe { (&*text, &*schema) };
-    let result = decode_with_depth(text, schema, false)
+    let mut allocation = None;
+    let result = decode_with_depth(text, schema, false, &mut allocation)
         .or_else(|_| {
+            if let Some(error) = allocation.take() {
+                return Err(error);
+            }
             check_depth(text).map_err(|message| Error::new(Kind::ValueError, message))?;
-            decode(text, schema).map_err(|error| {
-                Error::new(Kind::ValueError, format!("invalid typed JSON: {error}"))
+            decode(text, schema, &mut allocation).map_err(|error| {
+                allocation.take().unwrap_or_else(|| {
+                    Error::new(Kind::ValueError, format!("invalid typed JSON: {error}"))
+                })
             })
         })
         .map(|value| value.into_word() as *const usize);

@@ -6,6 +6,7 @@ use std::thread;
 
 use super::*;
 use crate::StorageCell;
+use crate::objects::acquire_rc;
 
 type Captured = (ExitStatus, Vec<u8>, Vec<u8>);
 
@@ -38,19 +39,13 @@ pub(in crate::objects) struct AsyncProcess {
     pipes: [bool; 2],
 }
 
-fn stdio(mode: u32) -> Stdio {
-    match mode {
-        0 => Stdio::inherit(),
-        1 => Stdio::piped(),
-        2 => Stdio::null(),
-        _ => fail("SystemError", "unknown async subprocess output mode"),
-    }
-}
-
 impl AsyncProcess {
     fn spawn(launch: Launch, cwd: Option<&CString>, stdout: u32, stderr: u32) -> Result<Self> {
+        if stdout > 2 || stderr > 2 {
+            fail("SystemError", "unknown async subprocess output mode");
+        }
         let child = launch
-            .spawn_with_output(cwd, stdio(stdout), stdio(stderr))
+            .spawn(cwd, stdout | (stderr << 4))
             .map_err(os_error)?;
         let guard = ChildGuard {
             child,
@@ -89,6 +84,7 @@ impl AsyncProcess {
         }
         match self.output.as_mut().expect("worker output was received") {
             Ok(output) => Ok(Some(output)),
+            Err(error) if capture_allocation_failed(error) => Err(Error::allocation()),
             Err(error) => Err(os_error(match error.raw_os_error() {
                 Some(code) => io::Error::from_raw_os_error(code),
                 None => io::Error::new(error.kind(), error.to_string()),

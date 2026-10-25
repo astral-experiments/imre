@@ -1,0 +1,24 @@
+upstream_id	result_at_O0_and_O3	method_source	diagnostic_location	reason
+test.test_collections.TestNamedTuple.test_copy	compile-blocked	Lib/test/test_collections.py:579	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""copy"""
+test.test_collections.TestNamedTuple.test_defaults	compile-blocked	Lib/test/test_collections.py:349	upstream:350:17	Imre: a module is not callable
+test.test_collections.TestNamedTuple.test_factory	compile-blocked	Lib/test/test_collections.py:320	upstream:321:17	Imre: a module is not callable
+test.test_collections.TestNamedTuple.test_factory_doc_attr	fixture-blocked	Lib/test/test_collections.py:415		TestNamedTuple.test_factory_doc_attr needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_field_descriptor	fixture-blocked	Lib/test/test_collections.py:679		TestNamedTuple.test_field_descriptor needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_field_doc	fixture-blocked	Lib/test/test_collections.py:423		TestNamedTuple.test_field_doc needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_field_doc_reuse	fixture-blocked	Lib/test/test_collections.py:438		TestNamedTuple.test_field_doc_reuse needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_field_repr	fixture-blocked	Lib/test/test_collections.py:445		TestNamedTuple.test_field_repr needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_instance	compile-blocked	Lib/test/test_collections.py:471	upstream:472:17	Imre: a module is not callable
+test.test_collections.TestNamedTuple.test_keyword_only_arguments	compile-blocked	Lib/test/test_collections.py:658	upstream:660:14	Imre: unknown class method
+test.test_collections.TestNamedTuple.test_large_size	fixture-blocked	Lib/test/test_collections.py:546		TestNamedTuple.test_large_size needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_match_args	compile-blocked	Lib/test/test_collections.py:704	upstream:705:17	Imre: a module is not callable
+test.test_collections.TestNamedTuple.test_module_parameter	compile-blocked	Lib/test/test_collections.py:467	upstream:468:14	Imre: a module is not callable
+test.test_collections.TestNamedTuple.test_name_conflicts	compile-blocked	Lib/test/test_collections.py:586	upstream:589:13	Imre: a module is not callable
+test.test_collections.TestNamedTuple.test_name_fixer	compile-blocked	Lib/test/test_collections.py:456	upstream:462:13	Imre: expected list[tuple[str, str]], got list[tuple[str, str, str, str]]; annotations are enforced contracts
+test.test_collections.TestNamedTuple.test_namedtuple_subclass_issue_24931	compile-blocked	Lib/test/test_collections.py:668	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_collections.TestNamedTuple.test_new_builtins_issue_43102	compile-blocked	Lib/test/test_collections.py:698	upstream:699:15	Imre: a module is not callable
+test.test_collections.TestNamedTuple.test_non_generic_subscript	compile-blocked	Lib/test/test_collections.py:708	upstream:711:17	Imre: a module is not callable
+test.test_collections.TestNamedTuple.test_odd_sizes	compile-blocked	Lib/test/test_collections.py:528	upstream:529:16	Imre: a module is not callable
+test.test_collections.TestNamedTuple.test_pickle	compile-blocked	Lib/test/test_collections.py:568	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""pickle"""
+test.test_collections.TestNamedTuple.test_readonly	compile-blocked	Lib/test/test_collections.py:399	upstream:400:17	Imre: a module is not callable
+test.test_collections.TestNamedTuple.test_repr	compile-blocked	Lib/test/test_collections.py:650	upstream:651:13	Imre: a module is not callable
+test.test_collections.TestNamedTuple.test_tupleness	compile-blocked	Lib/test/test_collections.py:505	upstream:506:17	Imre: a module is not callable

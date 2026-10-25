@@ -508,16 +508,17 @@ impl Checker<'_> {
                 "assignment expressions are forbidden in comprehension iterables",
             ));
         }
-        if !narrowing::expression_assignments(expression).is_empty()
+        let input = self.iteration_input(&display.clauses[0].iter)?;
+        if matches!(input, Iteration::Prepared(_))
+            || !narrowing::expression_assignments(expression).is_empty()
             || pipelines::is_pipeline_expression(self, &display.clauses[0].iter)
             || !self.local_functions.is_empty()
                 && free_reads(expression, HashSet::new())
                     .iter()
                     .any(|name| self.local_functions.contains_key(name))
         {
-            return self.inline_comprehension(expression, display, expected);
+            return self.inline_comprehension(expression, display, expected, input);
         }
-        let input = self.iteration_input(&display.clauses[0].iter)?;
         let mut targets = HashSet::new();
         for clause in display.clauses {
             target_names(&clause.target, &mut targets);
@@ -540,6 +541,9 @@ impl Checker<'_> {
         let mut captures = reads.names.into_iter().collect::<Vec<_>>();
         captures.sort();
         let id = self.helpers.reserve();
+        // Eager displays share the enclosing Python frame, even when lowered to a helper.
+        let omitted_locals = self.omitted_assert_locals.clone();
+        let omitted_free = self.omitted_assert_free.clone();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -549,6 +553,8 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_locals = omitted_locals;
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.class = self.class;
         helper.class_receiver = self
@@ -590,7 +596,7 @@ impl Checker<'_> {
                 items,
                 start: start.map(|start| parameter(start, &mut helper)),
             },
-            Iteration::Prepared(_) => unreachable!("pipeline comprehensions run inline"),
+            Iteration::Prepared(_) => unreachable!("prepared inputs were dispatched inline"),
         };
         for name in captures {
             let Some(&source_slot) = self.names.get(&name) else {
@@ -757,8 +763,8 @@ impl Checker<'_> {
         expression: &ast::Expr,
         display: Display<'_>,
         expected: Option<Type>,
+        input: Iteration,
     ) -> Result<Expr, String> {
-        let input = self.iteration_input(&display.clauses[0].iter)?;
         let before = self.local_state();
         let names = self.names.clone();
         let class_receiver = self.class_receiver.clone();

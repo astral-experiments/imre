@@ -1,0 +1,102 @@
+{
+  "compiler_commit": "624d69d664944054951e727b0e30ff313325e5c0",
+  "compiler_sha256": "aa3a0f36d2a141c93c2eede03875fd0889bc50654c239db0eec36fb2e01b1ae7",
+  "registry_commit": "624d69d664944054951e727b0e30ff313325e5c0",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "suites": [
+    "test.test_os",
+    "test.test_posix",
+    "test.test_genericpath"
+  ],
+  "reference_denominator": 579,
+  "source": "pinned Lib/test and unchanged grouped coordinator entries",
+  "entries_sha256": {
+    "imre_os_imports.py": "9ba69007659d30c0e9dc55c8a3d0307340c69fb6e06fffd29d8a92ff68ebcc55",
+    "imre_os_run.py": "d0c69f694023b55ee7d6275618805248785edc70c67a56853e93c75275d58392"
+  },
+  "tests_executed": 0,
+  "checks": [
+    {
+      "mode": "imports-all",
+      "phase": "check",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_imports.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\""
+    },
+    {
+      "mode": "imports-reachable",
+      "phase": "check",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_imports.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\""
+    },
+    {
+      "mode": "run-all",
+      "phase": "check",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_run.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\""
+    },
+    {
+      "mode": "run-reachable",
+      "phase": "check",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_run.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\""
+    }
+  ],
+  "builds": [
+    {
+      "mode": "imports-all",
+      "phase": "build",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_imports.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\"",
+      "opt_level": 0
+    },
+    {
+      "mode": "imports-reachable",
+      "phase": "build",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_imports.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\"",
+      "opt_level": 0
+    },
+    {
+      "mode": "run-all",
+      "phase": "build",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_run.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\"",
+      "opt_level": 0
+    },
+    {
+      "mode": "run-reachable",
+      "phase": "build",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_run.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\"",
+      "opt_level": 0
+    },
+    {
+      "mode": "imports-all",
+      "phase": "build",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_imports.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\"",
+      "opt_level": 3
+    },
+    {
+      "mode": "imports-reachable",
+      "phase": "build",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_imports.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\"",
+      "opt_level": 3
+    },
+    {
+      "mode": "run-all",
+      "phase": "build",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_run.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\"",
+      "opt_level": 3
+    },
+    {
+      "mode": "run-reachable",
+      "phase": "build",
+      "exit": 1,
+      "diagnostic": "Lib/imre_os_run.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\"",
+      "opt_level": 3
+    }
+  ]
+}
