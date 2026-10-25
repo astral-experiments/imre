@@ -58,6 +58,7 @@ under their CPython fixtures. For every remaining non-skipped method it either
 tries to compile the complete definition or records the original decorator
 that requires an adapter. An unreviewed exception proposal remains a blocker.
 The actual native CLI failure for `test_orig_argv` is recorded separately.
+The unchanged `test_exit` runs under its original CPython fixture and assertions: six caught calls and five original child programs complete in Imre, including `2**128` and a pending stderr write. The next unchanged child source contains a lone U+DCFF. Its native compile failure blocks the method before the final Latin-1 check; no partial method receives pass credit.
 The unchanged locale-dependent method can pass under `-X utf8` even though
 the reference skipped it; the contract records that as a reference disagreement.
 

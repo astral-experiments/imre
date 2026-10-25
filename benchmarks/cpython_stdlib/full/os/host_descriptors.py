@@ -17,7 +17,13 @@ from native_descriptors import HERE, descriptor_suite, host_fixtures, verify_sou
 CASES = {
     "test_os": ("FDInheritanceTests.test_get_inheritable_cloexec",
                 "FDInheritanceTests.test_set_inheritable_cloexec",
-                "FDInheritanceTests.test_get_set_inheritable_o_path"),
+                "FDInheritanceTests.test_get_set_inheritable_o_path",
+                "FDInheritanceTests.test_get_set_inheritable_badf",
+                "TestInvalidFD.test_dup",
+                "TestInvalidFD.test_dup2",
+                "TestInvalidFD.test_dup2_negative_fd",
+                "TestInvalidFD.test_inheritable",
+                "TestInvalidFD.test_blocking"),
     "test_posix": ("PosixTester.test_dup", "PosixTester.test_dup2"),
 }
 
@@ -48,7 +54,14 @@ def bindings(library):
                 if status:
                     raise RuntimeError(f"native {name} exited with status {status}")
                 output.seek(0)
-                return output.read()
+                data = output.read()
+                lines = data.splitlines()
+                if len(lines) == 3 and lines[0] in {b"OSError", b"FileNotFoundError", b"PermissionError"}:
+                    error = OSError(int(lines[1]), lines[2].decode())
+                    if type(error).__name__.encode() != lines[0]:
+                        raise ValueError(f"native OS exception class mismatch: {data!r}")
+                    raise error
+                return data
 
             # Only the audited operations are exposed. A new OS call in a test
             # cannot silently run on CPython. Constants describe the host ABI.
@@ -58,6 +71,8 @@ def bindings(library):
                 close=lambda fd: void(invoke("close", fd)),
                 dup=lambda fd: int(invoke("dup", fd)),
                 dup2=lambda fd, fd2, inheritable=True: int(invoke("dup2", fd, fd2, int(inheritable))),
+                get_blocking=lambda fd: {b"True\n": True, b"False\n": False}[invoke("get_blocking", fd)],
+                set_blocking=lambda fd, value: void(invoke("set_blocking", fd, int(value))),
                 get_inheritable=lambda fd: {b"True\n": True, b"False\n": False}[invoke("get_inheritable", fd)],
                 set_inheritable=lambda fd, value: void(invoke("set_inheritable", fd, int(value))),
             )

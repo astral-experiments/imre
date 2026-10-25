@@ -651,7 +651,8 @@ impl Checker<'_> {
         } else {
             let binding = self.graph.resolve(self.module, expression);
             if let Some(Binding::Definition(definition)) = binding
-                && self.classes.declarations.ids.contains_key(&definition)
+                && (self.classes.declarations.ids.contains_key(&definition)
+                    || self.types.namedtuple(definition).is_some())
             {
                 // Static dispatch and constant folding can erase the class name from the IR.
                 self.class_reads.borrow_mut().insert(definition);
@@ -743,17 +744,17 @@ impl Checker<'_> {
             return Ok(None);
         }
         let direct = |checker: &mut Self, id: usize| -> Result<Expr, String> {
-            match checker.classes.declarations.definitions[id].exception_aliases[attr.attr.as_str()]
+            match &checker.classes.declarations.definitions[id].exception_aliases
+                [attr.attr.as_str()]
             {
-                crate::classes::ExceptionAlias::Builtin(kind) => {
-                    checker.simple_exception(call, kind)
+                crate::classes::ExceptionAlias::Builtin { kind, .. } => {
+                    checker.simple_exception(call, *kind)
                 }
                 crate::classes::ExceptionAlias::Named(def) => {
-                    if let Some(&layout) = checker.classes.declarations.ids.get(&def) {
+                    if let Some(&layout) = checker.classes.declarations.ids.get(def) {
                         checker.construct(call, layout)
                     } else {
-                        checker
-                            .simple_exception(call, checker.classes.declarations.exceptions[&def])
+                        checker.simple_exception(call, checker.classes.declarations.exceptions[def])
                     }
                 }
             }
@@ -849,7 +850,10 @@ impl Checker<'_> {
         expected: Option<Type>,
     ) -> Result<Expr, String> {
         if attribute.attr.starts_with("__")
-            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+            && !matches!(
+                attribute.attr.as_str(),
+                "__str__" | "__post_init__" | "__copy__"
+            )
         {
             return Err(error(
                 self.source,
@@ -933,13 +937,30 @@ impl Checker<'_> {
             ));
         }
         if attribute.attr.starts_with("__")
-            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+            && !matches!(
+                attribute.attr.as_str(),
+                "__str__" | "__post_init__" | "__copy__"
+            )
         {
             return Err(error(
                 self.source,
                 call,
                 "special methods cannot be called directly",
             ));
+        }
+        if matches!(attribute.attr.as_str(), "assertEqual" | "assertListEqual")
+            && let Some(receiver) = &receiver
+            && let Some(checked) =
+                self.unittest_equality(call, attribute.attr.as_str(), class, receiver)?
+        {
+            return Ok(checked);
+        }
+        if attribute.attr.as_str() == "assertRaises"
+            && !self.classes.methods[class].contains_key("assertRaises")
+            && let Some(receiver) = &receiver
+            && let Some(context) = self.unittest_assert_raises(call, class, receiver)?
+        {
+            return Ok(context);
         }
         let signature = self.classes.methods[class]
             .get(attribute.attr.as_str())

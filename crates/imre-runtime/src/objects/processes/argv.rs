@@ -49,6 +49,15 @@ pub(super) fn copy(cmd: &OwnedWord) -> Result<Vec<CString>> {
 }
 
 /// # Safety
+/// A non-null value must be a rooted str, bytes or Path with this exact kind.
+pub(super) unsafe fn optional_path(value: *const (), kind: u32) -> Result<Option<CString>> {
+    // SAFETY: the compiler restricts the optional to native path representations.
+    (!value.is_null())
+        .then(|| unsafe { element(value as usize, WordKind::new(kind)) })
+        .transpose()
+}
+
+/// # Safety
 /// The caller roots the element with the given storage kind.
 unsafe fn element(word: usize, kind: WordKind) -> Result<CString> {
     let (word, kind) = if kind.raw() == 9 {

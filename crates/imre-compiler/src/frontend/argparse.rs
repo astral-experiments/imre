@@ -17,6 +17,7 @@ pub(super) struct Parsers {
     commands: HashMap<usize, (String, HashMap<String, usize>)>,
 }
 
+#[derive(Clone)]
 struct Parser {
     class: usize,
     schema: String,
@@ -158,12 +159,41 @@ fn range_choices(call: &ast::ExprCall) -> Option<[String; 3]> {
     }
 }
 
+/// Prefixes affect both the option grammar and the implicit help action.
+struct Flags<'a> {
+    prefixes: &'a str,
+    help: Option<[String; 2]>,
+    abbrev: bool,
+}
+
+impl<'a> Flags<'a> {
+    fn new(prefixes: &'a str, add_help: bool, abbrev: bool) -> Self {
+        let p = if prefixes.contains('-') {
+            '-'
+        } else {
+            prefixes.chars().next().unwrap()
+        };
+        Self {
+            prefixes,
+            help: add_help.then(|| [format!("{p}h"), format!("{p}{p}help")]),
+            abbrev,
+        }
+    }
+
+    fn prefixed(&self, flag: &str) -> bool {
+        flag.chars()
+            .next()
+            .is_some_and(|c| self.prefixes.contains(c))
+    }
+}
+
 fn option(
     call: &ast::ExprCall,
     graph: &SourceGraph,
     id: ModuleId,
     types: &Types,
     classes: &Classes,
+    flags: &Flags,
 ) -> Result<OptionField, String> {
     let module = &graph.modules[id];
     let Some((flag, rest)) = call.arguments.args.split_first() else {
@@ -173,52 +203,66 @@ fn option(
         ));
     };
     let flag_name = literal(flag, module)?;
-    let positional = !flag_name.starts_with('-');
+    let positional = !flags.prefixed(flag_name);
     let aliases = rest
         .iter()
         .map(|expr| literal(expr, module))
         .collect::<Result<Vec<_>, _>>()?;
-    if positional && (!aliases.is_empty() || flag_name.contains('-')) {
-        return Err(module.error(flag, "argparse positional arguments have one name"));
+    let kw = keywords(
+        call,
+        &[
+            "type", "nargs", "help", "action", "default", "const", "required", "choices", "dest",
+        ],
+        module,
+    )?;
+    if positional && (!aliases.is_empty() || kw.contains_key("dest")) {
+        return Err(module.error(flag, "argparse positional arguments have one destination"));
     }
     let spellings = std::iter::once(flag_name).chain(aliases.iter().copied());
-    let dest = if positional {
-        flag_name
+    let dest = if let Some(expr) = kw.get("dest") {
+        literal(expr, module)?.to_owned()
+    } else if positional {
+        flag_name.to_owned()
     } else {
-        spellings
+        let spelling = spellings
             .clone()
-            .find_map(|s| s.strip_prefix("--"))
-            .unwrap_or(flag_name.trim_start_matches('-'))
-    }
-    .replace('-', "_");
-    let mut seen = HashSet::new();
-    if !dest.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+            .find(|name| {
+                name.chars()
+                    .nth(1)
+                    .is_some_and(|c| flags.prefixes.contains(c))
+            })
+            .unwrap_or(flag_name);
+        spelling
+            .trim_start_matches(|c| flags.prefixes.contains(c))
+            .replace('-', "_")
+    };
+    if !dest
+        .as_bytes()
+        .first()
+        .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_')
         || !dest.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
-        || spellings.into_iter().any(|s| {
-            !seen.insert(s)
-                || !positional
-                    && (matches!(s, "-h" | "--help")
-                        || !(s.strip_prefix("--").is_some_and(|n| {
-                            !n.is_empty()
-                                && n.bytes()
-                                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
-                        }) || s.len() == 2
-                            && s.starts_with('-')
-                            && s.as_bytes()[1].is_ascii_alphabetic()))
+    {
+        return Err(module.error(
+            flag,
+            "argparse requires a representable namespace field name",
+        ));
+    }
+    let mut seen = HashSet::new();
+    if !positional
+        && spellings.into_iter().any(|s| {
+            !flags.prefixed(s)
+                || !seen.insert(s)
+                || flags
+                    .help
+                    .as_ref()
+                    .is_some_and(|help| help.iter().any(|h| h == s))
         })
     {
         return Err(module.error(
             flag,
-            "argparse arguments require distinct ASCII field names and flags",
+            "argparse option spellings require distinct flags with a declared prefix",
         ));
     }
-    let kw = keywords(
-        call,
-        &[
-            "type", "nargs", "help", "action", "default", "const", "required", "choices",
-        ],
-        module,
-    )?;
     if positional && kw.contains_key("required") {
         return Err(module.error(call, "argparse positionals do not accept required"));
     }
@@ -505,10 +549,10 @@ fn option(
         element
     };
     Ok(OptionField {
-        name: dest,
+        name: dest.clone(),
         annotation: flag.clone(),
         ty: if optional { types.optional(ty) } else { ty },
-        option: json!({ "flag": flag_name, "aliases": aliases, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
+        option: json!({ "flag": flag_name, "dest": dest, "positional": positional, "aliases": aliases, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
             "choices": choices, "range":range, "has_choices": kw.contains_key("choices"), "int_default": int_default || element == Type::Int && numeric_kw("default", element),
             "int_constant": int_constant || element == Type::Int && numeric_kw("const", element),
             "float_default": element == Type::Float && numeric_kw("default", element),
@@ -616,13 +660,31 @@ fn assigned_call<'a>(
     Some((name, method(&assign.value, receiver, operation)?))
 }
 
-struct ContainsName<'a>(&'a str, bool);
+/// A literal builder may be read repeatedly through its parser operations. Any
+/// other use, including passing the builder as an argument, would escape it.
+struct Uses<'a> {
+    builder: &'a str,
+    operations: Vec<TextSize>,
+    escaped: bool,
+    allow_calls: bool,
+}
 
-impl<'ast> Visitor<'ast> for ContainsName<'_> {
+impl<'ast> Visitor<'ast> for Uses<'_> {
     fn visit_expr(&mut self, node: &'ast ast::Expr) {
-        self.1 |= names(node, self.0);
-        if !self.1 {
-            walk_expr(self, node)
+        if self.allow_calls
+            && let ast::Expr::Call(call) = node
+            && let ast::Expr::Attribute(attr) = &*call.func
+            && names(&attr.value, self.builder)
+            && matches!(
+                attr.attr.as_str(),
+                "parse_args" | "format_help" | "format_usage" | "print_help" | "print_usage"
+            )
+        {
+            self.operations.push(call.start());
+            self.visit_arguments(&call.arguments);
+        } else {
+            self.escaped |= names(node, self.builder);
+            walk_expr(self, node);
         }
     }
 }
@@ -699,7 +761,35 @@ impl Parsers {
                         return Err(module
                             .error(ctor, "ArgumentParser requires named literal configuration"));
                     }
-                    let kw = keywords(ctor, &["description", "formatter_class", "prog"], module)?;
+                    let kw = keywords(
+                        ctor,
+                        &[
+                            "description",
+                            "formatter_class",
+                            "prog",
+                            "prefix_chars",
+                            "add_help",
+                            "allow_abbrev",
+                        ],
+                        module,
+                    )?;
+                    let prefixes = kw
+                        .get("prefix_chars")
+                        .map(|e| literal(e, module))
+                        .transpose()?
+                        .unwrap_or("-");
+                    if prefixes.is_empty() {
+                        return Err(
+                            module.error(ctor, "argparse requires at least one prefix character")
+                        );
+                    }
+                    let boolean = |name| match kw.get(name) {
+                        None => Ok(true),
+                        Some(ast::Expr::BooleanLiteral(value)) => Ok(value.value),
+                        _ => Err(module.error(ctor, "argparse flags require literal booleans")),
+                    };
+                    let flags =
+                        Flags::new(prefixes, boolean("add_help")?, boolean("allow_abbrev")?);
                     let raw = if let Some(&value) = kw.get("formatter_class") {
                         if graph.resolve(module_id, value)
                             != Some(Binding::Intrinsic(Intrinsic::RawDescriptionHelpFormatter))
@@ -753,6 +843,7 @@ impl Parsers {
                     builders.push(builder.to_owned());
                     let read_options =
                         |builder: &str,
+                         flags: &Flags,
                          index: &mut usize,
                          mut names: HashSet<String>,
                          builders: &mut Vec<String>|
@@ -782,7 +873,8 @@ impl Parsers {
                                 if owner != builder && group.is_none() {
                                     break;
                                 }
-                                let mut field = option(add, graph, module_id, types, classes)?;
+                                let mut field =
+                                    option(add, graph, module_id, types, classes, flags)?;
                                 if let Some(group) = group {
                                     field.option["group"] = json!(group);
                                 }
@@ -808,7 +900,7 @@ impl Parsers {
                         };
                     let mut index = start + 1;
                     let (options, groups) =
-                        read_options(builder, &mut index, HashSet::new(), &mut builders)?;
+                        read_options(builder, &flags, &mut index, HashSet::new(), &mut builders)?;
                     let mut root_names = options
                         .iter()
                         .map(|field| field.name.clone())
@@ -874,6 +966,7 @@ impl Parsers {
                             index += 1;
                             let (options, groups) = read_options(
                                 child.id.as_str(),
+                                &Flags::new("-", true, true),
                                 &mut index,
                                 root_names.clone(),
                                 &mut builders,
@@ -896,23 +989,30 @@ impl Parsers {
                             option: Value::Null,
                         });
                     }
-                    let parse = match function.body.get(index) {
-                        Some(ast::Stmt::Expr(stmt)) => Some(&*stmt.value),
-                        Some(ast::Stmt::Assign(stmt)) if stmt.targets.len() == 1 && stmt.targets[0].as_name_expr().is_some() => Some(&*stmt.value),
-                        Some(ast::Stmt::Return(stmt)) => stmt.value.as_deref(),
-                        _ => None,
-                    }.and_then(|expr| method(expr, builder, "parse_args"))
-                        .ok_or_else(|| module.error(ctor, "literal add_argument declarations must be followed by a parse_args() call"))?;
-                    for builder in builders {
-                        let mut outside = ContainsName(&builder, false);
-                        outside.visit_body(&function.body[..start]);
-                        outside.visit_body(&function.body[index + 1..]);
-                        if outside.1 {
+                    let mut operations = Vec::new();
+                    for declared in &builders {
+                        let mut uses = Uses {
+                            builder: declared,
+                            operations: Vec::new(),
+                            escaped: false,
+                            allow_calls: false,
+                        };
+                        uses.visit_body(&function.body[..start]);
+                        uses.allow_calls = declared == builder;
+                        uses.visit_body(&function.body[index..]);
+                        if uses.escaped {
                             return Err(module.error(
                                 name,
                                 "argparse builder cannot escape its declaration or be rebound",
                             ));
                         }
+                        operations.extend(uses.operations);
+                    }
+                    if operations.is_empty() {
+                        return Err(module.error(
+                            ctor,
+                            "argparse declarations must be followed by a parser operation",
+                        ));
                     }
                     let definition = DefinitionId {
                         module: module_id,
@@ -937,7 +1037,7 @@ impl Parsers {
                         tags.insert(child.name.clone(), variant);
                         child_schemas.push(json!({
                             "name": child.name, "help": child.help,
-                            "raw": false,
+                            "raw": false, "prefixes": "-", "help_flags":["-h","--help"], "abbrev":true,
                             "options": child.options.iter().map(|f| &f.option).collect::<Vec<_>>(),
                             "groups": child.groups,
                         }));
@@ -953,16 +1053,16 @@ impl Parsers {
                         .into_iter()
                         .map(|field| field.option)
                         .collect::<Vec<_>>();
-                    let schema = json!({"prog": prog, "raw": raw, "options": options, "groups": groups, "subcommands": subcommands}).to_string();
-                    parsers.calls.insert(
-                        (module_id, parse.start()),
-                        Parser {
-                            class,
-                            children: child_classes,
-                            schema,
-                            description: description.cloned(),
-                        },
-                    );
+                    let schema = json!({"prog": prog, "raw": raw, "prefixes": flags.prefixes, "help_flags": flags.help, "abbrev": flags.abbrev, "options": options, "groups": groups, "subcommands": subcommands}).to_string();
+                    let parser = Parser {
+                        class,
+                        children: child_classes,
+                        schema,
+                        description: description.cloned(),
+                    };
+                    for operation in operations {
+                        parsers.calls.insert((module_id, operation), parser.clone());
+                    }
                 }
             }
         }
@@ -1008,6 +1108,54 @@ impl Checker<'_> {
                 kind: ExprKind::Str(String::new()),
             },
         };
+        let schema = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Str(parser.schema.clone()),
+        };
+        let method = call.func.as_attribute_expr().unwrap().attr.as_str();
+        if method != "parse_args" {
+            let print = method.starts_with("print");
+            let file = match (
+                call.arguments.args.as_ref(),
+                call.arguments.keywords.as_ref(),
+            ) {
+                ([], []) => None,
+                ([file], []) if print => Some(file),
+                ([], [kw]) if print && kw.arg.as_ref().is_some_and(|name| name == "file") => {
+                    Some(&kw.value)
+                }
+                _ => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "invalid argparse formatting arguments",
+                    ));
+                }
+            };
+            let mut args = vec![schema, description];
+            let output = match file {
+                _ if !print => ir::ArgparseOutput::Return,
+                None | Some(ast::Expr::NoneLiteral(_)) => ir::ArgparseOutput::Stdout,
+                Some(file) => match self.resolve(file) {
+                    Some(Binding::Intrinsic(Intrinsic::Stdout)) => ir::ArgparseOutput::Stdout,
+                    Some(Binding::Intrinsic(Intrinsic::Stderr)) => ir::ArgparseOutput::Stderr,
+                    _ => {
+                        args.push(self.expr_expected(file, Type::TextIO)?);
+                        ir::ArgparseOutput::File
+                    }
+                },
+            };
+            return Ok(Some(Expr {
+                ty: if print { Type::None } else { Type::Str },
+                kind: ExprKind::Builtin(
+                    Builtin::ArgparseText {
+                        usage: method.ends_with("usage"),
+                        output,
+                    },
+                    args,
+                ),
+            }));
+        }
         let explicit = match (
             call.arguments.args.as_ref(),
             call.arguments.keywords.as_ref(),
@@ -1051,14 +1199,7 @@ impl Checker<'_> {
                     children: parser.children.clone(),
                     process_argv: explicit.is_none(),
                 },
-                vec![
-                    Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str(parser.schema.clone()),
-                    },
-                    description,
-                    argv,
-                ],
+                vec![schema, description, argv],
             ),
         }))
     }
