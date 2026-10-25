@@ -9,6 +9,8 @@ use std::ffi::CString;
 use std::io;
 use std::rc::Rc;
 
+mod credentials;
+
 macro_rules! descriptor_constants {
     ($($name:ident = $flag:ident),* $(,)?) => {$(
         #[unsafe(no_mangle)]
