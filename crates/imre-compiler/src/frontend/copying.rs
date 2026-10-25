@@ -122,7 +122,7 @@ impl Checker<'_> {
         let mut work = vec![(root, false)];
         let mut seen = HashSet::new();
         while let Some((ty, key)) = work.pop() {
-            if atomic(ty) || !seen.insert((ty, key)) {
+            if atomic(ty) || self.types.is_value_struct(ty) || !seen.insert((ty, key)) {
                 continue;
             }
             if let Some(fields) = self.types.fields(ty) {

@@ -2,7 +2,7 @@
 //! input before constructing the compiler-described, owned namespace record.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashSet, TryReserveError};
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -82,6 +82,7 @@ struct OptionSpec {
     help: String,
     optional: bool,
     group: Option<usize>,
+    mutex: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -101,6 +102,8 @@ struct Parser {
     options: Vec<OptionSpec>,
     #[serde(default)]
     groups: Vec<ArgumentGroup>,
+    #[serde(default)]
+    mutex_required: Vec<bool>,
     subcommands: Option<Subcommands>,
 }
 
@@ -179,6 +182,12 @@ enum Stop<'a> {
     Help(&'a Parser),
     Error(&'a Parser, String),
     Exception(Error),
+}
+
+impl From<TryReserveError> for Stop<'_> {
+    fn from(_: TryReserveError) -> Self {
+        Self::Exception(Error::allocation())
+    }
 }
 
 impl Parser {
@@ -316,8 +325,49 @@ impl Parser {
         }
     }
 
+    fn select_group<'a>(&'a self, seen: &mut [Option<usize>], slot: usize) -> Result<(), Stop<'a>> {
+        if let Some(group) = self.options[slot].mutex {
+            if let Some(other) = seen[group]
+                && other != slot
+            {
+                return Err(Stop::Error(
+                    self,
+                    format!(
+                        "argument {}: not allowed with argument {}",
+                        self.options[slot].error_name(),
+                        self.options[other].error_name()
+                    ),
+                ));
+            }
+            seen[group] = Some(slot);
+        }
+        Ok(())
+    }
+
+    /// Resolve the whole short-option cluster before invoking its actions in order.
+    fn apply_flags<'a>(
+        &'a self,
+        flags: impl IntoIterator<Item = Option<(usize, &'a str)>>,
+        seen: &mut [Option<usize>],
+        values: &mut [Option<Bound<'a>>],
+    ) -> Result<(), Stop<'a>> {
+        for flag in flags {
+            let Some((slot, spelling)) = flag else {
+                return Err(Stop::Help(self));
+            };
+            self.select_group(seen, slot)?;
+            values[slot] = Some(
+                self.options[slot]
+                    .flag_value(values[slot].take(), spelling)
+                    .map_err(|e| Stop::Error(self, e))?,
+            );
+        }
+        Ok(())
+    }
+
     fn parse<'a>(&'a self, args: &[&'a str]) -> Result<Parsed<'a>, Stop<'a>> {
         let mut values = self.options.iter().map(|_| None).collect::<Vec<_>>();
+        let mut seen = vec![None; self.mutex_required.len()];
         let mut extras = Vec::new();
         let mut index = 0;
         let mut selected = None;
@@ -379,6 +429,7 @@ impl Parser {
                             ));
                         };
                         let mut parsed = definition.parser.parse(&args[index + 1..])?;
+                        extras.try_reserve(parsed.extras.len())?;
                         extras.append(&mut parsed.extras);
                         selected = Some((child, name, parsed.words));
                         break 'parse;
@@ -399,7 +450,11 @@ impl Parser {
                             .bind(Some(&taken))
                             .map_err(|e| Stop::Error(self, e))?,
                     );
+                    if !taken.is_empty() {
+                        self.select_group(&mut seen, slot)?;
+                    }
                 }
+                extras.try_reserve(end - index)?;
                 extras.extend(args[index..end].iter().copied().map(Cow::Borrowed));
                 index = end;
                 if index == args.len() {
@@ -408,7 +463,7 @@ impl Parser {
             }
             let arg = args[index];
             index += 1;
-            let mut clustered_help = false;
+            let mut cluster = Vec::new();
             let (slot, spelling, explicit) = match self.token(arg) {
                 Token::Help(None) => return Err(Stop::Help(self)),
                 Token::Help(Some(value)) => {
@@ -429,6 +484,7 @@ impl Parser {
                 }
                 Token::End | Token::Value => unreachable!("positional run already consumed"),
                 Token::Unknown => {
+                    extras.try_reserve(1)?;
                     extras.push(Cow::Borrowed(arg));
                     continue;
                 }
@@ -441,6 +497,7 @@ impl Parser {
                         let Some((matched, slot)) =
                             self.flags().find(|(name, _)| *name == spelling)
                         else {
+                            extras.try_reserve(1)?;
                             extras.push(Cow::Owned(format!("{prefix}{suffix}")));
                             break;
                         };
@@ -475,21 +532,11 @@ impl Parser {
                                 ),
                             ));
                         }
-                        if let Some((slot, option)) = option {
-                            values[slot] = Some(
-                                option
-                                    .flag_value(values[slot].take(), matched)
-                                    .map_err(|e| Stop::Error(self, e))?,
-                            );
-                        } else {
-                            clustered_help = true;
-                        }
+                        cluster.push(slot.map(|slot| (slot, matched)));
                         suffix = rest;
                     }
                     let Some(take) = take else {
-                        if clustered_help {
-                            return Err(Stop::Help(self));
-                        }
+                        self.apply_flags(cluster, &mut seen, &mut values)?;
                         continue;
                     };
                     take
@@ -520,11 +567,7 @@ impl Parser {
                 }
                 vec![value]
             } else if !option.takes_value() {
-                values[slot] = Some(
-                    option
-                        .flag_value(values[slot].take(), spelling)
-                        .map_err(|e| Stop::Error(self, e))?,
-                );
+                self.apply_flags([Some((slot, spelling))], &mut seen, &mut values)?;
                 continue;
             } else {
                 let start = index;
@@ -549,14 +592,13 @@ impl Parser {
                 }
                 args[start..index].to_vec()
             };
-            if clustered_help {
-                return Err(Stop::Help(self));
-            }
+            self.apply_flags(cluster, &mut seen, &mut values)?;
             values[slot] = Some(
                 option
                     .bind(Some(&taken))
                     .map_err(|e| Stop::Error(self, e))?,
             );
+            self.select_group(&mut seen, slot)?;
         }
         let mut missing = Vec::new();
         let mut words = Vec::with_capacity(values.len());
@@ -594,6 +636,21 @@ impl Parser {
                     missing.join(", ")
                 ),
             ));
+        }
+        for (id, required) in self.mutex_required.iter().enumerate() {
+            if *required && seen[id].is_none() {
+                let names = self
+                    .options
+                    .iter()
+                    .filter(|o| o.mutex == Some(id))
+                    .map(OptionSpec::error_name)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                return Err(Stop::Error(
+                    self,
+                    format!("one of the arguments {names} is required"),
+                ));
+            }
         }
         if self
             .subcommands
@@ -717,24 +774,25 @@ pub unsafe extern "C" fn imre_argparse_parse(
     // SAFETY: these immutable inputs remain rooted during parsing and construction.
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
     let parser = Parser::from_schema(schema);
+    let mut owners = Vec::new();
+    let mut args = Vec::new();
     // SAFETY: argv is a rooted list[str]; take independent string owners before
     // reading the argument values or constructing the output namespace.
-    let owners = unsafe {
+    let reserved = unsafe {
         argv.0.with(|storage| {
             let sequence = storage.sequence();
             sequence.check_kind(3);
-            sequence
-                .values
-                .iter()
-                .skip(usize::from(process_argv))
-                .map(|&word| super::acquire_rc::<Str>(word))
-                .collect::<Vec<_>>()
+            let words = sequence.values.iter().skip(usize::from(process_argv));
+            owners.try_reserve_exact(words.len())?;
+            args.try_reserve_exact(words.len())?;
+            owners.extend(words.map(|&word| super::acquire_rc::<Str>(word)));
+            Ok::<_, std::collections::TryReserveError>(())
         })
     };
-    let args = owners
-        .iter()
-        .map(|value| value.as_str())
-        .collect::<Vec<_>>();
+    if reserved.is_err() {
+        return Error::allocation().returning(std::ptr::null_mut());
+    }
+    args.extend(owners.iter().map(|value| value.as_str()));
     let parsed = match parser.parse(&args).and_then(|parsed| {
         if !pair_layout.is_null() || parsed.extras.is_empty() {
             Ok(parsed)
@@ -784,6 +842,15 @@ pub unsafe extern "C" fn imre_argparse_parse(
             return Error::exit_status(2).returning(std::ptr::null_mut());
         }
     };
+    let mut extras = Words::new(3);
+    if !pair_layout.is_null()
+        && extras
+            .values
+            .try_reserve_exact(parsed.extras.len())
+            .is_err()
+    {
+        return Error::allocation().returning(std::ptr::null_mut());
+    }
     // SAFETY: every slot receives exactly one owner of its declared kind. All
     // input validation is complete, and option conversion invokes no user code.
     unsafe {
@@ -809,7 +876,6 @@ pub unsafe extern "C" fn imre_argparse_parse(
         if pair_layout.is_null() {
             return result;
         }
-        let mut extras = Words::new(3);
         extras.values.extend(
             parsed
                 .extras

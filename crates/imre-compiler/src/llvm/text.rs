@@ -1,7 +1,7 @@
 //! Text results use existing string, sequence, and fixed tuple ownership.
 
 use super::*;
-use crate::ir::TextOperation;
+use crate::ir::{TextOperation, TextPredicate};
 
 impl Emitter<'_, '_> {
     /// Elides a temporary split sequence only when its selected field is known.
@@ -47,11 +47,11 @@ impl Emitter<'_, '_> {
     ) -> Value {
         let source = &args[0].value.operand;
         let operand = match operation {
-            TextOperation::IsSpace | TextOperation::IsUpper => {
-                let symbol = if matches!(operation, TextOperation::IsUpper) {
-                    "imre_str_is_upper"
-                } else {
-                    "imre_str_isspace"
+            TextOperation::Predicate(predicate) => {
+                let symbol = match predicate {
+                    TextPredicate::Alnum => "imre_str_isalnum",
+                    TextPredicate::Space => "imre_str_isspace",
+                    TextPredicate::Upper => "imre_str_is_upper",
                 };
                 let bit = self.instruction(format!("call i32 @{symbol}(ptr {source})"));
                 self.instruction(format!("icmp ne i32 {bit}, 0"))

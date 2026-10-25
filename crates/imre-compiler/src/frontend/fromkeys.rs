@@ -45,6 +45,7 @@ impl Checker<'_> {
         let mut outer = calls::ArgumentScope::default();
         let receiver = receiver.map(|owner| outer.hold(self, owner));
         let args = call.arguments.args.as_slice();
+        let error_type = shape.map_or(Type::None, |(key, value)| self.types.dict(key, value));
         if !call.arguments.keywords.is_empty() || !(1..=2).contains(&args.len()) {
             let reason = if !call.arguments.keywords.is_empty() {
                 "dict.fromkeys() takes no keyword arguments".to_string()
@@ -54,8 +55,7 @@ impl Checker<'_> {
                 format!("fromkeys expected at most 2 arguments, got {}", args.len())
             };
             for arg in args {
-                let item = self.expr(arg)?;
-                outer.hold(self, item);
+                outer.discard(self, arg)?;
             }
             for kw in &call.arguments.keywords {
                 if kw.arg.is_none() {
@@ -65,10 +65,23 @@ impl Checker<'_> {
                         "dict.fromkeys keyword unpacking is unsupported",
                     ));
                 }
-                let item = self.expr(&kw.value)?;
-                outer.hold(self, item);
+                outer.discard(self, &kw.value)?;
             }
-            return Ok(outer.finish(fromkeys_error(reason)));
+            // Counter.fromkeys(iterable, v=None) accepts names and raises its
+            // own exception after the caller has evaluated all arguments.
+            let named = |name| call.arguments.find_keyword(name).is_some();
+            let binds_counter = match (args.len(), call.arguments.keywords.len()) {
+                (0, 1) => named("iterable"),
+                (0, 2) => named("iterable") && named("v"),
+                (1, 1) => named("v"),
+                _ => false,
+            };
+            if binds_counter && let Some(owner) = receiver {
+                let (key, value) = shape.unwrap_or((Type::Int, Type::None));
+                let target = self.fromkeys_target(Some(owner), key, value);
+                outer.hold(self, target);
+            }
+            return Ok(outer.finish(fromkeys_error(reason, error_type)));
         }
         let source = &args[0];
         let hint = shape.map(|(key, _)| key);
@@ -111,7 +124,7 @@ impl Checker<'_> {
                     self.fromkeys_target(Some(owner), hint.unwrap_or(Type::Int), value_type);
                 outer.hold(self, target);
             }
-            return Ok(outer.finish(fromkeys_error(reason)));
+            return Ok(outer.finish(fromkeys_error(reason, error_type)));
         }
         let mut input = self.prepare_iteration(input, source, false)?;
         self.hint_empty_iteration(&input, Some(hint.unwrap_or(Type::Int)));
@@ -171,9 +184,9 @@ impl Checker<'_> {
     }
 }
 
-fn fromkeys_error(message: String) -> Expr {
+fn fromkeys_error(message: String, ty: Type) -> Expr {
     Expr {
-        ty: Type::None,
+        ty,
         kind: ExprKind::Builtin(
             Builtin::RaiseException,
             vec![Expr {
