@@ -3,6 +3,7 @@
 import logging
 import os.path
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 seen_records: list[logging.LogRecord] = []
@@ -30,6 +31,15 @@ class Redirect(logging.FileHandler):
     def format(self, record: logging.LogRecord) -> str:
         self.stream = Path(self.baseFilename + ".redirect").open("w", encoding="utf-8")
         return record.getMessage()
+
+
+class BrokenRotation(RotatingFileHandler):
+    def rotate(self, source: str, dest: str) -> None:
+        raise ValueError("rotation")
+
+    def handleError(self, record: logging.LogRecord) -> None:
+        print(record is seen_records[0])
+        print(isinstance(sys.exception(), ValueError))
 
 
 filename = sys.argv[1]
@@ -86,3 +96,11 @@ redirect.close()
 if original is not None:
     original.close()
 print(redirect_path.read_text(encoding="utf-8"))
+
+rotating = BrokenRotation(filename, maxBytes=1, backupCount=1)
+print(rotating.handle(entry) is entry)
+try:
+    rotating.doRollover()
+except ValueError as error:
+    print(str(error))
+rotating.close()

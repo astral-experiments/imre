@@ -83,6 +83,9 @@ class RotatingFileHandler(BaseRotatingHandler):
             self._can_seek = _can_seek(self.stream)
 
     def emit(self, record: LogRecord) -> None:
-        if self.shouldRollover(record):
-            self.doRollover()
-        FileHandler.emit(self, record)
+        try:
+            if self.shouldRollover(record):
+                self.doRollover()
+            FileHandler.emit(self, record)
+        except Exception:
+            self.handleError(record)
