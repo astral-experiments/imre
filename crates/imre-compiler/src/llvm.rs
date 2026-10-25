@@ -5986,6 +5986,16 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
+            Builtin::SequenceTakeInBounds => {
+                let mut index = args[1].value.clone();
+                index.small_integer = true;
+                let at = self.index_word(&index, true);
+                let word = self.instruction(format!(
+                    "call i64 @imre_seq_take_index_proven(ptr {}, i64 {at})",
+                    args[0].value.operand
+                ));
+                self.decode_word(word, returns)
+            }
             Builtin::SequenceGetInBounds => {
                 debug_assert!(matches!(
                     expressions[1].kind,
@@ -6837,8 +6847,19 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::SetIter => self.call("imre_set_iter", Type::Iterator, &[&args[0].value]),
-            Builtin::Append => {
-                self.append(&args[0].value, &args[1].value);
+            Builtin::JoinBufferNew => self.call("imre_join_buffer_new", returns, &[&args[0].value]),
+            Builtin::JoinBufferFinish => {
+                self.call("imre_join_buffer_finish", Type::Str, &[&args[0].value])
+            }
+            Builtin::Append | Builtin::JoinBufferAppend => {
+                if matches!(builtin, Builtin::JoinBufferAppend) {
+                    self.checked_status(format!(
+                        "call i32 @imre_join_buffer_append(ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand
+                    ));
+                } else {
+                    self.append(&args[0].value, &args[1].value);
+                }
                 // The list now owns the item. Drop the argument first so a
                 // temporary receiver destroys its items in reverse insertion order.
                 self.release_operand(&args[1]);
@@ -8696,6 +8717,7 @@ declare i64 @imre_seq_get(ptr, i64)
 declare void @imre_seq_set(ptr, i64, i64, i32)
 declare i64 @imre_seq_get_index(ptr, i64)
 declare i64 @imre_seq_borrow_index_proven(ptr, i64) nounwind
+declare i64 @imre_seq_take_index_proven(ptr, i64) nounwind
 declare ptr @imre_seq_data_readonly(ptr) nounwind
 declare void @imre_seq_set_index(ptr, i64, i64, i32)
 declare i32 @imre_seq_append(ptr, i64, i32)
@@ -8894,6 +8916,9 @@ declare ptr @imre_sort_detach(ptr, i32)
 declare void @imre_sort_restore(ptr, i32, ptr, i32)
 declare void @imre_sort_by_keys(ptr, i32, ptr, i32, i32)
 declare ptr @imre_str_join(ptr, ptr)
+declare ptr @imre_join_buffer_new(ptr)
+declare i32 @imre_join_buffer_append(ptr, ptr)
+declare ptr @imre_join_buffer_finish(ptr)
 declare ptr @imre_str_format(ptr, ptr, i64)
 declare ptr @imre_str_format_fields(ptr, ptr, i64)
 declare ptr @imre_str_replace(ptr, ptr, ptr)
