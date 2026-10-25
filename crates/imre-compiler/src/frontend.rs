@@ -3648,6 +3648,9 @@ impl<'a> Checker<'a> {
             {
                 Some(self.classes.declarations.exceptions[&def])
             }
+            Some(Binding::Intrinsic(Intrinsic::ShutilError)) => Some(64),
+            Some(Binding::Intrinsic(Intrinsic::SameFileError)) => Some(65),
+            Some(Binding::Intrinsic(Intrinsic::SpecialFileError)) => Some(66),
             Some(Binding::Intrinsic(Intrinsic::CancelledError)) => Some(33),
             Some(Binding::Intrinsic(Intrinsic::UnsupportedOperation)) => Some(19),
             Some(Binding::Intrinsic(Intrinsic::SubprocessError)) => Some(25),
@@ -3655,9 +3658,6 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::TimeoutExpired)) => Some(27),
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
-            Some(Binding::Intrinsic(Intrinsic::ShutilError)) => Some(38),
-            Some(Binding::Intrinsic(Intrinsic::SameFileError)) => Some(39),
-            Some(Binding::Intrinsic(Intrinsic::SpecialFileError)) => Some(40),
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),

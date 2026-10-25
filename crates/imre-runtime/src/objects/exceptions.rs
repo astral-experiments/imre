@@ -66,9 +66,10 @@ pub(crate) enum Kind {
     StopIteration = 35,
     BadZipFile = 36,
     NotImplementedError = 37,
-    ShutilError = 38,
-    SameFileError = 39,
-    SpecialFileError = 40,
+    // 38 belongs to _csv.Error; keep the shutil family in its own ABI range.
+    ShutilError = 64,
+    SameFileError = 65,
+    SpecialFileError = 66,
 }
 
 impl Kind {
@@ -112,9 +113,9 @@ impl Kind {
             35 => Self::StopIteration,
             36 => Self::BadZipFile,
             37 => Self::NotImplementedError,
-            38 => Self::ShutilError,
-            39 => Self::SameFileError,
-            40 => Self::SpecialFileError,
+            64 => Self::ShutilError,
+            65 => Self::SameFileError,
+            66 => Self::SpecialFileError,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
