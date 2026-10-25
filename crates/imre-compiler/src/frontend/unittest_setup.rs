@@ -122,7 +122,9 @@ pub(super) fn slots(
         for &id in group {
             let c = &classes.definitions[id];
             let Some(setup) = c.node.body.iter().find_map(|s| match s {
-                ast::Stmt::FunctionDef(f) if f.name == "setUp" && f.decorator_list.is_empty() => {
+                ast::Stmt::FunctionDef(f)
+                    if f.name.as_str() == "setUp" && f.decorator_list.is_empty() && !f.is_async =>
+                {
                     Some(f)
                 }
                 _ => None,
@@ -147,7 +149,7 @@ pub(super) fn slots(
             }
             for (name, value) in writes.assignments {
                 if c.fields.iter().any(|f| f.name == name)
-                    || c.methods.iter().any(|m| m.name == name)
+                    || c.methods.iter().any(|m| m.name.as_str() == name)
                 {
                     continue;
                 }
@@ -184,7 +186,8 @@ pub(super) fn slots(
             // Do not invent a second interpretation on a base-typed receiver.
             if group.iter().any(|&id| {
                 let c = &classes.definitions[id];
-                c.fields.iter().any(|f| f.name == name) || c.methods.iter().any(|m| m.name == name)
+                c.fields.iter().any(|f| f.name == name)
+                    || c.methods.iter().any(|m| m.name.as_str() == name)
             }) {
                 continue;
             }
