@@ -1,5 +1,5 @@
 from pathlib import Path
-from shutil import copy, copy2, copymode, copystat
+from shutil import _copyxattr, copy, copy2, copymode, copystat
 
 def describe(path: str | Path) -> None:
     if isinstance(path, Path):
@@ -18,3 +18,21 @@ try:
     copy("file-link", b"empty-directory")
 except TypeError as exc:
     print(str(exc))
+
+try:
+    copystat("missing-source", "bad\0destination")
+except FileNotFoundError:
+    print("missing source")
+try:
+    copymode("input.txt/child", "bad\0destination")
+except NotADirectoryError:
+    print("source traverses a file")
+try:
+    copy2("bad\0source", b"empty-directory")
+except TypeError:
+    print("mixed directory and basename types")
+try:
+    copystat("input.txt", "bad\0destination")
+except ValueError:
+    print("invalid destination")
+print(_copyxattr("empty.txt", "bad\0destination"))

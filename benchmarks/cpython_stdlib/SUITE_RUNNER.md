@@ -68,3 +68,31 @@ for per-occurrence records, exact exception policies and rollup validation.
 The original `run_in_fixtures` callback interface remains available.
 
 The default fixture supports `with self.assertRaises(ValueError) as cm:` and subsequent reads of `cm.exception`. The unchanged `Test_TestCase.testAssertRaisesNoExceptionType` exercises the default fixture at both levels.
+
+### String and list assertions
+
+The bundled `unittest.TestCase` accepts `self.assertEqual(a, b, msg=None)`
+for a pair of strings or two lists whose elements are strings, bytes, or
+integers. `assertMultiLineEqual` and `assertListEqual` use the same respective
+comparisons. Mismatches raise the case's `failureException` and respect
+`longMessage` and `maxDiff`. See the [negative controls](full/unittest/equality_protocol.py)
+and [pinned methods and outcomes](full/unittest/README.md).
+
+For the original `string` tests, add their import to the standard fixture.
+After verifying the module's manifest as above, pass the callback to
+`run_evidence` under its original ID:
+
+```python
+case_id = "test.test_string.test_string.ModuleTest.test_capwords"
+execute = native_method(
+    tools, directory, string_suite / "upstream/Lib/test/test_string/test_string.py",
+    "ModuleTest", case_id, "import string\n" + testcase_fixture(),
+    operation=("imre", "string.capwords"),
+)
+```
+
+Both this case and `ModuleTest.test_attrs` pass at O0 and O3 with the shared
+assertion, as does `test.test_fnmatch.FilterTestCase.test_filter` with its
+original imports. All three use native bodies, assertions and module operations
+with the original CPython lifecycle around the native process: record
+`fixture="mixed"` and `native-body-host-fixture`.
