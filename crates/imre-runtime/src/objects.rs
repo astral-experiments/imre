@@ -751,7 +751,8 @@ pub unsafe extern "C" fn imre_str_get_part(
 
 /// Formats one integer at its expression position without allocating for small
 /// values. Null means the fragment borrows `buffer`; otherwise the result owns
-/// the fallback string referenced by `part`. Neither outcome consumes `value`.
+/// the fallback string referenced by `part`. A pending digit-limit error means `part`
+/// is uninitialized. No outcome consumes `value`.
 ///
 /// # Safety
 /// `value` is a rooted canonical integer for this call. `buffer` points to 20
@@ -784,6 +785,9 @@ pub unsafe extern "C" fn imre_int_str_part(
         // SAFETY: the input is still rooted; this conversion returns an independent
         // string owner and performs arbitrary-precision formatting exactly once.
         let result = unsafe { super::imre_int_str(value) };
+        if result.is_null() {
+            return result;
+        }
         // SAFETY: the caller provides a writable descriptor, and the returned
         // owner keeps its immutable Str allocation alive for concatenation.
         unsafe {
