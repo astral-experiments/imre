@@ -388,6 +388,12 @@ impl std::fmt::Display for Type {
     }
 }
 
+/// The information an actual Python call must keep until it returns or unwinds.
+pub(crate) enum SourceFrame {
+    Depth,
+    Module(String),
+}
+
 pub(crate) struct Module {
     /// Interpreter-style -I commands ignore Python process environment variables at startup.
     pub ignore_python_environment: bool,
@@ -404,6 +410,8 @@ pub(crate) struct Module {
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
     pub globals: Vec<Type>,
+    /// Source functions and entry in emission order. Synthetic helpers have no frame.
+    pub source_frames: Vec<Option<SourceFrame>>,
     pub functions: Vec<Function>,
     pub entry: Function,
 }
@@ -1103,6 +1111,9 @@ pub(crate) enum Builtin {
     SysArgv,
     OptionalStrConcat,
     SysOrigArgv,
+    SysGetFrameModuleName,
+    SysGetRecursionLimit,
+    SysSetRecursionLimit,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
         namespace: usize,

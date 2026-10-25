@@ -253,6 +253,9 @@ pub(crate) enum Intrinsic {
     SysEncoding(&'static str),
     SysIntern { query: bool },
     SysException,
+    SysGetFrameModuleName,
+    SysGetRecursionLimit,
+    SysSetRecursionLimit,
     SysJitPredicate(&'static str),
     Stdin,
     OsName,
@@ -682,6 +685,9 @@ impl IntrinsicModule {
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
+            (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
+            (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
+            (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
             (Self::SysJit, "is_enabled") => Intrinsic::SysJitPredicate("_jit.is_enabled"),
             (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
@@ -1164,6 +1170,12 @@ impl SourceGraph {
     pub(crate) fn checked_positional_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
+    }
+
+    /// Lowering checked this exact operand against the native integer protocol.
+    pub(crate) fn checked_argument_type(&self, module: ModuleId, argument: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::ArgumentType(argument));
     }
 
     pub(crate) fn deferred_name(&self, module: ModuleId, name: TextRange) {

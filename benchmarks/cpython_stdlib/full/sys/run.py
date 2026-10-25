@@ -22,6 +22,7 @@ import argv_case
 import encoding_methods
 import jit_case
 import locale_case
+import recursion_case
 import thread_case
 from filesystem_case import filesystem_method
 
@@ -61,6 +62,22 @@ def method_hashes(source):
 def select(toolchain, work, source, module):
     executions = {}
     pinned_methods = method_hashes(source)
+    # A host process cannot supply frames to a native child. Compare the stacks
+    # of two complete programs with the same calls, separately from upstream IDs.
+    frames = directory(work, "frame-names")
+    owner = HERE / "frame_names_owner.py"
+    (frames / owner.name).write_bytes(owner.read_bytes())
+    binary = toolchain.build((HERE / "frame_names.py").read_bytes(), frames)
+    stock = subprocess.run([sys.executable, "-E", "-B", frames / "case.py"],
+                           capture_output=True, check=True, timeout=15)
+    actual = output(binary)
+    if actual != (stock.stdout, stock.stderr):
+        raise AssertionError(("native module frames", (stock.stdout, stock.stderr), actual))
+    frame_control = {"kind": "separate native program", "opt_level": toolchain.level,
+                     "source": "frame_names.py and frame_names_owner.py",
+                     "stdout_sha256": hashlib.sha256(actual[0]).hexdigest(),
+                     "stdout_lines": len(actual[0].splitlines()), "matches_cpython": True,
+                     "original_method_operations": 0}
     for cls, method, fixture, operation in [
         ("SysModuleTest", "test_43581", "import sys\n" + testcase_fixture(), "sys.__stdout__.encoding and sys.__stderr__.encoding"),
         ("ActiveExceptionTests", "test_sys_exception_no_exception", EXCEPTION_EQUAL, "sys.exception() outside a handler"),
@@ -152,10 +169,11 @@ def select(toolchain, work, source, module):
         module, toolchain, work / "argv-controls", pinned_methods["SysModuleTest", "test_orig_argv"])
     executions[locale_case.CASE_ID] = locale_case.observer(
         module, toolchain, work / "nonascii-child", pinned_methods["SysModuleTest", "test_ioencoding_nonascii"])
+    executions.update(recursion_case.cases(module, toolchain, work, source))
     jit = jit_case.observer(module, toolchain, work, pinned_methods)
     for method in ("test_jit_is_available", "test_jit_is_enabled"):
         executions[f"{MODULE}.TestSysJIT.{method}"] = jit
-    return executions
+    return executions, frame_control
 
 
 def main():
@@ -203,9 +221,10 @@ def main():
             if (config["LC_CTYPE"], config["utf8_mode"], config["filesystem_encoding"],
                     config["preferred_encoding"]) != ("C.UTF-8", 0, "utf-8", "UTF-8"):
                 parser.error(f"canonical Linux report requires the recorded C.UTF-8 reference settings: {config}")
-        executions = select(toolchain, Path(tmp), source, test_sys)
+        executions, frame_control = select(toolchain, Path(tmp), source, test_sys)
         if args.evidence:
             preflight = blocked_methods(toolchain, Path(tmp), source, reference, executions, test_sys)
+            preflight[SYS + "test_getframemodulename", 1]["evidence"]["module_name_control"] = frame_control
             jit_case.audit_active(load_suite(MODULE), executions, preflight)
             evidence = {}
 
