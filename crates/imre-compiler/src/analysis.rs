@@ -573,6 +573,9 @@ impl CheckedDiagnostic {
             Self::ExcessArgument(arg) => {
                 diagnostic == "too-many-positional-arguments" && arg == range
             }
+            Self::PositionalKeyword(arg) => {
+                diagnostic == "positional-only-parameter-as-kwarg" && arg == range
+            }
         }
     }
 }

@@ -94,6 +94,8 @@ pub(crate) enum Type {
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
     SimpleNamespace(usize),
     CodecInfo,
+    CodecWriterClass,
+    CodecWriter,
     Sha256,
     JsonDecoder,
     /// An open or closed ZIP archive retains its ordered central directory.
@@ -239,6 +241,8 @@ impl std::fmt::Display for Type {
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::CodecInfo => "codecs.CodecInfo",
+            Self::CodecWriterClass => "type[codecs.StreamWriter]",
+            Self::CodecWriter => "codecs.StreamWriter",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -819,6 +823,7 @@ pub(crate) enum Builtin {
     CodecName,
     CodecEncode,
     CodecDecode,
+    CodecWriter(WriterOperation),
     Sha256Hex,
     Sha256New,
     HashNew,
@@ -832,6 +837,7 @@ pub(crate) enum Builtin {
     },
     Sha256Copy,
     BytesIo,
+    BytesIoValue,
     StringIo(StringIoOperation),
     BinarySeek,
     BinaryTell,
@@ -1369,6 +1375,21 @@ pub(crate) enum LogRecordOperation {
     Repr,
     Flag,
     SetFlag,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WriterOperation {
+    Class,
+    New,
+    Write,
+    Flush,
+    Close,
+    Reset,
+    Encoding,
+    SetEncoding,
+    Stream,
+    Errors,
+    SetErrors,
 }
 
 /// Operations on the native logging registry and its named loggers.

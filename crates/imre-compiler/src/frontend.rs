@@ -6028,6 +6028,30 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::CodecName, vec![receiver]),
                     });
                 }
+                if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "streamwriter" {
+                    return Ok(codecs::writer(
+                        ir::WriterOperation::Class,
+                        Type::CodecWriterClass,
+                        vec![receiver],
+                    ));
+                }
+                if matches!(receiver.ty, Type::CodecWriterClass | Type::CodecWriter) {
+                    let (op, ty) = match (receiver.ty, attribute.attr.as_str()) {
+                        (_, "encoding") => (ir::WriterOperation::Encoding, Type::Str),
+                        (Type::CodecWriter, "errors") => (ir::WriterOperation::Errors, Type::Str),
+                        (Type::CodecWriter, "stream") => {
+                            (ir::WriterOperation::Stream, Type::BinaryIO)
+                        }
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                attribute,
+                                "unsupported stream writer attribute",
+                            ));
+                        }
+                    };
+                    return Ok(codecs::writer(op, ty, vec![receiver]));
+                }
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
                 }
@@ -6717,6 +6741,9 @@ impl<'a> Checker<'a> {
                 return self.typed_expr(value);
             }
             Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
+            Some(Binding::Intrinsic(Intrinsic::CodecGetWriter)) => {
+                return self.codec_getwriter(call);
+            }
             Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
                 return self.sha256_constructor(call, op == Intrinsic::HashNew);
             }
@@ -7048,6 +7075,9 @@ impl<'a> Checker<'a> {
             || !matches!(&*call.func, ast::Expr::Name(_) | ast::Expr::Attribute(_))
         {
             let callable = self.expr(&call.func)?;
+            if callable.ty == Type::CodecWriterClass {
+                return self.codec_writer_new(callable, call);
+            }
             return self.invoke(call, callable);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
@@ -7171,6 +7201,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::CodecInfo {
                 return self.codec_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::CodecWriter {
+                return self.codec_writer_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);
@@ -7354,6 +7387,7 @@ impl<'a> Checker<'a> {
                     ),
                     ("read", 1) if binary => (Builtin::BinaryReadSize, Type::Bytes),
                     ("tell", 0) if binary => (Builtin::BinaryTell, Type::Int),
+                    ("getvalue", 0) if binary => (Builtin::BytesIoValue, Type::Bytes),
                     ("readline", 0) => (Builtin::FileReadline, data_type),
                     ("write", 1) => (
                         if binary {

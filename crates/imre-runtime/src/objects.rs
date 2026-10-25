@@ -13,6 +13,7 @@ mod asyncio;
 mod boxed_values;
 mod builtins;
 mod bytes;
+mod charmaps;
 mod codecs;
 pub(crate) use codecs::Codec;
 mod contexts;
@@ -107,6 +108,8 @@ enum Storage {
     ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
     CodecInfo(codecs::Codec),
+    CodecWriterClass(codecs::writer::WriterClass),
+    CodecWriter(Box<codecs::writer::Writer>),
     Exception(exceptions::Exception),
     ObjectValue(OwnedWord),
     File(Box<files::FileState>),
