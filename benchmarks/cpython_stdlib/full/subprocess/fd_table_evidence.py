@@ -80,8 +80,13 @@ def main():
         [raw] = [r for r in data["reports"] if r["opt_level"] == level]
         if data["schema"] == "imre.subprocess.fd-table/v1":
             shapes = SHAPES
-        elif data["schema"] == "imre.subprocess.pass-fds-warning/v1":
+        elif data["schema"] in (
+            "imre.subprocess.pass-fds-warning/v1",
+            "imre.subprocess.fd-table-with-shared-warning/v1",
+        ):
             shapes = {PASS_FDS: [(True, "tuple", 1, 0), (False, "tuple", 1, 0)] * 10}
+            if data["schema"] == "imre.subprocess.fd-table-with-shared-warning/v1":
+                shapes = SHAPES | shapes
             control = raw["withheld_warning"]
             if control[
                 "original_failure"

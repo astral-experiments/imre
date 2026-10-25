@@ -52,3 +52,18 @@ the warning, but the original assertion fails with “RuntimeWarning not
 triggered” when the transport withholds it. The evidence generator accepts
 the fourth observation only when the pair counts, native warning, descriptor
 identities, reaps, child programs and negative control agree.
+
+### Shared warning hierarchy replay
+
+The [current four-method run](fd-table-shared-warning-linux.json) uses
+[#1000](https://github.com/astral-sh/imre/pull/1000) at `d330a2b`
+(tree `50a62b358800449aac1a8e0dde3b03b451d87c7e`), including the standalone
+[Warning and RuntimeWarning base](https://github.com/astral-sh/imre/pull/1036)
+at `a629bbd`. Both optimization levels ran all four original methods. The
+unchanged `test_pass_fds` observes ten real warnings and twenty reaps per
+level; withholding the native warning fails its original assertion. The other
+three methods still account for three, one, and one successful native child
+launches. Each keeps its host body, assertions, and fixture classification.
+The four hierarchy catch controls are recorded separately from the method
+results. Rebuild the pair with `fd_table_evidence.py --previous <#778-report>
+--fd-table fd-table-shared-warning-linux.json --result evidence-linux.json`.
