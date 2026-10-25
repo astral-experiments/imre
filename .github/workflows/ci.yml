@@ -127,6 +127,9 @@ jobs:
           python3 benchmarks/cpython_stdlib/test_suite_evidence.py
           python3 benchmarks/cpython_stdlib/full/unittest/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-unittest.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/unittest/reference-linux.json "$RUNNER_TEMP/cpython-unittest.json"
+      - name: Compare static inspect lookups with the pinned CPython suite
+        run: |
+          python3 benchmarks/cpython_stdlib/full/inspect/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-inspect.json"
       - name: Verify the complete OS, POSIX and genericpath evidence
         run: |
           for level in 0 3; do
