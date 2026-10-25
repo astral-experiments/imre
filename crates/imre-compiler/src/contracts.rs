@@ -220,7 +220,11 @@ impl Builtin {
                 | ProcessOperation::JoinGroup
                 | ProcessOperation::GeneratorNext
                 | ProcessOperation::GeneratorYield
-                | ProcessOperation::Acquire => Contract::new(true, Unknown),
+                | ProcessOperation::Acquire
+                | ProcessOperation::PopenSetPoll { .. }
+                | ProcessOperation::PopenDeletePoll
+                | ProcessOperation::PopenStatus { poll: true }
+                | ProcessOperation::PopenSignal => Contract::new(true, Unknown),
                 ProcessOperation::Executable
                 | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
@@ -230,11 +234,10 @@ impl Builtin {
                 | ProcessOperation::PopenPid
                 | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
-                | ProcessOperation::PopenStatus { .. }
+                | ProcessOperation::PopenStatus { poll: false }
                 | ProcessOperation::PopenExit
                 | ProcessOperation::PopenCommunicate { .. }
                 | ProcessOperation::PopenWait
-                | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncSpawn { .. }
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }

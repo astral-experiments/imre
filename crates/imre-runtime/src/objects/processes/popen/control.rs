@@ -46,6 +46,20 @@ impl ReturnCode {
 }
 
 impl State {
+    fn signal_if_running(&self, value: impl FnOnce() -> Result<i32>) -> Result<()> {
+        if self.status.is_none() {
+            let value = value()?;
+            // SAFETY: the locked state still owns this PID; kill checks the signal.
+            if unsafe { libc::kill(self.child.id() as libc::pid_t, value) } < 0 {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::ESRCH) {
+                    return Err(errno_error(error));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Poll the kernel when the public cache is empty. Rust's Child::try_wait
     /// caches a previous reap even after Python assigns returncode = None.
     fn refresh(&mut self) -> Result<()> {
@@ -105,17 +119,12 @@ impl ChildControl {
     pub(super) fn signal(&self, value: impl FnOnce() -> Result<i32>) -> Result<()> {
         let mut state = self.state.lock().unwrap();
         state.refresh()?;
-        if state.status.is_none() {
-            let value = value()?;
-            // SAFETY: this PID is the child owned by state; kill checks the signal.
-            if unsafe { libc::kill(self.pid, value) } < 0 {
-                let error = io::Error::last_os_error();
-                if error.raw_os_error() != Some(libc::ESRCH) {
-                    return Err(errno_error(error));
-                }
-            }
-        }
-        Ok(())
+        state.signal_if_running(value)
+    }
+
+    /// A Python override has already run; check only the public cache under the lock.
+    pub(super) fn signal_after_poll(&self, value: impl FnOnce() -> Result<i32>) -> Result<()> {
+        self.state.lock().unwrap().signal_if_running(value)
     }
 
     pub(super) fn wait(&self, timeout: Option<&Deadline>) -> Result<Option<ReturnCode>> {
