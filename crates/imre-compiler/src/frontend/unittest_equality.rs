@@ -134,14 +134,18 @@ impl Checker<'_> {
         };
         let left = operand(0, a);
         let right = operand(1, b);
-        // [] takes the element type of the other operand. Two empty lists
-        // compare equal for any element type, so use the ordinary int list.
-        let empty = |arg: &ast::Expr| matches!(arg, ast::Expr::List(list) if list.elts.is_empty());
+        // Empty container literals take their element types from the other operand.
+        let empty = |arg: &ast::Expr| {
+            matches!(arg, ast::Expr::List(list) if list.elts.is_empty())
+                || matches!(arg, ast::Expr::Dict(dict) if dict.items.is_empty())
+        };
         let ty = if let Some(expr) = left
             .filter(|e| !empty(e))
             .or_else(|| right.filter(|e| !empty(e)))
         {
             self.expr(expr)?.ty
+        } else if name != "assertListEqual" && matches!(left, Some(ast::Expr::Dict(_))) {
+            self.types.dict(Type::Str, Type::Str)
         } else if name == "assertListEqual" || left.is_some_and(empty) {
             Type::ListInt
         } else {
@@ -170,12 +174,23 @@ impl Checker<'_> {
                 call,
                 "native assertListEqual expects list operands",
             ));
+        } else if self.types.mapping(ty) == Some((Type::Str, Type::Str)) {
+            "assertDictEqual"
         } else if matches!(ty, Type::Str | Type::StrLiteral(_)) {
             "assertMultiLineEqual"
         } else {
             "_baseAssertEqual"
         };
-        let mut signature = self.classes.methods[class][method].clone();
+        let mut signature = self.classes.methods[class]
+            .get(method)
+            .cloned()
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    call,
+                    &format!("native TestCase equality method {method} is unavailable"),
+                )
+            })?;
         signature.params[1].name = a.into();
         signature.params[2].name = b.into();
         self.source_call(call, &signature, Some(receiver.clone()), 1)

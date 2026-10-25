@@ -26,6 +26,17 @@ pub(super) fn executable_method(
 ) -> Result<ast::StmtFunctionDef, String> {
     let mut method = method.clone();
     method.decorator_list.clear();
+    if classes.definitions[context.class].forwarder.is_some()
+        && matches!(method.name.as_str(), "__str__" | "__repr__")
+        && method.returns.is_none()
+    {
+        method.returns = Some(Box::new(
+            ruff_python_parser::parse_expression("str")
+                .expect("static annotation")
+                .expr()
+                .clone(),
+        ));
+    }
     let origin = classes.definitions[context.class].method_origins[context.index].module;
     if iterator_result(&method, graph, origin) {
         let Some(ast::Stmt::Expr(stmt)) = method.body.last() else {
@@ -628,6 +639,15 @@ impl Checker<'_> {
                 ) && classes.definitions[context.class].initializer != Some(context.index)
             })
             .and(lexical_base);
+        self.exception_formatter = context.and_then(|ctx| {
+            let class = &self.classes.declarations.definitions[ctx.class];
+            class.forwarder.as_ref()?;
+            match class.methods[ctx.index].name.as_str() {
+                "__str__" => Some(false),
+                "__repr__" => Some(true),
+                _ => None,
+            }
+        });
         self.super_initializer = context.and_then(|context| {
             let record = &self.classes.declarations.definitions[context.class];
             if record.methods[context.index].name.as_str() != "__init__" {
@@ -661,6 +681,9 @@ impl Checker<'_> {
     /// Static receiver attributes must not accidentally resolve through an
     /// identically named module import or global binding.
     pub(super) fn resolve(&self, expression: &ast::Expr) -> Option<Binding> {
+        if self.unbound_assert_root(expression).is_some() {
+            return None;
+        }
         if let ast::Expr::Attribute(attr) = expression
             && let Some(binding) = self.fixed_class_binding(attr)
         {
@@ -670,7 +693,11 @@ impl Checker<'_> {
         while let ast::Expr::Attribute(attribute) = root {
             root = &attribute.value;
         }
-        if self.is_class_receiver(root) {
+        if self.is_class_receiver(root)
+            || root
+                .as_name_expr()
+                .is_some_and(|n| self.class_lexical.contains(n.id.as_str()))
+        {
             None
         } else {
             let binding = self.graph.resolve(self.module, expression);
@@ -804,7 +831,7 @@ impl Checker<'_> {
 
     /// Instance access still evaluates the receiver for class/static methods,
     /// even though their native calls have no receiver parameter.
-    fn evaluated_receiver(&self, receiver: Option<Expr>, value: Expr) -> Expr {
+    pub(super) fn evaluated_receiver(&self, receiver: Option<Expr>, value: Expr) -> Expr {
         match receiver {
             None => value,
             Some(receiver) => Expr {
@@ -818,31 +845,66 @@ impl Checker<'_> {
         }
     }
 
-    /// Fixed record types resolve `__str__` to an ordinary native method call.
-    /// Records without an override use their existing Python representation.
     pub(super) fn record_text(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
+        self.record_display(value, at, "__str__")
+    }
+
+    pub(super) fn record_repr(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
+        self.record_display(value, at, "__repr__")
+    }
+
+    fn record_display(
+        &mut self,
+        value: Expr,
+        at: &impl Ranged,
+        method: &'static str,
+    ) -> Result<Expr, String> {
         if let Type::Class(class) = value.ty
             && self.classes.has_concrete_subclasses(class)
         {
             return self.dispatch_record(class, value, at, |checker, _, receiver| {
-                checker.direct_record_text(receiver, at)
+                checker.direct_record_display(receiver, at, method)
             });
         }
-        self.direct_record_text(value, at)
+        self.direct_record_display(value, at, method)
     }
 
-    fn direct_record_text(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
-        let kind = if let Type::Class(class) = value.ty
-            && let Some(method) = self.classes.methods[class].get("__str__")
-        {
-            self.calls.insert(method.id);
-            ExprKind::Call(method.id, ir::CallArgs::positional(vec![value]))
+    fn direct_record_display(
+        &mut self,
+        value: Expr,
+        at: &impl Ranged,
+        method_name: &str,
+    ) -> Result<Expr, String> {
+        let method = if let Type::Class(id) = value.ty {
+            let methods = &self.classes.methods[id];
+            if method_name == "__str__"
+                && let Some(method) = methods.get("__str__")
+            {
+                Some(method.id)
+            } else if self.classes.has_repr_override(id) {
+                let method = methods.get("__repr__").ok_or_else(|| {
+                    error(
+                        self.source,
+                        at,
+                        "this representation requires a reachable __repr__ implementation",
+                    )
+                })?;
+                Some(method.id)
+            } else {
+                None
+            }
         } else {
-            if !dataclass_values::can_format(value.ty, self.types, self.classes) {
+            None
+        };
+        let kind = if let Some(id) = method {
+            self.calls.insert(id);
+            ExprKind::Call(id, ir::CallArgs::positional(vec![value]))
+        } else {
+            if !dataclass_values::can_format_concrete(value.ty, self.types, self.classes) {
                 return Err(error(
                     self.source,
                     at,
-                    "generated repr cannot format resource or callable fields",
+                    "generated repr cannot format resource, callable, or custom-repr fields",
                 ));
             }
             ExprKind::Builtin(Builtin::Repr, vec![value])
@@ -861,13 +923,32 @@ impl Checker<'_> {
         expected: Option<Type>,
     ) -> Result<Expr, String> {
         let owner = &self.classes.declarations.definitions[class];
+        if matches!(
+            owner.static_bindings.get(attribute.attr.as_str()),
+            Some(crate::classes::ClassValue::Runtime { .. })
+        ) {
+            self.class_reads.borrow_mut().insert(owner.definition);
+            if self.classes.has_concrete_subclasses(class)
+                && let Some(receiver) = receiver
+            {
+                return self.dispatch_record(
+                    class,
+                    receiver,
+                    attribute,
+                    |checker, layout, receiver| {
+                        checker.runtime_class_attribute(attribute, layout, Some(receiver))
+                    },
+                );
+            }
+            return self.runtime_class_attribute(attribute, class, receiver);
+        }
         let literal = match owner.static_bindings.get(attribute.attr.as_str()) {
             Some(crate::classes::ClassValue::String(value)) => Some(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Str(value.clone()),
             }),
             Some(crate::classes::ClassValue::Strings { owner, ordinal, .. }) => {
-                Some(self.globals.class_tuple(*owner, *ordinal).ok_or_else(|| {
+                Some(self.globals.class_value(*owner, *ordinal).ok_or_else(|| {
                     error(
                         self.source,
                         attribute,
@@ -889,6 +970,32 @@ impl Checker<'_> {
             });
         }
         self.direct_class_attribute(attribute, class, receiver, expected)
+    }
+
+    fn runtime_class_attribute(
+        &mut self,
+        attribute: &ast::ExprAttribute,
+        class: usize,
+        receiver: Option<Expr>,
+    ) -> Result<Expr, String> {
+        let owner = &self.classes.declarations.definitions[class];
+        let Some(crate::classes::ClassValue::Runtime { owner, ordinal }) =
+            owner.static_bindings.get(attribute.attr.as_str())
+        else {
+            return Err(error(
+                self.source,
+                attribute,
+                "a class data override must retain its storage type",
+            ));
+        };
+        let value = self.globals.class_value(*owner, *ordinal).ok_or_else(|| {
+            error(
+                self.source,
+                attribute,
+                "class value is read before its declaration",
+            )
+        })?;
+        self.data_attribute(class, attribute, receiver, value)
     }
 
     pub(super) fn direct_class_attribute(
@@ -1024,6 +1131,12 @@ impl Checker<'_> {
                 "special methods cannot be called directly",
             ));
         }
+        if attribute.attr.as_str() == "getTestCaseNames"
+            && let Some(object) = &receiver
+            && let Some(names) = self.unittest_loader_names(call, class, object)?
+        {
+            return Ok(names);
+        }
         if matches!(attribute.attr.as_str(), "assertIn" | "assertNotIn")
             && let Some(receiver) = &receiver
             && let Some(checked) =
@@ -1115,6 +1228,12 @@ impl Checker<'_> {
     }
 
     pub(super) fn construct(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
+        if self.classes.declarations.definitions[class]
+            .forwarder
+            .is_some()
+        {
+            return self.forwarding_exception(call, class);
+        }
         if self.classes.declarations.definitions[class]
             .enum_members
             .as_ref()
@@ -1230,18 +1349,23 @@ impl Checker<'_> {
                 args,
             },
         });
+        Ok(self.wrap_exception_record(class, record))
+    }
+
+    /// Attach the concrete class and display methods after the complete constructor succeeds.
+    pub(super) fn wrap_exception_record(&mut self, class: usize, record: Expr) -> Expr {
         let decl = &self.classes.declarations.definitions[class];
         if let Some(&kind) = self.classes.declarations.exceptions.get(&decl.definition) {
             let text = self.classes.methods[class].get("__str__").map(|m| m.id);
             let repr = self.classes.methods[class].get("__repr__").map(|m| m.id);
             self.calls.extend(text);
             self.calls.extend(repr);
-            return Ok(Expr {
+            return Expr {
                 ty: Type::NamedException(class),
                 kind: ExprKind::Builtin(
                     Builtin::NamedException {
                         kind,
-                        message_field: decl.fields.len() - 1,
+                        message_field: decl.exception_argument_slot(),
                         tuple_args: self.exception_tuple_slot(class),
                         text,
                         repr,
@@ -1249,9 +1373,9 @@ impl Checker<'_> {
                     },
                     vec![record],
                 ),
-            });
+            };
         }
-        Ok(record)
+        record
     }
 
     /// Install the native message slot used by the exception's args and formatting.
@@ -1292,7 +1416,7 @@ impl Checker<'_> {
     }
 
     fn store_exception_arguments(&self, class: usize, value: Expr) -> Expr {
-        let field = self.classes.fields[class].len() - 1;
+        let field = self.classes.declarations.definitions[class].exception_argument_slot();
         Expr {
             ty: Type::None,
             kind: ExprKind::Scope {
@@ -1360,6 +1484,7 @@ impl Checker<'_> {
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         if let Some(class) = self.class
+            && !matches!(self.super_initializer, Some(BaseInitializer::Record(_)))
             && self
                 .classes
                 .declarations

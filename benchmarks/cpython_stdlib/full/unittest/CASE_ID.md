@@ -1,0 +1,7 @@
+# Case identity during native fixtures
+
+`unittest.main()` stores the discovered method name on each case before calling its inherited `setUp`. The fixture, body, and `tearDown` read the same `self.id()`, including the concrete subclass and its defining module. A fresh `TestCase().id()` is `unittest.case.TestCase.runTest`. The direct constructor still accepts only its default method name.
+
+The [whole-file control](../../../../tests/fixtures/unittest_main/identity.py) uses an [imported setup](../../../../tests/fixtures/unittest_main/identity_helpers.py). In verbose mode it selects four methods. Two run their bodies and teardown; one skips in setup, and one raises in setup. Only the latter makes the process exit unsuccessfully. The per-method output also checks direct instances, base-typed references, and a second fresh instance after the first is modified.
+
+This is the lifecycle needed by CPython 3.14.5's `Lib/test/test_pathlib/test_pathlib.py:116`: `PurePathTest.setUp` obtains the name with `self.id().split('.')[-1]`, checks the concrete path class's parser, then either calls `skipTest(reason)` or sets the parser and separators. Each of the three pure-path variants has 15 candidate method bodies. Their original fixture and parser must execute together before those occurrences can be classified as fully native. A generated entry under `__main__` has that module name; a caller that depends on the original fully qualified ID must import the class from its original module.

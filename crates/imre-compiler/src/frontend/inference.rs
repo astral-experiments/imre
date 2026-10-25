@@ -307,7 +307,7 @@ impl Inference {
                 }
             }
             let before = self.revision.get();
-            let class_globals = classes.declarations.owns_class_tuples(graph.entry);
+            let class_globals = classes.declarations.has_class_values(graph.entry);
             let helpers =
                 Helpers::new(definitions.len() + graph.initializers(class_globals).count());
             let globals = ModuleValues::default();
@@ -368,7 +368,7 @@ impl Inference {
                             checker.declare(keyword.name.as_str(), parameter.ty, &**keyword)?;
                         checker.assigned.insert(slot);
                     }
-                    checker.collect_local_functions(&function.body)?;
+                    checker.collect_local_definitions(&function.body)?;
                     let (_, falls_through) = checker.block(&function.body)?;
                     if let Some(mut returns) = checker.inferred_returns.take() {
                         if falls_through || returns.is_empty() {

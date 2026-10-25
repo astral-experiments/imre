@@ -148,6 +148,8 @@ def snapshot(directory: Path) -> dict:
 
 
 def main() -> None:
+    sources = [(p.stem, p) for p in sorted(FIXTURES.glob("*.py"))]
+    sources.extend((p.parent.name, p) for p in sorted(FIXTURES.glob("*/main.py")))
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
     parser.add_argument("--runtime", required=True, type=Path)
@@ -156,7 +158,7 @@ def main() -> None:
     parser.add_argument("--target")
     parser.add_argument("--lto-linker", type=Path)
     parser.add_argument("--opt-levels", nargs="+", choices=["0", "1", "2", "3"], default=["0", "3"])
-    parser.add_argument("--fixture", action="append", choices=sorted(p.stem for p in FIXTURES.glob("*.py")) + ["imported"],
+    parser.add_argument("--fixture", action="append", choices=sorted(name for name, _ in sources),
                         help="limit the positive filesystem comparisons to these fixtures")
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
@@ -189,9 +191,7 @@ def main() -> None:
         result = files.run([compiler, "check", str(shadow / "main.py")], temporary)
         assert result.returncode > 0 and b"standard-library" in result.stderr, result.stderr
         checks += 1
-        sources = [*sorted(FIXTURES.glob("*.py")), FIXTURES / "imported/main.py"]
-        for source in sources:
-            name = source.stem if source.parent == FIXTURES else "imported"
+        for name, source in sources:
             if args.fixture and name not in args.fixture:
                 continue
             runner = files.run_with_failing_output if name == "failures" else subprocess.run

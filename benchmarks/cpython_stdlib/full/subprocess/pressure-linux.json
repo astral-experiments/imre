@@ -1,0 +1,127 @@
+{
+  "schema": "imre.subprocess.pressure/v1",
+  "platform": "linux",
+  "subprocess_revision": "726d058a23359a473c03c8bddeaf7a51fd7df31a",
+  "main_revision": "fce47341adca5540e3f15140ba5505446c7b29ec",
+  "tested_tree": "3371172ac5480c270758ca486760ceec22672da9",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "toolchain": {
+        "imre": "c9b8309beea0b27a733ece4ee32f4ea50686788357a602d334a3993a21f7121a",
+        "runtime": "3138ecdd2a1ff5694debdbce5e67ae230e44e20eeadc37e6158bb28556291c75",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_no_leaking": [
+          {
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "fixture_selector": "PollSelector",
+            "native_parent_sha256": "1c088461c0abb895947b38f3877ba24e94639e6b64b13ca6b055e2fa07643b48",
+            "native_parents": 1,
+            "open_file_limit": 1024,
+            "free_slots": 10,
+            "pressure_fds": 1011,
+            "original_descriptor_numbers_and_cloexec": true,
+            "unchanged_fd_table_after_each_communicate": 15,
+            "native_creations": 15,
+            "native_reaps": 15,
+            "data_child": "CPython stdin/stdout echo",
+            "selector_calls": {
+              "poll": 45
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_no_leaking": [
+          {
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "fixture_selector": "SelectSelector",
+            "native_parent_sha256": "d8c91a662b113784d4dd1cd354c8f4fb0df66acee7917d87d75e1579e3383064",
+            "native_parents": 1,
+            "open_file_limit": 1024,
+            "free_slots": 10,
+            "pressure_fds": 1011,
+            "original_descriptor_numbers_and_cloexec": true,
+            "unchanged_fd_table_after_each_communicate": 15,
+            "native_creations": 15,
+            "native_reaps": 15,
+            "data_child": "CPython stdin/stdout echo",
+            "selector_calls": {
+              "pselect6": 46
+            }
+          }
+        ]
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "toolchain": {
+        "imre": "c9b8309beea0b27a733ece4ee32f4ea50686788357a602d334a3993a21f7121a",
+        "runtime": "3138ecdd2a1ff5694debdbce5e67ae230e44e20eeadc37e6158bb28556291c75",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_no_leaking": [
+          {
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "fixture_selector": "PollSelector",
+            "native_parent_sha256": "d95975cc8b164394212d5dae7fbde34eb4ab3c2321bb6ccd064aa43b7e919efd",
+            "native_parents": 1,
+            "open_file_limit": 1024,
+            "free_slots": 10,
+            "pressure_fds": 1011,
+            "original_descriptor_numbers_and_cloexec": true,
+            "unchanged_fd_table_after_each_communicate": 15,
+            "native_creations": 15,
+            "native_reaps": 15,
+            "data_child": "CPython stdin/stdout echo",
+            "selector_calls": {
+              "poll": 47
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_no_leaking": [
+          {
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "fixture_selector": "SelectSelector",
+            "native_parent_sha256": "44b1b241e4b127b86ad7647040ebf6d66560b3a1847449a09cab8b2e07bc8b8e",
+            "native_parents": 1,
+            "open_file_limit": 1024,
+            "free_slots": 10,
+            "pressure_fds": 1011,
+            "original_descriptor_numbers_and_cloexec": true,
+            "unchanged_fd_table_after_each_communicate": 15,
+            "native_creations": 15,
+            "native_reaps": 15,
+            "data_child": "CPython stdin/stdout echo",
+            "selector_calls": {
+              "pselect6": 52
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
