@@ -287,8 +287,9 @@ impl Checker<'_> {
             return Ok(None);
         }
         let policy = self.local_cache_policy(definition)?;
+        let decorator = self.local_dispatch_decorator(definition)?;
         let mut raw;
-        let signature_def = if policy.is_some() {
+        let signature_def = if policy.is_some() || decorator.is_some() {
             raw = definition.clone();
             raw.decorator_list.clear();
             &raw
@@ -309,6 +310,9 @@ impl Checker<'_> {
             let raw = function.callback(self.types, self.source, definition)?;
             let origin = self.local_annotation_origin(&function);
             Some(self.owned_cache(raw, policy, Some(origin), definition)?)
+        } else if let Some(decorator) = decorator {
+            let target = function.callback(self.types, self.source, definition)?;
+            Some(self.decorate_dispatch(decorator, target, definition)?)
         } else if site.value_read || overload {
             function
                 .callback(self.types, self.source, definition)

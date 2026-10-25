@@ -5,7 +5,6 @@
 use crate::StrOwner;
 use std::cmp::Ordering;
 use std::fmt::Write;
-use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
@@ -370,7 +369,11 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                     super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
                 ),
                 (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
-                    object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)
+                    object_element(
+                        crate::ObjectOwner::as_ptr(left),
+                        crate::ObjectOwner::as_ptr(right),
+                        position,
+                    )
                 }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
                     left.compare_entry(right, position)
@@ -640,8 +643,11 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                                 .or_insert_with(|| kind.acquire(word));
                         }
                     }
-                    let exception: Rc<Object> = super::acquire_rc(owner as usize);
-                    let text = super::exceptions::imre_exception_repr(Rc::as_ptr(&exception));
+                    let exception: crate::ObjectOwner =
+                        crate::ObjectOwner::acquire_word(owner as usize);
+                    let text = super::exceptions::imre_exception_repr(crate::ObjectOwner::as_ptr(
+                        &exception,
+                    ));
                     if text.is_null() {
                         return;
                     }

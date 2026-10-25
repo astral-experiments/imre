@@ -6,7 +6,6 @@ use rustix::fs::FileType;
 use std::cell::OnceCell;
 use std::fs::Metadata;
 use std::os::unix::fs::MetadataExt;
-use std::rc::Rc;
 
 /// One path's data, independent of the owner so a saved view can outlive the path.
 pub(in crate::objects) struct Info {
@@ -17,8 +16,8 @@ pub(in crate::objects) struct Info {
 }
 
 impl Info {
-    pub(super) fn object(name: StrOwner, entry: Option<FileType>) -> Rc<Object> {
-        Rc::new(Object(StorageCell::new(Storage::PathInfo(Box::new(
+    pub(super) fn object(name: StrOwner, entry: Option<FileType>) -> crate::ObjectOwner {
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::PathInfo(Box::new(
             Self {
                 name,
                 entry,
@@ -96,7 +95,7 @@ pub unsafe extern "C" fn imre_path_info(path: *const Object) -> *const Object {
             let Storage::Path { text, .. } = s else {
                 unreachable!()
             };
-            Rc::into_raw(text.info())
+            crate::ObjectOwner::into_raw(text.info())
         })
     }
 }
