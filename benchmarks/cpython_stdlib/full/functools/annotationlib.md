@@ -61,6 +61,16 @@ establish that deferred annotations have been evaluated on a wrapped function.
 Hashing, union operators, evaluation, and inspection of private evaluator cells
 require further support.
 
+[Three complete upstream ForwardRef routines](annotation-forwardrefs-linux.json)
+exercise the non-string constructor argument and invalid class targets of
+`isinstance` and `issubclass` at O0 and O3. The bodies, errors and
+`assertRaises` assertions ran in Imre; the original module/class/instance
+fixtures ran on CPython. Reproduce with `run_annotationlib.py --forward-refs`
+and the same toolchain options as for `TestFormat`. This run used the
+ForwardRef implementation at `69f7e15` and the unittest assertion context at
+`87e5d20` (local integration `20c7de7`). These are supplemental annotation
+tests, separate from the 325 functools and four free-threaded occurrences.
+
 Using the untouched import and unittest entry points from the coordinator's
 76d74f9 startup run (both default and reachable-only), the first diagnosis
 moves from test_functools.py:2 (annotationlib) to line 3 (builtins). The two
