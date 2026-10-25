@@ -27,6 +27,19 @@ EQUALITY = """    def assertEqual(self, first: OPERAND, second: OPERAND, msg: st
 """
 
 
+def only_string_assertions(method):
+    """Every use of self is an assertEqual call with an exact string expectation."""
+    uses = {n for n in ast.walk(method) if isinstance(n, ast.Name) and n.id == "self"}
+    assertions = {
+        call.func.value for call in ast.walk(method) if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute) and call.func.attr == "assertEqual"
+        and isinstance(call.func.value, ast.Name) and call.func.value.id == "self"
+        and len(call.args) == 2 and not call.keywords
+        and isinstance(call.args[1], ast.Constant) and type(call.args[1].value) is str
+    }
+    return bool(uses) and assertions == uses
+
+
 def declared(nodes):
     """Index the bindings available to a method, including the accelerator-only declarations."""
     bindings = {}
@@ -139,6 +152,8 @@ class Fixtures:
         equality = ({"test_with_bound_and_unbound_methods": "str",
                      "test_get_annotations": "dict[str, type]",
                      "test_lru_cache_parameters": ""}.get(method))
+        if equality is None and only_string_assertions(node):
+            equality = "str"
         fixture = "\n".join(sorted(imports)) + "\n\n"
         fixture += "\n".join(external + [declarations[k] for k in sorted(declarations)])
         fixture += "\nclass NativeCase" + (":\n" if equality is not None else "(unittest.TestCase):\n")
