@@ -1425,6 +1425,9 @@ pub(crate) enum ErrnoOperation {
 pub(crate) enum ProcessOperation {
     Executable,
     RunToStderr,
+    ShellOutput {
+        status: bool,
+    },
     CheckOutput {
         streams: u32,
         validation: u32,

@@ -25,6 +25,7 @@ mod argv;
 mod asynchronous;
 mod launch_error;
 mod popen;
+mod shell_output;
 pub(super) use asynchronous::AsyncProcess;
 pub(super) use popen::Popen;
 

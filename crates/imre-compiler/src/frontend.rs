@@ -6894,6 +6894,11 @@ impl<'a> Checker<'a> {
         ) {
             return self.process_run(call);
         }
+        if let Some(Binding::Intrinsic(Intrinsic::ShellOutput { status })) =
+            self.resolve(&call.func)
+        {
+            return self.shell_output(call, status);
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::CheckOutput)) {
             return self.process_check_output(call);
         }
