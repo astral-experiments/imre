@@ -97,37 +97,10 @@ impl Checker<'_> {
         if returned_by.is_none() && matches!(value.ty, Type::Path | Type::PurePath(_)) {
             return self.fspath_value(value, at);
         }
-        if let Some((slot, test, first, second)) = self.protocol_alternatives(value.ty) {
-            let mut left = self.fspath_protocol(first, at, returned_by, syscall)?;
-            let mut right = self.fspath_protocol(second, at, returned_by, syscall)?;
-            // A branch that only raises supplies no Python value to the join.
-            if matches!(left.kind, ExprKind::Builtin(Builtin::RaiseException, _)) {
-                left.ty = right.ty;
-            } else if matches!(right.kind, ExprKind::Builtin(Builtin::RaiseException, _)) {
-                right.ty = left.ty;
-            }
-            let ty = self.types.join(left.ty, right.ty).ok_or_else(|| {
-                error(
-                    self.source,
-                    at,
-                    "path protocol results require a common str or bytes representation",
-                )
-            })?;
-            return Ok(Expr {
-                ty,
-                kind: ExprKind::Scope {
-                    body: vec![Statement::Assign(slot, value)],
-                    value: Box::new(Expr {
-                        ty,
-                        kind: ExprKind::Conditional(
-                            Box::new(test),
-                            Box::new(self.coerce(left, ty, at)?),
-                            Box::new(self.coerce(right, ty, at)?),
-                        ),
-                    }),
-                    clear: vec![slot],
-                },
-            });
+        if let Some(selected) = self.map_fspath_arms(&value, at, |checker, arm| {
+            checker.fspath_protocol(arm, at, returned_by, syscall)
+        })? {
+            return Ok(selected);
         }
         if returned_by.is_none()
             && let Type::Class(id) = value.ty
@@ -140,6 +113,48 @@ impl Checker<'_> {
             return self.exact_fspath(id, value, at, syscall);
         }
         Ok(self.fspath_type_error(value, returned_by, syscall))
+    }
+
+    /// Check one actual protocol operand or descriptor result, including None.
+    fn map_fspath_arms(
+        &mut self,
+        value: &Expr,
+        at: &ast::Expr,
+        mut check: impl FnMut(&mut Self, Expr) -> Result<Expr, String>,
+    ) -> Result<Option<Expr>, String> {
+        let Some((slot, test, first, second)) = self.protocol_alternatives(value.ty) else {
+            return Ok(None);
+        };
+        let mut left = check(self, first)?;
+        let mut right = check(self, second)?;
+        // A branch that only raises supplies no Python value to the join.
+        if matches!(left.kind, ExprKind::Builtin(Builtin::RaiseException, _)) {
+            left.ty = right.ty;
+        } else if matches!(right.kind, ExprKind::Builtin(Builtin::RaiseException, _)) {
+            right.ty = left.ty;
+        }
+        let ty = self.types.join(left.ty, right.ty).ok_or_else(|| {
+            error(
+                self.source,
+                at,
+                "path protocol results require a common str or bytes representation",
+            )
+        })?;
+        Ok(Some(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, value.clone())],
+                value: Box::new(Expr {
+                    ty,
+                    kind: ExprKind::Conditional(
+                        Box::new(test),
+                        Box::new(self.coerce(left, ty, at)?),
+                        Box::new(self.coerce(right, ty, at)?),
+                    ),
+                }),
+                clear: vec![slot],
+            },
+        }))
     }
 
     pub(super) fn exact_fspath(

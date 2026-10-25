@@ -81,19 +81,7 @@ impl Checker<'_> {
         let slot = self.hidden(getter.ty);
         let failed = self.hidden(Type::Bool);
         let missing = self.fspath_type_error(receiver, None, syscall);
-        let value = self.local(slot);
-        let result = if value.ty == Type::None {
-            missing.clone()
-        } else if self.types.signature(value.ty).is_some() {
-            self.invoke(call, value)?
-        } else {
-            let actual = self.path_argument_type_name(value.ty);
-            self.sys_type_error(
-                call,
-                Type::Str,
-                format!("'{actual}' object is not callable"),
-            )?
-        };
+        let result = self.invoke_fspath_value(call, self.local(slot), &missing)?;
         let flag = |value| Expr {
             ty: Type::Bool,
             kind: ExprKind::Bool(value),
@@ -119,5 +107,31 @@ impl Checker<'_> {
                 clear: vec![slot, failed],
             },
         }))
+    }
+
+    /// None suppresses this special method; a present callable is invoked once.
+    fn invoke_fspath_value(
+        &mut self,
+        call: &ast::ExprCall,
+        value: Expr,
+        missing: &Expr,
+    ) -> Result<Expr, String> {
+        if let Some(selected) = self.map_fspath_arms(&value, &call.func, |checker, arm| {
+            checker.invoke_fspath_value(call, arm, missing)
+        })? {
+            return Ok(selected);
+        }
+        if value.ty == Type::None {
+            return Ok(missing.clone());
+        }
+        if self.types.signature(value.ty).is_some() {
+            return self.invoke(call, value);
+        }
+        let actual = self.path_argument_type_name(value.ty);
+        self.sys_type_error(
+            call,
+            Type::Str,
+            format!("'{actual}' object is not callable"),
+        )
     }
 }

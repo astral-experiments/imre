@@ -63,6 +63,35 @@ class FailedCall:
         return self.spell
 
 
+class Maybe:
+    present: bool
+
+    def __init__(self, present: bool) -> None:
+        self.present = present
+
+    def spell(self) -> str:
+        return 'present'
+
+    @property
+    def __fspath__(self) -> Callable[[], str] | None:
+        if self.present:
+            return self.spell
+        return None
+
+
+class NotCallable:
+    binary: bool
+
+    def __init__(self, binary: bool) -> None:
+        self.binary = binary
+
+    @property
+    def __fspath__(self) -> str | bytes:
+        if self.binary:
+            return b'text'
+        return 'text'
+
+
 print(str(Path(StaticName(), ClassName(), DefaultName())))
 print(str(PureWindowsPath('root').joinpath(MethodProperty())))
 try:
@@ -89,3 +118,14 @@ try:
     PureWindowsPath(FailedCall())
 except ValueError as error:
     print(str(error))
+
+print(str(Path(Maybe(True))))
+try:
+    os.fspath(Maybe(False))
+except TypeError as error:
+    print(str(error))
+for binary in (False, True):
+    try:
+        os.fspath(NotCallable(binary))
+    except TypeError as error:
+        print(str(error))
