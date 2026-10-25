@@ -1308,12 +1308,13 @@ impl Emitter<'_, '_> {
         self.branch(&same, &end, &fallback);
         self.start(&fallback);
         let ordinary = self.list_length(receiver);
+        let fallback_end = self.current.clone();
         self.jump(&end);
         self.start(&end);
         Some(Value {
             ty: Type::Int,
             operand: self.instruction(format!(
-                "phi i64 [{}, %{before}], [{}, %{fallback}]",
+                "phi i64 [{}, %{before}], [{}, %{fallback_end}]",
                 snapshot.length.operand, ordinary.operand
             )),
             small_integer: true,
