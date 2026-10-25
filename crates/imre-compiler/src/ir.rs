@@ -1079,6 +1079,7 @@ impl StrDescriptor {
 pub(crate) enum TextOperation {
     IsSpace,
     SplitLineEnds,
+    ExpandTabs,
     Lower,
     Capitalize,
     /// True splits from the right.
@@ -1254,6 +1255,8 @@ pub(crate) enum LogOperation {
     FileConfig,
     Disabled,
     Propagate,
+    SetPropagate,
+    HasHandlers,
     Name,
     Level,
     Root,
@@ -1391,6 +1394,9 @@ pub(crate) enum ProcessOperation {
     Which,
     RmTree,
     Copy(CopyOperation),
+    CopyTree(Type),
+    IgnorePatterns,
+    TreeErrorArgs,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

@@ -344,7 +344,7 @@ fn os_error_kind(kind: io::ErrorKind) -> Kind {
 }
 
 /// Format a POSIX errno without a filename, as in OSError(errno, strerror).
-pub(super) fn errno_error(error: io::Error) -> Error {
+pub(crate) fn errno_error(error: io::Error) -> Error {
     errno_with_filename(error, None)
 }
 
