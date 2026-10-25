@@ -2,17 +2,22 @@
 
 The [versioned per-occurrence report](evidence-linux.json) covers the same
 659 original IDs separately at O0 and O3 on Imre
-`d305916ec30a9269bfe040c358be8815784cca9b`. Each level has eleven
+`d041aeb3fd052afabd1b2ea807caa3f63a5c048e`. Each level has thirteen
 methods with native bodies, operations and assertions under the original
-CPython fixture hooks: seven Counter methods and four 100,000-item deque
-queue and stack methods. Twelve native Counter doctest bodies have host
+CPython fixture hooks: seven Counter methods, four 100,000-item deque
+queue and stack methods, and the complete deque `test_clear` and
+`test_maxlen_zero`. The last test checks that construction, `extend`, and
+`extendleft` consume the source iterator even when no items can be stored.
+Independent native assertion controls reported `0 != 3` after clear and
+`[] != [0]` after a zero-capacity extension at both optimization levels.
+Twelve native Counter doctest bodies have host
 output checking, including the arithmetic methods and `most_common`. One additional method,
 `test_subtract`, runs its original body and assertions in CPython with 24
 native Counter operations. Its direct body compilation blocker is retained
 in the same record. The shared classification places those twelve doctests and
 that host-driven method in `host-driven-native-operation`; their separate roles
 show which code ran where. Four routines have no collections operation, and
-three have justified reference skips. The other 628 report their first blocker. No
+three have justified reference skips. The other 626 report their first blocker. No
 occurrence on this build is classified as fully native.
 
 The four non-product methods are three original deque methods whose bodies
