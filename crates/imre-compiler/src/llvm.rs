@@ -71,6 +71,7 @@ impl Type {
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
+            | Self::SysImplementation
             | Self::CompletedProcess(..)
             | Self::EventLoop
             | Self::Coroutine(_)
@@ -132,6 +133,7 @@ impl Type {
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
+            | Self::SysImplementation
             | Self::CompletedProcess(..)
             | Self::EventLoop
             | Self::Coroutine(_)
@@ -707,9 +709,11 @@ impl Emitter<'_, '_> {
             Type::Str | Type::StrLiteral(_) | Type::BuiltinClass => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
-            Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(..) => {
-                "record"
-            }
+            Type::Class(_)
+            | Type::Tuple(_)
+            | Type::Callable(_)
+            | Type::SysImplementation
+            | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
@@ -3345,6 +3349,7 @@ impl Emitter<'_, '_> {
                 | Type::ImportException
                 | Type::TimeoutExpired
                 | Type::TextIO
+                | Type::SysImplementation
                 | Type::CompletedProcess(..)
                 | Type::BinaryIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
@@ -4337,6 +4342,11 @@ impl Emitter<'_, '_> {
             ),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::SysImplementation => self.tuple(
+                returns,
+                &crate::version::implementation_values(&self.module.types),
+                Some("sys_implementation"),
+            ),
             Builtin::SysVersionInfo { implementation } => {
                 let root = if *implementation {
                     "sys_implementation_version"
@@ -5717,6 +5727,7 @@ impl Emitter<'_, '_> {
                     | Type::JsonObject
                     | Type::RegexMatch
                     | Type::BinaryIO
+                    | Type::SysImplementation
                     | Type::CompletedProcess(..)
                     | Type::Tuple(_)
                     | Type::Optional(_)
@@ -5965,6 +5976,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
+            | Type::SysImplementation
             | Type::CompletedProcess(..)
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
         }
@@ -6040,6 +6052,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
+            | Type::SysImplementation
             | Type::CompletedProcess(..)
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
@@ -6584,7 +6597,11 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
         Type::ListInt => 4,
-        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(..) => 6,
+        Type::Class(_)
+        | Type::Tuple(_)
+        | Type::Callable(_)
+        | Type::SysImplementation
+        | Type::CompletedProcess(..) => 6,
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
@@ -6635,6 +6652,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
 
 fn record_name(ty: Type) -> String {
     match ty {
+        Type::SysImplementation => "sys_implementation_record".to_owned(),
         Type::Class(id) => format!("class_{id}"),
         Type::Tuple(id) => format!("tuple_{id}"),
         Type::Callable(_) => "callable".to_owned(),
@@ -6674,14 +6692,17 @@ fn record_layouts(module: &Module, output: &mut Output) {
         .iter()
         .enumerate()
         .map(|(id, fields)| (Type::Class(id), fields.clone()));
+    let mut implementation = false;
     let mut captures = std::collections::BTreeSet::from([(crate::ir::ProcessCapture::TEXT, None)]);
     for function in module.functions.iter().chain([&module.entry]) {
         for ty in function.locals.iter().chain([&function.returns]) {
+            implementation |= *ty == Type::SysImplementation;
             if let Type::CompletedProcess(c, cmd) = ty {
                 captures.insert((*c, *cmd));
             }
         }
         crate::ir::walk_expressions(&function.body, &mut |value| {
+            implementation |= value.ty == Type::SysImplementation;
             if let Type::CompletedProcess(c, cmd) = value.ty {
                 captures.insert((c, cmd));
             }
@@ -6698,7 +6719,17 @@ fn record_layouts(module: &Module, output: &mut Output) {
             ],
         )
     });
-    for (ty, fields) in classes.chain(module.types.tuples()).chain(processes) {
+    let implementation = implementation.then(|| {
+        (
+            Type::SysImplementation,
+            crate::version::implementation_fields(&module.types),
+        )
+    });
+    for (ty, fields) in classes
+        .chain(module.types.tuples())
+        .chain(processes)
+        .chain(implementation)
+    {
         let name = record_name(ty);
         let storage = fields
             .iter()

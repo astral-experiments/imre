@@ -149,6 +149,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
+            | Type::SysImplementation
             | Type::CompletedProcess(_, None)
             | Type::EventLoop
             | Type::TaskGroup
@@ -515,6 +516,7 @@ impl Types {
             | Type::TextIO
             | Type::Path
             | Type::PurePath(_)
+            | Type::SysImplementation
             | Type::CompletedProcess(..)
             | Type::EventLoop
             | Type::Coroutine(_)

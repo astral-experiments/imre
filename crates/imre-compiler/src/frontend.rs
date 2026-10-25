@@ -4826,6 +4826,12 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
+                Intrinsic::SysImplementation => {
+                    return Ok(Expr {
+                        ty: Type::SysImplementation,
+                        kind: ExprKind::Builtin(Builtin::SysImplementation, vec![]),
+                    });
+                }
                 Intrinsic::SysVersionInfo => return Ok(self.sys_version_info(false)),
                 Intrinsic::SysHexversion => {
                     return Ok(crate::version::integer(crate::version::hex(
@@ -5586,6 +5592,22 @@ impl<'a> Checker<'a> {
                 }
                 if let Type::StrDescriptor(method) = receiver.ty {
                     return self.descriptor_attribute(receiver, method, attribute);
+                }
+                if receiver.ty == Type::SysImplementation {
+                    let index = crate::version::IMPLEMENTATION
+                        .iter()
+                        .position(|&name| name == attribute.attr.as_str())
+                        .ok_or_else(|| {
+                            error(
+                                self.source,
+                                attribute,
+                                "unknown sys.implementation attribute",
+                            )
+                        })?;
+                    return Ok(Expr {
+                        ty: crate::version::implementation_fields(self.types)[index],
+                        kind: ExprKind::Field(Box::new(receiver), index),
+                    });
                 }
                 if let Some(declaration) = self.types.tuple_metadata(receiver.ty) {
                     return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
@@ -7267,6 +7289,7 @@ impl<'a> Checker<'a> {
                 && (matches!(
                     args[0].ty,
                     Type::Class(_)
+                        | Type::SysImplementation
                         | Type::CompletedProcess(..)
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)

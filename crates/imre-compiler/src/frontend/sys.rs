@@ -78,6 +78,36 @@ impl Checker<'_> {
     }
 
     pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        if matches!(&*call.func, ast::Expr::Name(n) if n.id == "hasattr" && !self.names.contains_key("hasattr"))
+            && self.resolve(&call.func).is_none()
+            && let [object, name] = call.arguments.args.as_ref()
+        {
+            let receiver = self.expr(object)?;
+            if receiver.ty == Type::SysImplementation {
+                self.reject_builtin_keywords(call)?;
+                let name = self.expr_expected(name, Type::Str)?;
+                let names = Expr {
+                    ty: self.types.list(Type::Str),
+                    kind: ExprKind::List(
+                        crate::version::IMPLEMENTATION
+                            .iter()
+                            .map(|s| unpacking::string(*s))
+                            .collect(),
+                    ),
+                };
+                return Ok(Some(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::Expr(receiver)],
+                        clear: vec![],
+                        value: Box::new(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Builtin(Builtin::StringListContains, vec![name, names]),
+                        }),
+                    },
+                }));
+            }
+        }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::SysExit)) => {
                 return self.system_exit(call, true).map(Some);
@@ -238,11 +268,7 @@ pub(super) fn exit_payload_supported(ty: Type, types: &Types) -> bool {
 impl Checker<'_> {
     pub(super) fn sys_version_info(&self, implementation: bool) -> Expr {
         Expr {
-            ty: self.types.struct_sequence(
-                "sys.version_info",
-                crate::version::FIELDS,
-                vec![Type::Int, Type::Int, Type::Int, Type::Str, Type::Int],
-            ),
+            ty: crate::version::info_type(self.types),
             kind: ExprKind::Builtin(Builtin::SysVersionInfo { implementation }, vec![]),
         }
     }
