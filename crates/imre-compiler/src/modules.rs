@@ -268,6 +268,7 @@ pub(crate) enum Intrinsic {
     Environ,
     GetEnv,
     GetCwd,
+    Strerror,
     Fd(crate::ir::FdOperation),
     OpenFlag(&'static str),
     FsPath,
@@ -346,7 +347,7 @@ impl IntrinsicModule {
             if name == "path" {
                 return Some(Binding::IntrinsicModule(Self::PosixPath));
             }
-            if let Some(symbol) = os::descriptor(name) {
+            if let Some(symbol) = os::symbol(name) {
                 return Some(Binding::Intrinsic(symbol));
             }
         }

@@ -133,6 +133,17 @@ jobs:
             --values-results "$RUNNER_TEMP/value_cases-O0.json" "$RUNNER_TEMP/value_cases-O3.json" \
             --credential-results "$RUNNER_TEMP/credential_children-O0.json" "$RUNNER_TEMP/credential_children-O3.json" \
             --descriptor-results "$RUNNER_TEMP/native_descriptors-O0.json" "$RUNNER_TEMP/host_descriptors-O0.json" "$RUNNER_TEMP/native_descriptors-O3.json" "$RUNNER_TEMP/host_descriptors-O3.json"
+      - name: Compare structured OS failures with CPython
+        run: |
+          work=$(mktemp -d "$RUNNER_TEMP/os-errno-fields-XXXXXX")
+          src="$GITHUB_WORKSPACE/benchmarks/cpython_stdlib/full/os/errno_fields.py"
+          cd "$work"
+          python3 "$src" > reference
+          for opt in 0 3; do
+            "$GITHUB_WORKSPACE/target/release/imre" build "$src" --no-cache --runtime "$GITHUB_WORKSPACE/target/release/libimre_runtime.a" --clang /usr/bin/clang-18 --opt-level "$opt" -o "$work/fields"
+            ./fields > native
+            diff -u reference native
+          done
       - name: Check sys streams and exits with vendored CPython methods
         run: |
           python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18

@@ -538,6 +538,24 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
+            ProcessOperation::OsErrorField(field) => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_os_error_field(ptr {}, i32 {field})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::Strerror => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_os_strerror(i64 {})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             ProcessOperation::ErrorField(field) => {
                 let tagged = matches!(
                     self.module.types.payload(returns).unwrap_or(returns),
