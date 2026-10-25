@@ -484,7 +484,7 @@ pub unsafe extern "C" fn imre_str_encode(value: *const Str) -> *const Bytes {
 }
 
 /// Renders Python's strict UTF-8 decode error from the invalid sequence bounds.
-fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
+pub(super) fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
     let start = error.valid_up_to();
     let end = error
         .error_len()

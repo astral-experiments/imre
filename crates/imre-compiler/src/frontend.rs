@@ -52,6 +52,7 @@ mod truthiness;
 mod unions;
 mod unpacking;
 mod zip_sums;
+mod zipfile;
 use assignments::LocalState;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
@@ -327,6 +328,9 @@ const RESERVED: &[&str] = &[
 
 /// These numbers are the sealed exception categories in the runtime ABI.
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
+    if name == "NotImplementedError" {
+        return Some(37);
+    }
     if name == "StopIteration" {
         return Some(35);
     }
@@ -1248,6 +1252,7 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
@@ -3530,14 +3535,16 @@ impl<'a> Checker<'a> {
             return self.generator_scope(item, remaining, body, manager);
         }
         let stored = self.types.directory_value(manager.ty);
+        let archive = manager.ty == Type::ZipFile;
         if temporary.is_none()
             && stored.is_none()
+            && !archive
             && !matches!(manager.ty, Type::TextIO | Type::BinaryIO)
         {
             return Err(error(
                 self.source,
                 &item.context_expr,
-                "with requires a sealed file or a direct TemporaryDirectory call",
+                "with requires a supported file, ZIP archive, or directory context",
             ));
         }
         let captured = self.hidden(manager.ty);
@@ -3564,7 +3571,7 @@ impl<'a> Checker<'a> {
         let (nested, falls) = self.with_items(remaining, body)?;
         protected.extend(nested);
         let mut statements = vec![Statement::Assign(captured, manager)];
-        if temporary.is_none() && stored.is_none() {
+        if temporary.is_none() && stored.is_none() && !archive {
             statements.push(Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
@@ -3574,6 +3581,8 @@ impl<'a> Checker<'a> {
             Builtin::Path(ir::PathOperation::ContextExit)
         } else if temporary.is_some() {
             Builtin::Path(ir::PathOperation::CleanupTemporaryDirectory)
+        } else if archive {
+            Builtin::ZipClose
         } else {
             Builtin::TextClose
         };
@@ -3644,6 +3653,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CalledProcessError)) => Some(26),
             Some(Binding::Intrinsic(Intrinsic::TimeoutExpired)) => Some(27),
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
+            Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),
@@ -5130,6 +5140,7 @@ impl<'a> Checker<'a> {
                 return Ok(self.ordered_builtin(Builtin::UrlsafeB64encode, Type::Bytes, args));
             }
             Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
+            Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
@@ -5373,6 +5384,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::ZipFile {
+                return self.zipfile_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);

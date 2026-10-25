@@ -31,6 +31,12 @@ struct OptionField {
     option: Value,
 }
 
+impl OptionField {
+    fn many_positional(&self) -> bool {
+        self.option["flag"] == self.name && self.option["many"] == true
+    }
+}
+
 fn literal<'a>(expr: &'a ast::Expr, module: &SourceModule) -> Result<&'a str, String> {
     let ast::Expr::StringLiteral(value) = expr else {
         return Err(module.error(expr, "argparse declarations require literal strings"));
@@ -170,13 +176,13 @@ fn option(
         module,
     )?;
     if positional
-        && ["required", "action", "nargs", "default"]
+        && ["required", "action", "default"]
             .iter()
             .any(|k| kw.contains_key(k))
     {
         return Err(module.error(
             call,
-            "ordinary argparse positionals take one required value",
+            "argparse positionals do not accept required, action, or default",
         ));
     }
     let mut element = Type::Str;
@@ -558,12 +564,20 @@ impl Parsers {
                                         index: &mut usize,
                                         mut names: HashSet<String>|
                      -> Result<Vec<OptionField>, String> {
-                        let mut options = Vec::new();
+                        let mut options: Vec<OptionField> = Vec::new();
                         let mut spellings = HashSet::new();
                         while let Some(ast::Stmt::Expr(stmt)) = function.body.get(*index)
                             && let Some(add) = method(&stmt.value, builder, "add_argument")
                         {
                             let field = option(add, graph, module_id, types, classes)?;
+                            if field.option["flag"] == field.name
+                                && options.iter().any(OptionField::many_positional)
+                            {
+                                return Err(module.error(
+                                    add,
+                                    "a positional with nargs='+' must be the last positional",
+                                ));
+                            }
                             for value in &add.arguments.args {
                                 let name = literal(value, module)?;
                                 if !spellings.insert(name) {
@@ -593,6 +607,12 @@ impl Parsers {
                     if let Some((group, add)) =
                         assigned_call(function.body.get(index), builder, "add_subparsers")
                     {
+                        if options.iter().any(OptionField::many_positional) {
+                            return Err(module.error(
+                                add,
+                                "a positional with nargs='+' cannot precede a subcommand",
+                            ));
+                        }
                         register(group, &builders)?;
                         builders.push(group.id.as_str());
                         let kw = keywords(add, &["dest", "required"], module)?;

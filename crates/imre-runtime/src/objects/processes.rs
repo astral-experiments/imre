@@ -201,7 +201,14 @@ fn exit_word(returncode: i32) -> usize {
 }
 
 fn cstring(bytes: &[u8]) -> Result<CString> {
-    CString::new(bytes).map_err(|_| Error::new(Kind::ValueError, "embedded null byte"))
+    let mut owned = Vec::new();
+    owned
+        .try_reserve_exact(bytes.len() + 1)
+        .map_err(|_| Error::allocation())?;
+    owned.extend_from_slice(bytes);
+    owned.push(0);
+    CString::from_vec_with_nul(owned)
+        .map_err(|_| Error::new(Kind::ValueError, "embedded null byte"))
 }
 
 /// Self-contained immutable C arrays: moving the owner never moves CString data.
@@ -1037,6 +1044,16 @@ pub unsafe extern "C" fn imre_subprocess_run_timeout_int(
     }
 }
 
+fn copy_argv(words: &[usize], copy: impl Fn(usize) -> Result<CString>) -> Result<Vec<CString>> {
+    let mut argv = Vec::new();
+    argv.try_reserve_exact(words.len())
+        .map_err(|_| Error::allocation())?;
+    for &word in words {
+        argv.push(copy(word)?);
+    }
+    Ok(argv)
+}
+
 /// # Safety
 /// The caller roots an exact argv list whose elements are all strings.
 unsafe fn native_argv(args: *const Object) -> Result<Vec<CString>> {
@@ -1045,11 +1062,9 @@ unsafe fn native_argv(args: *const Object) -> Result<Vec<CString>> {
         object(args).0.with(|storage| {
             let values = storage.sequence();
             values.check_kind(3);
-            values
-                .values
-                .iter()
-                .map(|&word| cstring((&*(word as *const Str)).as_bytes()))
-                .collect()
+            copy_argv(&values.values, |word| {
+                cstring((&*(word as *const Str)).as_bytes())
+            })
         })
     }
 }
@@ -1062,26 +1077,23 @@ pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *c
     let argv = unsafe {
         object(args).0.with(|storage| -> Result<Vec<CString>> {
             let list = storage.sequence();
-            list.values
-                .iter()
-                .map(|&word| {
-                    let (word, ty) = if list.kind.raw() == 9 {
-                        super::unions::member(word)
-                    } else {
-                        (word, list.kind)
-                    };
-                    match ty.raw() {
-                        3 => cstring((&*(word as *const Str)).as_bytes()),
-                        5 => object(word as *const Object)
-                            .0
-                            .with(|storage| match storage {
-                                Storage::Path { .. } => cstring(storage.path().as_bytes()),
-                                _ => fail("SystemError", "expected a subprocess Path argument"),
-                            }),
-                        _ => fail("SystemError", "invalid subprocess argument kind"),
-                    }
-                })
-                .collect()
+            copy_argv(&list.values, |word| {
+                let (word, ty) = if list.kind.raw() == 9 {
+                    super::unions::member(word)
+                } else {
+                    (word, list.kind)
+                };
+                match ty.raw() {
+                    3 => cstring((&*(word as *const Str)).as_bytes()),
+                    5 => object(word as *const Object)
+                        .0
+                        .with(|storage| match storage {
+                            Storage::Path { .. } => cstring(storage.path().as_bytes()),
+                            _ => fail("SystemError", "expected a subprocess Path argument"),
+                        }),
+                    _ => fail("SystemError", "invalid subprocess argument kind"),
+                }
+            })
         })
     };
     let run = argv.and_then(|argv| {
