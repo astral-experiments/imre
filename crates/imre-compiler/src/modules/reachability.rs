@@ -329,6 +329,10 @@ impl Reachable {
                                         | "__iter__"
                                         | "__str__"
                                 )
+                                || (matches!(name, "__getitem__" | "__len__" | "__contains__")
+                                    && has_base(graph, id, |module, base| {
+                                        crate::classes::mapping_base(graph, module, base)
+                                    }))
                                 || (name == "__repr__" && exception_base(graph, id))
                                 || definition_effect(graph, id.module, method))
                                 && refs.found.methods.insert((id.module, method.start()))
@@ -624,6 +628,21 @@ fn class_effect(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClassDef
 
 /// Rich exception display overrides are reachable through base-class catches.
 fn exception_base(graph: &SourceGraph, id: DefinitionId) -> bool {
+    has_base(graph, id, |module, base| {
+        graph.resolve(module, base).is_none()
+            && base
+                .as_name_expr()
+                .and_then(|n| crate::frontend::exception_kind(n.id.as_str()))
+                .is_some()
+    })
+}
+
+/// Walk the finite class graph before fixed layouts are resolved.
+fn has_base(
+    graph: &SourceGraph,
+    id: DefinitionId,
+    matches: impl Fn(ModuleId, &ast::Expr) -> bool,
+) -> bool {
     let mut pending = vec![id];
     let mut seen = HashSet::new();
     while let Some(def) = pending.pop() {
@@ -638,16 +657,11 @@ fn exception_base(graph: &SourceGraph, id: DefinitionId) -> bool {
             continue;
         };
         for base in &args.args {
-            match graph.resolve(def.module, base) {
-                Some(Binding::Definition(parent)) => pending.push(parent),
-                None if base
-                    .as_name_expr()
-                    .and_then(|n| crate::frontend::exception_kind(n.id.as_str()))
-                    .is_some() =>
-                {
-                    return true;
-                }
-                _ => {}
+            if matches(def.module, base) {
+                return true;
+            }
+            if let Some(Binding::Definition(parent)) = graph.resolve(def.module, base) {
+                pending.push(parent);
             }
         }
     }
