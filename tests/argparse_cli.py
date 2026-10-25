@@ -113,6 +113,19 @@ CASES = {
                          ["range", "--big", "4999", "100000000000000000001"],
                          ["radix", str(2**80)], ["radix", str(2**80 + 3)], ["radix", "--help"]],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
+    "optional_commands": [
+        [], ["-v"], ["run"], ["r", "--value", "x"], ["-v", "start", "--value=-v"],
+        ["list", "a"], ["ls"], ["invalid"], ["--help"], ["r", "--help"], ["start", "--bogus"],
+        ["--", "run"], ["absent"], ["absent", "run"], ["absent", "run", "--mark"],
+        ["absent", "t"], ["absent", "--help"], ["required"], ["required", "r", "--value=1"],
+        ["required", "list"], ["required", "--help"], ["required", "r", "--help"],
+        ["required", "bad"], ["required", "--", "list"],
+        ["named"], ["named", "bad"], ["named", "g"], ["named", "go-now", "--help"],
+        ["named", "--help"], ["empty"], ["empty", "bad"], ["empty", "--help"],
+        ["empty-required"], ["empty-required", "--key=ok"], ["empty-required", "bad"],
+        ["named", "two words"], ["named", ""], ["named", "Δ"], ["dispatch"],
+        ["dispatch", "r", "--value=selected"], ["dispatch", "ls", "name"],
+    ],
     "spellings": [[], ["+h"], ["++help"], ["++hel"], ["--help"], ["++value=x"], ["/v", "v"],
                   ["+xz"], ["+x+z"], ["+xZ"], ["+"], ["++v", "x"], ["--", "++value"],
                   ["abbrev"], ["abbrev", "-h"], ["abbrev", "-foo"], ["abbrev", "-foob=x"],
@@ -265,6 +278,11 @@ def main():
             checked = subprocess.run([args.compiler, "check", source], capture_output=True)
             if checked.returncode == 0:
                 raise AssertionError(wrong)
+        alias_source = (FIXTURES / "optional_commands.py").read_text()
+        source.write_text(alias_source.replace("print(repr(namespace.value))", "print(repr(namespace.name))"))
+        checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+        if checked.returncode == 0 or b"unknown field" not in checked.stderr:
+            raise AssertionError(checked.stderr)
         source.write_text(commands.replace("    return args\n", "    print(args.text)\n    return args\n"))
         checked = subprocess.run([args.compiler, "check", source], capture_output=True)
         if checked.returncode == 0 or b"unknown field" not in checked.stderr:
@@ -277,7 +295,7 @@ def main():
         if checked.returncode == 0 or b"argparse.Namespace requires" not in checked.stderr:
             raise AssertionError(checked.stderr)
     print(
-        f"Validated {checks} argparse process comparisons and {len(REJECTED) + 7} compile-time rejections"
+        f"Validated {checks} argparse process comparisons and {len(REJECTED) + 8} compile-time rejections"
     )
 
 

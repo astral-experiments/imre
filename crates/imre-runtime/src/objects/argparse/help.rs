@@ -7,7 +7,7 @@ use std::io::IsTerminal;
 use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategoryGroup};
 
 use super::super::python_whitespace;
-use super::{Kind, OptionSpec, Parser, Subcommands};
+use super::{ArgumentGroup, Kind, OptionSpec, Parser, Subcommands};
 
 /// Parse the positive decimal width accepted by shutil.get_terminal_size().
 fn positive_columns(value: &str) -> Option<usize> {
@@ -277,15 +277,43 @@ fn usage_lines(
 }
 
 impl Subcommands {
-    fn metavar(&self) -> String {
-        format!(
-            "{{{}}}",
-            self.choices
-                .iter()
-                .map(|child| child.name.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        )
+    pub(super) fn metavar(&self) -> String {
+        self.metavar
+            .clone()
+            .unwrap_or_else(|| format!("{{{}}}", self.spellings().collect::<Vec<_>>().join(",")))
+    }
+    fn write_rows(
+        &self,
+        output: &mut String,
+        prog: &str,
+        width: usize,
+        position: usize,
+        color: bool,
+    ) {
+        let label = self.metavar();
+        help_row(
+            output,
+            width,
+            position,
+            2,
+            &label,
+            &paint(color, "1;32", &label),
+            &expand(self.help.as_deref().unwrap_or_default(), prog, None),
+        );
+        for child in &self.choices {
+            if let Some(help) = &child.help {
+                let label = child.label();
+                help_row(
+                    output,
+                    width,
+                    position,
+                    4,
+                    &label,
+                    &paint(color, "1;32", &label),
+                    &expand(help, prog, None),
+                );
+            }
+        }
     }
 }
 
@@ -455,6 +483,16 @@ impl Parser {
         text
     }
 
+    fn open_group(&self, output: &mut String, group: &ArgumentGroup, width: usize, color: bool) {
+        output.push('\n');
+        if let Some(title) = &group.title {
+            writeln!(output, "{}", paint(color, "1;34", &format!("{title}:"))).unwrap();
+        }
+        if let Some(text) = &group.description {
+            writeln!(output, "{}\n", self.description(text, width, 2)).unwrap();
+        }
+    }
+
     pub(super) fn help(&self, description: &str) -> String {
         let width = width();
         let mut output = self.usage(width);
@@ -504,14 +542,18 @@ impl Parser {
             max_header = max_header.max(len(&commands.metavar()));
             for child in &commands.choices {
                 if child.help.is_some() {
-                    max_header = max_header.max(2 + len(&child.name));
+                    max_header = max_header.max(2 + len(&child.label()));
                 }
             }
         }
         let position = (max_header + 4)
             .min(24)
             .min(width.saturating_sub(20).max(4));
-        if !positionals.is_empty() || self.subcommands.is_some() {
+        let inline = self
+            .subcommands
+            .as_ref()
+            .filter(|commands| commands.group.is_none());
+        if !positionals.is_empty() || inline.is_some() {
             writeln!(
                 output,
                 "\n{}",
@@ -522,30 +564,8 @@ impl Parser {
                 help_row(&mut output, width, position, 2, &label, &styled, &help);
             }
         }
-        if let Some(commands) = &self.subcommands {
-            let label = commands.metavar();
-            help_row(
-                &mut output,
-                width,
-                position,
-                2,
-                &label,
-                &paint(color, "1;32", &label),
-                "",
-            );
-            for child in &commands.choices {
-                if let Some(help) = &child.help {
-                    help_row(
-                        &mut output,
-                        width,
-                        position,
-                        4,
-                        &child.name,
-                        &paint(color, "1;32", &child.name),
-                        &expand(help, &self.prog, None),
-                    );
-                }
-            }
+        if let Some(commands) = inline {
+            commands.write_rows(&mut output, &self.prog, width, position, color);
         }
         if !rows.is_empty() {
             writeln!(output, "\n{}", paint(color, "1;34", "options:")).unwrap();
@@ -557,16 +577,16 @@ impl Parser {
             if rows.is_empty() && group.description.is_none() {
                 continue;
             }
-            output.push('\n');
-            if let Some(title) = &group.title {
-                writeln!(output, "{}", paint(color, "1;34", &format!("{title}:"))).unwrap();
-            }
-            if let Some(text) = &group.description {
-                writeln!(output, "{}\n", self.description(text, width, 2)).unwrap();
-            }
+            self.open_group(&mut output, group, width, color);
             for (label, styled, help) in rows {
                 help_row(&mut output, width, position, 2, &label, &styled, &help);
             }
+        }
+        if let Some(commands) = &self.subcommands
+            && let Some(group) = &commands.group
+        {
+            self.open_group(&mut output, group, width, color);
+            commands.write_rows(&mut output, &self.prog, width, position, color);
         }
         // HelpFormatter collapses three or more newlines throughout the report,
         // including blank lines at the edges of a raw module docstring.
