@@ -59,43 +59,59 @@ jobs:
             python -B "benchmarks/cpython_stdlib/full/shutil/$control.py" "${args[@]}" | tee "$RUNNER_TEMP/evidence/$control.log"
           done
           sha256sum target/debug/imre target/debug/libimre_runtime.a > "$RUNNER_TEMP/evidence/binaries.sha256"
-      - name: Generate and check the table with the resolved compiler and pinned CPython
+      - name: Check iterator and packed values against CPython on this compiler
+        run: |
+          out="$RUNNER_TEMP/evidence"
+          set -euo pipefail
+          test "$(python -c 'import sys;print(sys.version.split()[0])')" = 3.14.5
+          cargo test --locked -j 2 -p imre-compiler --lib effects::tests::local_and_final_analysis_agree_on_packed_list_allocations -- --exact > "$out/effects-test.log"
+          grep -F '1 passed; 0 failed;' "$out/effects-test.log"
+          work=$(mktemp -d "$RUNNER_TEMP/effects-XXXXXX")
+          : > "$out/effects-fixtures.tsv"
+          for fixture in tests/fixtures/iterator_pipelines/source_generator.py tests/fixtures/dataclasses/value_struct.py; do
+            name=$(basename "$fixture" .py)
+            PYTHONPATH="$PWD/stdlib" python -B "$fixture" > "$work/$name.ref" 2> "$work/$name.referr"
+            for mode in ordinary reachable; do
+              flags=()
+              if [[ "$mode" == reachable ]]; then flags+=(--reachable-only); fi
+              for level in 0 3; do
+                target/debug/imre build "$fixture" -o "$work/probe" --no-cache --opt-level "$level" --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 "${flags[@]}"
+                "$work/probe" > "$work/$name.native" 2> "$work/$name.stderr"
+                cmp "$work/$name.ref" "$work/$name.native"
+                cmp "$work/$name.referr" "$work/$name.stderr"
+                printf '%s\t-O%s\t%s\t%s\t%s\n' "$name" "$level" "$mode" "$(wc -l < "$work/$name.native")" "$(sha256sum "$work/$name.native" | cut -d' ' -f1)" >> "$out/effects-fixtures.tsv"
+              done
+            done
+          done
+          test "$(wc -l < "$out/effects-fixtures.tsv")" -eq 8
+      - name: Run original text and bytes missing-PATH fixtures on this source
         run: |
           set -euo pipefail
-          dir=benchmarks/cpython_stdlib/full
-          evidence="$RUNNER_TEMP/evidence"
-          if git cat-file -e "HEAD:$dir/support_table.py"; then
-            docs=$(git rev-parse HEAD)
-          else
-            docs=e185079af3084a9bf3b345c28b2f9e0f01e29cbb
-            git fetch --no-tags origin "$docs"
-            git show "$docs:$dir/support_table.py" > "$dir/support_table.py"
-            git show "$docs:$dir/api_examples.toml" > "$dir/api_examples.toml"
-          fi
-          echo "$docs" > "$evidence/table-source.txt"
-          python - <<'PY'
-          import sys
+          python -B - target/debug/imre target/debug/libimre_runtime.a /usr/bin/clang-18 "$RUNNER_TEMP/evidence/missing-path.json" <<'PY'
           from pathlib import Path
-          assert sys.version_info[:3] == (3, 14, 5)
-          p = Path('benchmarks/cpython_stdlib/full/api_examples.toml')
-          s = p.read_text()
-          assert '\nrandom = ' not in s and s.count('\nre = ') == 1
-          row = 'random = ["Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences.","benchmarks/cpython_stdlib/full/shutil/random.md"]'
-          p.write_text(s.replace('\nre = ', '\n' + row + '\nre = '))
-          PY
-          python -B "$dir/support_table.py" --imre target/debug/imre
-          python -B "$dir/support_table.py" --imre target/debug/imre --check
-          cp docs/stdlib.md "$dir/api_examples.toml" "$evidence/"
-          python - <<'PY'
-          from pathlib import Path
-          rows = [s for s in Path('docs/stdlib.md').read_text().splitlines() if s.startswith(('| `random` |', '| `shutil` |'))]
-          assert len(rows) == 2 and any(s.startswith('| `random` | Yes |') for s in rows)
-          print(*rows, sep='\n')
+          from types import SimpleNamespace
+          from tempfile import TemporaryDirectory
+          import hashlib, json, sys
+          from test import test_shutil
+          assert sys.version_info[:3] == (3,14,5)
+          assert hashlib.sha1(b'blob '+str(len(data:=Path(test_shutil.__file__).read_bytes())).encode()+b'\x00'+data).hexdigest() == 'fb1a7d876a617e17bcecbb8d8b654a2a87dafe48'
+          bench=Path('benchmarks/cpython_stdlib').resolve()
+          sys.path[:0] = [str(bench/'full/shutil'),str(bench)]
+          import which_defaults
+          args=SimpleNamespace(**dict(zip(('imre','runtime','clang'),map(Path,sys.argv[1:4]),strict=True)))
+          with TemporaryDirectory() as tmp:
+           rows=which_defaults.paired(args,test_shutil,Path(tmp))
+          for level,values in rows.items():
+           assert set(values)=={'test.test_shutil.TestWhich.test_environ_path_missing','test.test_shutil.TestWhichBytes.test_environ_path_missing'}
+           for value in values.values():
+            assert value['native_calls']==2 and value['native_environment']=={'PATH':'absent','processes':2}
+          Path(sys.argv[4]).write_text(json.dumps(rows,indent=2)+'\n')
+          print([(level,len(values)) for level,values in rows.items()])
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: shutil-random-table
+          name: shutil-random-canonical
           path: ${{ runner.temp }}/evidence
           if-no-files-found: error
           retention-days: 7
