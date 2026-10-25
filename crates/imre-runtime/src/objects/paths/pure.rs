@@ -1,9 +1,9 @@
 //! Pure paths retain their input segments: nesting a path of the same flavor
 //! splices its raw segments, while a foreign path contributes its POSIX spelling.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 use std::cell::OnceCell;
-use std::rc::Rc;
 
 use super::{Error, Kind, Object, Result, Storage, StorageCell, Str, object};
 use crate::objects::exceptions::string_repr;
@@ -240,9 +240,9 @@ impl PurePath {
         }
     }
     pub(super) fn into_object(self) -> *const Object {
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::PurePath(
-            Box::new(self),
-        )))))
+        ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+            Storage::PurePath(Box::new(self)),
+        ))))
     }
 }
 

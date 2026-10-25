@@ -1,6 +1,7 @@
 //! Synchronous context managers suspend their native frame at a bare yield.
 //! Each resume restores the caller's dynamically active exception and yielder.
 
+use crate::ObjectOwner;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -11,7 +12,7 @@ use super::records::imre_record_retain;
 use super::words::WordKind;
 use super::*;
 
-type Signal = Option<Rc<Object>>;
+type Signal = Option<ObjectOwner>;
 type Fiber = Coroutine<Signal, (), Signal>;
 type Callback = unsafe extern "C" fn(*const usize) -> usize;
 
@@ -77,7 +78,7 @@ pub unsafe extern "C" fn imre_context_new(
         active: RefCell::default(),
         entered: Cell::new(false),
     });
-    Rc::into_raw(Rc::new(Object(StorageCell::new(
+    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
         Storage::GeneratorContext(manager),
     ))))
 }
@@ -117,7 +118,9 @@ fn exit(manager: &Manager, error: Signal) -> bool {
     }
     match manager.resume(error.clone()) {
         CoroutineResult::Return(None) => true,
-        CoroutineResult::Return(Some(raised)) if error.is_some_and(|e| Rc::ptr_eq(&e, &raised)) => {
+        CoroutineResult::Return(Some(raised))
+            if error.is_some_and(|e| ObjectOwner::ptr_eq(&e, &raised)) =>
+        {
             false
         }
         CoroutineResult::Return(Some(raised)) => {
@@ -144,7 +147,7 @@ pub unsafe extern "C" fn imre_context_exit(handle: *const Object) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_context_throw(handle: *const Object, error: *const Object) -> u32 {
     // SAFETY: acquire the injected exception independently of the caller's handler.
-    let error = unsafe { acquire_rc(error as usize) };
+    let error = unsafe { ObjectOwner::acquire_word(error as usize) };
     // SAFETY: the caller roots the exact manager handle through this operation.
     let manager = unsafe { manager(handle) };
     u32::from(exit(&manager, Some(error)))

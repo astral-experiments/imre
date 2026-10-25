@@ -6,6 +6,7 @@
 //! except for compiler-proven readonly loop views; displaced owners are dropped
 //! only after mutable storage access ends.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 mod argparse;
 mod args;
@@ -60,8 +61,8 @@ enum Storage {
     Sha256(Box<sha2::Sha256>),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
-    ZipFile(Box<zipfile::Archive>),
-    ZipInfo(Rc<zipfile::Info>),
+    ZipFile(allocator_api2::boxed::Box<zipfile::Archive>),
+    ZipInfo(crate::Shared<zipfile::Info>),
     AsyncProcess(Box<processes::AsyncProcess>),
     AsyncTask(Rc<asyncio::Task>),
     GeneratorContext(Rc<contexts::Manager>),
@@ -132,7 +133,7 @@ impl Storage {
 pub unsafe extern "C" fn imre_object_retain(value: *const Object) {
     if !value.is_null() {
         // SAFETY: the caller roots this allocation.
-        unsafe { Rc::increment_strong_count(value) };
+        unsafe { ObjectOwner::increment_strong_count(value) };
     }
 }
 
@@ -142,13 +143,13 @@ pub unsafe extern "C" fn imre_object_retain(value: *const Object) {
 pub unsafe extern "C" fn imre_object_release(value: *const Object) {
     if !value.is_null() {
         // SAFETY: the caller transfers one live strong reference.
-        unsafe { Rc::decrement_strong_count(value) };
+        unsafe { ObjectOwner::decrement_strong_count(value) };
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_seq_new(kind: u32) -> *const Object {
-    Rc::into_raw(Words::new(kind).into_object())
+    ObjectOwner::into_raw(Words::new(kind).into_object())
 }
 
 /// Tests string membership with the list and needle rooted for the whole read.
@@ -425,7 +426,7 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
         })
     };
     finish(
-        result.map(|values| Rc::into_raw(values.into_object())),
+        result.map(|values| ObjectOwner::into_raw(values.into_object())),
         std::ptr::null(),
     )
 }
@@ -959,7 +960,7 @@ pub unsafe extern "C" fn imre_str_split_whitespace(value: *const Str) -> *const 
     {
         text::push_part(&mut result, &value, part);
     }
-    Rc::into_raw(result.into_object())
+    ObjectOwner::into_raw(result.into_object())
 }
 
 /// Bytes in 0x20..=0x7f contain no Python line break. Reducing fixed-size
@@ -1094,9 +1095,9 @@ pub unsafe extern "C" fn imre_str_splitlines_iter(value: *const Str) -> *const O
     // SAFETY: acquire a strong reference while the caller still roots the input.
     let owner: StrOwner = unsafe { StrOwner::acquire_word(value as usize) };
     let offsets = LineOffsets::new(&owner);
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LineIterator(
-        LineIterator { owner, offsets },
-    )))))
+    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+        Storage::LineIterator(LineIterator { owner, offsets }),
+    ))))
 }
 
 /// Splits Python line boundaries without retaining separators. CRLF is one
@@ -1127,7 +1128,7 @@ fn split_lines(
             .map_err(|_| Error::allocation())?;
         result.values.push(StrOwner::into_raw(own(range)) as usize);
     }
-    Ok(Rc::into_raw(result.into_object()))
+    Ok(ObjectOwner::into_raw(result.into_object()))
 }
 
 #[cfg(test)]
@@ -1417,13 +1418,17 @@ mod tests {
             // SAFETY: taking pending transfers one exception owner; retrieving
             // its message returns one independent string owner, both adopted once.
             unsafe {
-                let error = Rc::from_raw(exceptions::imre_error_take());
+                let error = ObjectOwner::from_raw(exceptions::imre_error_take());
                 assert_eq!(
-                    exceptions::imre_exception_matches(Rc::as_ptr(&error), Kind::IndexError as u32),
+                    exceptions::imre_exception_matches(
+                        ObjectOwner::as_ptr(&error),
+                        Kind::IndexError as u32
+                    ),
                     1,
                 );
-                let message =
-                    StrOwner::from_raw(exceptions::imre_exception_message(Rc::as_ptr(&error)));
+                let message = StrOwner::from_raw(exceptions::imre_exception_message(
+                    ObjectOwner::as_ptr(&error),
+                ));
                 assert_eq!(message.as_str(), expected);
             }
             assert_eq!(exceptions::imre_error_pending(), 0);
@@ -1566,9 +1571,12 @@ mod tests {
             let restored = StrOwner::from_raw(pointer);
             assert!(StrOwner::ptr_eq(&restored, &alias));
             assert_eq!(restored.as_str(), "preserved");
-            let error = Rc::from_raw(exceptions::imre_error_take());
+            let error = ObjectOwner::from_raw(exceptions::imre_error_take());
             assert_eq!(
-                exceptions::imre_exception_matches(Rc::as_ptr(&error), Kind::MemoryError as u32),
+                exceptions::imre_exception_matches(
+                    ObjectOwner::as_ptr(&error),
+                    Kind::MemoryError as u32
+                ),
                 1
             );
         }
@@ -2064,7 +2072,7 @@ mod tests {
             // SAFETY: the source is rooted; the returned sequence transfers one
             // owner, and inspection copies strings without retaining storage refs.
             let actual = unsafe {
-                let result = Rc::from_raw(imre_str_splitlines(StrOwner::as_ptr(&source)));
+                let result = ObjectOwner::from_raw(imre_str_splitlines(StrOwner::as_ptr(&source)));
                 result.0.with(|storage| {
                     storage
                         .sequence()

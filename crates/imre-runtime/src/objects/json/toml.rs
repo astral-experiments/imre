@@ -4,6 +4,7 @@
 //! Only its temporary syntax tree is dynamic; published values use the same exact
 //! native storage and cleanup rules as typed JSON.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 use ::toml::de::{DeTable, DeValue};
 
@@ -111,7 +112,7 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
                         .values
                         .push(convert(value.get_ref(), child)?.into_word());
                 }
-                Rc::into_raw(result.into_object()) as usize
+                ObjectOwner::into_raw(result.into_object()) as usize
             }
         }
         (DICTIONARY, DeValue::Table(values)) => {
@@ -127,9 +128,9 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
                     "parser rejected duplicate keys"
                 );
             }
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-                Box::new(result),
-            ))))) as usize
+            ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+                Storage::Dictionary(Box::new(result)),
+            )))) as usize
         }
         (RECORD, DeValue::Table(values)) => {
             let fields = schema.fields();

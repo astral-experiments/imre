@@ -2,6 +2,7 @@
 //! so nested values survive the source array; typed scalar results own only
 //! their native string or integer. No Python object graph or mutable alias is exposed.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 mod arrays;
 mod constants;
@@ -100,7 +101,7 @@ impl Node {
 pub(super) enum Nodes {
     Document(Rc<Vec<Node>>),
     /// Keep aliases of a mutable root array without enlarging every scalar view.
-    Root(Rc<Vec<Node>>, Rc<Object>),
+    Root(Rc<Vec<Node>>, ObjectOwner),
     /// Computed scalars and missing defaults do not need a second allocation.
     Single(Node),
 }
@@ -116,7 +117,7 @@ impl std::ops::Deref for Nodes {
 }
 
 impl Nodes {
-    pub(super) fn root_items(&self) -> Option<&Rc<Object>> {
+    pub(super) fn root_items(&self) -> Option<&ObjectOwner> {
         match self {
             Self::Root(_, items) => Some(items),
             _ => None,
@@ -153,7 +154,9 @@ impl View {
     }
 
     fn into_handle(self) -> *const Object {
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Json(self)))))
+        ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(Storage::Json(
+            self,
+        )))))
     }
 
     fn resolved(&self, index: usize) -> (&Self, usize) {
@@ -304,7 +307,7 @@ impl View {
 
     fn array(&self, children: &[usize]) -> *const Object {
         if let Some(items) = self.nodes.root_items() {
-            return Rc::into_raw(Rc::clone(items));
+            return ObjectOwner::into_raw(ObjectOwner::clone(items));
         }
         Self::children(&self.nodes, children)
     }
@@ -314,7 +317,7 @@ impl View {
         result
             .values
             .extend(children.iter().map(|&i| Self::handle(nodes, i) as usize));
-        Rc::into_raw(result.into_object())
+        ObjectOwner::into_raw(result.into_object())
     }
 
     fn select(&self, mut path: &[u8], mode: u32, literal: Option<&Str>) -> Result<usize, Error> {
@@ -673,7 +676,7 @@ pub unsafe extern "C" fn imre_json_get_receiver(value: *const Object) -> *const 
     let result = unsafe {
         with_view(value, |v| {
             v.get_receiver()?;
-            Rc::increment_strong_count(value);
+            ObjectOwner::increment_strong_count(value);
             Ok(value)
         })
     };
@@ -810,7 +813,7 @@ pub unsafe extern "C" fn imre_json_iter(value: *const Object) -> *const Object {
                     ));
                 }
             }
-            Ok(Rc::into_raw(items.into_object()))
+            Ok(ObjectOwner::into_raw(items.into_object()))
         })
     };
     finish(result, std::ptr::null())

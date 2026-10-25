@@ -1,4 +1,5 @@
 //! Process-local logging state for the native single-threaded runtime.
+use crate::ObjectOwner;
 use crate::StrOwner;
 mod levels;
 
@@ -6,21 +7,20 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::mem::MaybeUninit;
-use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::exceptions::Result;
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object};
 
 struct Entry {
-    handle: Rc<Object>,
+    handle: ObjectOwner,
     level: Int,
 }
 
 impl Entry {
     fn new(name: &str, level: i64) -> Self {
         Self {
-            handle: Rc::new(Object(StorageCell::new(Storage::Logger(StrOwner::new(
+            handle: ObjectOwner::new(Object(StorageCell::new(Storage::Logger(StrOwner::new(
                 Str::from(name),
             ))))),
             level: Int::small(level).unwrap(),
@@ -201,10 +201,10 @@ pub unsafe extern "C" fn imre_log_get(word: usize) -> *const Object {
     let name = if name.is_empty() { "root" } else { name };
     LOGGERS.with_borrow_mut(|logs| {
         if let Some(entry) = logs.entries.get(name) {
-            return Rc::into_raw(entry.handle.clone());
+            return ObjectOwner::into_raw(entry.handle.clone());
         }
         let entry = Entry::new(name, 0);
-        let result = Rc::into_raw(entry.handle.clone());
+        let result = ObjectOwner::into_raw(entry.handle.clone());
         logs.entries.insert(name.into(), entry);
         result
     })
@@ -253,7 +253,7 @@ pub unsafe extern "C" fn imre_log_name(logger: *const Object) -> *const Str {
 /// A receiver has already been evaluated and rooted by the caller.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_log_root(_logger: *const Object) -> *const Object {
-    LOGGERS.with_borrow(|logs| Rc::into_raw(logs.entries["root"].handle.clone()))
+    LOGGERS.with_borrow(|logs| ObjectOwner::into_raw(logs.entries["root"].handle.clone()))
 }
 
 /// # Safety
@@ -264,7 +264,7 @@ pub unsafe extern "C" fn imre_log_parent(logger: *const Object) -> usize {
     let name = unsafe { name(logger) };
     LOGGERS.with_borrow(|logs| {
         logs.parent_name(&name).map_or(0, |parent| {
-            Rc::into_raw(logs.entries[parent].handle.clone()) as usize
+            ObjectOwner::into_raw(logs.entries[parent].handle.clone()) as usize
         })
     })
 }

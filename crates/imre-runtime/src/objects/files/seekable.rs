@@ -2,6 +2,7 @@
 
 use super::super::{acquire_rc, zipfile::Member};
 use super::*;
+use crate::ObjectOwner;
 use num_traits::ToPrimitive;
 
 pub(super) struct Memory {
@@ -68,7 +69,7 @@ impl Memory {
 }
 
 impl FileState {
-    pub(in crate::objects) fn memory(data: Rc<Bytes>) -> Rc<Object> {
+    pub(in crate::objects) fn memory(data: Rc<Bytes>) -> ObjectOwner {
         Self {
             name: None,
             kind: FileKind::Memory,
@@ -77,7 +78,7 @@ impl FileState {
         .into_object()
     }
 
-    pub(in crate::objects) fn member(member: Member) -> Rc<Object> {
+    pub(in crate::objects) fn member(member: Member) -> ObjectOwner {
         Self {
             name: Some(member.name().clone()),
             kind: FileKind::Member,
@@ -86,8 +87,8 @@ impl FileState {
         .into_object()
     }
 
-    fn into_object(self) -> Rc<Object> {
-        Rc::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
+    fn into_object(self) -> ObjectOwner {
+        ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
     }
 
     pub(super) fn check_member(&mut self, message: &'static str) -> Result<()> {
@@ -175,7 +176,7 @@ pub unsafe extern "C" fn imre_bytes_io(initial: *const Bytes) -> *const Object {
         // SAFETY: the caller keeps the bytes owner live throughout construction.
         unsafe { acquire_rc(initial as usize) }
     };
-    Rc::into_raw(FileState::memory(data))
+    ObjectOwner::into_raw(FileState::memory(data))
 }
 
 /// Reposition the cursor using Python's signed offset and integer whence.

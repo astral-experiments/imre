@@ -1,7 +1,9 @@
 //! Checked Unicode sequence access and shallow slices of concrete list storage.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 use num_traits::{Signed, ToPrimitive};
+#[cfg(test)]
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
@@ -375,7 +377,7 @@ pub unsafe extern "C" fn imre_seq_slice(
         })
     };
     finish(
-        result.map(|values| Rc::into_raw(values.into_object())),
+        result.map(|values| ObjectOwner::into_raw(values.into_object())),
         std::ptr::null(),
     )
 }
@@ -416,13 +418,13 @@ impl StringIterator {
 pub unsafe extern "C" fn imre_str_iter(value: *const Str) -> *const Object {
     // SAFETY: the rooted source acquires an independent owner for the cursor.
     let owner = unsafe { StrOwner::acquire_word(value as usize) };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::StringIterator(
-        StringIterator {
+    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+        Storage::StringIterator(StringIterator {
             owner,
             position: 0,
             reverse: false,
-        },
-    )))))
+        }),
+    ))))
 }
 
 /// Creates a reverse Unicode cursor without copying or rescanning the prefix.
@@ -434,13 +436,13 @@ pub unsafe extern "C" fn imre_str_reverse_iter(value: *const Str) -> *const Obje
     // SAFETY: the rooted source acquires an independent owner for this cursor.
     let owner: StrOwner = unsafe { StrOwner::acquire_word(value as usize) };
     let position = owner.len();
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::StringIterator(
-        StringIterator {
+    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+        Storage::StringIterator(StringIterator {
             owner,
             position,
             reverse: true,
-        },
-    )))))
+        }),
+    ))))
 }
 
 /// Builds the eager integer list without allocating one-character strings.
@@ -542,9 +544,12 @@ mod tests {
         // SAFETY: taking pending transfers one exception owner; reading its
         // message acquires a separate string owner. Both transferred owners are consumed below.
         unsafe {
-            let error = Rc::from_raw(imre_error_take());
-            assert_eq!(imre_exception_matches(Rc::as_ptr(&error), kind as u32), 1);
-            let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+            let error = ObjectOwner::from_raw(imre_error_take());
+            assert_eq!(
+                imre_exception_matches(ObjectOwner::as_ptr(&error), kind as u32),
+                1
+            );
+            let message = StrOwner::from_raw(imre_exception_message(ObjectOwner::as_ptr(&error)));
             assert_eq!(message.as_str(), expected);
         }
         assert_eq!(imre_error_pending(), 0);
@@ -834,7 +839,7 @@ mod tests {
         // live exact handles, and error pointers are checked before adoption.
         unsafe {
             let list = Rc::from_raw(imre_list_new());
-            let sequence = Rc::from_raw(imre_seq_new(3));
+            let sequence = ObjectOwner::from_raw(imre_seq_new(3));
             assert!(imre_str_slice(StrOwner::as_ptr(&text), 0, 0, integer(0)).is_null());
             clear_error(Kind::ValueError, "slice step cannot be zero");
             assert!(imre_list_slice(Rc::as_ptr(&list), 0, 0, integer(0)).is_null());
@@ -843,7 +848,7 @@ mod tests {
             clear_error(Kind::ValueError, "slice step cannot be zero");
             assert_eq!(imre_list_slice_sum(Rc::as_ptr(&list), 0, 0, integer(-1)), 1);
             assert_eq!(imre_error_pending(), 0);
-            assert!(imre_seq_slice(Rc::as_ptr(&sequence), 0, 0, integer(0)).is_null());
+            assert!(imre_seq_slice(ObjectOwner::as_ptr(&sequence), 0, 0, integer(0)).is_null());
             clear_error(Kind::ValueError, "slice step cannot be zero");
             let empty =
                 StrOwner::from_raw(imre_str_slice(StrOwner::as_ptr(&text), 0, 0, integer(-1)));
@@ -891,14 +896,16 @@ mod tests {
         unsafe {
             let child = Rc::from_raw(imre_list_new());
             let weak = Rc::downgrade(&child);
-            let source = Rc::from_raw(imre_seq_new(4));
-            imre_seq_append(Rc::as_ptr(&source), Rc::as_ptr(&child) as usize, 4);
-            let slice = Rc::from_raw(imre_seq_slice(Rc::as_ptr(&source), 0, 0, 0));
-            assert!(!Rc::ptr_eq(&source, &slice));
+            let source = ObjectOwner::from_raw(imre_seq_new(4));
+            imre_seq_append(ObjectOwner::as_ptr(&source), Rc::as_ptr(&child) as usize, 4);
+            let slice =
+                ObjectOwner::from_raw(imre_seq_slice(ObjectOwner::as_ptr(&source), 0, 0, 0));
+            assert!(!ObjectOwner::ptr_eq(&source, &slice));
             drop(source);
             imre_list_append(Rc::as_ptr(&child), integer(17));
             drop(child);
-            let saved = Rc::from_raw(imre_seq_get_index(Rc::as_ptr(&slice), 0) as *const List);
+            let saved =
+                Rc::from_raw(imre_seq_get_index(ObjectOwner::as_ptr(&slice), 0) as *const List);
             drop(slice);
             assert_eq!(Int(imre_list_len(Rc::as_ptr(&saved))).as_small(), Some(1));
             assert_eq!(
@@ -914,15 +921,23 @@ mod tests {
                 (257, vec![0, 1, 2]),
                 (258, vec![0, integer(9)]),
             ] {
-                let source = Rc::from_raw(imre_seq_new(kind));
+                let source = ObjectOwner::from_raw(imre_seq_new(kind));
                 for &value in &values {
-                    imre_seq_append(Rc::as_ptr(&source), value, kind);
+                    imre_seq_append(ObjectOwner::as_ptr(&source), value, kind);
                 }
-                let slice = Rc::from_raw(imre_seq_slice(Rc::as_ptr(&source), 0, 0, integer(-1)));
+                let slice = ObjectOwner::from_raw(imre_seq_slice(
+                    ObjectOwner::as_ptr(&source),
+                    0,
+                    0,
+                    integer(-1),
+                ));
                 drop(source);
                 assert_eq!(slice.0.with(|storage| storage.sequence().kind.raw()), kind);
                 for (at, &expected) in values.iter().rev().enumerate() {
-                    assert_eq!(imre_seq_get_index(Rc::as_ptr(&slice), at), expected);
+                    assert_eq!(
+                        imre_seq_get_index(ObjectOwner::as_ptr(&slice), at),
+                        expected
+                    );
                 }
             }
         }
@@ -936,20 +951,26 @@ mod tests {
         // SAFETY: iterator creation acquires the source; every output is adopted
         // once before reusing its slot. Exhausted calls must not touch outputs.
         unsafe {
-            let iterator = Rc::from_raw(imre_str_iter(StrOwner::as_ptr(&source)));
+            let iterator = ObjectOwner::from_raw(imre_str_iter(StrOwner::as_ptr(&source)));
             let indexed = StrOwner::from_raw(imre_str_get(StrOwner::as_ptr(&source), integer(1)));
             drop(source);
             assert_eq!(weak.strong_count(), 1);
             let mut output = 73;
             let mut unused = 91;
             let mut values = Vec::new();
-            while imre_mapping_iter_next(Rc::as_ptr(&iterator), &mut output, &mut unused) != 0 {
+            while imre_mapping_iter_next(ObjectOwner::as_ptr(&iterator), &mut output, &mut unused)
+                != 0
+            {
                 values.push(StrOwner::from_raw(output as *const Str));
                 assert_eq!(unused, 91);
             }
             output = 73;
             assert_eq!(
-                imre_mapping_iter_next(Rc::as_ptr(&iterator), &mut output, std::ptr::null_mut()),
+                imre_mapping_iter_next(
+                    ObjectOwner::as_ptr(&iterator),
+                    &mut output,
+                    std::ptr::null_mut()
+                ),
                 0
             );
             assert_eq!(output, 73);

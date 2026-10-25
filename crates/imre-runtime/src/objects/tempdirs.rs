@@ -1,6 +1,7 @@
 //! Direct-with temporary workspaces. Creation is exclusive and private; cleanup
 //! walks held directory descriptors and never follows a descendant symlink.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, OsStr, OsString};
@@ -14,7 +15,6 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use rustix::fs::{self as rfs, AtFlags, Dir, FileType, Mode, OFlags};
 use rustix::io::Errno;
@@ -512,7 +512,7 @@ pub unsafe extern "C" fn imre_directory_context_new(
         temporary,
         armed: std::cell::Cell::new(temporary),
     };
-    Rc::into_raw(Rc::new(super::Object(super::StorageCell::new(
+    ObjectOwner::into_raw(ObjectOwner::new(super::Object(super::StorageCell::new(
         super::Storage::DirectoryContext(manager),
     ))))
 }

@@ -1,5 +1,6 @@
 //! Python value operations for JSON stored inside ordinary dataclass fields.
 
+use crate::ObjectOwner;
 use std::fmt::Write as _;
 
 use super::{Node, View};
@@ -65,7 +66,7 @@ impl View {
             unsafe {
                 crate::objects::values::write_repr(
                     output,
-                    std::rc::Rc::as_ptr(items) as usize,
+                    ObjectOwner::as_ptr(items) as usize,
                     crate::objects::words::WordKind::new(5),
                 )
             };

@@ -1,12 +1,12 @@
 //! Fixed string patterns and immutable snapshots of participating capture spans.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 mod captures;
 
 use captures::AnchoredCaptures;
 use std::cell::Cell;
 use std::ptr;
-use std::rc::Rc;
 
 use memchr::memmem::Finder;
 use regex_automata::meta::{self, Regex};
@@ -14,9 +14,7 @@ use regex_automata::util::primitives::NonMaxUsize;
 use regex_automata::{Anchored, Input, PatternID};
 use regex_syntax::hir::{Hir, HirKind, literal::Extractor};
 
-use super::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, acquire_rc, fail, finish, object,
-};
+use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, fail, finish, object};
 
 pub(super) struct Pattern {
     regex: Regex,
@@ -256,7 +254,7 @@ impl Pattern {
 }
 
 pub(super) struct Match {
-    pattern: Rc<Object>,
+    pattern: ObjectOwner,
     text: StrOwner,
     spans: Spans,
 }
@@ -332,7 +330,7 @@ impl Spans {
 }
 
 fn handle(storage: Storage) -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(storage))))
+    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(storage))))
 }
 
 /// Instantiates a literal already validated by the compiler with this regex engine.
@@ -432,7 +430,7 @@ unsafe fn match_text(pattern: *const Object, text: *const Str, anchored: bool) -
                 visible = slot;
             }
             handle(Storage::RegexMatch(Match {
-                pattern: acquire_rc(pattern as usize),
+                pattern: ObjectOwner::acquire_word(pattern as usize),
                 text: StrOwner::acquire_word(text as usize),
                 spans: Spans::new(&compiled.slots[..visible], (&*text).len()),
             }))
@@ -618,12 +616,13 @@ mod tests {
             let text = StrOwner::new(Str::from(text));
             // SAFETY: the helper owns each ABI handle until its last access.
             unsafe {
-                let compiled = Rc::from_raw(imre_regex_compile(pattern.as_ptr(), pattern.len()));
-                let found = Rc::from_raw(imre_regex_search(
-                    Rc::as_ptr(&compiled),
+                let compiled =
+                    ObjectOwner::from_raw(imre_regex_compile(pattern.as_ptr(), pattern.len()));
+                let found = ObjectOwner::from_raw(imre_regex_search(
+                    ObjectOwner::as_ptr(&compiled),
                     StrOwner::as_ptr(&text),
                 ));
-                let m = Rc::as_ptr(&found);
+                let m = ObjectOwner::as_ptr(&found);
                 let last = Str::new("last");
                 assert_eq!(
                     Int::borrow(imre_regex_bound(m, 1, 0, 0)).as_small(),
@@ -640,9 +639,9 @@ mod tests {
                 assert_eq!(imre_regex_present(m, 5, 0), 0);
                 assert_eq!(imre_regex_present(m, 13, 0), 1);
                 assert_eq!(imre_regex_present(m, 15, 0), 0);
-                let error = Rc::from_raw(imre_error_take());
+                let error = ObjectOwner::from_raw(imre_error_take());
                 assert_eq!(
-                    imre_exception_matches(Rc::as_ptr(&error), Kind::IndexError as u32),
+                    imre_exception_matches(ObjectOwner::as_ptr(&error), Kind::IndexError as u32),
                     1
                 );
             }
@@ -702,20 +701,22 @@ mod tests {
         let input = StrOwner::downgrade(&text);
         // SAFETY: every call uses the declared owners; returned owners are consumed once.
         unsafe {
-            let pattern = Rc::from_raw(imre_regex_compile(source.as_ptr(), source.len()));
-            let matched = Rc::from_raw(imre_regex_search(
-                Rc::as_ptr(&pattern),
+            let pattern = ObjectOwner::from_raw(imre_regex_compile(source.as_ptr(), source.len()));
+            let matched = ObjectOwner::from_raw(imre_regex_search(
+                ObjectOwner::as_ptr(&pattern),
                 StrOwner::as_ptr(&text),
             ));
             let other = StrOwner::new(Str::new("xyyΠ"));
-            drop(Rc::from_raw(imre_regex_search(
-                Rc::as_ptr(&pattern),
+            drop(ObjectOwner::from_raw(imre_regex_search(
+                ObjectOwner::as_ptr(&pattern),
                 StrOwner::as_ptr(&other),
             )));
             let miss = StrOwner::new(Str::new("xyz"));
-            assert!(imre_regex_search(Rc::as_ptr(&pattern), StrOwner::as_ptr(&miss)).is_null());
+            assert!(
+                imre_regex_search(ObjectOwner::as_ptr(&pattern), StrOwner::as_ptr(&miss)).is_null()
+            );
             drop((pattern, text));
-            let m = Rc::as_ptr(&matched);
+            let m = ObjectOwner::as_ptr(&matched);
             assert_eq!(*StrOwner::from_raw(imre_regex_group(m, 1, 0)), "Π");
             assert!(imre_regex_group(m, 3, 0).is_null());
             let empty = Str::new("empty");
@@ -743,9 +744,9 @@ mod tests {
                 (usize::MAX, 0),
             ] {
                 assert!(imre_regex_group(m, selector, named).is_null());
-                let error = Rc::from_raw(imre_error_take());
+                let error = ObjectOwner::from_raw(imre_error_take());
                 assert_eq!(
-                    imre_exception_matches(Rc::as_ptr(&error), Kind::IndexError as u32),
+                    imre_exception_matches(ObjectOwner::as_ptr(&error), Kind::IndexError as u32),
                     1
                 );
             }

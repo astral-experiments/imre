@@ -1,10 +1,10 @@
 //! Native parsing for a fixed declaration of long options. Parsing checks all
 //! input before constructing the compiler-described, owned namespace record.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 use std::borrow::Cow;
 use std::io::{self, Write};
-use std::rc::Rc;
 
 use icu_properties::props::{EnumeratedProperty, GeneralCategory};
 use serde::Deserialize;
@@ -477,7 +477,7 @@ impl OptionSpec {
             values
                 .values
                 .extend(args.into_iter().map(|value| scalar(self.kind, value)));
-            return Rc::into_raw(values.into_object()) as usize;
+            return ObjectOwner::into_raw(values.into_object()) as usize;
         }
         args.as_ref()
             .and_then(|args| args.first().copied())

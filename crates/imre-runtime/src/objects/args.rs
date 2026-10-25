@@ -1,9 +1,9 @@
 //! C-main argument capture with one lazy, shared Python-visible list.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_char};
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Object, Str, Words, fail};
@@ -16,7 +16,7 @@ struct Arguments {
 
 thread_local! {
     static ARGUMENTS: Cell<Option<Arguments>> = const { Cell::new(None) };
-    static ARGV: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
+    static ARGV: RefCell<Option<ObjectOwner>> = const { RefCell::new(None) };
 }
 
 /// Captures argv without decoding or allocating. Generated main calls this only
@@ -38,7 +38,7 @@ pub unsafe extern "C" fn imre_args_init(argc: i32, argv: *const *const c_char) {
 }
 
 /// Decodes all inputs before publishing a list, so a failed access can be retried.
-fn decode(arguments: Arguments) -> Result<Rc<Object>> {
+fn decode(arguments: Arguments) -> Result<ObjectOwner> {
     let mut values = Words::new(3);
     values
         .values
@@ -131,7 +131,7 @@ pub extern "C" fn imre_sys_executable() -> *const Str {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_argv() -> *const Object {
     if let Some(value) = ARGV.with(|argv| argv.borrow().clone()) {
-        return Rc::into_raw(value);
+        return ObjectOwner::into_raw(value);
     }
     let arguments = ARGUMENTS
         .get()
@@ -139,7 +139,7 @@ pub extern "C" fn imre_sys_argv() -> *const Object {
     let result = decode(arguments).map(|value| {
         let previous = ARGV.with(|argv| argv.replace(Some(value.clone())));
         drop(previous);
-        Rc::into_raw(value)
+        ObjectOwner::into_raw(value)
     });
     finish(result, std::ptr::null())
 }
@@ -173,19 +173,29 @@ mod tests {
         // returned handles are owned and used with their declared representations.
         unsafe {
             imre_args_init(pointers.len() as i32, pointers.as_ptr());
-            let first = Rc::from_raw(imre_sys_argv());
-            let alias = Rc::from_raw(imre_sys_argv());
-            assert!(Rc::ptr_eq(&first, &alias));
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&first))).as_small(), Some(3));
+            let first = ObjectOwner::from_raw(imre_sys_argv());
+            let alias = ObjectOwner::from_raw(imre_sys_argv());
+            assert!(ObjectOwner::ptr_eq(&first, &alias));
+            assert_eq!(
+                Int(imre_seq_len(ObjectOwner::as_ptr(&first))).as_small(),
+                Some(3)
+            );
             let unicode = StrOwner::from_raw(imre_seq_get(
-                Rc::as_ptr(&first),
+                ObjectOwner::as_ptr(&first),
                 Int::small(2).unwrap().0,
             ) as *const Str);
             assert_eq!(unicode.as_str(), "é🦀");
             let added = StrOwner::new(Str::new("new argument"));
-            imre_seq_append(Rc::as_ptr(&first), StrOwner::as_ptr(&added) as usize, 3);
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&alias))).as_small(), Some(4));
-            let weak = Rc::downgrade(&first);
+            imre_seq_append(
+                ObjectOwner::as_ptr(&first),
+                StrOwner::as_ptr(&added) as usize,
+                3,
+            );
+            assert_eq!(
+                Int(imre_seq_len(ObjectOwner::as_ptr(&alias))).as_small(),
+                Some(4)
+            );
+            let weak = ObjectOwner::downgrade(&first);
             let pending = imre_exception_new(Kind::RuntimeError as u32, std::ptr::null());
             imre_error_set(pending);
             imre_args_clear();
@@ -193,7 +203,10 @@ mod tests {
             imre_object_release(pending);
             imre_object_release(pending);
             drop(first);
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&alias))).as_small(), Some(4));
+            assert_eq!(
+                Int(imre_seq_len(ObjectOwner::as_ptr(&alias))).as_small(),
+                Some(4)
+            );
             drop(alias);
             assert!(weak.upgrade().is_none());
         }

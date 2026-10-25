@@ -5,6 +5,7 @@
 //! publishes incomplete values or leaks earlier fields. Unknown fields are
 //! validated and skipped without building an intermediate object tree.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 use std::borrow::Cow;
 use std::fmt;
@@ -339,7 +340,7 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
                 values.values.push(value.into_word());
             }
         }
-        let pointer = Rc::into_raw(values.into_object()) as usize;
+        let pointer = ObjectOwner::into_raw(values.into_object()) as usize;
         // SAFETY: this new generic sequence owns every decoded child word.
         Ok(unsafe { OwnedWord::from_owned(pointer, self.0.storage()) })
     }
@@ -357,9 +358,9 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
                     return Err(A::Error::custom("duplicate JSON dictionary key"));
                 }
             }
-            let pointer = Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-                Box::new(mapping),
-            ))))) as usize;
+            let pointer = ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+                Storage::Dictionary(Box::new(mapping)),
+            )))) as usize;
             // SAFETY: the new dictionary owns every successfully decoded entry.
             return Ok(unsafe { OwnedWord::from_owned(pointer, self.0.storage()) });
         }

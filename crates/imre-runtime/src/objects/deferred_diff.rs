@@ -4,6 +4,7 @@
 
 use super::difflib::{Output, materialize_words};
 use super::{Object, Str, Words, object};
+use crate::ObjectOwner;
 use crate::StrOwner;
 use std::cell::{OnceCell, Ref, RefCell};
 use std::rc::{Rc, Weak};
@@ -232,7 +233,7 @@ pub unsafe extern "C" fn imre_ndiff_deferred(
         signed: OnceCell::new(),
         projected: OnceCell::new(),
     });
-    Rc::into_raw(Words::deferred(Deferred(View::Full(source))).into_object())
+    ObjectOwner::into_raw(Words::deferred(Deferred(View::Full(source))).into_object())
 }
 
 /// # Safety
@@ -249,7 +250,7 @@ pub unsafe extern "C" fn imre_str_list_copy(list: *const Object) -> *const Objec
             )
         })
     };
-    Rc::into_raw(words.into_object())
+    ObjectOwner::into_raw(words.into_object())
 }
 
 fn same_sign(first: &str, second: Option<&str>) -> bool {
@@ -328,7 +329,7 @@ pub unsafe extern "C" fn imre_str_list_filter(
             )
         })
     };
-    Rc::into_raw(result.into_object())
+    ObjectOwner::into_raw(result.into_object())
 }
 
 /// Stable ordering by the suffix starting at a fixed nonnegative scalar index.
@@ -365,7 +366,7 @@ pub unsafe extern "C" fn imre_str_list_sorted_suffix(
             }
         })
     };
-    Rc::into_raw(result.into_object())
+    ObjectOwner::into_raw(result.into_object())
 }
 
 /// # Safety

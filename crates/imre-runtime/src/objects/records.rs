@@ -1,17 +1,18 @@
 //! Fixed native records with a compact header and compiler-described payload.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::rc::Rc;
 
-use super::{Object, fail, words::WordKind};
+use super::{fail, words::WordKind};
 
 pub(super) mod strings;
 
 enum Release {
     Record(*const usize),
-    Object(Rc<Object>),
+    Object(ObjectOwner),
 }
 
 thread_local! {
@@ -389,7 +390,7 @@ pub unsafe extern "C" fn imre_record_release(payload: *const usize) {
 
 /// Defer object drops during a record traversal. The last owner can flush a file
 /// or release further records through a container.
-pub(super) fn release_object_word(object: Rc<Object>) {
+pub(super) fn release_object_word(object: ObjectOwner) {
     PENDING_RELEASES.with(|slot| {
         // SAFETY: the outer record release owns the queue while this slot is set.
         if let Some(pending) = unsafe { slot.get().as_ref() } {
@@ -571,8 +572,8 @@ mod tests {
         unsafe {
             let list = Rc::<List>::from_raw(imre_list_new());
             let weak_list = Rc::downgrade(&list);
-            let object = Rc::from_raw(imre_seq_new(2));
-            let weak_object = Rc::downgrade(&object);
+            let object = ObjectOwner::from_raw(imre_seq_new(2));
+            let weak_object = ObjectOwner::downgrade(&object);
             let child = imre_record_new(&child_descriptor);
             replace(child, 0, StrOwner::as_ptr(&text) as usize, 3);
             let record = imre_record_new(&descriptor);
@@ -581,7 +582,7 @@ mod tests {
             replace(record, 2, Rc::as_ptr(&integer) as usize, 2);
             replace(record, 3, StrOwner::as_ptr(&text) as usize, 3);
             replace(record, 4, Rc::as_ptr(&list) as usize, 4);
-            replace(record, 5, Rc::as_ptr(&object) as usize, 5);
+            replace(record, 5, ObjectOwner::as_ptr(&object) as usize, 5);
             replace(record, 6, child as usize, 6);
             // Nullable owning words remain absent; uninitialized regular owning
             // slots on a second record also require safe final cleanup.

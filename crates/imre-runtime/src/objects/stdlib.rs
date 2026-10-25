@@ -1,8 +1,8 @@
 //! Sealed scalar sorting and UTF-8 builders. User callbacks finish before entry.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 use std::cmp::Ordering;
-use std::rc::Rc;
 
 use smallvec::SmallVec;
 
@@ -232,7 +232,10 @@ pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const 
             })
         };
         // Preserve the header verbatim, including a surrounding sort's marker.
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(saved))))).cast()
+        ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+            Storage::Sequence(saved),
+        ))))
+        .cast()
     }
 }
 
@@ -694,8 +697,8 @@ mod tests {
         for (reverse, order) in [(0, [1, 4, 3, 0, 2]), (1, [0, 2, 3, 1, 4])] {
             // SAFETY: the list and its string owners stay rooted throughout the sort.
             unsafe {
-                let list = Rc::from_raw(super::super::imre_seq_new(3));
-                let pointer = Rc::as_ptr(&list);
+                let list = ObjectOwner::from_raw(super::super::imre_seq_new(3));
+                let pointer = ObjectOwner::as_ptr(&list);
                 for text in &texts {
                     super::super::imre_seq_append(pointer, StrOwner::as_ptr(text) as usize, 3);
                 }
@@ -740,15 +743,15 @@ mod tests {
         // SAFETY: both strings and both distinct list handles stay rooted. The
         // saved list is released exactly once after restoration.
         unsafe {
-            let list = Rc::from_raw(super::super::imre_seq_new(3));
-            let alias = Rc::clone(&list);
-            let target = Rc::as_ptr(&list);
+            let list = ObjectOwner::from_raw(super::super::imre_seq_new(3));
+            let alias = ObjectOwner::clone(&list);
+            let target = ObjectOwner::as_ptr(&list);
             super::super::imre_seq_append(target, StrOwner::as_ptr(&original) as usize, 3);
-            let saved = Rc::from_raw(imre_sort_detach(target.cast(), 3).cast::<Object>());
+            let saved = ObjectOwner::from_raw(imre_sort_detach(target.cast(), 3).cast::<Object>());
             assert!(alias.0.with(|storage| storage.sequence().values.is_empty()));
             assert_eq!(StrOwner::strong_count(&original), 2);
             super::super::imre_seq_append(target, StrOwner::as_ptr(&addition) as usize, 3);
-            imre_sort_restore(target.cast(), 3, Rc::as_ptr(&saved).cast(), 0);
+            imre_sort_restore(target.cast(), 3, ObjectOwner::as_ptr(&saved).cast(), 0);
             assert_eq!(
                 alias.0.with(|storage| storage.sequence().values[0]),
                 StrOwner::as_ptr(&original) as usize,

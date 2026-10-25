@@ -2,6 +2,7 @@
 //! buffers are each bounded even when the caller requests the entire member.
 use crate::StrOwner;
 use std::io::SeekFrom;
+#[cfg(test)]
 use std::rc::Rc;
 
 use flate2::{Crc, Decompress, FlushDecompress, Status};
@@ -27,7 +28,7 @@ fn deflate_error(message: &str) -> Error {
 
 pub(in crate::objects) struct Member {
     source: Source,
-    info: Rc<Info>,
+    info: crate::Shared<Info>,
     start: u64,
     packed_at: u64,
     packed_left: u64,
@@ -45,7 +46,7 @@ pub(in crate::objects) struct Member {
 impl Member {
     pub(super) fn open(
         source: Source,
-        info: Rc<Info>,
+        info: crate::Shared<Info>,
         encrypted_name: impl FnOnce() -> Str,
     ) -> Result<Self> {
         let at = u64::try_from(info.offset).map_err(|_| bad("Truncated file header"))?;

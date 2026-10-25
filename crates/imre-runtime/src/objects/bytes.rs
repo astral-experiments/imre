@@ -1,5 +1,6 @@
 //! Immutable byte values with exact ownership, Python repr, and strict UTF-8.
 
+use crate::ObjectOwner;
 use crate::StrOwner;
 use std::rc::Rc;
 
@@ -28,12 +29,12 @@ pub(super) struct ByteOutput {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_byte_output_new() -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ByteOutput(
-        ByteOutput {
+    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+        Storage::ByteOutput(ByteOutput {
             bytes: Vec::new(),
             invalid: false,
-        },
-    )))))
+        }),
+    ))))
 }
 
 /// Hints at most 256 bytes per private buffer. A loop can break or raise before
@@ -575,9 +576,9 @@ impl BytesIterator {
 pub unsafe extern "C" fn imre_bytes_iter(value: *const Bytes) -> *const Object {
     // SAFETY: the rooted source acquires an independent owner for the cursor.
     let owner = unsafe { acquire_rc(value as usize) };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::BytesIterator(
-        BytesIterator { owner, position: 0 },
-    )))))
+    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+        Storage::BytesIterator(BytesIterator { owner, position: 0 }),
+    ))))
 }
 
 #[cfg(test)]
@@ -595,12 +596,12 @@ mod tests {
         // SAFETY: taking the pending exception transfers one live owner, and
         // message extraction returns another independently owned string.
         unsafe {
-            let error = Rc::from_raw(error);
+            let error = ObjectOwner::from_raw(error);
             assert_eq!(
-                imre_exception_matches(Rc::as_ptr(&error), Kind::IndexError as u32),
+                imre_exception_matches(ObjectOwner::as_ptr(&error), Kind::IndexError as u32),
                 1
             );
-            let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+            let message = StrOwner::from_raw(imre_exception_message(ObjectOwner::as_ptr(&error)));
             assert_eq!(message.as_str(), expected);
         }
         assert_eq!(imre_error_pending(), 0);
@@ -708,15 +709,20 @@ mod tests {
             // before the next call, and failed validation acquires no owner.
             unsafe {
                 assert!(imre_bytes_decode(Rc::as_ptr(&source)).is_null());
-                let ordinary = Rc::from_raw(imre_error_take());
-                let expected = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&ordinary)));
+                let ordinary = ObjectOwner::from_raw(imre_error_take());
+                let expected =
+                    StrOwner::from_raw(imre_exception_message(ObjectOwner::as_ptr(&ordinary)));
                 assert!(imre_bytes_validate_utf8(Rc::as_ptr(&source)).is_null());
-                let error = Rc::from_raw(imre_error_take());
+                let error = ObjectOwner::from_raw(imre_error_take());
                 assert_eq!(
-                    imre_exception_matches(Rc::as_ptr(&error), Kind::UnicodeDecodeError as u32),
+                    imre_exception_matches(
+                        ObjectOwner::as_ptr(&error),
+                        Kind::UnicodeDecodeError as u32
+                    ),
                     1
                 );
-                let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+                let message =
+                    StrOwner::from_raw(imre_exception_message(ObjectOwner::as_ptr(&error)));
                 assert_eq!(message, expected);
                 assert_eq!(Rc::strong_count(&source), 1);
                 assert_eq!(imre_error_pending(), 0);
@@ -728,9 +734,9 @@ mod tests {
     fn byte_output_transfers_its_allocation_at_conversion() {
         // SAFETY: the sole owner roots this private builder through conversion.
         unsafe {
-            let output = Rc::from_raw(imre_byte_output_new());
+            let output = ObjectOwner::from_raw(imre_byte_output_new());
             imre_byte_output_reserve_range(std::ptr::null(), 1, 2001, 3, 2);
-            imre_byte_output_reserve_range(Rc::as_ptr(&output), 1, 2001, 3, usize::MAX);
+            imre_byte_output_reserve_range(ObjectOwner::as_ptr(&output), 1, 2001, 3, usize::MAX);
             output.0.with(|storage| {
                 let Storage::ByteOutput(output) = storage else {
                     unreachable!()
@@ -738,14 +744,17 @@ mod tests {
                 assert_eq!(output.bytes.capacity(), 256);
                 assert!(output.bytes.is_empty());
             });
-            assert_eq!(imre_byte_output_append_pair(Rc::as_ptr(&output), 1, 511), 1);
+            assert_eq!(
+                imre_byte_output_append_pair(ObjectOwner::as_ptr(&output), 1, 511),
+                1
+            );
             let buffer = output.0.with(|storage| {
                 let Storage::ByteOutput(output) = storage else {
                     unreachable!()
                 };
                 output.bytes.as_ptr()
             });
-            let result = Rc::from_raw(imre_byte_output_finish(Rc::as_ptr(&output)));
+            let result = Rc::from_raw(imre_byte_output_finish(ObjectOwner::as_ptr(&output)));
             drop(output);
             assert_eq!(result.as_ptr(), buffer);
             assert_eq!(result.as_slice(), [0, 255]);
@@ -803,12 +812,16 @@ mod tests {
                 // conversion transfers only a pending exception owner.
                 unsafe {
                     assert!(imre_bytes_list(Rc::as_ptr(&source)).is_null());
-                    let error = Rc::from_raw(imre_error_take());
+                    let error = ObjectOwner::from_raw(imre_error_take());
                     assert_eq!(
-                        imre_exception_matches(Rc::as_ptr(&error), Kind::ValueError as u32),
+                        imre_exception_matches(
+                            ObjectOwner::as_ptr(&error),
+                            Kind::ValueError as u32
+                        ),
                         1
                     );
-                    let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+                    let message =
+                        StrOwner::from_raw(imre_exception_message(ObjectOwner::as_ptr(&error)));
                     assert_eq!(message.as_str(), "bytes must be in range(0, 256)");
                     source.0.with(|values| {
                         assert_eq!(values.len(), 129);

@@ -1,6 +1,7 @@
 //! Async subprocess handles live on the language thread. Only the direct child
 //! and owned native pipe buffers cross into its reaping worker.
 
+use crate::ObjectOwner;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
@@ -28,7 +29,7 @@ unsafe fn wait_for_process(handle: *const Object) -> bool {
         return true;
     }
     // SAFETY: the compiler roots this exact process through the await.
-    let owner: Rc<Object> = unsafe { acquire_rc(handle as usize) };
+    let owner: ObjectOwner = unsafe { ObjectOwner::acquire_word(handle as usize) };
     ready(&owner) || asyncio::suspend(Box::new(move || ready(&owner)))
 }
 
@@ -115,9 +116,9 @@ pub unsafe extern "C" fn imre_async_process_spawn(
     let result = unsafe { prepare_process(args, cwd, env) }
         .and_then(|(launch, cwd)| AsyncProcess::spawn(launch, cwd.as_ref(), stdout, stderr))
         .map(|process| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::AsyncProcess(
-                Box::new(process),
-            )))))
+            ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+                Storage::AsyncProcess(Box::new(process)),
+            ))))
         });
     finish(result, std::ptr::null())
 }

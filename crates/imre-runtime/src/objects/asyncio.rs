@@ -1,6 +1,7 @@
 //! Cooperative tasks run generated code on its owning thread. Native subprocess
 //! workers wake that thread when captured output is ready.
 
+use crate::ObjectOwner;
 mod event_loop;
 pub(super) use event_loop::EventLoop;
 
@@ -18,7 +19,7 @@ use super::*;
 type Ready = Box<dyn Fn() -> bool>;
 type Fiber = Coroutine<(), Ready, Outcome>;
 type Callback = unsafe extern "C" fn(*const usize) -> usize;
-type Outcome = std::result::Result<OwnedWord, Rc<Object>>;
+type Outcome = std::result::Result<OwnedWord, ObjectOwner>;
 
 struct Call {
     callback: Callback,
@@ -43,7 +44,7 @@ pub(super) struct Task {
     call: RefCell<Option<Call>>,
     fiber: RefCell<Option<Fiber>>,
     ready: RefCell<Option<Ready>>,
-    active: RefCell<Option<Rc<Object>>>,
+    active: RefCell<Option<ObjectOwner>>,
     outcome: RefCell<Option<Outcome>>,
     scheduled: Cell<bool>,
     cancelled: Cell<bool>,
@@ -56,7 +57,7 @@ pub(super) struct Task {
 #[derive(Default)]
 pub(super) struct Group {
     children: RefCell<Vec<Rc<Task>>>,
-    error: RefCell<Option<Rc<Object>>>,
+    error: RefCell<Option<ObjectOwner>>,
     parent: RefCell<Weak<Task>>,
     state: Cell<GroupState>,
     aborting: Cell<bool>,
@@ -292,7 +293,7 @@ fn task_of(object: &Object) -> Rc<Task> {
 }
 
 fn resource(storage: Storage) -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(storage))))
+    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(storage))))
 }
 
 /// # Safety
@@ -496,7 +497,9 @@ pub unsafe extern "C" fn imre_async_abort_group(group: *const Object, error: *co
             let Storage::TaskGroup(group) = storage else {
                 fail("SystemError", "expected TaskGroup");
             };
-            group.error.replace(Some(acquire_rc(error as usize)));
+            group
+                .error
+                .replace(Some(ObjectOwner::acquire_word(error as usize)));
         })
     };
 }
@@ -653,8 +656,8 @@ pub unsafe extern "C" fn imre_async_gather(
         let word = match outcome.as_ref().expect("all gather inputs completed") {
             Ok(value) if tagged && value.word != 0 => value.word | 4,
             Ok(value) => value.word,
-            Err(error) if kind & 0xff == 9 => Rc::as_ptr(error) as usize | 3,
-            Err(error) => Rc::as_ptr(error) as usize,
+            Err(error) if kind & 0xff == 9 => ObjectOwner::as_ptr(error) as usize | 3,
+            Err(error) => ObjectOwner::as_ptr(error) as usize,
         };
         // SAFETY: the outcome roots its word and the exact list acquires a
         // reference for the returned sequence before that owner is released.
