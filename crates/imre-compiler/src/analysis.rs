@@ -371,7 +371,7 @@ impl Session {
     pub(crate) fn check_scopes(
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
@@ -382,7 +382,7 @@ impl Session {
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -413,31 +413,23 @@ struct CheckedFile<'db> {
     #[returns(copy)]
     file: File,
     skipped: Vec<TextRange>,
-    overloads: Vec<CheckedOverload>,
+    overloads: Vec<CheckedDiagnostic>,
 }
 
-/// The frontend validates context-manager decorators and the exact calls
-/// it lowers with a signature different from typeshed's overloads.
+/// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum CheckedOverload {
+pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
-    Call(TextRange),
-    AbstractMappingCall(TextRange),
+    Exact(&'static str, TextRange),
 }
 
-impl CheckedOverload {
-    pub(crate) fn range(self) -> TextRange {
-        match self {
-            Self::Decorator(r) | Self::Call(r) | Self::AbstractMappingCall(r) => r,
-        }
-    }
-
+impl CheckedDiagnostic {
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
-        match (self, diagnostic) {
-            (Self::Decorator(decorator), "no-matching-overload") => decorator.contains_range(range),
-            (Self::Call(call), "no-matching-overload")
-            | (Self::AbstractMappingCall(call), "call-non-callable") => call == range,
-            _ => false,
+        match self {
+            Self::Decorator(decorator) => {
+                diagnostic == "no-matching-overload" && decorator.contains_range(range)
+            }
+            Self::Exact(id, checked) => diagnostic == id && range == checked,
         }
     }
 }
@@ -581,7 +573,7 @@ impl AnalysisCache {
         fresh: &mut Session,
         inputs: &crate::SourceInputs,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         if let Some(cached) = &mut self.diagnostics
             && cached.same_files(fresh, inputs)

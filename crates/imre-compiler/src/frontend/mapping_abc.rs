@@ -35,7 +35,7 @@ impl Checker<'_> {
             inputs.push(self.expr(&keyword.value)?);
         }
         self.graph
-            .checked_abstract_mapping(self.module, call.range());
+            .checked_diagnostic(self.module, "call-non-callable", call.range());
         inputs.push(Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {

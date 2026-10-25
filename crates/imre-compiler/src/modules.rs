@@ -8,13 +8,14 @@ use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
-use crate::analysis::{CheckedOverload, Session};
+use crate::analysis::{CheckedDiagnostic, Session};
 use crate::ir::PosixPathOperation;
 use crate::watch::FileSystem;
 
 mod declarations;
 mod empty_keywords;
 mod entry_profile;
+mod os;
 mod reachability;
 mod type_aliases;
 
@@ -94,6 +95,7 @@ pub(crate) enum IntrinsicModule {
     Hashlib,
     Base64,
     Zipfile,
+    Csv,
     Re,
     Enum,
     Zlib,
@@ -119,6 +121,8 @@ pub(crate) enum Intrinsic {
     LevelMap { names: bool },
     LogRecord,
     MakeLogRecord,
+    LogFormatter,
+    ClockConverter(bool),
     LogRecordFlag(u8),
     BasicConfig,
     LogLevel(i64),
@@ -135,6 +139,7 @@ pub(crate) enum Intrinsic {
     Semaphore,
     ContextManager,
     FunctionCache,
+    LruCache,
     CachedProperty,
     NewType,
     Reduce,
@@ -150,6 +155,7 @@ pub(crate) enum Intrinsic {
     NullContext,
     SignalNumber(i64),
     WallTime,
+    TimeSleep,
     PatchSet,
     Awaitable,
     TypeVar,
@@ -169,6 +175,7 @@ pub(crate) enum Intrinsic {
     Ndiff,
     Final,
     Argv,
+    OrigArgv,
     Logger,
     LogRoot,
     LogEmit(Option<u8>),
@@ -193,6 +200,8 @@ pub(crate) enum Intrinsic {
     BytesIo,
     BadZipFile,
     BadGzipFile,
+    CsvReader,
+    CsvError,
     RegexCompile,
     RegexSearch,
     RegexSub,
@@ -255,6 +264,8 @@ pub(crate) enum Intrinsic {
     Environ,
     GetEnv,
     GetCwd,
+    Fd(crate::ir::FdOperation),
+    OpenFlag(&'static str),
     FsPath,
     PosixPath(PosixPathOperation),
     Unquote,
@@ -301,6 +312,7 @@ impl IntrinsicModule {
             "hashlib" => Some(Self::Hashlib),
             "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
+            "csv" => Some(Self::Csv),
             "re" => Some(Self::Re),
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
@@ -317,8 +329,13 @@ impl IntrinsicModule {
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
-        if self == Self::Os && name == "path" {
-            return Some(Binding::IntrinsicModule(Self::PosixPath));
+        if self == Self::Os {
+            if name == "path" {
+                return Some(Binding::IntrinsicModule(Self::PosixPath));
+            }
+            if let Some(symbol) = os::descriptor(name) {
+                return Some(Binding::Intrinsic(symbol));
+            }
         }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
@@ -334,6 +351,9 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
+            (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
+            (Self::Time, "localtime") => Intrinsic::ClockConverter(false),
             (Self::Logging, "LogRecord") => Intrinsic::LogRecord,
             (Self::Logging, "logThreads") => Intrinsic::LogRecordFlag(1),
             (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
@@ -362,6 +382,7 @@ impl IntrinsicModule {
             (Self::Asyncio, "Semaphore") => Intrinsic::Semaphore,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
+            (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal, "SIGINT") => Intrinsic::SignalNumber(2),
             (Self::Signal, "SIGTERM") => Intrinsic::SignalNumber(15),
@@ -370,6 +391,7 @@ impl IntrinsicModule {
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
+            (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
             (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
@@ -396,6 +418,7 @@ impl IntrinsicModule {
                 Intrinsic::RawDescriptionHelpFormatter
             }
             (Self::Sys, "argv") => Intrinsic::Argv,
+            (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
             (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
             (Self::Sys, "exit") => Intrinsic::SysExit,
@@ -439,6 +462,8 @@ impl IntrinsicModule {
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
             (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
+            (Self::Csv, "reader") => Intrinsic::CsvReader,
+            (Self::Csv, "Error") => Intrinsic::CsvError,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
@@ -564,7 +589,7 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
-    checked_calls: std::cell::RefCell<Vec<Vec<CheckedOverload>>>,
+    checked_diagnostics: std::cell::RefCell<Vec<Vec<(&'static str, TextRange)>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -667,6 +692,12 @@ impl SourceGraph {
             .is_none_or(|r| r.inherited_class_method(class, name))
     }
 
+    pub(crate) fn unused_literal_global(&self, definition: DefinitionId) -> bool {
+        self.reachable
+            .as_ref()
+            .is_some_and(|r| r.unused_literals.contains(&definition))
+    }
+
     pub(crate) fn includes_method(&self, module: ModuleId, method: &ast::StmtFunctionDef) -> bool {
         self.reachable
             .as_ref()
@@ -684,18 +715,27 @@ impl SourceGraph {
     /// Record only this call's overload diagnostic. Nested arguments still get
     /// their own diagnostics, including calls with the same method name.
     pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
-        self.checked_calls.borrow_mut()[module].push(CheckedOverload::Call(call));
+        self.checked_diagnostic(module, "no-matching-overload", call);
     }
 
-    /// The abstract Mapping constructor is lowered to a catchable TypeError.
-    pub(crate) fn checked_abstract_mapping(&self, module: ModuleId, call: TextRange) {
-        self.checked_calls.borrow_mut()[module].push(CheckedOverload::AbstractMappingCall(call));
+    /// Native lowering handled this specific diagnostic at this precise span.
+    pub(crate) fn checked_diagnostic(&self, module: ModuleId, id: &'static str, range: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push((id, range));
+    }
+
+    pub(crate) fn checked_keywords(
+        &self,
+        module: ModuleId,
+        keywords: impl Iterator<Item = TextRange>,
+    ) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .extend(keywords.map(|range| ("unknown-argument", range)));
     }
 
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
     pub(crate) fn diagnostic_scopes(
         &self,
-    ) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<CheckedOverload>>) {
+    ) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<CheckedDiagnostic>>) {
         let overloads: Vec<Vec<_>> = self
             .modules
             .iter()
@@ -723,19 +763,16 @@ impl SourceGraph {
                         };
                         (self.resolve(id, &decorator.expression)
                             == Some(Binding::Intrinsic(Intrinsic::ContextManager)))
-                        .then_some(CheckedOverload::Decorator(decorator.range()))
+                        .then_some(CheckedDiagnostic::Decorator(decorator.range()))
                     })
                     .chain({
-                        let mut calls = self.checked_calls.borrow()[id].clone();
-                        calls.sort_unstable_by_key(|scope| {
-                            (
-                                scope.range().start(),
-                                scope.range().end(),
-                                matches!(scope, CheckedOverload::AbstractMappingCall(_)),
-                            )
-                        });
-                        calls.dedup();
-                        calls.into_iter()
+                        let mut diagnostics = self.checked_diagnostics.borrow()[id].clone();
+                        diagnostics
+                            .sort_unstable_by_key(|(id, range)| (range.start(), range.end(), *id));
+                        diagnostics.dedup();
+                        diagnostics
+                            .into_iter()
+                            .map(|(id, range)| CheckedDiagnostic::Exact(id, range))
                     })
                     .collect()
             })
@@ -1080,7 +1117,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
-            checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?

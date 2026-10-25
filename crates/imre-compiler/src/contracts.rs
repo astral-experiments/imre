@@ -57,6 +57,7 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
                 if args
                     .first()
@@ -64,6 +65,12 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::ImportErrorReset => Contract::new(false, Unknown),
+            Self::ImportErrorNew { .. }
+            | Self::ImportErrorField(_)
+            | Self::ExceptionFieldLen
+            | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
+            Self::ExceptionFieldRepr => Contract::new(false, PreservesOwners),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
@@ -158,6 +165,8 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::TimeSleep | Self::PercentInteger => Contract::new(true, PreservesLists),
+            Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
                 matches!(
@@ -169,6 +178,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
+                ProcessOperation::OpenFlag(_) => Contract::new(false, PreservesLists),
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
                 | ProcessOperation::Gather { .. }
@@ -221,6 +231,7 @@ impl Builtin {
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
+                | ProcessOperation::Fd(_)
                 | ProcessOperation::Which
                 | ProcessOperation::CopyFile
                 | ProcessOperation::CheckReturnCode
@@ -261,6 +272,8 @@ impl Builtin {
             | Self::RegexGroupDict
             | Self::DictGet
             | Self::JsonDecode(_)
+            | Self::CsvReader { .. }
+            | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
             | Self::JsonErrorField(_)
@@ -277,6 +290,8 @@ impl Builtin {
             | Self::JsonSelect(_)
             | Self::ListGet
             | Self::ListGetBounded { .. }
+            | Self::FunctionCacheProbe(..)
+            | Self::FunctionCacheInsert(..)
             | Self::ListGetI32
             | Self::ListSliceSum
             | Self::Slice
@@ -296,6 +311,7 @@ impl Builtin {
             | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
+            | Self::CsvLineNumber
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::HashAvailable
@@ -318,6 +334,8 @@ impl Builtin {
             | Self::JsonEmptyObject
             | Self::WallTime
             | Self::FunctionCache(_)
+            | Self::FunctionCacheStat(..)
+            | Self::FunctionCacheClear(_)
             | Self::HashStr
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
@@ -389,6 +407,7 @@ impl Builtin {
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
             | Self::OsName
+            | Self::SysOrigArgv
             | Self::SysArgv
             | Self::FileFileno
             | Self::TextClose
@@ -417,7 +436,6 @@ impl Builtin {
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
-            | Self::Repr
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
@@ -425,7 +443,8 @@ impl Builtin {
             | Self::StringIter
             | Self::StringReverseIter
             | Self::TextClosed => Contract::new(false, Unknown),
-            Self::SortedRecordRows { .. }
+            Self::CounterMath { .. }
+            | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::TupleCacheNew
             | Self::TupleCacheResult => Contract::new(true, Unknown),
@@ -663,6 +682,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_deletions"
                 | "imre_log_file_should_roll"
                 | "imre_log_file_roll"
+                | "imre_time_sleep"
+                | "imre_str_percent_int"
+                | "imre_formatter_format"
+                | "imre_formatter_time"
+                | "imre_formatter_message"
                 | "imre_logrecord_message"
                 | "imre_log_config"
                 | "imre_log_config_named"
@@ -691,6 +715,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_regex_groupdict"
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
+                | "imre_exception_field_index"
+                | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
                 | "imre_urlsafe_b64encode"
@@ -707,6 +733,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_none"
                 | "imre_input"
                 | "imre_sys_argv"
+                | "imre_sys_orig_argv"
                 | "imre_path_read_bytes"
                 | "imre_path_read_text"
                 | "imre_path_write_text"
