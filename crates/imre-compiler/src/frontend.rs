@@ -41,6 +41,7 @@ mod inspect;
 mod iterables;
 mod itertools;
 mod json;
+mod linecache;
 mod literals;
 mod local_functions;
 mod logging;
@@ -4719,6 +4720,9 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::HashAvailable, vec![]),
                     });
                 }
+                Intrinsic::Linecache(ir::LinecacheOperation::Cache) => {
+                    return Ok(self.linecache_mapping());
+                }
                 Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
                 Intrinsic::OsDevnull => {
                     return Ok(Expr {
@@ -6191,6 +6195,11 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::Linecache(op)))
+                if op != ir::LinecacheOperation::Cache =>
+            {
+                return self.linecache_call(op, call);
             }
             Some(Binding::Intrinsic(Intrinsic::InspectIsMethodDescriptor)) => {
                 return self.is_method_descriptor(call);

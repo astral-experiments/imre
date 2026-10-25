@@ -65,6 +65,7 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
