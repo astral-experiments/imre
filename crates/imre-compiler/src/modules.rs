@@ -1011,6 +1011,10 @@ impl SourceGraph {
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
     }
 
+    pub(crate) fn deferred_name(&self, module: ModuleId, name: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DeferredName(name));
+    }
+
     /// The native binder raises because this keyword's parameter was already bound.
     pub(crate) fn checked_repeated_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]

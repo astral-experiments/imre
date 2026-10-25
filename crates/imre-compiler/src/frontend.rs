@@ -1374,9 +1374,15 @@ fn signature(
         });
         parameter_types.push(Some(ty));
     }
+    // A .pyi describes the linked C function. Its ellipsis is not an executable body.
+    let inert = graph.modules[module].archive.is_none() && annotations::inert_body(function);
+    if inert && let Some(ast::Expr::Name(n)) = function.returns.as_deref() {
+        graph.deferred_name(module, n.range());
+    }
     let returns = function
         .returns
         .as_deref()
+        .filter(|_| !inert)
         .filter(|value| {
             graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                 && namedtuples::annotation(graph, module, value, types).is_none()
@@ -1393,6 +1399,7 @@ fn signature(
             }
         })
         .transpose()?
+        .or(inert.then_some(Type::None))
         .or_else(|| match (receiver, function.name.as_str()) {
             (Some(_), "__init__" | "__post_init__") => Some(Type::None),
             (Some(_), "__str__" | "__repr__") => Some(Type::Str),
@@ -3852,10 +3859,7 @@ impl<'a> Checker<'a> {
             return Ok((Vec::new(), true));
         }
         let result = match statement {
-            ast::Stmt::FunctionDef(function) => {
-                self.define_local_function(function)?;
-                None
-            }
+            ast::Stmt::FunctionDef(function) => self.define_local_function(function)?,
             ast::Stmt::Assign(assign) => {
                 return Ok((self.assignment_statement(assign)?, true));
             }
@@ -4007,6 +4011,9 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Stmt::Expr(expression) => {
+                if matches!(&*expression.value, ast::Expr::EllipsisLiteral(_)) {
+                    return Ok((Vec::new(), true));
+                }
                 if let ast::Expr::Yield(yielded) = &*expression.value
                     && let Some(element) = self.generator_item
                     && let Some(value) = &yielded.value
@@ -5159,7 +5166,10 @@ impl<'a> Checker<'a> {
             });
         }
         self.reject_class_receiver_value(expression)?;
-        if self.local_function_binding(expression).is_some() {
+        if let Some(binding) = self.local_function_binding(expression) {
+            if let Some(slot) = binding.value_slot {
+                return Ok(self.local(slot));
+            }
             return Err(error(
                 self.source,
                 expression,
@@ -6112,6 +6122,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if matches!(receiver.ty, Type::AnnotationValue(_)) {
+                    return self.annotation_attribute(receiver, attribute);
+                }
                 if let Type::ChainMap(id) = receiver.ty
                     && attribute.attr.as_str() == "maps"
                 {

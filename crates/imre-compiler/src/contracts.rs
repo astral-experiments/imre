@@ -464,6 +464,10 @@ impl Builtin {
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
             | Self::ForwardRefField(_)
+            | Self::BoxAnnotation(_)
+            | Self::AnnotationMember(_)
+            | Self::AnnotationIs
+            | Self::StaticFunction(_)
             | Self::NewForwardRef
             | Self::ClassNameView
             | Self::StrEnumName
@@ -477,7 +481,8 @@ impl Builtin {
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
-            Self::BinaryOpen(_)
+            Self::AnnotationRef
+            | Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
@@ -833,6 +838,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "imre_chr"
+                | "imre_annotation_ref"
                 | "imre_int_pow"
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"
