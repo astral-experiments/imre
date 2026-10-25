@@ -14,6 +14,7 @@ mod boxed_values;
 mod builtins;
 mod bytes;
 mod cache_paths;
+mod calendar;
 mod chainmap;
 mod contexts;
 mod copying;
@@ -144,6 +145,7 @@ enum Storage {
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
+    Calendar(Box<calendar::Value>),
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),

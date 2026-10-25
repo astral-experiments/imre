@@ -96,6 +96,7 @@ pub(crate) enum Type {
     Logger,
     TimedFileHandler,
     ClockTime,
+    Calendar(CalendarType),
     /// An exact instance of Python's plain, identity-only object.
     PlainObject,
     /// An exact immutable method descriptor on the builtin str class.
@@ -117,6 +118,33 @@ pub(crate) enum Type {
     JsonValue,
     JsonObject,
     None,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum CalendarType {
+    DateTime,
+    Delta,
+    Zone,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CalendarOp {
+    DateTime,
+    Delta,
+    Zone,
+    Utc,
+    ZoneLimit,
+    Now,
+    Shift { reverse: bool, subtract: bool },
+    Negate,
+    Field,
+    TzInfo,
+    Offset,
+    ZoneOffset,
+    ZoneName,
+    Text { iso: bool },
+    NullableEqual,
+    TotalSeconds,
 }
 
 /// Each captured stream has one exact text or byte representation. An inherited
@@ -250,6 +278,9 @@ impl std::fmt::Display for Type {
             Self::Logger => "logging.Logger",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
+            Self::Calendar(CalendarType::DateTime) => "datetime.datetime",
+            Self::Calendar(CalendarType::Delta) => "datetime.timedelta",
+            Self::Calendar(CalendarType::Zone) => "datetime.timezone",
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
@@ -750,6 +781,7 @@ pub(crate) enum Builtin {
     PercentFormat,
     Logging(LogOperation),
     Timed(TimedOperation),
+    Calendar(CalendarOp),
     LogRecord(LogRecordOperation),
     Formatter(FormatterOperation),
     Input,

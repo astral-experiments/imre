@@ -19,6 +19,7 @@ use crate::types::Types;
 
 mod asyncio;
 mod byte_outputs;
+mod calendar;
 mod callables;
 mod conditionals;
 mod integer_regions;
@@ -101,6 +102,7 @@ impl Type {
             | Self::TimedFileHandler
             | Self::CacheState(_)
             | Self::ClockTime
+            | Self::Calendar(_)
             | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
@@ -177,6 +179,7 @@ impl Type {
             | Self::TimedFileHandler
             | Self::CacheState(_)
             | Self::ClockTime
+            | Self::Calendar(_)
             | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
@@ -814,6 +817,7 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::Calendar(_)
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
@@ -3469,6 +3473,14 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp {predicate} i32 {order}, 0"))
                 }
+                Type::Calendar(_) => {
+                    let equality = matches!(predicate, "eq" | "ne");
+                    let order = self.checked_instruction(format!(
+                        "call i32 @imre_calendar_compare(ptr {}, ptr {}, i1 {equality})",
+                        left.operand, right.operand
+                    ));
+                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                }
                 Type::ClockTime => {
                     let order = self.instruction(format!(
                         "call i32 @imre_log_clock_compare(ptr {}, ptr {})",
@@ -4019,6 +4031,7 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::Calendar(operation) => self.calendar_builtin(*operation, returns, &args),
             Builtin::Timed(operation) => {
                 use crate::ir::TimedOperation::*;
                 let name = match operation {
@@ -6689,6 +6702,7 @@ impl Emitter<'_, '_> {
                     | Type::TimedFileHandler
                     | Type::CacheState(_)
                     | Type::ClockTime
+                    | Type::Calendar(_)
                     | Type::StrDescriptor(_)
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
@@ -6966,6 +6980,7 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::Calendar(_)
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
@@ -7056,6 +7071,7 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::Calendar(_)
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
@@ -7664,6 +7680,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::TimedFileHandler
         | Type::CacheState(_)
         | Type::ClockTime
+        | Type::Calendar(_)
         | Type::StrDescriptor(_)
         | Type::PlainObject
         | Type::SimpleNamespace(_)
@@ -8492,6 +8509,24 @@ declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)
+declare ptr @imre_calendar_delta(i32, i64, i64, i64, i64, i64, i64, i64)
+declare ptr @imre_calendar_datetime(i64, i64, i64, i64, i64, i64, i64, i64, i64)
+declare ptr @imre_calendar_zone(ptr, i64)
+declare ptr @imre_calendar_utc()
+declare ptr @imre_calendar_zone_limit(i1)
+declare ptr @imre_calendar_now(ptr)
+declare ptr @imre_calendar_shift(ptr, ptr, i1)
+declare ptr @imre_calendar_negate(ptr)
+declare i64 @imre_calendar_field(ptr,i64)
+declare i64 @imre_calendar_tzinfo(ptr)
+declare i64 @imre_calendar_offset(ptr)
+declare ptr @imre_calendar_zoneoffset(ptr)
+declare ptr @imre_calendar_zonename(ptr)
+declare ptr @imre_calendar_text(ptr,i1)
+declare double @imre_calendar_seconds(ptr)
+declare i1 @imre_calendar_truth(ptr)
+declare i1 @imre_calendar_equal_optional(i64,i64)
+declare i32 @imre_calendar_compare(ptr,ptr,i1)
 declare ptr @imre_log_clock_new(i64, i64, i64, i64, i8, i64)
 declare i32 @imre_log_clock_compare(ptr, ptr)
 declare i64 @imre_log_clock_part(ptr, i64)

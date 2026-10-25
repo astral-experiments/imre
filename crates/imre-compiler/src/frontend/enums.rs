@@ -443,6 +443,13 @@ impl Checker<'_> {
             || types == [Type::HandlerLock; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
+            || types.iter().all(|&t| {
+                matches!(t, Type::Calendar(_))
+                    || self
+                        .types
+                        .payload(t)
+                        .is_some_and(|p| matches!(p, Type::Calendar(_)))
+            })
             || types == [Type::PathInfo; 2]
             || types == [Type::JsonDecoder; 2]
             || types == [Type::Poll; 2]

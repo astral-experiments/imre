@@ -349,6 +349,19 @@ A fixed-layout class can inherit from `collections.abc.Mapping[K, V]` or `typing
 
 `urllib.parse.unquote(string)` is a sealed native import for one positional or named string argument. It decodes percent escapes with the default UTF-8 replacement behavior. Byte inputs, configurable `encoding`/`errors`, and other URL parsing APIs remain unsupported.
 
+## Datetime and fixed UTC offsets
+
+`datetime.datetime`, `timedelta`, `timezone` and the `UTC` singleton have native immutable
+values. A datetime can be naive or use a fixed offset. `datetime.now(tz)` reads the system
+clock and requires a native `timezone`; there is no local or DST lookup. Civil construction,
+field reads, default ISO formatting, datetime comparisons, shifting a datetime by a
+timedelta, and fixed-zone names and offsets are supported. Timedelta construction accepts
+int, bool, and float units, normalizes negative durations, and checks overflow.
+
+The [datetime test inventory](../benchmarks/cpython_stdlib/full/datetime/README.md)
+lists the operations and original CPython cases checked. This does not change the typed
+TOML date boundary.
+
 ## CSV reader
 
 `csv.reader(lines)` returns a lazy iterator over lists of strings. The supported
