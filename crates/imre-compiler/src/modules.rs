@@ -178,6 +178,8 @@ pub(crate) enum Intrinsic {
     Stderr,
     Stdout,
     SysExecutable,
+    SysFlags,
+    SysDontWriteBytecode,
     SysPlatform,
     SysEncoding(&'static str),
     SysException,
@@ -191,6 +193,8 @@ pub(crate) enum Intrinsic {
     OsDevnull,
     SysExit,
     ShlexSplit,
+    ShlexQuote,
+    ShlexJoin,
     Ndiff,
     Final,
     Argv,
@@ -287,7 +291,7 @@ pub(crate) enum Intrinsic {
     GetCwd,
     Strerror,
     Fd(crate::ir::FdOperation),
-    OpenFlag(&'static str),
+    DescriptorConstant(&'static str),
     FsPath,
     PosixNormcase,
     PosixPath(PosixPathOperation),
@@ -476,6 +480,8 @@ impl IntrinsicModule {
             (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
+            (Self::Sys, "flags") => Intrinsic::SysFlags,
+            (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
             (Self::Os, "name") => Intrinsic::OsName,
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
@@ -505,6 +511,8 @@ impl IntrinsicModule {
             (Self::Logging, "ERROR") => Intrinsic::LogLevel(40),
             (Self::Logging, "CRITICAL" | "FATAL") => Intrinsic::LogLevel(50),
             (Self::Shlex, "split") => Intrinsic::ShlexSplit,
+            (Self::Shlex, "quote") => Intrinsic::ShlexQuote,
+            (Self::Shlex, "join") => Intrinsic::ShlexJoin,
             (Self::Difflib, "ndiff") => Intrinsic::Ndiff,
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
@@ -666,6 +674,7 @@ impl SourceModule {
 }
 
 pub(crate) struct SourceGraph {
+    pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) entry_profile: entry_profile::Profile,
@@ -698,10 +707,11 @@ impl SourceGraph {
         profile: Option<&Path>,
     ) -> (crate::SourceInputs, Vec<PathBuf>) {
         let mut inputs = std::mem::take(&mut self.inputs);
-        let mut modules = self.modules.iter();
-        inputs
-            .files
-            .retain(|_| !modules.next().expect("one input per module").bundled);
+        let mut modules = self.modules.iter().enumerate();
+        inputs.files.retain(|_| {
+            let (id, module) = modules.next().expect("one input per module");
+            !module.bundled && !(id == self.entry && self.command_startup.is_some())
+        });
         let paths = inputs
             .files
             .iter()
@@ -923,6 +933,37 @@ impl SourceGraph {
         loader.finish(entry, filename, reachable_only, None)
     }
 
+    /// Parse command bytes as __main__; only a non-safe command sees the working directory.
+    pub(crate) fn command(
+        command: &crate::PythonCommand,
+        options: &crate::CompileOptions,
+        fs: FileSystem<'_>,
+    ) -> Result<Self, String> {
+        let root = std::env::current_dir().map_err(|e| e.to_string())?;
+        let mut loader = Loader::new(root.clone(), &options.extension_paths, fs)?;
+        loader.skip_current_root = command.flags.safe_path;
+        loader.reachable_only = options.reachable_only || options.entry_profile.is_some();
+        let filename = root.join("<string>.py");
+        let entry = loader.add_source(
+            filename.clone(),
+            filename.clone(),
+            "__main__".into(),
+            false,
+            &command.source,
+            crate::SourceKind::Command,
+        )?;
+        loader.scan(entry)?;
+        let reachable_only = loader.reachable_only;
+        let mut graph = loader.finish(
+            entry,
+            filename,
+            reachable_only,
+            options.entry_profile.as_deref(),
+        )?;
+        graph.command_startup = Some((command.flags, command.executable.clone()));
+        Ok(graph)
+    }
+
     #[cfg(test)]
     pub(crate) fn load(
         entry: &Path,
@@ -1097,6 +1138,7 @@ struct Loader<'a> {
     loading: HashSet<ModuleId>,
     import_depth: usize,
     allow_imports: bool,
+    skip_current_root: bool,
     reachable_only: bool,
     initialization: Vec<(ModuleId, Range<usize>)>,
     pub(crate) errno_names: Vec<String>,
@@ -1135,6 +1177,7 @@ impl<'a> Loader<'a> {
             loading: HashSet::new(),
             import_depth: 0,
             allow_imports: true,
+            skip_current_root: false,
             reachable_only: false,
             initialization: Vec::new(),
             errno_names: Vec::new(),
@@ -1149,15 +1192,34 @@ impl<'a> Loader<'a> {
         is_package: bool,
         source: &str,
     ) -> Result<ModuleId, String> {
+        self.add_source(
+            path,
+            identity,
+            name,
+            is_package,
+            source,
+            crate::SourceKind::File,
+        )
+    }
+
+    fn add_source(
+        &mut self,
+        path: PathBuf,
+        identity: PathBuf,
+        name: String,
+        is_package: bool,
+        source: &str,
+        kind: crate::SourceKind,
+    ) -> Result<ModuleId, String> {
         self.inputs.files.push((
             path.clone(),
             identity.clone(),
             blake3::hash(source.as_bytes()).to_hex().to_string(),
         ));
-        let source = crate::normalize_source(source)
+        let source = crate::normalize_source(source, kind)
             .map_err(|error| format!("{}: {error}", path.display()))?
             .into_owned();
-        let parsed = self.session.add(&path, &source)?;
+        let parsed = self.session.add(&path, &source, kind)?;
         let id = self.modules.len();
         self.by_name.insert(name.clone(), id);
         self.by_path.insert(identity, id);
@@ -1258,6 +1320,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
+            command_startup: None,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
@@ -1640,7 +1703,7 @@ impl<'a> Loader<'a> {
     }
 
     fn reject_stdlib_shadow(&mut self, name: &str) -> Result<(), String> {
-        if self.allow_imports {
+        if self.allow_imports && !self.skip_current_root {
             for base in [
                 self.root.join(name.split('.').next().unwrap()),
                 self.root.join(name.replace('.', "/")),
@@ -1760,6 +1823,9 @@ impl<'a> Loader<'a> {
         let roots = std::iter::once(&self.root).chain(&self.extension_roots);
         let mut resolved = None;
         for (root_index, root) in roots.enumerate() {
+            if root_index == 0 && self.skip_current_root {
+                continue;
+            }
             if parent_root.is_some_and(|index| index != root_index) {
                 continue;
             }

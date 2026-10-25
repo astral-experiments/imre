@@ -43,7 +43,6 @@ SysModuleTest.test_is_gil_enabled	reference-only	The reference predicate is conf
 SysModuleTest.test_issue20602	blocked	Original child reads and prints sys.flags and sys.float_info from __del__ during shutdown; native destruction must keep both usable.
 SysModuleTest.test_module_names	blocked	The runtime needs an immutable frozenset of its standard library module names and iterable native string elements.
 SysModuleTest.test_no_duplicates_in_meta_path	blocked	The static module loader does not expose Python's mutable meta_path or its initialized finder instances.
-SysModuleTest.test_orig_argv	failed	The unchanged -I -X utf8 -c invocation exits 1 at Imre option dispatch before both sys reads and unittest assertions. Stock CPython passes. The same child source reports the actual argv/orig_argv in Imre's run and executable launch modes at O0/O3; those controls do not satisfy the requested -c launch. See #302.
 SysModuleTest.test_posix_locale_surrogateescape	blocked	The same verified child checks stdin/stdout/stderr error policies under LC_ALL=POSIX, both with and without an encoding override.
 SysModuleTest.test_recursionlimit_recovery	blocked	Repeated genuine native recursive calls must raise RecursionError at each configured depth and recover for the next depth.
 SysModuleTest.test_refcount	blocked	Native getrefcount must reject missing arguments, preserve the None singleton count across global bindings and expose total count only if available.

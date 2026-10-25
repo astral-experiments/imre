@@ -13,6 +13,23 @@ pub(super) fn module() -> Expr {
 }
 
 impl Checker<'_> {
+    /// All import spellings project the same module object and target registry.
+    pub(super) fn errno_value(&self, expression: &ast::Expr) -> Option<Expr> {
+        match self.resolve(expression)? {
+            Binding::IntrinsicModule(crate::modules::IntrinsicModule::Errno) => Some(module()),
+            Binding::Intrinsic(Intrinsic::ErrnoFrom(slot)) => {
+                Some(self.errno_attribute(module(), &self.graph.errno_names[slot]))
+            }
+            Binding::Intrinsic(Intrinsic::ErrnoAttribute) => {
+                let ast::Expr::Attribute(attr) = expression else {
+                    return None;
+                };
+                Some(self.errno_attribute(module(), attr.attr.as_str()))
+            }
+            _ => None,
+        }
+    }
+
     /// Build the same structured exception as Python's from-import machinery.
     pub(super) fn check_errno_import(&self, name: &str) -> Statement {
         let condition = op(Op::Has, Type::Bool, vec![module(), unpacking::string(name)]);
