@@ -73,8 +73,11 @@ def pipe():
         os.close(w)
 
 
-def probe(cmd):
-    assert require([*cmd, "state"]) == "state passed\n"
+def probe(cmd, expected_state=None):
+    state = require([*cmd, "state"])
+    assert state.endswith("state passed\n"), state
+    if expected_state is not None:
+        assert state == expected_state, (cmd, state, expected_state)
     assert require([*cmd, "bounds"]) == "bounds passed\n"
 
     def events(fds):
@@ -118,6 +121,7 @@ def probe(cmd):
                 finally:
                     if child.poll() is None:
                         child.kill()
+    return state
 
 
 def main():
@@ -135,7 +139,7 @@ def main():
         parser.error("the original host fixture requires CPython 3.14.5")
     manifest = json.loads((HERE / "UPSTREAM.json").read_bytes())
     verify_files(HERE / "upstream", manifest["files"])
-    probe([sys.executable, HERE / "operations.py"])
+    expected_state = probe([sys.executable, HERE / "operations.py"])
     reports = {"select": [], "poll": [], "selectors": []}
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -147,7 +151,7 @@ def main():
         for level in args.opt_levels:
             observations = {}
             exe = build(HERE / "operations.py", level)
-            probe([exe])
+            probe([exe], expected_state)
             if args.host_original:
                 for flags in ([], ["--controls"]):
                     print(require([sys.executable, "-B", HERE / "host_poll.py", exe, *flags]).strip())
