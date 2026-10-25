@@ -72,6 +72,7 @@ impl FileState {
         Self {
             fd: None,
             name: None,
+            encoding: None,
             kind: FileKind::Memory,
             stream: Some(Stream::Memory(Memory { data, position: 0 })),
         }
@@ -82,6 +83,7 @@ impl FileState {
         Self {
             fd: None,
             name: Some(member.name().clone()),
+            encoding: None,
             kind: FileKind::Member,
             stream: Some(Stream::Member(Box::new(member))),
         }

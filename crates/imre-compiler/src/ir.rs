@@ -625,6 +625,7 @@ pub(crate) enum Builtin {
     SysStdoutSet,
     SysStdoutDelete,
     TextOptionalReceiver,
+    TextEncoding,
     SysDisplayHook,
     BuiltinsLast,
     BuiltinsHasLast,

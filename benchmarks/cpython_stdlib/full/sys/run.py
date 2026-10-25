@@ -90,16 +90,23 @@ def select(toolchain, work, source, module):
     executions[DISPLAY_ID] = display_observer(module, display, work, toolchain.level)
     check_import_snapshots(toolchain, directory(work, "import-snapshots"))
 
-    binding_source = HERE / "stdout_binding.py"
-    binding = toolchain.build(binding_source.read_bytes(), directory(work, "stdout-binding"))
-    redirected = work / "redirected"
-    observations = []
-    for command in ([sys.executable, binding_source], [binding]):
-        run = subprocess.run([*command, redirected], capture_output=True, check=True, timeout=15)
-        observations.append((run.stdout, run.stderr, redirected.read_bytes()))
-        redirected.unlink()
-    if observations[0] != observations[1]:
-        raise AssertionError(("stdout binding", observations))
+    stream_controls = {}
+    for filename in ("stdout_binding.py", "stdout_metadata.py"):
+        exercise = HERE / filename
+        binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))
+        redirected = work / "redirected"
+        observations = []
+        for command in ([sys.executable, exercise], [binary]):
+            run = subprocess.run([*command, redirected], capture_output=True, check=True, timeout=15)
+            observations.append((run.stdout, run.stderr, redirected.read_bytes()))
+            redirected.unlink()
+        if observations[0] != observations[1]:
+            raise AssertionError((filename, observations))
+        stdout, stderr, disk = observations[1]
+        stream_controls[exercise.stem] = {
+            "matches_pinned_cpython": True,
+            "stdout_hex": stdout.hex(), "stderr_hex": stderr.hex(), "redirected_hex": disk.hex(),
+        }
 
     encoding = toolchain.build((HERE / "encoding_driver.py").read_bytes(), directory(work, "encoding"))
 
@@ -154,7 +161,7 @@ def select(toolchain, work, source, module):
     jit = jit_case.observer(module, toolchain, work, pinned_methods)
     for method in ("test_jit_is_available", "test_jit_is_enabled"):
         executions[f"{MODULE}.TestSysJIT.{method}"] = jit
-    return executions
+    return executions, stream_controls
 
 
 def main():
@@ -202,7 +209,7 @@ def main():
             if (config["LC_CTYPE"], config["utf8_mode"], config["filesystem_encoding"],
                     config["preferred_encoding"]) != ("C.UTF-8", 0, "utf-8", "UTF-8"):
                 parser.error(f"canonical Linux report requires the recorded C.UTF-8 reference settings: {config}")
-        executions = select(toolchain, Path(tmp), source, test_sys)
+        executions, stream_controls = select(toolchain, Path(tmp), source, test_sys)
         if args.evidence:
             preflight = blocked_methods(toolchain, Path(tmp), source, reference, executions, test_sys)
             jit_case.audit_active(load_suite(MODULE), executions, preflight)
@@ -236,7 +243,8 @@ def main():
         raise ValueError("missing execution outcome")
     args.result.write_text(json.dumps({"cpython_commit": manifest["commit"],
                                        "opt_level": args.opt_level, "denominator": len(ids),
-                                       "tests": dict(sorted(results.items()))}, indent=2) + "\n")
+                                       "tests": dict(sorted(results.items())),
+                                       "stream_controls": stream_controls}, indent=2) + "\n")
 
 
 if __name__ == "__main__":

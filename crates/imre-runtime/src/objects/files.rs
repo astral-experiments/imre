@@ -25,6 +25,8 @@ pub(super) struct FileState {
     fd: Option<RawFd>,
     stream: Option<Stream>,
     pub(super) name: Option<Rc<Str>>,
+    // A closed text wrapper still owns its encoding; StringIO has no byte codec.
+    encoding: Option<Rc<Str>>,
     // Preserve access mode after close: binary wrong-direction errors take precedence.
     kind: FileKind,
 }
@@ -146,6 +148,7 @@ impl FileState {
         Rc::new(Object(StorageCell::new(Storage::File(Box::new(Self {
             fd: Some(fd),
             name: None,
+            encoding: text.then(|| super::literal_string("UTF-8")),
             stream: Some(stream),
             kind,
         })))))
@@ -404,19 +407,47 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
     build(os_error_kind(error.kind()), errno, &description)
 }
 
-/// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.
-/// Returns an owned Object or null with a pending error.
+/// Open a text wrapper and retain its codec spelling, including after close.
 ///
 /// # Safety
-/// `path` must be rooted. Mode 4 reads universal newlines without translating them.
-/// Like other fallible entries, pending state must be clear on entry.
+/// Root the path and any non-null encoding. The frontend checks the codec and mode;
+/// mode 4 reads universal newlines without translating them.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_text_open(path: *const Str, mode: u32) -> *const Object {
-    // SAFETY: the caller roots the immutable path throughout opening the stream.
+pub unsafe extern "C" fn imre_text_open(
+    path: *const Str,
+    mode: u32,
+    encoding: *const Str,
+) -> *const Object {
+    // SAFETY: the caller retains both native strings through construction.
+    let (path, encoding) = unsafe { (&*path, encoding.as_ref()) };
+    let state = open_state_with_encoding(
+        path,
+        mode,
+        false,
+        false,
+        Some(encoding.map_or("UTF-8", |name| name)),
+    );
     finish(
-        open(unsafe { &*path }, mode, false, false),
+        state.map(|file| Rc::into_raw(file.into_object())),
         std::ptr::null(),
     )
+}
+
+/// Return the wrapper's retained encoding, or a null optional word for StringIO.
+///
+/// # Safety
+/// The compiler supplies a rooted text file, including after close.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_text_encoding(file: *const Object) -> *const Str {
+    // SAFETY: the rooted file owns its optional string throughout this read.
+    unsafe {
+        object(file).0.with(|s| {
+            s.file()
+                .encoding
+                .clone()
+                .map_or(std::ptr::null(), Rc::into_raw)
+        })
+    }
 }
 
 /// Opens an immutable-byte stream in rb, wb, ab, or xb mode (0 through 3).
@@ -455,6 +486,7 @@ pub(super) fn standard_stream(stderr: bool) -> Rc<Object> {
                 io::stdout().as_raw_fd()
             }),
             stream: Some(Stream::Standard(stderr)),
+            encoding: Some(super::literal_string("utf-8")),
             kind: FileKind::Text,
             name: Some(Rc::new(Str::new(if stderr {
                 "<stderr>"
@@ -467,13 +499,24 @@ pub(super) fn standard_stream(stderr: bool) -> Rc<Object> {
 
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
 pub(super) fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
-    let state = open_state(path, mode, binary, gzip)?;
-    Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
-        Storage::File(Box::new(state)),
-    )))))
+    Ok(Rc::into_raw(
+        open_state(path, mode, binary, gzip)?.into_object(),
+    ))
 }
 
 fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
+    let encoding = (!binary).then_some(if gzip { "utf-8" } else { "UTF-8" });
+    open_state_with_encoding(path, mode, binary, gzip, encoding)
+}
+
+/// The wrapper owns a spelling separate from the caller's encoding argument.
+fn open_state_with_encoding(
+    path: &str,
+    mode: u32,
+    binary: bool,
+    gzip: bool,
+    encoding: Option<&str>,
+) -> Result<FileState> {
     let (file, metadata) = open_file(path, mode)?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
     let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
@@ -492,6 +535,7 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
         fd: Some(fd),
         stream: Some(stream),
         name: Some(Rc::new(Str::new(path))),
+        encoding: encoding.map(super::literal_string),
         kind: match (binary, mode) {
             (false, _) => FileKind::Text,
             (true, 0) if gzip => FileKind::GzipBinaryRead,
@@ -901,7 +945,7 @@ mod tests {
     fn open(path: &str, mode: u32) -> Rc<Object> {
         let path = Str::new(path);
         // SAFETY: the local string is rooted; this helper requires a successful open.
-        let result = unsafe { imre_text_open(&path, mode) };
+        let result = unsafe { imre_text_open(&path, mode, std::ptr::null()) };
         assert!(!result.is_null());
         // SAFETY: open transfers this one owned reference to the Rc.
         unsafe { Rc::from_raw(result) }
@@ -934,6 +978,7 @@ mod tests {
                 stream: Some(Stream::Write(Output::new(file, 8192, false))),
                 kind: FileKind::Text,
                 name: None,
+                encoding: Some(crate::objects::literal_string("UTF-8")),
             },
         )))))
     }
@@ -1347,7 +1392,7 @@ mod tests {
             ("nul\0path".to_owned(), Kind::ValueError),
         ] {
             // SAFETY: the temporary path remains rooted for this failed call.
-            assert!(unsafe { imre_text_open(&Str::from(path), 0) }.is_null());
+            assert!(unsafe { imre_text_open(&Str::from(path), 0, std::ptr::null()) }.is_null());
             take_error(kind);
         }
         os_error(io::ErrorKind::OutOfMemory.into()).raise();
