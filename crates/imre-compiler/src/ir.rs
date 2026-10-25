@@ -40,8 +40,10 @@ pub(crate) enum Type {
     Exception,
     /// An exception object known to own the given fixed payload layout.
     NamedException(usize),
-    /// An owned view of the immutable None, bool, int or str in SystemExit.code.
-    ExitCode,
+    /// A retained value projected from a structured builtin exception.
+    ExceptionField,
+    /// A builtin ImportError (including its ModuleNotFoundError and marker subclasses).
+    ImportException,
     /// A proved catch-only timeout with readonly float and nullable bytes fields.
     TimeoutExpired,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
@@ -155,7 +157,8 @@ impl std::fmt::Display for Type {
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception | Self::NamedException(_) => "Exception",
-            Self::ExitCode => "SystemExit.code",
+            Self::ExceptionField => "exception field",
+            Self::ImportException => "ImportError",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
@@ -521,6 +524,15 @@ pub(crate) enum Builtin {
     ExceptionRecord,
     /// A single non-string Python argument, retained for str/repr.
     ExceptionArgument(u32),
+    ImportErrorNew {
+        kind: u32,
+        fields: [Option<usize>; 3],
+    },
+    ImportErrorField(u32),
+    ImportErrorReset,
+    ExceptionFieldRepr,
+    ExceptionFieldLen,
+    ExceptionFieldIndex,
     ExceptionRepr,
     /// Python representation of a value with a fully known storage shape.
     Repr,
@@ -1055,7 +1067,10 @@ impl InstanceType {
             Self::Tuple => matches!(ty, Type::Tuple(_)),
             Self::Exception(_) => matches!(
                 ty,
-                Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+                Type::Exception
+                    | Type::ImportException
+                    | Type::TimeoutExpired
+                    | Type::NamedException(_)
             ),
         }
     }

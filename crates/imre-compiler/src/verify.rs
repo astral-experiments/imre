@@ -291,7 +291,10 @@ impl Verifier<'_> {
                 self.block(finalbody)
             }
             Statement::Raise(Some(value)) => require(
-                matches!(value.ty, Type::Exception | Type::TimeoutExpired),
+                matches!(
+                    value.ty,
+                    Type::Exception | Type::ImportException | Type::TimeoutExpired
+                ),
                 "raise needs an exception",
             ),
             Statement::Raise(None)

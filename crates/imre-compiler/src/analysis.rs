@@ -327,7 +327,7 @@ impl Session {
     pub(crate) fn check_scopes(
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
-        decorators: &[Vec<TextRange>],
+        decorators: &[Vec<CheckedScope>],
     ) -> Result<(), String> {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
@@ -338,7 +338,7 @@ impl Session {
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
-        decorators: &[Vec<TextRange>],
+        decorators: &[Vec<CheckedScope>],
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -363,13 +363,20 @@ impl Session {
     }
 }
 
+/// Only diagnostics superseded by a proved native operation may be excluded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum CheckedScope {
+    Decorator(TextRange),
+    Keyword(TextRange),
+}
+
 /// Reachable-only entry profiles can select different scopes of the same source.
 #[salsa::interned]
 struct CheckedFile<'db> {
     #[returns(copy)]
     file: File,
     skipped: Vec<TextRange>,
-    decorators: Vec<TextRange>,
+    decorators: Vec<CheckedScope>,
 }
 
 /// A per-file result depends on the ty queries it actually read, including any other source
@@ -394,10 +401,16 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (diagnostic.id().as_str() == "no-matching-overload"
-                                && decorators
-                                    .iter()
-                                    .any(|decorator| decorator.contains_range(range)))
+                            || decorators.iter().any(|scope| match *scope {
+                                CheckedScope::Decorator(scope) => {
+                                    diagnostic.id().as_str() == "no-matching-overload"
+                                        && scope.contains_range(range)
+                                }
+                                CheckedScope::Keyword(keyword) => {
+                                    diagnostic.id().as_str() == "unknown-argument"
+                                        && keyword == range
+                                }
+                            })
                     })
         })
         .map(|diagnostic| {
@@ -512,7 +525,7 @@ impl AnalysisCache {
         fresh: &mut Session,
         inputs: &crate::SourceInputs,
         skipped: Option<&[Vec<TextRange>]>,
-        decorators: &[Vec<TextRange>],
+        decorators: &[Vec<CheckedScope>],
     ) -> Result<(), String> {
         if let Some(cached) = &mut self.diagnostics
             && cached.same_files(fresh, inputs)

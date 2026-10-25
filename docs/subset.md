@@ -943,6 +943,16 @@ Exceptions contain an immutable category, message, optional explicit cause, and 
 
 An explicitly typed local assigned in a `try` body may be read after a handled exception. When a simple assignment did not complete on that path and no earlier value exists, the read raises `UnboundLocalError` (a `NameError`). A successfully assigned `None` remains an ordinary value.
 
+`ImportError` and its subclass `ModuleNotFoundError` retain their positional
+arguments in `.args`. The keyword-only `name`, `path`, and `name_from` attributes
+default to `None`; `.msg` is the sole positional argument, or `None`. Arguments
+can be `None`, booleans, integers, strings, bytes, or fixed tuples of these
+values. On a constructed or narrowed import exception, these fields support
+`str`, `repr`, equality, truth, and type tests. Strings, bytes, and tuples also
+support length and integer indexing. Reinitializing an instance resets omitted
+fields. Arbitrary objects, expanded keyword dictionaries, direct field writes,
+and pickling remain outside this subset.
+
 User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent
 Python method resolution order. A class that carries fields can use an ordinary

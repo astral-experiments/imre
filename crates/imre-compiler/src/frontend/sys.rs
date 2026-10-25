@@ -20,7 +20,7 @@ impl Checker<'_> {
         self.sys_type_error(call, result.ty, message)
     }
 
-    fn sys_type_error(
+    pub(super) fn sys_type_error(
         &mut self,
         call: &ast::ExprCall,
         ty: Type,

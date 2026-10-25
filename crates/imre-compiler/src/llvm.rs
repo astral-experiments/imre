@@ -65,7 +65,8 @@ impl Type {
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExitCode
+            | Self::ExceptionField
+            | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
@@ -116,7 +117,8 @@ impl Type {
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExitCode
+            | Self::ExceptionField
+            | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
@@ -696,7 +698,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExitCode
+            | Type::ExceptionField
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
             | Type::PurePath(_)
@@ -3277,7 +3280,8 @@ impl Emitter<'_, '_> {
                 | Type::ZipInfo
                 | Type::Exception
                 | Type::NamedException(_)
-                | Type::ExitCode
+                | Type::ExceptionField
+                | Type::ImportException
                 | Type::TimeoutExpired
                 | Type::TextIO
                 | Type::CompletedProcess(_)
@@ -4264,6 +4268,60 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ImportErrorNew { kind, fields } => {
+                let desc = if *kind >= 256 {
+                    format!(
+                        "@{}",
+                        self.output.global_ref(format!("exception_type_{kind}"))
+                    )
+                } else {
+                    "null".into()
+                };
+                let fields = fields
+                    .map(|idx| {
+                        idx.map_or_else(
+                            || "i32 0, i64 0".into(),
+                            |idx| {
+                                let arg = &args[idx].value;
+                                let kind = representation_kind(arg.ty, &self.module.types);
+                                let word = self.word(arg);
+                                format!("i32 {kind}, i64 {word}")
+                            },
+                        )
+                    })
+                    .join(", ");
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @imre_import_error_new(i32 {kind}, ptr {desc}, ptr {}, {fields})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::ImportErrorReset => {
+                self.void_call("imre_import_error_reset", &[&args[0].value, &args[1].value]);
+                none()
+            }
+            Builtin::ImportErrorField(field) => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @imre_import_error_field(ptr {}, i32 {field})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::ExceptionFieldRepr => {
+                self.call("imre_exception_field_repr", returns, &[&args[0].value])
+            }
+            Builtin::ExceptionFieldLen => {
+                self.call("imre_exception_field_len", returns, &[&args[0].value])
+            }
+            Builtin::ExceptionFieldIndex => self.call(
+                "imre_exception_field_index",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::ExceptionArgument(kind) => {
                 let arg = &args[0].value;
                 let word = self.word(arg);
@@ -4371,10 +4429,13 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::None => self.call("imre_none_str", Type::Str, &[]),
-                Type::ExitCode => {
+                Type::ExceptionField => {
                     self.call("imre_system_exit_code_text", Type::Str, &[&args[0].value])
                 }
-                Type::Exception | Type::TimeoutExpired | Type::NamedException(_) => {
+                Type::Exception
+                | Type::ImportException
+                | Type::TimeoutExpired
+                | Type::NamedException(_) => {
                     self.call("imre_exception_message", Type::Str, &[&args[0].value])
                 }
                 Type::Class(_) => self.value_repr(&args[0].value),
@@ -4897,7 +4958,7 @@ impl Emitter<'_, '_> {
                         self.instruction(format!("icmp eq i64 {}, 0", args[0].value.operand))
                     }
                     Type::None => "true".to_owned(),
-                    Type::ExitCode => {
+                    Type::ExceptionField => {
                         let bit = self.instruction(format!(
                             "call i32 @imre_system_exit_code_equal(ptr {}, i32 0, i64 0)",
                             args[0].value.operand
@@ -4947,7 +5008,8 @@ impl Emitter<'_, '_> {
                     | Type::ByteOutput
                     | Type::Exception
                     | Type::NamedException(_)
-                    | Type::ExitCode
+                    | Type::ExceptionField
+                    | Type::ImportException
                     | Type::TimeoutExpired
                     | Type::Path
                     | Type::PurePath(_)
@@ -5179,7 +5241,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExitCode
+            | Type::ExceptionField
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
             | Type::PurePath(_)
@@ -5244,7 +5307,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExitCode
+            | Type::ExceptionField
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
             | Type::PurePath(_)
@@ -5808,7 +5872,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ByteOutput
         | Type::Exception
         | Type::NamedException(_)
-        | Type::ExitCode
+        | Type::ExceptionField
+        | Type::ImportException
         | Type::TimeoutExpired
         | Type::Path
         | Type::PurePath(_)
@@ -6131,6 +6196,12 @@ declare void @imre_union_retain(i64)
 declare void @imre_union_release(i64)
 declare i32 @imre_union_truthy(i64)
 declare ptr @imre_exception_message(ptr)
+declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
+declare ptr @imre_import_error_field(ptr, i32)
+declare void @imre_import_error_reset(ptr, ptr)
+declare ptr @imre_exception_field_repr(ptr)
+declare i64 @imre_exception_field_len(ptr)
+declare ptr @imre_exception_field_index(ptr, i64)
 declare ptr @imre_exception_argument(i32, ptr, i64, i32)
 declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)

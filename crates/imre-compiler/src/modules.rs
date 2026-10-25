@@ -512,6 +512,10 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
+    /// Keyword tokens bound by the native ImportError constructor, including runtime TypeErrors.
+    pub(crate) import_keywords: std::cell::RefCell<
+        HashMap<ModuleId, std::collections::BTreeMap<ruff_text_size::TextSize, TextRange>>,
+    >,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -629,7 +633,12 @@ impl SourceGraph {
     }
 
     /// Source ranges where the reachable profile or supported decorators replace ty diagnostics.
-    pub(crate) fn diagnostic_scopes(&self) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<TextRange>>) {
+    pub(crate) fn diagnostic_scopes(
+        &self,
+    ) -> (
+        Option<Vec<Vec<TextRange>>>,
+        Vec<Vec<crate::analysis::CheckedScope>>,
+    ) {
         let context_decorators: Vec<Vec<_>> = self
             .modules
             .iter()
@@ -657,8 +666,16 @@ impl SourceGraph {
                         };
                         (self.resolve(id, &decorator.expression)
                             == Some(Binding::Intrinsic(Intrinsic::ContextManager)))
-                        .then_some(decorator.range())
+                        .then_some(crate::analysis::CheckedScope::Decorator(decorator.range()))
                     })
+                    .chain(
+                        self.import_keywords
+                            .borrow()
+                            .get(&id)
+                            .into_iter()
+                            .flat_map(|spans| spans.values().copied())
+                            .map(crate::analysis::CheckedScope::Keyword),
+                    )
                     .collect()
             })
             .collect();
@@ -961,6 +978,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
+            import_keywords: Default::default(),
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))

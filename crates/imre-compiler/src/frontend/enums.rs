@@ -164,7 +164,11 @@ impl Checker<'_> {
             || types.iter().all(|ty| {
                 matches!(
                     ty,
-                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_) | Type::None
+                    Type::Exception
+                        | Type::ImportException
+                        | Type::TimeoutExpired
+                        | Type::NamedException(_)
+                        | Type::None
                 )
             })
             || types == [Type::Logger; 2]
