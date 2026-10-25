@@ -242,12 +242,58 @@ jobs:
           cp "$JSON_RESULTS/doctest-startup-linux.json" "$JSON_DIR/doctest-startup-linux.json"
           python3 -B "$JSON_DIR/evidence.py" --imre "$JSON_IMRE" --runtime "$JSON_RUNTIME" --clang /usr/bin/clang-18 --result "$JSON_RESULTS/evidence-linux.json"
           python3 -B benchmarks/cpython_stdlib/suite_evidence.py "$JSON_DIR/reference-linux.json" "$JSON_RESULTS/evidence-linux.json"
-      - name: Regenerate the public standard library table
-        if: ${{ success() && inputs.support_table }}
+      - name: Compare the overlapping compiler fixtures with CPython
+        if: ${{ success() && inputs.audit == 'decoder-current-main' }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$JSON_REQUIRE_SUPPORT_TABLE" != true ]]; then exit 0; fi
+          python3 -B - <<'PY'
+          import hashlib, json, os, subprocess, sys, tempfile
+          from pathlib import Path
+          sys.path.insert(0, str(Path('tests').resolve()))
+          from dataclass_records import assignments
+          fixtures = ('tests/fixtures/dataclasses/value_struct.py',
+                      'tests/fixtures/dataclasses/sparse_value_struct.py',
+                      'tests/fixtures/dataclasses/repeated_value_struct.py',
+                      'tests/fixtures/text/percent_tuple.py',
+                      'tests/fixtures/text/formatter_ownership.py',
+                      'tests/fixtures/iterator_pipelines/source_generator.py',
+                      'tests/fixtures/containers/chainmap.py',
+                      'benchmarks/cpython_stdlib/full/sys/display_values.py')
+          report = {'source': os.environ['JSON_TEST_REVISION'], 'cpython': sys.version, 'fixtures': {}}
+          with tempfile.TemporaryDirectory() as directory:
+              work = Path(directory)
+              for name in fixtures:
+                  source = Path(name).resolve()
+                  ref = assignments.reference(sys.executable, source, work, None)
+                  assert ref.stdout and not ref.stderr, name
+                  row = {'git_blob': subprocess.check_output(['git', 'hash-object', source], text=True).strip(),
+                         'lines': len(ref.stdout.splitlines()), 'stdout_sha256': hashlib.sha256(ref.stdout.encode()).hexdigest(), 'levels': []}
+                  for level in ('0', '3'):
+                      binary = work / 'fixture'
+                      subprocess.run([os.environ['JSON_IMRE'], 'build', source, '--no-cache', '--opt-level', level,
+                                      '--runtime', os.environ['JSON_RUNTIME'], '--clang', '/usr/bin/clang-18', '-o', binary], check=True)
+                      actual = subprocess.run([binary], cwd=work, capture_output=True, text=True, check=True)
+                      assert (actual.stdout, actual.stderr) == (ref.stdout, ref.stderr), (name, level, actual, ref)
+                      row['levels'].append(int(level))
+                  report['fixtures'][name] = row
+              negative = work / 'chainmap_equality.py'
+              negative.write_text('from collections import ChainMap\na: ChainMap[str, int] = ChainMap({"x": 1})\nprint(a == a)\n')
+              assert assignments.reference(sys.executable, negative, work, None).stdout == 'True\n'
+              for level in ('0', '3'):
+                  rejected = subprocess.run([os.environ['JSON_IMRE'], 'build', negative, '--no-cache', '--opt-level', level,
+                                             '--runtime', os.environ['JSON_RUNTIME'], '--clang', '/usr/bin/clang-18', '-o', work/'negative'],
+                                            cwd=work, capture_output=True, text=True)
+                  assert rejected.returncode and 'container and optional value comparisons are unsupported' in rejected.stderr, rejected
+              report['unsupported_chainmap_equality'] = ['0', '3']
+          (Path(os.environ['JSON_RESULTS']) / 'shared-compiler-fixtures.json').write_text(json.dumps(report, indent=2) + '\n')
+          PY
+      - name: Regenerate the public standard library table
+        if: ${{ success() && (inputs.support_table || inputs.audit == 'decoder-current-main') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$JSON_REQUIRE_SUPPORT_TABLE" != true && ! -f benchmarks/cpython_stdlib/full/support_table.py ]]; then exit 0; fi
           python3 -B -c 'import sys; assert sys.implementation.name == "cpython" and sys.version_info[:3] == (3, 14, 5)'
           python3 -B benchmarks/cpython_stdlib/full/support_table.py --imre "$JSON_IMRE"
           cp docs/stdlib.md "$JSON_RESULTS/stdlib.md"
@@ -300,6 +346,7 @@ jobs:
                        'Observe original key identity and nested decoding fixtures',
                        'Compare the overlapping native shutil callable path',
                        'Validate both full per-occurrence reports',
+                       'Compare the overlapping compiler fixtures with CPython',
                        'Regenerate the public standard library table'):
               step, = [part for part in steps if part.startswith('name: ' + name + '\n')]
               command = textwrap.dedent(step.split('        run: |\n', 1)[1])
