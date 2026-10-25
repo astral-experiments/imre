@@ -2,7 +2,7 @@
   "schema": "imre.cpython-stdlib.pathlib.supplemental-entry/v1",
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
   "platform": "linux",
-  "imre_commit": "265e053407b5635120ae955815b4f8fc88a959c7",
+  "imre_commit": "66ff11995e158d982b1a69fbf9e3156f0372c12a",
   "source": "tests/fixtures/paths/samefile/cases.py",
   "contributes_upstream_occurrences": 0,
   "source_sha256": "14ee3f3b4281bb40da6b8b2dd52ea42b26e1ff01d220e765547cc71b7b9b7e52",
