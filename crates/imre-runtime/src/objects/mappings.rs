@@ -1875,8 +1875,13 @@ pub unsafe extern "C" fn imre_dict_fromkeys_target(
     owner: *const Object,
     fresh: *const Object,
 ) -> *const Object {
-    // SAFETY: only the missing-key policy is copied out of the receiver's borrow.
-    let policy = unsafe { object(owner).0.with(|s| s.dictionary().missing) };
+    // SAFETY: only the receiver's class and missing-key policy leave its borrow.
+    let (policy, ordered) = unsafe {
+        object(owner).0.with(|storage| {
+            let source = storage.dictionary();
+            (source.missing, source.order_version.is_some())
+        })
+    };
     let missing = match policy {
         Missing::Zero => {
             return Error::new(
@@ -1890,9 +1895,11 @@ pub unsafe extern "C" fn imre_dict_fromkeys_target(
     };
     // SAFETY: the target is still private; the result needs its own strong reference.
     unsafe {
-        object(fresh)
-            .0
-            .with_mut(|s| s.dictionary_mut().missing = missing);
+        object(fresh).0.with_mut(|storage| {
+            let target = storage.dictionary_mut();
+            target.missing = missing;
+            target.order_version = ordered.then_some(0);
+        });
         crate::ObjectOwner::increment_strong_count(fresh);
     }
     fresh
@@ -2414,6 +2421,7 @@ pub unsafe extern "C" fn imre_dict_setdefault(
             if inserted {
                 mapping.value_kind.acquire(word).into_word();
                 mapping.update_ascii_int(key, word);
+                mapping.keys_changed();
             }
             Ok(mapping.value_kind.acquire(word).into_word())
         })

@@ -1210,6 +1210,11 @@ Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the count
 order. Each positive integer count repeats its key; a change to a later entry
 is visible when the iterator reaches it.
 
+`_collections._count_elements(mapping, iterable)`, also exported by
+`collections`, adds one per yielded key. It accepts dictionaries with integer
+counts and concrete classes with `get` and `__setitem__` methods. It updates
+the receiver before requesting another key, so mutations survive later errors.
+
 `mapping.clear()` removes every entry in place and returns `None`. Aliases see
 the empty dictionary; a `Counter` still returns zero for a missing key, and a
 `defaultdict` keeps its factory. `dict.clear(mapping)` and the inherited class
