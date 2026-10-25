@@ -112,13 +112,13 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
     }
     // SAFETY: both pointers are rooted record payloads.
     let (left_layout, right_layout) = unsafe { (descriptor(left), descriptor(right)) };
-    // SAFETY: nonnull semantic descriptors are immutable compiler-emitted data.
+    // SAFETY: semantic descriptors stay rooted through the comparison.
     let Some(semantics) = (unsafe { left_layout.semantics.as_ref() }) else {
         return Comparison::Done(false);
     };
-    if !std::ptr::eq(left_layout, right_layout) && !left_layout.same_class(right_layout) {
-        // Named tuples compare structurally with other tuple layouts. Both
-        // descriptors must agree on how to read every word before traversing.
+    let distinct = !std::ptr::eq(left_layout, right_layout);
+    if distinct && !left_layout.same_class(right_layout) {
+        // Tuples can compare across layouts; records can share a nominal class.
         // SAFETY: the immutable descriptors cover each initialized field.
         let compatible = unsafe {
             semantics.kind == TUPLE
@@ -127,8 +127,6 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
                     .as_ref()
                     .is_some_and(|other| other.kind == TUPLE)
                 && left_layout.length == right_layout.length
-                && (0..left_layout.length)
-                    .all(|i| *left_layout.kinds.add(i) == *right_layout.kinds.add(i))
         };
         if !compatible {
             return Comparison::Done(false);
@@ -145,6 +143,11 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
                 continue;
             }
             let kind = WordKind::new(*left_layout.kinds.add(index));
+            // Check the kind exactly once per visited field, including across
+            // resumptions after comparing a nested tuple.
+            if distinct && kind.raw() != *right_layout.kinds.add(index) {
+                return Comparison::Done(false);
+            }
             let left_word = kind.read_record_field(left.add(index));
             let right_word = kind.read_record_field(right.add(index));
             if left_layout.is_value_struct() && kind.raw() == 7 {

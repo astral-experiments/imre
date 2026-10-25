@@ -269,6 +269,25 @@ impl Checker<'_> {
         tuple: &ast::ExprTuple,
         expected: Option<&[Type]>,
     ) -> Result<Expr, String> {
+        let runtime_width = tuple.elts.iter().any(|entry| {
+            let ast::Expr::Starred(star) = entry else {
+                return false;
+            };
+            self.graph
+                .session
+                .tuple_spread_width(self.module, star.start())
+                .is_none()
+        });
+        if runtime_width {
+            if expected.is_some() {
+                return Err(error(
+                    self.source,
+                    tuple,
+                    "a tuple display with runtime width cannot guarantee a fixed layout",
+                ));
+            }
+            return self.runtime_tuple_display(tuple);
+        }
         let mut scope = calls::ArgumentScope::default();
         let mut values = Vec::new();
         for entry in &tuple.elts {
@@ -353,6 +372,84 @@ impl Checker<'_> {
             ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
             kind: ExprKind::Tuple(values),
         }))
+    }
+
+    /// Capture each spread completely before evaluating the next expression.
+    fn runtime_tuple_display(&mut self, tuple: &ast::ExprTuple) -> Result<Expr, String> {
+        let buffer = self.hidden(Type::TupleBuffer);
+        let mut body = vec![Statement::Assign(
+            buffer,
+            Expr {
+                ty: Type::TupleBuffer,
+                kind: ExprKind::Builtin(Builtin::TupleBufferNew, vec![]),
+            },
+        )];
+        let mut parts = Vec::new();
+        let push = |checker: &Self, value: Expr| {
+            Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::TupleBufferPush,
+                    vec![checker.local(buffer), value],
+                ),
+            })
+        };
+        for entry in &tuple.elts {
+            if let ast::Expr::Starred(star) = entry {
+                let input = self.expansion_input(&star.value, None)?;
+                if let Iteration::Container { iterable, .. } = &input {
+                    let scalar = match iterable.ty {
+                        Type::Int => Some("int"),
+                        Type::Bool => Some("bool"),
+                        Type::None => Some("NoneType"),
+                        Type::Float => Some("float"),
+                        _ => None,
+                    };
+                    if let Some(name) = scalar {
+                        self.graph
+                            .checked_non_iterable_spread(self.module, star.value.range());
+                        let exception = Expr {
+                            ty: Type::Exception,
+                            kind: ExprKind::Exception {
+                                kind: exception_kind("TypeError").unwrap(),
+                                message: Some(Box::new(unpacking::string(format!(
+                                    "Value after * must be an iterable, not {name}"
+                                )))),
+                            },
+                        };
+                        body.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(
+                                Builtin::RaiseException,
+                                vec![iterable.clone(), exception],
+                            ),
+                        }));
+                        continue;
+                    }
+                }
+                let fixed = matches!(&input, Iteration::Container { iterable, items: false, start: None } if self.types.fields(iterable.ty).is_some());
+                body.extend(self.expand_items(input, entry, |checker, value| {
+                    parts.push((value.ty, !fixed));
+                    Ok(vec![push(checker, value)])
+                })?);
+            } else {
+                let value = self.expr(entry)?;
+                parts.push((value.ty, false));
+                body.push(push(self, value));
+            }
+        }
+        let ty = self.types.display_tuple(parts);
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::TupleBufferFinish, vec![self.local(buffer)]),
+                }),
+                clear: vec![buffer],
+            },
+        })
     }
 
     /// The right operand may mutate or rebind the left before either list is copied.

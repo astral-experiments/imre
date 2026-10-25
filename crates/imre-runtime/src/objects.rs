@@ -112,6 +112,7 @@ enum Storage {
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
+    TupleBuffer(Vec<OwnedWord>),
     SimpleNamespace(Rc<Object>),
     SourceModule {
         name: crate::StrOwner,
