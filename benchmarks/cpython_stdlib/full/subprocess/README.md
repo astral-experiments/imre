@@ -6,6 +6,11 @@ programs from `Lib/test/subprocessdata`, and the PSF license to CPython commit
 existing vendored copies. Use a test-enabled build of that release; its own
 `Lib/test` supplies unittest, regrtest, and their support modules.
 
+The current [per-occurrence reports](evidence-linux.json) distinguish the test
+body, assertions, subprocess operation and fixture at each optimization level.
+[Pipe capacities](PIPE_CAPACITIES.md) describes how the original `fcntl`
+assertions inspect the compiled parent's stdin, stdout and stderr.
+
 ## Linux reference
 
 [reference-linux.json](reference-linux.json) records **all 353 distinct IDs**.

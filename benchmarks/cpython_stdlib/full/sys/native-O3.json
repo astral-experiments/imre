@@ -56,6 +56,21 @@
         "sys.orig_argv"
       ]
     },
+    "test.test_sys.SysModuleTest.test_thread_info": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "original CPython module/class/instance hooks",
+      "calls": [
+        "thread_info",
+        "length",
+        "name",
+        "lock",
+        "platform",
+        "name"
+      ]
+    },
     "test.test_sys.TestSysJIT.test_jit_is_available": {
       "status": "pass",
       "execution": "mixed",
