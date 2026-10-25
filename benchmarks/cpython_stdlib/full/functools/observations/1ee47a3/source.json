@@ -1,0 +1,10 @@
+{
+  "adapter_commit": "1ee47a393b4920ffd5bad160fe5a72f9eec6583a",
+  "tree": "efff3f9b8b3be28e33c299178ea91c398348c3a9",
+  "compiler_source": "3b7a9fd34d468b4f2ee8dd3e671aa2b6c943140f",
+  "binary_sha256": {
+    "imre": "2f723198ba377521ba74d8b87dab6850b6cb24982b139192e289d2d2af1328b3",
+    "libimre_runtime.a": "0bab331746d1c84546eb31c360272bf0b92c2e27c971cd804d57dd364c123921"
+  },
+  "note": "No compiler or runtime sources changed between these revisions. The two transport controls are separate from upstream occurrences."
+}

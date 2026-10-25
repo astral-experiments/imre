@@ -2,6 +2,13 @@
 
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum JoinStyle {
+    Plain,
+    Shell,
+    WindowsCommand,
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum ReverseSequence {
     List,
@@ -445,24 +452,57 @@ impl Checker<'_> {
                 "str.join requires one string iterable",
             ));
         };
-        self.join_parts(receiver, source, call, false)
+        self.join_parts(receiver, source, call, JoinStyle::Plain)
     }
 
-    /// For shlex.join, quote each yielded item before requesting the next one.
+    /// Quote or convert each yielded item before asking for the next one.
     pub(super) fn join_parts(
         &mut self,
         receiver: Expr,
         source: &ast::Expr,
         call: &ast::ExprCall,
-        shell_quote: bool,
+        style: JoinStyle,
     ) -> Result<Expr, String> {
-        let input = self.expansion_input(source, (!shell_quote).then_some(Type::Str))?;
+        let input = if style == JoinStyle::WindowsCommand
+            && let ast::Expr::List(display) = source
+            && !display
+                .elts
+                .iter()
+                .any(|item| matches!(item, ast::Expr::Starred(_)))
+        {
+            Iteration::Container {
+                iterable: self.process_argument_list(display)?,
+                items: false,
+                start: None,
+            }
+        } else {
+            self.expansion_input(source, (style == JoinStyle::Plain).then_some(Type::Str))?
+        };
+        if style == JoinStyle::WindowsCommand
+            && let Iteration::Container { iterable, .. } = &input
+            && let Some(name) = match iterable.ty {
+                Type::None => Some("NoneType"),
+                Type::Int => Some("int"),
+                Type::Bool => Some("bool"),
+                Type::Float => Some("float"),
+                Type::Path => Some("PosixPath"),
+                Type::PurePath(ir::PathFlavor::Posix) => Some("PurePosixPath"),
+                Type::PurePath(ir::PathFlavor::Windows) => Some("PureWindowsPath"),
+                _ => None,
+            }
+        {
+            return self.sys_type_error(
+                call,
+                Type::Str,
+                format!("'{name}' object is not iterable"),
+            );
+        }
         if let Iteration::Container {
             iterable,
             items: false,
             start: None,
         } = &input
-            && !shell_quote
+            && style == JoinStyle::Plain
             && matches!(
                 self.types.element(iterable.ty),
                 Some(Type::Str | Type::StrLiteral(_))
@@ -489,10 +529,19 @@ impl Checker<'_> {
             ),
         ];
         body.extend(self.expand_items(input, call, |checker, value| {
-            let value = if shell_quote {
-                checker.shlex_quote_value(value, call)?
-            } else {
-                checker.coerce(value, Type::Str, call)?
+            let value = match style {
+                JoinStyle::Plain => checker.coerce(value, Type::Str, call)?,
+                JoinStyle::Shell => checker.shlex_quote_value(value, call)?,
+                JoinStyle::WindowsCommand => {
+                    let path = Self::string_value(checker.fspath(value, source)?);
+                    Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::QuoteCommandArgument),
+                            vec![path],
+                        ),
+                    }
+                }
             };
             Ok(vec![Statement::Expr(Expr {
                 ty: Type::None,
@@ -538,25 +587,18 @@ impl Checker<'_> {
                 return Err(error(self.source, keyword, "repeated str.format keyword"));
             }
             let value = Self::string_value(self.expr(&keyword.value)?);
-            let text = match value.ty {
-                Type::Str => value,
-                Type::Int => Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Str, vec![value]),
-                },
-                _ => {
-                    return Err(error(
-                        self.source,
-                        keyword,
-                        "str.format fields require str or int",
-                    ));
-                }
-            };
+            if !matches!(value.ty, Type::Str | Type::Int) {
+                return Err(error(
+                    self.source,
+                    keyword,
+                    "str.format fields require str or int",
+                ));
+            }
             args.push(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Str(name.to_string()),
             });
-            args.push(text);
+            args.push(value);
         }
         Ok(Expr {
             ty: Type::Str,
@@ -619,16 +661,6 @@ impl Checker<'_> {
                 "debug f-string fields are unsupported",
             ));
         }
-        if !matches!(
-            field.conversion,
-            ast::ConversionFlag::None | ast::ConversionFlag::Str | ast::ConversionFlag::Repr
-        ) {
-            return Err(error(
-                self.source,
-                field,
-                "f-string conversions support only !s and !r",
-            ));
-        }
         let mut specification = String::new();
         if let Some(spec) = &field.format_spec {
             for part in &spec.elements {
@@ -641,6 +673,16 @@ impl Checker<'_> {
                 };
                 specification.push_str(&literal.value);
             }
+        }
+        if field.conversion == ast::ConversionFlag::Ascii {
+            if !specification.is_empty() {
+                return Err(error(
+                    self.source,
+                    field,
+                    "formatted strings support !a with an empty format specification",
+                ));
+            }
+            return self.ascii_expr(&field.expression);
         }
         if specification.is_empty()
             && let Some(text) = self.unittest_failure_repr(&field.expression)?
@@ -765,6 +807,9 @@ impl Checker<'_> {
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(..))
         {
             return self.record_text(value, field);
+        }
+        if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Class(_)) {
+            return self.record_repr(value, field);
         }
         if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
             return Ok(Expr {

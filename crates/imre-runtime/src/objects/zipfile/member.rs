@@ -1,9 +1,12 @@
 //! Independent member cursors with incremental CRC. Compressed and inflated
 //! buffers are each bounded even when the caller requests the entire member.
+use crate::StrOwner;
 use std::io::SeekFrom;
 use std::rc::Rc;
 
 use flate2::{Crc, Decompress, FlushDecompress, Status};
+use num_bigint::Sign;
+use num_traits::ToPrimitive;
 
 use super::super::{
     Bytes, Str, bytes,
@@ -14,6 +17,7 @@ use super::{
     directory::{bad, grow, name, u16_at},
     source::Source,
 };
+use crate::Int;
 
 const BLOCK: usize = 64 * 1024;
 
@@ -139,7 +143,7 @@ impl Member {
         })
     }
 
-    pub(in crate::objects) fn name(&self) -> &Rc<Str> {
+    pub(in crate::objects) fn name(&self) -> &StrOwner {
         &self.info.filename
     }
 
@@ -398,6 +402,33 @@ impl Member {
         self.info.file_size - self.left - (self.buffer.len() - self.pos) as u64
     }
 
+    /// Resolve a Python seek relative to the member before clamping its position.
+    pub(in crate::objects) fn seek_offset(&mut self, offset: &Int, whence: i64) -> Result<u64> {
+        let base = match whence {
+            0 => 0,
+            1 => self.tell(),
+            2 => self.info.file_size,
+            _ => {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "whence must be os.SEEK_SET (0), os.SEEK_CUR (1), or os.SEEK_END (2)",
+                ));
+            }
+        };
+        let target = if let Some(delta) = offset.as_small() {
+            base.saturating_add_signed(delta)
+        } else {
+            let delta = offset.big();
+            let magnitude = delta.magnitude().to_u64().unwrap_or(u64::MAX);
+            if delta.sign() == Sign::Minus {
+                base.saturating_sub(magnitude)
+            } else {
+                base.saturating_add(magnitude)
+            }
+        };
+        self.seek(SeekFrom::Start(target))
+    }
+
     pub(in crate::objects) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
         let now = self.tell();
         let to = match at {
@@ -472,6 +503,12 @@ mod tests {
         let error = member.seek(SeekFrom::End(0)).unwrap_err();
         assert!(error.is_kind(Kind::OverflowError));
         assert_eq!(member.tell(), 0);
+        let almost_size = Int::new((1 - i128::from(u64::MAX)).into());
+        assert_eq!(member.seek_offset(&almost_size, 2).ok(), Some(1));
+        assert_eq!(
+            member.seek_offset(&Int::new(i128::MIN.into()), 2).ok(),
+            Some(0)
+        );
         assert_eq!(member.read(Some(1)).ok().unwrap(), b"X");
     }
 

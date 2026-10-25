@@ -91,7 +91,7 @@ impl Header {
         self.descriptor.get().addr() & ANCHOR != 0
     }
 
-    /// Return the original descriptor or tagged block, even on an observed record.
+    /// Recover the original layout, including block and tuple tags on an observed record.
     pub(super) fn layout_pointer(&self) -> *const RecordDescriptor {
         let layout = self.descriptor.get();
         if layout.addr() & ANCHOR == 0 {

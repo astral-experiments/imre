@@ -17,14 +17,16 @@ import tempfile
 import unittest
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1]))
+sys.path[:0] = [str(HERE.parents[1]), str(HERE)]
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import Toolchain, native_method, run_in_fixtures
 from native_counter import assertion_fixture
+from chainmap_methods import OPERATIONS as CHAINMAP_OPERATIONS, fixture as chainmap_fixture
 from deque_methods import BIG_METHODS, BIG_OPERATION, big_fixture
 
 
 COUNTER_OPERATIONS = {
+    "test_unary": "Native unary Counter operations and conversion to plain dictionaries",
     "test_total": "Counter construction and total()",
     "test_invariant_for_the_in_operator": "Counter construction, key iteration, subscription and membership",
     "test_eq": "Counter equality and inequality with missing zero counts",
@@ -33,8 +35,25 @@ COUNTER_OPERATIONS = {
     "test_ge": "Counter multiset containment with missing zero counts",
     "test_gt": "Counter strict multiset containment with missing zero counts",
 }
+
+# For the original unary test both operands are plain dict[str, int]. Compare
+# stored keys (including absence) and their counts without depending on order.
+UNARY_ASSERTIONS = """from collections import Counter
+
+class NativeCase:
+    def assertEqual(self, left: dict[str, int], right: dict[str, int]) -> None:
+        if len(left) != len(right):
+            raise AssertionError("different lengths")
+        for key in left:
+            if key not in right or left[key] != right[key]:
+                raise AssertionError("different entries")
+"""
 EMPTY = {f"test.test_deque.TestSequence.{method}" for method in
          ("test_getitem", "test_getslice", "test_subscript")}
+DEQUE_OPERATIONS = {
+    "test_clear": "Construct a deque, clear it twice, and inspect its native length and iteration",
+    "test_maxlen_zero": "Consume native range iterators in bounded deque construction, extend, and extendleft",
+}
 
 
 @cache
@@ -160,11 +179,16 @@ def main():
                 node, fixture = native_fixture(path, owner, method, case)
                 operation, assertions = None, "imre"
                 if case_id == f"test.test_collections.TestCounter.{method}" and method in COUNTER_OPERATIONS:
-                    fixture = assertion_fixture(method, "NativeCase")
+                    fixture = UNARY_ASSERTIONS if method == "test_unary" else assertion_fixture(method, "NativeCase")
                     operation = ("imre", COUNTER_OPERATIONS[method])
+                elif case_id == f"test.test_collections.TestChainMap.{method}" and method in CHAINMAP_OPERATIONS:
+                    fixture = chainmap_fixture(method)
+                    operation = ("imre", CHAINMAP_OPERATIONS[method])
                 elif case_id == f"test.test_deque.TestBasic.{method}" and method in BIG_METHODS:
                     fixture = big_fixture(sys.modules[name].BIG)
                     operation = BIG_OPERATION
+                elif case_id == f"test.test_deque.TestBasic.{method}" and method in DEQUE_OPERATIONS:
+                    operation = ("imre", DEQUE_OPERATIONS[method])
                 elif case_id == "test.test_deque.TestBasic.test_basics":
                     operation = ("imre", "Reinitialize, grow, iterate and pop a native deque; reverse the list of right pops.")
                 elif case_id in EMPTY:
