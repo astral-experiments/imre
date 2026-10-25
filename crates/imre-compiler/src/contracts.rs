@@ -94,6 +94,7 @@ impl Builtin {
                     | TextOperation::ShlexSplit
                     | TextOperation::ShlexQuote => true,
                     TextOperation::IsSpace
+                    | TextOperation::IsUpper
                     | TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -298,6 +299,7 @@ impl Builtin {
             | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
+            | Self::FreezeStrings
             | Self::SetAdd
             | Self::CounterUpdate
             | Self::KeySet
@@ -305,6 +307,7 @@ impl Builtin {
             | Self::KeyIntersection
             | Self::KeyDifference
             | Self::RegexGroupDict
+            | Self::Errno(_)
             | Self::DictGet
             | Self::NamespaceWrap
             | Self::NamespaceDict

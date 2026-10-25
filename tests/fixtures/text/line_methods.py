@@ -94,3 +94,11 @@ try:
     print("".isspace(wrong=argument(-1)))
 except TypeError as err:
     print(err)
+try:
+    print(source("A").isupper(argument(-1), wrong=argument(1)))
+except TypeError as err:
+    print(err)
+try:
+    print(source("A").isupper(argument(-1), later()))
+except ValueError as err:
+    print(err)
