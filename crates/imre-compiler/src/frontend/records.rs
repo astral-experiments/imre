@@ -599,12 +599,67 @@ impl Checker<'_> {
         if self.is_class_receiver(expression) {
             return self.class;
         }
+        if let ast::Expr::Attribute(a) = expression
+            && let Some(class) = self.class_reference(&a.value)
+            && let Some(crate::classes::ExceptionAlias::Named(def)) =
+                self.classes.declarations.definitions[class]
+                    .exception_aliases
+                    .get(a.attr.as_str())
+        {
+            return self.classes.declarations.ids.get(def).copied();
+        }
         match self.resolve(expression) {
             Some(Binding::Definition(definition)) => {
                 self.classes.declarations.ids.get(&definition).copied()
             }
             _ => None,
         }
+    }
+
+    /// Class-valued exception attributes bind as constructors, never as methods.
+    /// An upcast receiver selects the override on its concrete record layout.
+    pub(super) fn exception_alias_call(
+        &mut self,
+        call: &ast::ExprCall,
+        attr: &ast::ExprAttribute,
+        class: usize,
+        receiver: Option<Expr>,
+    ) -> Result<Option<Expr>, String> {
+        if !self.classes.declarations.definitions[class]
+            .exception_aliases
+            .contains_key(attr.attr.as_str())
+        {
+            return Ok(None);
+        }
+        let direct = |checker: &mut Self, id: usize| -> Result<Expr, String> {
+            match checker.classes.declarations.definitions[id].exception_aliases[attr.attr.as_str()]
+            {
+                crate::classes::ExceptionAlias::Builtin(kind) => {
+                    checker.simple_exception(call, kind)
+                }
+                crate::classes::ExceptionAlias::Named(def) => {
+                    if let Some(&layout) = checker.classes.declarations.ids.get(&def) {
+                        checker.construct(call, layout)
+                    } else {
+                        checker
+                            .simple_exception(call, checker.classes.declarations.exceptions[&def])
+                    }
+                }
+            }
+        };
+        if let Some(receiver) = receiver {
+            if self.classes.has_concrete_subclasses(class) {
+                return self
+                    .dispatch_record(class, receiver, call, |checker, id, _| {
+                        let e = direct(checker, id)?;
+                        checker.coerce(e, Type::Exception, call)
+                    })
+                    .map(Some);
+            }
+            let result = direct(self, class)?;
+            return Ok(Some(self.evaluated_receiver(Some(receiver), result)));
+        }
+        direct(self, class).map(Some)
     }
 
     /// Instance access still evaluates the receiver for class/static methods,
@@ -747,7 +802,18 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
-        calls::reject_unpacking(call, self.source)?;
+        if call
+            .arguments
+            .keywords
+            .iter()
+            .any(|keyword| keyword.arg.is_none())
+        {
+            return Err(error(
+                self.source,
+                call,
+                "keyword argument unpacking is unsupported",
+            ));
+        }
         if attribute.attr.starts_with("__")
             && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
         {
@@ -784,6 +850,7 @@ impl Checker<'_> {
             ));
         }
         if kind == MethodKind::Property {
+            calls::reject_unpacking(call, self.source)?;
             let value = self.class_attribute(attribute, class, receiver, None)?;
             return self.invoke(call, value);
         }
@@ -793,16 +860,7 @@ impl Checker<'_> {
             (None, receiver)
         };
         let skip = usize::from(receiver.is_some());
-        let (ty, args) = if self.inference.is_some() {
-            self.infer_call(call, &signature, receiver, skip)?
-        } else {
-            (
-                signature.returns,
-                self.arguments(call, &signature.params[skip..], receiver)?,
-            )
-        };
-        self.calls.insert(signature.id);
-        let value = self.call_value(&signature, ty, args);
+        let value = self.source_call(call, &signature, receiver, skip)?;
         Ok(self.evaluated_receiver(discarded, value))
     }
 
@@ -911,16 +969,78 @@ impl Checker<'_> {
             self.arguments(call, &signature.params[1..], None)?
         };
         self.calls.insert(signature.id);
-        Ok(Expr {
+        let record = Expr {
             ty: Type::Class(class),
             kind: ExprKind::Construct {
                 initializer: signature.id,
                 args,
             },
-        })
+        };
+        let decl = &self.classes.declarations.definitions[class];
+        if let Some(&kind) = self.classes.declarations.exceptions.get(&decl.definition) {
+            let text = self.classes.methods[class].get("__str__").map(|m| m.id);
+            let repr = self.classes.methods[class].get("__repr__").map(|m| m.id);
+            self.calls.extend(text);
+            self.calls.extend(repr);
+            return Ok(Expr {
+                ty: Type::NamedException(class),
+                kind: ExprKind::Builtin(
+                    Builtin::NamedException {
+                        kind,
+                        message_field: decl.fields.len() - 1,
+                        text,
+                        repr,
+                        dataclass_repr: decl.dataclass.is_some_and(|d| d.repr),
+                    },
+                    vec![record],
+                ),
+            });
+        }
+        Ok(record)
     }
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(class) = self.class
+            && self
+                .classes
+                .declarations
+                .exceptions
+                .contains_key(&self.classes.declarations.definitions[class].definition)
+            && !self.names.contains_key("super")
+            && !self.graph.modules[self.module]
+                .bindings
+                .contains_key("super")
+        {
+            let [message] = call.arguments.args.as_ref() else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "fixed exception payloads require one string argument to super().__init__",
+                ));
+            };
+            if !call.arguments.keywords.is_empty() {
+                return Err(error(
+                    self.source,
+                    call,
+                    "exception messages do not accept keyword arguments",
+                ));
+            }
+            let ty = self.types.optional(Type::Str);
+            let message_value = self.expr_expected(message, Type::Str)?;
+            let value = self.coerce(message_value, ty, message)?;
+            let field = self.classes.fields[class].len() - 1;
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::SetField(self.local(0), field, value)],
+                    value: Box::new(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    }),
+                    clear: Vec::new(),
+                },
+            });
+        }
         let base = self
             .super_initializer
             .filter(|_| {

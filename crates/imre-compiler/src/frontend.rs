@@ -24,6 +24,7 @@ mod dispatch;
 mod documents;
 mod enums;
 mod expansions;
+mod functools;
 mod hashlib;
 mod inference;
 mod iterables;
@@ -528,7 +529,9 @@ pub(crate) fn lower_with_owners(
                 }
             } else if method.name.as_str() == "__post_init__" && signature.returns != Type::None {
                 return Err(module.error(&method, "__post_init__ must return None"));
-            } else if method.name.as_str() == "__str__" && signature.returns != Type::Str {
+            } else if matches!(method.name.as_str(), "__str__" | "__repr__")
+                && signature.returns != Type::Str
+            {
                 return Err(module.error(&method, "__str__ must return str"));
             }
             if keyword_copy {
@@ -1117,7 +1120,7 @@ fn signature(
         .transpose()?
         .or_else(|| match (receiver, function.name.as_str()) {
             (Some(_), "__init__" | "__post_init__") => Some(Type::None),
-            (Some(_), "__str__") => Some(Type::Str),
+            (Some(_), "__str__" | "__repr__") => Some(Type::Str),
             _ => None,
         });
     let id = inference.register(parameter_types, returns);
@@ -1231,7 +1234,11 @@ fn annotation_at(
     match graph.resolve_type(module, expression) {
         Some(Binding::Definition(definition)) => {
             if classes.exceptions.contains_key(&definition) {
-                return Ok(Type::Exception);
+                return Ok(classes
+                    .ids
+                    .get(&definition)
+                    .copied()
+                    .map_or(Type::Exception, Type::NamedException));
             }
             if let Some(&id) = classes.ids.get(&definition) {
                 return Ok(classes.instance(id));
@@ -1257,6 +1264,7 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
+        Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(crate::ir::ProcessCapture::TEXT));
         }
@@ -1745,6 +1753,19 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// Field accesses and Python methods use the existing fixed record machinery;
+    /// every other reference retains the canonical exception object.
+    fn exception_record(value: Expr) -> Expr {
+        if let Type::NamedException(class) = value.ty {
+            Expr {
+                ty: Type::Class(class),
+                kind: ExprKind::Builtin(Builtin::ExceptionRecord, vec![value]),
+            }
+        } else {
+            value
+        }
+    }
+
     /// Resolves a fixed field without evaluating its receiver more than once.
     fn field(&mut self, attribute: &ast::ExprAttribute) -> Result<(Expr, usize, Type), String> {
         let receiver = self.expr(&attribute.value)?;
@@ -1756,6 +1777,7 @@ impl<'a> Checker<'a> {
         attribute: &ast::ExprAttribute,
         receiver: Expr,
     ) -> Result<(Expr, usize, Type), String> {
+        let receiver = Self::exception_record(receiver);
         if let Type::Class(class) = receiver.ty {
             let declaration = &self.classes.declarations.definitions[class];
             if self.classes.parsers.namespace(class) {
@@ -1886,7 +1908,9 @@ impl<'a> Checker<'a> {
             };
             return self.coerce(literals::view(value, string), expected, node);
         }
-        if value.ty == Type::TimeoutExpired && expected == Type::Exception {
+        if matches!(value.ty, Type::TimeoutExpired | Type::NamedException(_))
+            && expected == Type::Exception
+        {
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(
@@ -3483,7 +3507,15 @@ impl<'a> Checker<'a> {
                         };
                         return Ok((vec![Statement::Raise(Some(member))], false));
                     }
-                    if !matches!(raised.kind, ExprKind::Exception { .. }) {
+                    if !matches!(
+                        raised.kind,
+                        ExprKind::Exception { .. }
+                            | ExprKind::Builtin(
+                                Builtin::NamedException { .. } | Builtin::ExceptionArgument(_),
+                                _
+                            )
+                    ) && !matches!(&raised.kind,ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionView),args) if matches!(args[0].kind,ExprKind::Builtin(Builtin::NamedException{..},_)))
+                    {
                         return Err(error(
                             self.source,
                             raise,
@@ -3617,8 +3649,80 @@ impl<'a> Checker<'a> {
     /// Imported exception aliases resolve by identity; a spelling alone cannot
     /// turn an arbitrary first-party definition into a builtin category.
     /// Class-form raises construct a new instance, just like an explicit call.
+    fn simple_exception(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
+        if kind == 32 {
+            return self.system_exit(call, false);
+        }
+        if matches!(kind, 0 | 18 | 25..=31 | 34) {
+            return Err(error(
+                self.source,
+                call,
+                "this exception category is catch-only",
+            ));
+        }
+        if !call.arguments.keywords.is_empty() || call.arguments.args.len() > 1 {
+            return Err(error(
+                self.source,
+                call,
+                "builtin exceptions accept zero arguments or one typed argument",
+            ));
+        }
+        let arg = call
+            .arguments
+            .args
+            .first()
+            .map(|v| self.expr(v))
+            .transpose()?;
+        let arg = match arg {
+            Some(v) if matches!(v.ty, Type::StrLiteral(_)) => {
+                Some(self.coerce(v, Type::Str, call)?)
+            }
+            other => other,
+        };
+        if arg.as_ref().is_some_and(|v| v.ty != Type::Str) {
+            let v = arg.unwrap();
+            if !matches!(
+                v.ty,
+                Type::Bool
+                    | Type::Int
+                    | Type::Float
+                    | Type::Bytes
+                    | Type::None
+                    | Type::List(_)
+                    | Type::Tuple(_)
+                    | Type::Dict(_)
+                    | Type::Set(_)
+            ) || !dataclass_values::can_format(v.ty, self.types, self.classes)
+            {
+                return Err(error(
+                    self.source,
+                    call,
+                    "exception argument has no supported Python representation",
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::Exception,
+                kind: ExprKind::Builtin(Builtin::ExceptionArgument(kind), vec![v]),
+            });
+        }
+        Ok(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind,
+                message: arg.map(Box::new),
+            },
+        })
+    }
+
     fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
         if let Some(kind) = self.exception_category(value) {
+            if self.class_reference(value).is_some() {
+                return Err(error(
+                    self.source,
+                    value,
+                    "raise a constructed exception payload with its required arguments",
+                ));
+            }
             if kind == 32 {
                 return Ok(Expr {
                     ty: Type::Exception,
@@ -3750,6 +3854,17 @@ impl<'a> Checker<'a> {
                     let slot = self.declare(name.as_str(), Type::Exception, handler)?;
                     self.assigned.insert(slot);
                     self.narrowed.remove_mut(&slot);
+                    if let [kind] = kinds.as_slice()
+                        && let Some((&def, _)) = self
+                            .classes
+                            .declarations
+                            .exceptions
+                            .iter()
+                            .find(|(_, id)| *id == kind)
+                        && let Some(&class) = self.classes.declarations.ids.get(&def)
+                    {
+                        self.narrowed.insert_mut(slot, Type::NamedException(class));
+                    }
                     if !kinds.is_empty() && kinds.iter().all(|kind| *kind == 27) {
                         self.narrowed.insert_mut(slot, Type::TimeoutExpired);
                     }
@@ -4124,6 +4239,12 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
+                Intrinsic::HashAvailable => {
+                    return Ok(Expr {
+                        ty: self.types.set(Type::Str),
+                        kind: ExprKind::Builtin(Builtin::HashAvailable, vec![]),
+                    });
+                }
                 Intrinsic::OsDevnull => {
                     return Ok(Expr {
                         ty: Type::Str,
@@ -4131,6 +4252,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
+                Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
                 Intrinsic::SysExecutable | Intrinsic::SysPlatform => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
@@ -4315,9 +4437,7 @@ impl<'a> Checker<'a> {
                     left = Self::string_value(left);
                     right = Self::string_value(right);
                 }
-                if binary.op == ast::Operator::Div
-                    && (left.ty == Type::Path || right.ty == Type::Path)
-                {
+                if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
                     return self.path_join(left, right, binary);
                 }
                 if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
@@ -4587,7 +4707,8 @@ impl<'a> Checker<'a> {
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
                         && matches!((ty, right), (Type::Class(_), Type::Class(_)));
-                    if !numeric && !records {
+                    let paths = ty.is_path() && right.is_path();
+                    if !numeric && !records && !paths {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
@@ -4789,6 +4910,16 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "encoding"
+                    && matches!(
+                        self.resolve(&attribute.value),
+                        Some(Binding::Intrinsic(
+                            Intrinsic::Stdin | Intrinsic::Stdout | Intrinsic::Stderr
+                        ))
+                    )
+                {
+                    return Ok(unpacking::string("utf-8"));
+                }
                 if let Some(class) = self.class_reference(&attribute.value) {
                     if let Some(member) = self.enum_member(class, attribute.attr.as_str()) {
                         return Ok(member);
@@ -4796,6 +4927,33 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Type::NamedException(class) = receiver.ty
+                    && attribute.attr.as_str() == "args"
+                {
+                    let message = Expr {
+                        ty: self.types.optional(Type::Str),
+                        kind: ExprKind::Field(
+                            Box::new(Self::exception_record(receiver)),
+                            self.classes.fields[class].len() - 1,
+                        ),
+                    };
+                    return Ok(Expr {
+                        ty: self.types.tuple(vec![Type::Str]),
+                        kind: ExprKind::Tuple(vec![Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Unwrap(Box::new(message)),
+                        }]),
+                    });
+                }
+                let receiver = if matches!(
+                    attribute.attr.as_str(),
+                    "__cause__" | "__suppress_context__"
+                ) && matches!(receiver.ty, Type::NamedException(_))
+                {
+                    self.coerce(receiver, Type::Exception, attribute)?
+                } else {
+                    Self::exception_record(receiver)
+                };
                 if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
                     match attribute.attr.as_str() {
                         "name" => {
@@ -4822,7 +4980,7 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
                 }
-                if receiver.ty == Type::Path {
+                if receiver.ty.is_path() {
                     return self.path_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::AsyncProcess(_)) {
@@ -5066,6 +5224,34 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
+        if calls::starred(call) {
+            if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
+                && let Some(signature) = self.functions.get(&definition)
+            {
+                return self.source_call(call, &signature.clone(), None, 0);
+            }
+            if let ast::Expr::Attribute(method) = &*call.func
+                && self.resolve(&call.func).is_none()
+            {
+                if let Some(class) = self.class_reference(&method.value) {
+                    return self.class_method_call(call, method, class, None);
+                }
+                let object = match receiver {
+                    Some(value) => value,
+                    None => self.expr(&method.value)?,
+                };
+                if let Type::Class(class) | Type::StrEnum(class) | Type::Enum(class) = object.ty
+                    && self.classes.methods[class].contains_key(method.attr.as_str())
+                {
+                    return self.class_method_call(call, method, class, Some(object));
+                }
+            }
+            return Err(error(
+                self.source,
+                call,
+                "argument unpacking requires a source-defined function or method",
+            ));
+        }
         calls::reject_unpacking(call, self.source)?;
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
             && let [input] = call.arguments.args.as_ref()
@@ -5145,6 +5331,7 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
                 let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
@@ -5159,7 +5346,9 @@ impl<'a> Checker<'a> {
                 check_string(target, self.source)?;
                 return self.typed_expr(value);
             }
-            Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
+            Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
+                return self.sha256_constructor(call, op == Intrinsic::HashNew);
+            }
             Some(Binding::Intrinsic(Intrinsic::BytesIo)) => {
                 let args = self.arguments(
                     call,
@@ -5203,6 +5392,11 @@ impl<'a> Checker<'a> {
                 return self.fspath_argument(path);
             }
             Some(Binding::Intrinsic(Intrinsic::GetLogger)) => return self.get_logger(call),
+            Some(Binding::Intrinsic(
+                symbol @ (Intrinsic::AddLevelName
+                | Intrinsic::GetLevelName
+                | Intrinsic::LevelNamesMapping),
+            )) => return self.logging_levels(symbol, call),
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
             }
@@ -5275,7 +5469,10 @@ impl<'a> Checker<'a> {
             self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::Path))
         ) {
-            return self.path_constructor(call);
+            return self.path_constructor(call, Type::Path);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) = self.resolve(&call.func) {
+            return self.path_constructor(call, Type::PurePath(flavor));
         }
         if matches!(
             self.resolve(&call.func),
@@ -5311,34 +5508,7 @@ impl<'a> Checker<'a> {
             return self.isinstance(call);
         }
         if let Some(kind) = self.exception_category(&call.func) {
-            self.reject_builtin_keywords(call)?;
-            if kind == 32 {
-                return self.system_exit(call, false);
-            }
-            if matches!(kind, 0 | 18 | 25..=31 | 34) {
-                return Err(error(
-                    self.source,
-                    call,
-                    "this exception category is catch-only",
-                ));
-            }
-            if call.arguments.args.len() > 1 {
-                return Err(error(
-                    self.source,
-                    call,
-                    "builtin exceptions accept zero arguments or one string message",
-                ));
-            }
-            let message = call
-                .arguments
-                .args
-                .first()
-                .map(|message| self.expr_expected(message, Type::Str).map(Box::new))
-                .transpose()?;
-            return Ok(Expr {
-                ty: Type::Exception,
-                kind: ExprKind::Exception { kind, message },
-            });
+            return self.simple_exception(call, kind);
         }
         if let Some(binding) = self.resolve(&call.func) {
             let Binding::Definition(definition) = binding else {
@@ -5349,20 +5519,7 @@ impl<'a> Checker<'a> {
                 .get(&definition)
                 .ok_or_else(|| error(self.source, call, "definition is not a callable function"))?
                 .clone();
-            if self.classes.cached.contains(&signature.id) && !call.arguments.keywords.is_empty() {
-                return Err(error(
-                    self.source,
-                    call,
-                    "cached calls currently require a positional key",
-                ));
-            }
-            if self.inference.is_some() {
-                let (ty, args) = self.infer_call(call, &signature, None, 0)?;
-                return Ok(self.call_value(&signature, ty, args));
-            }
-            let args = self.arguments(call, &signature.params, None)?;
-            self.calls.insert(signature.id);
-            return Ok(self.call_value(&signature, signature.returns, args));
+            return self.source_call(call, &signature, None, 0);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))
             || !matches!(&*call.func, ast::Expr::Name(_) | ast::Expr::Attribute(_))
@@ -5372,13 +5529,34 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
             if let Some(class) = self.class_reference(&attribute.value) {
+                if let Some(e) = self.exception_alias_call(call, attribute, class, None)? {
+                    return Ok(e);
+                }
                 return self.class_method_call(call, attribute, class, None);
             }
             let receiver = match receiver {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if matches!(receiver.ty, Type::NamedException(_))
+                && matches!(attribute.attr.as_str(), "__init__" | "__post_init__")
+            {
+                return Err(error(
+                    self.source,
+                    call,
+                    "reinitializing an existing exception payload is unsupported",
+                ));
+            }
+            let receiver = Self::exception_record(receiver);
             if let Type::Class(class) = receiver.ty {
+                if self.classes.declarations.definitions[class]
+                    .exception_aliases
+                    .contains_key(attribute.attr.as_str())
+                {
+                    return self
+                        .exception_alias_call(call, attribute, class, Some(receiver))
+                        .map(Option::unwrap);
+                }
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
             if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty
@@ -5405,7 +5583,7 @@ impl<'a> Checker<'a> {
             } else {
                 receiver
             };
-            if receiver.ty == Type::Path {
+            if receiver.ty.is_path() {
                 return self.path_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::CompletedProcess(_)) {
@@ -5837,10 +6015,7 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(builtin, args),
             });
         }
-        if args.len() == 1
-            && args[0].ty == Type::Path
-            && matches!(name.id.as_str(), "str" | "print")
-        {
+        if args.len() == 1 && args[0].ty.is_path() && matches!(name.id.as_str(), "str" | "print") {
             let text = paths::operation(ir::PathOperation::Text, Type::Str, args);
             return Ok(if name.id == "str" {
                 text
@@ -5937,7 +6112,10 @@ impl<'a> Checker<'a> {
         }
         if name.id == "print"
             && args.len() == 1
-            && matches!(args[0].ty, Type::Exception | Type::TimeoutExpired)
+            && matches!(
+                args[0].ty,
+                Type::Exception | Type::NamedException(_) | Type::TimeoutExpired
+            )
         {
             return Ok(Expr {
                 ty: Type::None,
@@ -5948,6 +6126,15 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::ExceptionMessage, args),
                     }],
                 ),
+            });
+        }
+        if name.id == "repr"
+            && args.len() == 1
+            && matches!(args[0].ty, Type::Exception | Type::NamedException(_))
+        {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::ExceptionRepr, args),
             });
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
@@ -6004,6 +6191,7 @@ impl<'a> Checker<'a> {
                             | Type::Bytes
                             | Type::None
                             | Type::Exception
+                            | Type::NamedException(_)
                             | Type::TimeoutExpired
                     ) =>
             {

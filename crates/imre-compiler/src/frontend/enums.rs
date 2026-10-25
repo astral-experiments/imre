@@ -152,6 +152,12 @@ impl Checker<'_> {
         if !(types
             .iter()
             .all(|ty| matches!(ty, Type::StrEnum(_) | Type::Enum(_)))
+            || types.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+                )
+            })
             || types == [Type::Logger; 2]
             || types == [Type::Sha256; 2])
         {
