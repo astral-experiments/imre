@@ -70,13 +70,28 @@ impl Checker<'_> {
         receiver: Expr,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        let signature = self.classes.methods[class].get("__copy__").ok_or_else(|| {
-            error(
-                self.source,
-                call,
-                "copying this class requires a supported __copy__ method",
-            )
-        })?;
+        let Some(signature) = self.classes.methods[class].get("__copy__") else {
+            let declarations = &self.classes.declarations.definitions;
+            if self
+                .classes
+                .declarations
+                .exceptions
+                .contains_key(&declarations[class].definition)
+                || std::iter::once(class)
+                    .chain(declarations[class].bases.iter().copied())
+                    .any(|id| declarations[id].node.body.iter().any(custom_reconstruction))
+            {
+                return Err(error(
+                    self.source,
+                    call,
+                    "copying this class requires an unsupported reconstruction protocol",
+                ));
+            }
+            return Ok(Expr {
+                ty: receiver.ty,
+                kind: ExprKind::Builtin(Builtin::RecordCopy, vec![receiver]),
+            });
+        };
         self.calls.insert(signature.id);
         Ok(Expr {
             ty: signature.returns,
@@ -100,5 +115,37 @@ impl Checker<'_> {
                 vec![list, absent.clone(), absent.clone(), absent],
             ),
         }
+    }
+}
+
+/// Reachability may omit an unused method from the native table. Check the
+/// original class declarations before treating a record as plain Python state.
+fn custom_reconstruction(statement: &ast::Stmt) -> bool {
+    fn protocol(name: &str) -> bool {
+        matches!(
+            name,
+            "__copy__"
+                | "__reduce__"
+                | "__reduce_ex__"
+                | "__getstate__"
+                | "__setstate__"
+                | "__getnewargs__"
+                | "__getnewargs_ex__"
+                | "__new__"
+                | "__getattr__"
+                | "__getattribute__"
+                | "__setattr__"
+                | "__delattr__"
+                | "__slots__"
+                | "__dict__"
+        )
+    }
+    let binding =
+        |target: &ast::Expr| matches!(target, ast::Expr::Name(n) if protocol(n.id.as_str()));
+    match statement {
+        ast::Stmt::FunctionDef(f) => protocol(f.name.as_str()),
+        ast::Stmt::Assign(a) => a.targets.iter().any(binding),
+        ast::Stmt::AnnAssign(a) => binding(&a.target),
+        _ => false,
     }
 }

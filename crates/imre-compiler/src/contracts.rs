@@ -261,6 +261,7 @@ impl Builtin {
             | Self::RegexGroupDict
             | Self::DictGet
             | Self::DictCopy
+            | Self::RecordCopy
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
             | Self::JsonLoads
@@ -455,6 +456,7 @@ impl Builtin {
             _ => false,
         };
         let valid = match self {
+            Self::RecordCopy => matches!(result, Type::Class(_)) && signature(&[result], result),
             Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
@@ -769,6 +771,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_repeat"
                 | "imre_str_repeat"
                 | "imre_seq_slice"
+                | "imre_record_shallow_copy"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
