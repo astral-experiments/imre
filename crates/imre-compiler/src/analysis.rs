@@ -534,6 +534,7 @@ pub(crate) enum CheckedDiagnostic {
     BuiltinImport(TextRange),
     ExcessArgument(TextRange),
     PositionalKeyword(TextRange),
+    RepeatedKeyword(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -549,6 +550,7 @@ impl CheckedDiagnostic {
             Self::ExcessArgument(range) => (range, 6),
             Self::PositionalKeyword(range) => (range, 7),
             Self::DeferredName(range) => (range, 9),
+            Self::RepeatedKeyword(range) => (range, 10),
         };
         (range.start(), range.end(), kind)
     }
@@ -562,6 +564,9 @@ impl CheckedDiagnostic {
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
             Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
+            Self::RepeatedKeyword(keyword) => {
+                diagnostic == "parameter-already-assigned" && keyword == range
+            }
             Self::PositionalKeyword(keyword) => {
                 diagnostic == "positional-only-parameter-as-kwarg" && keyword == range
             }
