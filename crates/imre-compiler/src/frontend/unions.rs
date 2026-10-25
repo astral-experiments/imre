@@ -189,6 +189,9 @@ impl Checker<'_> {
             );
             return Ok(classes);
         }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::CodecInfoClass)) {
+            return Ok(vec![InstanceType::Exact(Type::CodecInfo)]);
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
             return Ok(vec![InstanceType::StrEnum]);
         }
