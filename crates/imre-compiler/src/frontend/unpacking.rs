@@ -208,6 +208,19 @@ impl Checker<'_> {
                         ),
                     }));
                 }
+                if let Type::Class(class) = receiver.ty
+                    && self.classes.methods[class].contains_key("__setitem__")
+                {
+                    // Python evaluates the RHS, the receiver, then the index.
+                    let mut scope = calls::ArgumentScope::default();
+                    let value = scope.hold(self, value);
+                    let receiver = scope.hold(self, receiver);
+                    let key = self.expr(&subscript.slice)?;
+                    let key = scope.hold(self, key);
+                    let assigned =
+                        self.record_primitive(receiver, "__setitem__", &[key, value], target)?;
+                    return Ok(Statement::Expr(scope.finish(assigned)));
+                }
                 if matches!(receiver.ty, Type::Document(_)) {
                     if let ast::Expr::Slice(slice) = &*subscript.slice {
                         if slice.lower.is_some() || slice.upper.is_some() || slice.step.is_some() {
