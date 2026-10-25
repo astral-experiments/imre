@@ -28,3 +28,26 @@ methods. Resolving the import alone does not pass that routine.
 `ThemeSection` implements subscription, length, and key iteration. Its frozen `Argparse` dataclass subclass has 13 fields in declaration order. On an actual instance, `isinstance(section, Mapping)` is true, present-key `get` calls its subscription method, missing-key `get` returns the default, and membership and key/item/value views work from the three primitives. The concrete dataclass supplies its own equality; Mapping mixins must respect subclass overrides. Importing the name or erasing the base would not establish this behavior. The class also uses dataclass metadata, a bound dictionary getter and dynamic attribute lookup; Mapping alone does not prove that the complete argparse module can run.
 
 The original [`TestCollectionABCs.test_Mapping`](upstream/Lib/test/test_collections.py#L1842) also checks dict instance/subclass membership, abstract-method enforcement, comparison against an unrelated object and the disabled reverse protocol of a custom Mapping subclass. [`test_MutableMapping_subclass`](upstream/Lib/test/test_collections.py#L1864) checks the ABC identities of the views returned by `UserDict`. These remain original collections IDs in the baseline. The reference observations above add no native passes.
+
+## Top-level copy and the container protocols it calls
+
+The original tests below call `copy.copy` or `copy.deepcopy`, sometimes through
+a helper or as a stored callable. The copy module owns dispatch, reconstruction
+and memo handling. Collections owns its types' state, copy methods and
+reconstruction protocols. In particular, copying the backing mappings of a
+ChainMap cannot be substituted with copying each mapping at every depth.
+
+| Upstream cases (relative to `test.`) | Observable behavior |
+| --- | --- |
+| [`test_collections.TestUserObjects.test_list_copy` and `test_dict_copy`](upstream/Lib/test/test_collections.py#L43) | Both call the same original helper. The wrapper gets independent `.data`; the shallow copy's other instance attribute points to the original list. |
+| [`test_collections.TestChainMap.test_basics`](upstream/Lib/test/test_collections.py#L118) | The first map is distinct in a shallow copy and every parent is shared. Deep copy produces a distinct but equal map at *every* level. The same routine separately checks pickle and repr. |
+| [`test_collections.TestNamedTuple.test_copy`](upstream/Lib/test/test_collections.py#L579) | Both copy functions are taken as first-class values; the reconstructed module-level `TestNT` compares equal and retains `_fields`. |
+| [`test_collections.TestCounter.test_copying`](upstream/Lib/test/test_collections.py#L2216) | Both copies are distinct, equal Counters. This routine also exercises `.copy()`, all pickle protocols, repr/eval, update, and construction from another Counter. |
+| [`test_defaultdict.TestDefaultDict.test_shallow_copy` and `test_deep_copy`](upstream/Lib/test/test_defaultdict.py#L98) | Preserve the current factory, first an upstream function, then `list`; deep copy clones the nested list as well as the mapping. |
+| [`test_deque.TestBasic.test_copy` and `test_deepcopy`](upstream/Lib/test/test_deque.py#L675) | A distinct deque shares its inner list on shallow copy and separates it on deep copy. The shallow test separately checks the method's bound and unbounded maximum lengths and element identity. |
+| [`test_ordered_dict.*.test_copying`](upstream/Lib/test/test_ordered_dict.py#L297) | Six variants: C and pure Python, each as the base class, subclass and slotted subclass. Copies retain the exact type, ordered items and attributes. Shallow copies share the two mutable attributes; deep copies separate them. Missing attributes stay missing. The routine also checks pickle and repr. |
+| [`test_free_threading.test_collections.TestDeque.test_copy_race`](upstream/Lib/test/test_free_threading/test_collections.py#L10) | The imported `copy` callable must work during concurrent appends and pops. This single ID is import-skipped by the pinned GIL-enabled reference; it stays in the denominator. |
+
+These are 16 occurrences, including the one reference skip. A native container
+method alone does not establish that an original call through the copy module
+dispatches natively.

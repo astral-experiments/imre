@@ -7,9 +7,10 @@ free-threading test. The loader includes inherited test methods and both
 `load_tests` hooks. The 15 docstrings in `Lib/collections/__init__.py` are
 upstream test inputs.
 
-See the [complete native routine baseline](routines.md) for per-ID results at
-both optimization levels and the [startup dependency inventory](startup.md) for
-the array import and argparse's use of Mapping as a class base.
+The [versioned native evidence](evidence-linux.json) covers all eight suites
+at both optimization levels. See [execution and reproduction](routines.md)
+and the [dependency inventory](startup.md) for array registration, argparse's
+Mapping class base, and the copy protocols exercised by 16 original cases.
 
 | Suite | IDs |
 | --- | ---: |

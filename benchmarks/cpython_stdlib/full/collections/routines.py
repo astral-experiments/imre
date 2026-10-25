@@ -20,6 +20,16 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import Toolchain, native_method, run_in_fixtures
+from native_counter import assertion_fixture
+
+
+COUNTER_OPERATIONS = {
+    "test_total": "Counter construction and total()",
+    "test_invariant_for_the_in_operator": "Counter construction, key iteration, subscription and membership",
+    "test_eq": "Counter equality and inequality with missing zero counts",
+}
+EMPTY = {f"test.test_deque.TestSequence.{method}" for method in
+         ("test_getitem", "test_getslice", "test_subscript")}
 
 
 @cache
@@ -113,7 +123,8 @@ def main():
         except unittest.SkipTest:
             for case_id, outcome in reference.items():
                 if case_id.startswith(name + ".") and isinstance(outcome, dict) and not args.class_name:
-                    results[case_id] = {"result": "reference-skip", "reason": outcome["skipped"]}
+                    results[case_id] = {"result": "reference-skip", "reason": outcome["skipped"],
+                                        "variant": case_id.rsplit(".", 1)[0]}
             continue
         with tempfile.TemporaryDirectory() as work:
             executors = {}
@@ -121,12 +132,13 @@ def main():
                 case_id = case.id()
                 if args.class_name and type(case).__name__ != args.class_name:
                     continue
+                variant = f"{type(case).__module__}.{type(case).__qualname__}"
                 if isinstance(reference[case_id], dict):
                     results[case_id] = {"result": "reference-skip",
-                                        "reason": reference[case_id]["skipped"]}
+                                        "reason": reference[case_id]["skipped"], "variant": variant}
                     continue
                 if isinstance(case, doctest.DocTestCase):
-                    results[case_id] = {"result": "separate-doctest-gate"}
+                    results[case_id] = {"result": "separate-doctest-gate", "variant": f"{variant}: {case_id}"}
                     continue
                 method = case._testMethodName
                 original = inspect.unwrap(getattr(type(case), method))
@@ -136,11 +148,23 @@ def main():
                 path = HERE / "upstream" / relative
                 owner = original.__qualname__.split(".")[-2]
                 node, fixture = native_fixture(path, owner, method, case)
+                operation, assertions = None, "imre"
+                if case_id == f"test.test_collections.TestCounter.{method}" and method in COUNTER_OPERATIONS:
+                    fixture = assertion_fixture(method, "NativeCase")
+                    operation = ("imre", COUNTER_OPERATIONS[method])
+                elif case_id in EMPTY:
+                    if len(node.body) != 1 or not isinstance(node.body[0], ast.Pass):
+                        raise ValueError(f"{case_id} is no longer an empty upstream test")
+                    operation, assertions = ("none", "The unchanged method body is pass."), "none"
+                elif case_id == "test.test_userstring.UserStringTest.test_replacement_on_buffer_boundary":
+                    operation = ("none", "The inherited body calls str.replace on literal strings; it never uses UserString.")
+                    assertions = "none"
                 directory = Path(work) / case_id
                 directory.mkdir()
-                record = {"source": f"{relative}:{node.lineno}"}
+                record = {"source": f"{relative}:{node.lineno}", "variant": variant}
                 try:
-                    executors[case_id] = native_method(tools, directory, path, owner, case_id, fixture)
+                    executors[case_id] = native_method(tools, directory, path, owner, case_id, fixture,
+                                                       operation=operation, assertions=assertions)
                 except (ValueError, RuntimeError) as exc:
                     record.update(failure(exc, directory, node, fixture))
                 results[case_id] = record
@@ -158,7 +182,7 @@ def main():
         raise ValueError(f"routine IDs differ from the reference: {set(reference) ^ set(results)}")
     report = {"cpython_commit": manifest["commit"], "compiler_revision": args.compiler_revision,
               "opt_level": args.opt_level, "reference_denominator": len(reference),
-              "routines": dict(sorted(results.items()))}
+              "routines": results}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
 
 

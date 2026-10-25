@@ -1,5 +1,32 @@
 # Collections execution evidence
 
+The [versioned per-occurrence report](evidence-linux.json) covers the same
+659 original IDs separately at O0 and O3 on Imre
+`7630556901c9936c9ca112f7fb2f4e52f3706fd3`. Each level has three
+Counter methods with native bodies, operations and assertions under the
+original CPython fixture hooks, two native doctest bodies with host output
+checking, four routines with no collections operation, and three reference
+skips. The other 647 report their first compiler or fixture blocker. No
+occurrence on this build is classified as fully native.
+
+The four non-product methods are three original deque methods whose bodies
+are `pass`, and an inherited UserString case that calls `str.replace` on
+built-in strings. Those bodies were compiled and executed.
+
+To reproduce, run `routines.py` and `doctests.py` at each level under the pinned
+Python with the same `--imre`, `--runtime`, `--clang`, full `--compiler-revision`,
+`--opt-level`, and a separate `--result` for each gate and level. The doctest
+gate writes all results and exits nonzero if any example collection is blocked.
+From this directory:
+
+```sh
+python3 native_report.py --routines routines-O0.json routines-O3.json \
+  --doctests doctests-O0.json doctests-O3.json --result evidence-linux.json
+python3 ../../suite_evidence.py reference-linux.json evidence-linux.json
+```
+
+## Earlier standalone and routine evidence
+
 The [baseline table](baseline-c76a979.tsv) has one row per original ID on
 Imre `c76a979397dfe052f46137fcbb556af9d242d066`. Each row was reconciled at
 `-O0` and `-O3` against CPython `5607950ef232dad16d75c0cf53101d9649d89115`.
