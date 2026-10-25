@@ -2,17 +2,16 @@
 import logging
 
 
-class Recording(logging.NullHandler):
+class Recording(logging.Handler):
     records: list[logging.LogRecord]
 
     def __init__(self) -> None:
         super().__init__()
         self.records = []
 
-    def handle(self, record: logging.LogRecord | None) -> logging.LogRecord | bool | None:
+    def emit(self, record: logging.LogRecord | None) -> None:
         if record is not None:
             self.records.append(record)
-        return None
 
 
 def context() -> dict[str, str] | None:

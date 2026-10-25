@@ -1,9 +1,10 @@
-"""Run the five unchanged LoggerAdapter context methods inside their CPython fixtures."""
+"""Run unchanged LoggerAdapter context and handler methods inside their CPython fixtures."""
 import argparse
 import ast
 import hashlib
 import json
 from pathlib import Path
+from functools import cache
 import re
 import select
 import subprocess
@@ -23,9 +24,9 @@ from suite_native import NativeCompileError, Toolchain, method_bytes, native_met
 OWNER = 'LoggerAdapterTest'
 PREFIX = 'test.test_logging.' + OWNER + '.'
 NAMES = ('test_extra_in_records', 'test_extra_not_merged_by_default', 'test_extra_merged',
-         'test_extra_merged_log_call_has_precedence', 'test_extra_merged_without_extra')
+         'test_extra_merged_log_call_has_precedence', 'test_extra_merged_without_extra', 'test_has_handlers')
 FIXTURE = ('Original CPython LoggerAdapterTest setUp, root recording handler, shutdown and cleanups; '
-           'fresh native root with matching threshold, recording handler and default adapter.')
+           'fresh native root with matching threshold and default adapter. Its native Handler.emit stores the original records; CPython RecordingHandler stores them in handle.')
 OPERATION = 'Native adapter creation, process, record forwarding and live record attributes'
 CAPTURE = (HERE / 'adapter_event_driver.py').read_text().split('def context()', 1)[0]
 CAPTURE += """
@@ -58,6 +59,35 @@ PRESENCE = '''
         if hasattr(obj, name):
             self.fail(self._formatMessage(msg, "'LogRecord' object has unexpected attribute " + repr(name)))
 '''
+
+
+@cache
+def helper_classes(name):
+    """Keep the actual prefix/style helper definitions when the original method needs them."""
+    classes = {'test_nested': ('PrefixAdapter',), 'test_styled_adapter': ('Message', 'StyleAdapter'),
+               'test_nested_styled_adapter': ('PrefixAdapter', 'Message', 'StyleAdapter')}.get(name, ())
+    if not classes:
+        return ()
+    original = SOURCE.read_bytes()
+    lines = original.splitlines(keepends=True)
+    nodes = {c.name: c for c in ast.parse(original).body if isinstance(c, ast.ClassDef)}
+    return tuple((nodes[c].lineno, b''.join(lines[nodes[c].lineno-1:nodes[c].end_lineno]).decode()) for c in classes)
+
+
+def fixture_for(name, threshold):
+    helpers = ''.join(source + '\n' for _, source in helper_classes(name))
+    return CAPTURE + '\n' + helpers + testcase_fixture() + SETUP.replace('THRESHOLD', str(threshold))
+
+
+def helper_site(name, fixture, line):
+    """Map a diagnostic in an extracted helper back to its unchanged CPython line."""
+    for start, source in helper_classes(name):
+        before, _, _ = fixture.partition(source)
+        offset = line - len(before.splitlines()) - 1
+        lines = source.splitlines()
+        if 0 <= offset < len(lines):
+            return start + offset, lines[offset].strip()
+    return None
 
 
 def assertion_blocker(exc, directory, original):
@@ -161,7 +191,14 @@ def adapter_cases(toolchain, work):
                 raise AssertionError('unexpected original LoggerAdapterTest root or recording fixture')
             body = method_bytes(SOURCE, OWNER, name)
             statements = {line.strip() for line in body.decode().splitlines()}
-            fixture = CAPTURE + '\n' + testcase_fixture() + SETUP.replace('THRESHOLD', str(case.logger.getEffectiveLevel()))
+            fixture = fixture_for(name, case.logger.getEffectiveLevel())
+            if name == 'test_has_handlers':
+                if case.logger.handlers != [case.recording]:
+                    raise AssertionError('handler removal needs the actual single-handler fixture')
+                observed = native_method(toolchain, folder, SOURCE, OWNER, key, fixture,
+                    operation=('imre', 'Native adapter and logger handler search before and after live removal'))(case, original)
+                observed['observation']['evidence'].update(fixture=FIXTURE, assertion_fixture='stock native TestCase')
+                return observed
             blockers = []
             for label, added in [('stock native TestCase', ''), ('native assertions for concrete LogRecord', PRESENCE)]:
                 try:
@@ -196,7 +233,24 @@ def main():
     manifest = json.loads((HERE / 'UPSTREAM.json').read_bytes())
     verify_files(STDLIB / 'upstream', manifest['files'])
     verify_files(args.cpython_source, manifest['files'] | manifest['reference_files'])
-    report = {'cpython_commit': manifest['commit'], 'denominator': 272, 'levels': {}}
+    public = (HERE.parents[3] / 'tests/fixtures/files/logging_adapter_events.py').read_bytes()
+    checks = '''record = logging.LogRecord('name', 20, '', 1, 'hello', (), None)
+case.assertHasAttr(record, 'name')
+case.assertNotHasAttr(record, 'absent')
+print('present and absent')
+try:
+    case.assertHasAttr(record, 'absent', 'detail')
+except AssertionError as error:
+    print(str(error))
+case.longMessage = False
+try:
+    case.assertNotHasAttr(record, 'name', 'detail')
+except AssertionError as error:
+    print(str(error))
+'''
+    host_checks = ('import logging, unittest\ncase = unittest.TestCase()\n' + checks).encode()
+    native_checks = ('import logging\n' + testcase_fixture() + PRESENCE + '\ncase = NativeCase()\n' + checks).encode()
+    report = {'cpython_commit': manifest['commit'], 'denominator': 272, 'levels': {}, 'controls': {}}
     for level in (0, 3):
         suite = load_suite(manifest['module'])
         assert len(list(cases(suite))) == 272
@@ -207,8 +261,18 @@ def main():
             if failures or skips or set(evidence) != set(selected):
                 raise AssertionError((failures, skips, evidence))
             report['levels'][str(level)] = {k:v[0]['observation'] for k,v in evidence.items()}
+            report['controls'][str(level)] = controls = {}
+            for label, host, native in [('public_adapter_events', public, public),
+                                        ('concrete_attribute_assertions', host_checks, native_checks)]:
+                reference = subprocess.run([sys.executable, '-I', '-B', '-'], input=host, capture_output=True, check=True, timeout=60)
+                binary = tools.build(native, Path(tmp))
+                actual = subprocess.run([binary], capture_output=True, check=True, timeout=60)
+                if reference.stderr or actual.stderr or reference.stdout != actual.stdout:
+                    raise AssertionError((label, reference.stdout, actual.stdout, reference.stderr, actual.stderr))
+                controls[label] = {'observations': len(actual.stdout.splitlines()),
+                                   'stdout_sha256': hashlib.sha256(actual.stdout).hexdigest()}
     args.result.write_text(json.dumps(report, indent=2) + '\n')
-    print('Five original LoggerAdapter methods completed at O0 and O3; see each execution role.')
+    print(f'{len(NAMES)} original LoggerAdapter methods completed at O0 and O3; see each execution role.')
 
 
 if __name__ == '__main__':
