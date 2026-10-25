@@ -63,7 +63,7 @@ jobs:
           failed=0
           for opt in 0 3; do
             python3 -B "$dir/native.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" --result "$RUNNER_TEMP/itertools-O$opt.json" || failed=1
-            for exercise in repeat sources tee batched chain compress accumulate; do
+            for exercise in repeat sources tee batched chain compress accumulate predicates; do
               src="$dir/$exercise.py"
               if target/debug/imre build "$src" --opt-level "$opt" --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/iterator" && "$RUNNER_TEMP/iterator" "$RUNNER_TEMP/itertools-input" > "$RUNNER_TEMP/iterator.native" && python3 -B "$src" "$RUNNER_TEMP/itertools-input" > "$RUNNER_TEMP/iterator.reference" && diff -u "$RUNNER_TEMP/iterator.reference" "$RUNNER_TEMP/iterator.native"; then
                 echo "O$opt $exercise: native transcript matches"
