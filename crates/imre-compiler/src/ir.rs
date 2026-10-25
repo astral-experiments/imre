@@ -1084,6 +1084,7 @@ pub(crate) enum PathOperation {
     ContextExit,
     UnionText,
     Iterdir,
+    Walk,
     Glob {
         recursive: bool,
     },
