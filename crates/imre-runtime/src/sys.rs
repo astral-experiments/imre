@@ -12,17 +12,33 @@ static STDERR: LazyLock<Mutex<Output<io::Stderr>>> = LazyLock::new(|| {
     ))
 });
 
-fn write_stream<W: Write>(stream: &Mutex<Output<W>>, text: &str, newline: bool) -> io::Result<()> {
+fn write_stream<W: Write>(stream: &Mutex<Output<W>>, text: &[u8], newline: bool) -> io::Result<()> {
     let mut stream = stream.lock().unwrap_or_else(|poison| poison.into_inner());
-    stream.write_all(text.as_bytes())?;
+    stream.write_all(text)?;
     if newline {
         stream.write_all(b"\n")?;
     }
     Ok(())
 }
 
+pub(crate) fn write_standard(stderr: bool, bytes: &[u8]) -> io::Result<()> {
+    if stderr {
+        write_stream(&STDERR, bytes, false)
+    } else {
+        write_stream(&OUTPUT, bytes, false)
+    }
+}
+
+pub(crate) fn flush_standard(stderr: bool) -> io::Result<()> {
+    if stderr {
+        flush_stderr()
+    } else {
+        flush_stdout()
+    }
+}
+
 pub(super) fn write_stderr(text: &str, newline: bool) -> io::Result<()> {
-    write_stream(&STDERR, text, newline)
+    write_stream(&STDERR, text.as_bytes(), newline)
 }
 
 pub(super) fn stderr_writer() -> std::sync::MutexGuard<'static, Output<io::Stderr>> {
@@ -41,7 +57,14 @@ pub(super) fn flush_stderr() -> io::Result<()> {
 
 /// Write the default display hook's repr followed by a newline to stdout.
 pub(super) fn write_display_line(text: &str) -> bool {
-    match write_stream(&OUTPUT, text, true) {
+    if let Some(result) = crate::objects::stdio::write_line(text.as_bytes(), true) {
+        if let Err(error) = result {
+            error.raise();
+            return false;
+        }
+        return true;
+    }
+    match write_stream(&OUTPUT, text.as_bytes(), true) {
         Ok(()) => true,
         Err(error) => errno_error(error).returning(false),
     }
@@ -79,7 +102,7 @@ pub unsafe extern "C" fn imre_sys_stream_write(stderr: u32, text: *const Str) ->
     let result = if stderr != 0 {
         write_stderr(text, false)
     } else {
-        write_stream(&OUTPUT, text, false)
+        write_stream(&OUTPUT, text.as_bytes(), false)
     };
     match result {
         Ok(()) => Int::from_usize(text.chars().count()).into_raw(),

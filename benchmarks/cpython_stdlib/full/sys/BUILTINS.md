@@ -28,8 +28,10 @@ test packages and child-program strings:
 | argparse | `test_argparse.py:2069` | Patch `builtins.open` and observe which parser calls use it. |
 | unittest | `test_unittest/test_discovery.py:878,911`, `test_unittest/testmock/testmock.py:263` | Patch the actual import function for discovery and patch open for mock. |
 
-A qualified native `_` lookup reads its current value. A from-import would
-snapshot it at import time; the compiler currently rejects that form. The
+A qualified native `_` lookup reads its current value. A from-import executes
+its lookup once at the import statement and retains the object. A missing
+from-import raises ImportError with the original message and the module and
+export names; a qualified read raises AttributeError. The
 other callable bindings above also remain unsupported. Mapping their names to
 the default native operations would bypass changes to the namespace.
 
@@ -63,3 +65,11 @@ In `test_logging.py:2306`, `test_encoding_cyrillic_unicode`
 obtains `codecs.getwriter('cp1251')`, sets its class encoding, and logs into a
 wrapped `io.BytesIO`. A stateless UTF-8 or Latin-1 codec cannot implement that
 writer. These consumer occurrences stay with their respective suite reports.
+
+The complete original `DisplayHookTest.test_original_displayhook` runs at both
+optimization levels with CPython's fixture, body and assertions. Its ten
+operations reach one persistent Imre process. Newly written native stdout
+bytes are forwarded to the original captured stream. The child itself owns
+`builtins._`, saves and deletes its `sys.stdout`, raises the missing-stream
+exception, and restores the native handle. This is host-driven native
+operation coverage.

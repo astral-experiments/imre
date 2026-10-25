@@ -243,6 +243,21 @@ impl Checker<'_> {
                         vec![logging::number(mask), value],
                     )));
                 }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::Stdout)) {
+                    if !matches!(value.ty, Type::TextIO | Type::None)
+                        && self.types.payload(value.ty) != Some(Type::TextIO)
+                    {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "sys.stdout requires None or a native text stream",
+                        ));
+                    }
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::SysStdoutSet, vec![value]),
+                    }));
+                }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
                     if !sys::displayable(value.ty) {
                         return Err(error(

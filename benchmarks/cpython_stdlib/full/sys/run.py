@@ -21,6 +21,8 @@ from occurrences import blocked_methods, reference_skips
 import argv_case
 import jit_case
 import locale_case
+from display_case import CASE_ID as DISPLAY_ID, display_observer
+from import_snapshots import check_import_snapshots
 
 MODULE = "test.test_sys"
 SYS = MODULE + ".SysModuleTest."
@@ -84,6 +86,21 @@ def select(toolchain, work, source, module):
         binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))
         if output(binary) != (ref.stdout, ref.stderr):
             raise AssertionError(f"{filename}: native output differs from CPython")
+
+    display = toolchain.build((HERE / "display_driver.py").read_bytes(), directory(work, "display-driver"))
+    executions[DISPLAY_ID] = display_observer(module, display, work, toolchain.level)
+    check_import_snapshots(toolchain, directory(work, "import-snapshots"))
+
+    binding_source = HERE / "stdout_binding.py"
+    binding = toolchain.build(binding_source.read_bytes(), directory(work, "stdout-binding"))
+    redirected = work / "redirected"
+    observations = []
+    for command in ([sys.executable, binding_source], [binding]):
+        run = subprocess.run([*command, redirected], capture_output=True, check=True, timeout=15)
+        observations.append((run.stdout, run.stderr, redirected.read_bytes()))
+        redirected.unlink()
+    if observations[0] != observations[1]:
+        raise AssertionError(("stdout binding", observations))
 
     encoding = toolchain.build((HERE / "encoding_driver.py").read_bytes(), directory(work, "encoding"))
 

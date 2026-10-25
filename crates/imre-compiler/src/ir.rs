@@ -333,6 +333,18 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
+    pub(crate) fn changes_stdout(&self) -> bool {
+        let mut used = false;
+        for function in self.functions.iter().chain([&self.entry]) {
+            walk_expressions(&function.body, &mut |e| {
+                used |= matches!(
+                    e.kind,
+                    ExprKind::Builtin(Builtin::SysStdoutSet | Builtin::SysStdoutDelete, _)
+                );
+            });
+        }
+        used
+    }
     /// Only programs that can own a display value need to clear the namespace at shutdown.
     pub(crate) fn uses_builtins_last(&self) -> bool {
         let mut used = false;
@@ -613,6 +625,14 @@ pub(crate) enum Builtin {
     Islice,
     Tee,
     Cycle,
+    SysStdout,
+    SysHasStdout,
+    SysOriginalOutput {
+        stderr: bool,
+    },
+    SysStdoutSet,
+    SysStdoutDelete,
+    TextOptionalReceiver,
     SysDisplayHook,
     BuiltinsLast,
     BuiltinsHasLast,
