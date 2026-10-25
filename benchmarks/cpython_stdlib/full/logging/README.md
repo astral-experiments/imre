@@ -25,21 +25,23 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-This replay of `04eeb2e` includes logger hierarchy, the level registry, timed
-file handlers, records, formatters, filters and configuration. Both levels have the same counts:
+This replay of `f43af96` includes logger hierarchy, the level registry, timed
+file handlers, records, formatters, filters, configuration and [FileHandler](files.md).
+Both levels have the same counts:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 7 |
+| Imre | Imre | Imre | CPython hooks and native child | 9 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 34 |
-| Blocked before execution | | | | 224 |
+| Blocked before execution | | | | 222 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
 identity, immediate child membership, level-name mapping independence, daily
 rollover with an explicit time, record representation, formatter precision,
-and an empty name filter. Four bodies verify native stderr with the original
+an empty name filter, delayed file opening and emission after closing in write mode.
+Four bodies verify native stderr with the original
 CPython output helper. The 34 host-driven methods exercise the registry, timed
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
