@@ -262,12 +262,46 @@ impl Checker<'_> {
     }
 
     fn translation_argument(&mut self, argument: &ast::Expr) -> Result<Expr, String> {
-        if matches!(argument, ast::Expr::Dict(dict) if dict.items.is_empty()) {
-            // The empty literal has no observable key/value layout.
-            self.expr_expected(argument, self.types.dict(Type::Int, Type::Int))
-        } else {
-            self.expr(argument)
+        if let ast::Expr::Dict(dict) = argument {
+            if dict.items.is_empty() {
+                // The empty literal has no observable key/value layout.
+                return self.dictionary(dict, Some((Type::Int, Type::Int)));
+            }
+            // In a translation literal, None explicitly means deletion. Determine
+            // its optional scalar layout before emitting any operands; ordinary
+            // dictionary construction then evaluates everything once, in order.
+            if dict
+                .items
+                .iter()
+                .any(|item| matches!(item.value, ast::Expr::NoneLiteral(_)))
+            {
+                let scalar = |e: &ast::Expr| {
+                    if matches!(e, ast::Expr::NoneLiteral(_)) {
+                        Some(Type::None)
+                    } else {
+                        self.graph.session.scalar_type(self.module, e)
+                    }
+                };
+                let shape = (|| {
+                    let key = scalar(dict.items[0].key.as_ref()?)?;
+                    if !self.types.hashable_key(key) {
+                        return None;
+                    }
+                    let mut value = Type::None;
+                    for item in &dict.items {
+                        if scalar(item.key.as_ref()?)? != key {
+                            return None;
+                        }
+                        value = self.types.join(value, scalar(&item.value)?)?;
+                    }
+                    Some((key, value))
+                })();
+                if let Some(shape) = shape {
+                    return self.dictionary(dict, Some(shape));
+                }
+            }
         }
+        self.expr(argument)
     }
 
     /// Preserve ordinal lookup semantics only for plain tables without Python callbacks.
