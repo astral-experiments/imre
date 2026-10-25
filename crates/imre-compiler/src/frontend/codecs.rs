@@ -1,5 +1,6 @@
 //! Native codec registry lookup and stateless byte/text conversion.
 use super::*;
+use crate::analysis::CheckedDiagnostic;
 
 fn argument_type(ty: Type) -> Option<String> {
     Some(match ty {
@@ -41,18 +42,13 @@ impl Checker<'_> {
         }
         let positional = call.arguments.args.len();
         let count = values.len() - 1;
-        if count > 2 {
-            let kind = if positional == 0 {
-                "keyword arguments"
-            } else {
-                "arguments"
-            };
-            return Ok(Self::type_error_after(
-                values,
-                Type::Bytes,
-                format!("encode() takes at most 2 {kind} ({count} given)"),
-            ));
+        if let Some(extra) = call.arguments.args.get(2) {
+            self.graph.checked_argument(
+                self.module,
+                CheckedDiagnostic::ExcessPositional(extra.range()),
+            );
         }
+        let mut binding_error = None;
         let names = ["encoding", "errors"];
         let mut order = [0; 3];
         for (i, slot) in order.iter_mut().enumerate().take(positional + 1) {
@@ -61,20 +57,33 @@ impl Checker<'_> {
         for (i, kw) in call.arguments.keywords.iter().enumerate() {
             let key = kw.arg.as_ref().unwrap().as_str();
             let Some(slot) = names.iter().position(|name| *name == key).map(|i| i + 1) else {
-                return Ok(Self::type_error_after(
-                    values,
-                    Type::Bytes,
-                    format!("encode() got an unexpected keyword argument '{key}'"),
-                ));
+                self.graph
+                    .checked_argument(self.module, CheckedDiagnostic::Keyword(kw.range()));
+                binding_error.get_or_insert_with(|| {
+                    format!("encode() got an unexpected keyword argument '{key}'")
+                });
+                continue;
             };
             if order[slot] != 0 {
-                return Ok(Self::type_error_after(
-                    values,
-                    Type::Bytes,
-                    format!("argument for encode() given by name ('{key}') and position ({slot})"),
-                ));
+                self.graph
+                    .checked_argument(self.module, CheckedDiagnostic::RepeatedKeyword(kw.range()));
+                binding_error.get_or_insert_with(|| {
+                    format!("argument for encode() given by name ('{key}') and position ({slot})")
+                });
+                continue;
             }
             order[slot] = positional + i + 1;
+        }
+        if count > 2 {
+            let kind = if positional == 0 {
+                "keyword arguments"
+            } else {
+                "arguments"
+            };
+            binding_error = Some(format!("encode() takes at most 2 {kind} ({count} given)"));
+        }
+        if let Some(message) = binding_error {
+            return Ok(Self::type_error_after(values, Type::Bytes, message));
         }
         for (slot, default) in [(1, "utf-8"), (2, "strict")] {
             if order[slot] == 0 {

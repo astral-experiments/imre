@@ -47,6 +47,11 @@ def run() -> None:
         'x'.encode(extra=1)
     except TypeError as exc:
         print(str(exc))
+    try:
+        'x'.encode(marked(events, 'ascii'), marked(events, 'strict'), marked(events, 'excess'))
+    except TypeError as exc:
+        print(str(exc))
+    print(events)
 
 
 run()
