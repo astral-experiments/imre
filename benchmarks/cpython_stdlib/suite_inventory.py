@@ -37,20 +37,19 @@ def cases(suite):
             yield item
 
 
-def unique_ids(names):
+def id_counts(names):
     counts = Counter(names)
-    repeated = [name for name, count in counts.items() if count != 1]
-    if not counts or repeated:
-        raise ValueError(f"empty inventory or repeated IDs: {repeated}")
-    return set(counts)
+    if not counts:
+        raise ValueError("empty suite inventory")
+    return counts
 
 
 def reference_results(xml, expected):
     rows = ET.parse(xml).findall(".//testcase")
-    seen = unique_ids(row.attrib["name"] for row in rows)
+    seen = id_counts(row.attrib["name"] for row in rows)
     if seen != expected:
-        raise ValueError(f"reference IDs differ: missing={sorted(expected - seen)}, "
-                         f"extra={sorted(seen - expected)}")
+        raise ValueError(f"reference IDs differ: missing={dict(expected - seen)}, "
+                         f"extra={dict(seen - expected)}")
     results = {}
     for row in rows:
         name = row.attrib["name"]
@@ -58,12 +57,22 @@ def reference_results(xml, expected):
             raise ValueError(f"incomplete reference case: {row.attrib}")
         outcome = [child for child in row if child.tag not in {"system-out", "system-err"}]
         if not outcome:
-            results[name] = "pass"
+            value = "pass"
         elif len(outcome) == 1 and outcome[0].tag in {"failure", "error", "skipped"}:
-            results[name] = {outcome[0].tag: outcome[0].text or outcome[0].get("message", "")}
+            value = {outcome[0].tag: outcome[0].text or outcome[0].get("message", "")}
         else:
             raise ValueError(f"unrecognized reference result: {ET.tostring(row)}")
-    return dict(sorted(results.items()))
+        results.setdefault(name, []).append(value)
+    # Keep single occurrences compact without collapsing repeated executions.
+    return {name: values[0] if len(values) == 1 else values for name, values in sorted(results.items())}
+
+
+def verify_interpreter_tests(manifest):
+    import test
+
+    verify_files(Path(test.__file__).resolve().parent,
+                 {k.removeprefix("Lib/test/"): v for k, v in manifest["files"].items()
+                  if k.startswith("Lib/test/")})
 
 
 def main():
@@ -75,15 +84,12 @@ def main():
     version = ".".join(map(str, sys.version_info[:3]))
     if sys.implementation.name != "cpython" or "v" + version != manifest["tag"]:
         parser.error(f"run with test-enabled CPython {manifest['tag']}")
-    import test
-
     module = manifest["module"]
     verify_files(args.manifest.parent / "upstream", manifest["files"])
     # regrtest and its child processes import the interpreter's own Lib/test.
     # Verify those test bytes too. Do not replace package discovery with a glob.
-    verify_files(Path(test.__file__).resolve().parents[2],
-                 {k: v for k, v in manifest["files"].items() if k.startswith("Lib/test/")})
-    ids = unique_ids(case.id() for case in cases(load_suite(module)))
+    verify_interpreter_tests(manifest)
+    ids = id_counts(case.id() for case in cases(load_suite(module)))
     with tempfile.TemporaryDirectory() as work:
         xml = Path(work) / "reference.xml"
         run = subprocess.run([sys.executable, "-B", "-m", "test", "--single-process",
@@ -91,7 +97,7 @@ def main():
                               module.removeprefix("test.")], cwd=work)
         results = reference_results(xml, ids)
     report = {"module": module, "cpython_commit": manifest["commit"], "platform": sys.platform,
-              "denominator": len(ids), "reference": results}
+              "denominator": sum(ids.values()), "reference": results}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     return run.returncode
 

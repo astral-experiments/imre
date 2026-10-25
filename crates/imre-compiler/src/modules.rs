@@ -444,6 +444,7 @@ pub(crate) struct SourceModule {
     pub(crate) path: PathBuf,
     pub(crate) name: String,
     pub(crate) source: String,
+    bundled: bool,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
@@ -490,6 +491,26 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// Keep module indices stable for the semantic cache. Only after lowering
+    /// expose the files a disk build must revalidate and protect from writes.
+    pub(crate) fn disk_inputs(
+        &mut self,
+        profile: Option<&Path>,
+    ) -> (crate::SourceInputs, Vec<PathBuf>) {
+        let mut inputs = std::mem::take(&mut self.inputs);
+        let mut modules = self.modules.iter();
+        inputs
+            .files
+            .retain(|_| !modules.next().expect("one input per module").bundled);
+        let paths = inputs
+            .files
+            .iter()
+            .map(|(path, _, _)| path.clone())
+            .chain(profile.map(Path::to_path_buf))
+            .collect();
+        (inputs, paths)
+    }
+
     /// Keep read-only JSON views in programs that never parse or modify a TOML document.
     fn uses_mutable_documents(&self) -> bool {
         use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
@@ -851,6 +872,7 @@ impl<'a> Loader<'a> {
             path,
             name,
             source,
+            bundled: false,
             parsed,
             is_package,
             root_index: 0,
@@ -1170,7 +1192,14 @@ impl<'a> Loader<'a> {
     /// first-party file that attempts to shadow the standard-library namespace.
     fn intrinsic_module(&mut self, name: &str) -> Result<Option<IntrinsicModule>, String> {
         let module = IntrinsicModule::named(name);
-        if module.is_some() && self.allow_imports {
+        if module.is_some() {
+            self.reject_stdlib_shadow(name)?;
+        }
+        Ok(module)
+    }
+
+    fn reject_stdlib_shadow(&mut self, name: &str) -> Result<(), String> {
+        if self.allow_imports {
             for base in [
                 self.root.join(name.split('.').next().unwrap()),
                 self.root.join(name.replace('.', "/")),
@@ -1185,7 +1214,7 @@ impl<'a> Loader<'a> {
                 }
             }
         }
-        Ok(module)
+        Ok(())
     }
 
     fn import_name(&self, id: ModuleId, import: &ast::StmtImportFrom) -> Result<String, String> {
@@ -1214,9 +1243,6 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
-        if !self.allow_imports {
-            return Err("imports require a source file and a first-party module root".into());
-        }
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {
                 return Err(format!(
@@ -1224,6 +1250,25 @@ impl<'a> Loader<'a> {
                 ));
             }
             return Ok(id);
+        }
+        if name == "unittest" {
+            self.reject_stdlib_shadow(name)?;
+            // ty resolves this immutable source at its Python import path in the
+            // in-memory project. It is part of the compiler, not a disk input.
+            let path = self.root.join("unittest/__init__.py");
+            let id = self.add(
+                path.clone(),
+                path,
+                name.into(),
+                true,
+                include_str!("../stdlib/unittest/__init__.py"),
+            )?;
+            self.modules[id].bundled = true;
+            self.scan(id)?;
+            return Ok(id);
+        }
+        if !self.allow_imports {
+            return Err("imports require a source file and a first-party module root".into());
         }
         // Both scanning an import and resolving a dotted package parent can
         // re-enter the loader. Count active calls, including unresolved parents.
