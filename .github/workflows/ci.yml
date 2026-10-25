@@ -47,6 +47,7 @@ jobs:
           sparse-checkout: Lib/test
           persist-credentials: false
       - name: Prepare the exact merge with current main
+        if: matrix.name != 'receipts' && matrix.name != 'dispatch' && matrix.name != 'wraps'
         run: |
           cat > "$RUNNER_TEMP/prepare" <<'SH'
           set -euo pipefail
@@ -78,6 +79,8 @@ jobs:
             cache|both) fixtures+=(tests/fixtures/callables/cache_parameters.py tests/fixtures/containers/dict_clear.py);;
             annotation) fixtures+=(tests/fixtures/callables/forward_refs.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py);;
             defaults) fixtures+=(tests/fixtures/module_values/wrapper_attributes/main.py);;
+            dispatch) fixtures+=(tests/fixtures/callables/single_dispatch.py);;
+            wraps) fixtures+=(tests/fixtures/callables/wraps_application.py);;
           esac
           for source in "${fixtures[@]}"; do
             python "$source" > "$RUNNER_TEMP/oracle" 2> "$RUNNER_TEMP/oracle-err"
@@ -92,7 +95,7 @@ jobs:
             done
           done
       - name: Run the unchanged functools methods with their reference fixtures
-        if: matrix.name == 'cache' || matrix.name == 'both'
+        if: matrix.name == 'cache' || matrix.name == 'both' || matrix.name == 'receipts'
         run: |
           export PYTHONPATH="$GITHUB_WORKSPACE/.cpython-stdlib-reference/Lib"
           dir=benchmarks/cpython_stdlib/full/functools
@@ -103,6 +106,31 @@ jobs:
           python "$dir/run_reduce.py" "${args[@]}" --result "$out/reduce.json"
           cmp "$dir/reduce-linux.json" "$out/reduce.json"
           python "$dir/run_bodies.py" "${args[@]}" --compiler-commit "$CANDIDATE" --result "$out/bodies.json"
+      - name: Record every primary occurrence on the exact canonical source
+        if: matrix.name == 'receipts'
+        run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE/.cpython-stdlib-reference/Lib"
+          dir=benchmarks/cpython_stdlib/full/functools
+          out="$RUNNER_TEMP/receipts"
+          python benchmarks/cpython_stdlib/suite_inventory.py "$dir/UPSTREAM.json" --result "$out/reference.json"
+          cmp "$dir/reference-linux.json" "$out/reference.json"
+          python "$dir/write_evidence.py" --bodies "$out/bodies.json" --cache "$out/cache.json" --reduce "$out/reduce.json" --cache-commit "$CANDIDATE" --reduce-commit "$CANDIDATE" --result "$out/evidence-linux.json"
+          git show -s --format='%H %T' HEAD > "$out/exact-source"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        if: matrix.name == 'receipts'
+        with:
+          python-version: '3.14.5t'
+      - name: Run the four unchanged companion workers with the GIL disabled
+        if: matrix.name == 'receipts'
+        run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE/.cpython-stdlib-reference/Lib"
+          export PYTHON_GIL=0
+          dir=benchmarks/cpython_stdlib/full/functools
+          out="$RUNNER_TEMP/receipts"
+          python -c 'import sys, sysconfig; assert sys.version_info[:3] == (3, 14, 5) and sysconfig.get_config_var("Py_GIL_DISABLED") and not sys._is_gil_enabled()'
+          python benchmarks/cpython_stdlib/suite_inventory.py "$dir/FREE_THREADING.json" --result "$out/reference-free-threading.json"
+          cmp "$dir/reference-free-threading-linux.json" "$out/reference-free-threading.json"
+          python "$dir/run_free_threading.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --compiler-commit "$CANDIDATE" --result "$out/evidence-free-threading-linux.json"
       - name: Verify the unchanged errno suite on the combined tree
         if: matrix.name == 'both'
         run: |
