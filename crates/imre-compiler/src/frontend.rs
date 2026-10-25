@@ -3476,7 +3476,11 @@ impl<'a> Checker<'a> {
                 } else if let ast::Expr::Name(_) = &*assign.target {
                     let left = self.expr(&assign.target)?;
                     let right = self.expr(&assign.value)?;
-                    let value = self.binary_expr(assign.op, left, right, statement)?;
+                    let value = if self.types.is_counter(left.ty) {
+                        self.counter_math(assign.op, left, right, true, statement)?
+                    } else {
+                        self.binary_expr(assign.op, left, right, statement)?
+                    };
                     if self.types.element(value.ty).is_some() {
                         return Err(error(
                             self.source,
@@ -4374,6 +4378,9 @@ impl<'a> Checker<'a> {
             self.expect(left.ty, right.ty, binary)?;
             return self.concat_lists(left, right, binary);
         }
+        if self.types.is_counter(left.ty) && self.types.is_counter(right.ty) {
+            return self.counter_math(binary.op, left, right, false, binary);
+        }
         self.binary_expr(binary.op, left, right, binary)
     }
 
@@ -4746,6 +4753,20 @@ impl<'a> Checker<'a> {
                         )
                     }
                     ast::UnaryOp::USub | ast::UnaryOp::UAdd => {
+                        if self.types.is_counter(value.ty) {
+                            let op = if unary.op == ast::UnaryOp::UAdd {
+                                ir::CounterOp::Positive
+                            } else {
+                                ir::CounterOp::Negative
+                            };
+                            return Ok(Expr {
+                                ty: value.ty,
+                                kind: ExprKind::Builtin(
+                                    Builtin::CounterMath { op, inplace: false },
+                                    vec![value],
+                                ),
+                            });
+                        }
                         if !matches!(value.ty, Type::Int | Type::Float) {
                             return Err(error(
                                 self.source,
