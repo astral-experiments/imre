@@ -2716,6 +2716,9 @@ impl<'a> Checker<'a> {
             }
             return self.coerce(value, expected, expression);
         }
+        if self.types.is_unread_argument(expected) {
+            return self.unread_argument(expression, expected);
+        }
         // A record can carry user fields with distinct types. An expected scalar type
         // permits reading such a field; the runtime checks its actual representation.
         if let ast::Expr::Attribute(attr) = expression
