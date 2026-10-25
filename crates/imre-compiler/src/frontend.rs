@@ -99,6 +99,8 @@ struct ClassInfo {
     parsers: argparse::Parsers,
     declarations: Classes,
     fields: Vec<Vec<Type>>,
+    /// (class, offset, declaring constructor, formal) for unannotated payload slots.
+    constructor_fields: Vec<(usize, usize, DefinitionId, usize)>,
     methods: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
@@ -109,7 +111,7 @@ struct ClassInfo {
 }
 
 impl ClassInfo {
-    /// Resolves all nominal field types before checking constructors and methods.
+    /// Establishes record offsets before checking constructors and methods.
     fn new(graph: &SourceGraph, types: &Types) -> Result<Self, String> {
         let mut declarations = Classes::collect(graph)?;
         types.set_exception_declarations(declarations.exception_declarations.clone());
@@ -155,6 +157,7 @@ impl ClassInfo {
             })
             .collect::<HashSet<_>>();
         types.set_hashable_records(hashable.clone());
+        let mut constructor_fields = Vec::new();
         let mut fields = declarations
             .definitions
             .iter()
@@ -163,7 +166,14 @@ impl ClassInfo {
                 class
                     .fields
                     .iter()
-                    .map(|field| {
+                    .enumerate()
+                    .map(|(offset, field)| {
+                        if let Some((owner, index)) = field.constructor_parameter {
+                            constructor_fields.push((class_id, offset, owner, index));
+                            // Only speculative checking sees this temporary layout.
+                            // field_value defers until the formal has a checked type.
+                            return Ok(Type::None);
+                        }
                         if field.name == crate::classes::EXCEPTION_ARGS_SLOT {
                             return Ok(Type::ExceptionField);
                         }
@@ -235,17 +245,6 @@ impl ClassInfo {
             }
             types.set_hashable_records(hashable.clone());
         }
-        fn valid_keys(ty: Type, types: &Types) -> bool {
-            types
-                .mapping(ty)
-                .map(|(key, _)| key)
-                .or_else(|| types.set_element(ty))
-                .is_none_or(|key| types.hashable_key(key))
-                && types
-                    .children(ty)
-                    .into_iter()
-                    .all(|child| valid_keys(child, types))
-        }
         for (id, class) in declarations.definitions.iter().enumerate() {
             if class.toml_hash {
                 if !fields[id]
@@ -278,7 +277,7 @@ impl ClassInfo {
         }
         for (class, field_types) in declarations.definitions.iter().zip(&fields) {
             for (field, &ty) in class.fields.iter().zip(field_types) {
-                if !valid_keys(ty, types) {
+                if !Self::valid_field_keys(ty, types) {
                     return Err(graph.modules[field.module].error(
                         &field.annotation,
                         "record keys require a frozen dataclass with immutable comparison fields",
@@ -298,7 +297,20 @@ impl ClassInfo {
             contexts: HashSet::new(),
             declarations,
             fields,
+            constructor_fields,
         })
+    }
+
+    fn valid_field_keys(ty: Type, types: &Types) -> bool {
+        types
+            .mapping(ty)
+            .map(|(key, _)| key)
+            .or_else(|| types.set_element(ty))
+            .is_none_or(|key| types.hashable_key(key))
+            && types
+                .children(ty)
+                .into_iter()
+                .all(|child| Self::valid_field_keys(child, types))
     }
 
     fn cyclic_field_root(fields: &[Vec<Type>], types: &Types) -> Option<usize> {
@@ -316,7 +328,7 @@ impl ClassInfo {
             while let Some(step) = pending.pop() {
                 match step {
                     Step::Finish(id) => states[id] = 2,
-                    Step::Visit(Type::Class(id)) => match states[id] {
+                    Step::Visit(Type::Class(id) | Type::NamedException(id)) => match states[id] {
                         1 => return Some(root),
                         2 => {}
                         _ => {
@@ -1978,7 +1990,15 @@ impl<'a> Checker<'a> {
                     "unknown field; dynamic attributes and first-class methods are unsupported",
                 )
             })?;
-        Ok((receiver, field, self.classes.fields[class][field]))
+        let ty = if let Some(inference) = self.inference
+            && let Some((owner, parameter)) =
+                self.classes.declarations.definitions[class].fields[field].constructor_parameter
+        {
+            inference.constructor_field(self.classes, owner, parameter)?
+        } else {
+            self.classes.fields[class][field]
+        };
+        Ok((receiver, field, ty))
     }
 
     /// Optional and finite-union promotions are explicit; containers stay invariant.

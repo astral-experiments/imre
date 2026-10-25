@@ -112,6 +112,7 @@ pub(super) fn field(
         module: module_id,
         name: name.to_owned(),
         annotation: (*node.annotation).clone(),
+        constructor_parameter: None,
         default: None,
         kw_only: options.is_some_and(|options| options.kw_only),
         repr: true,

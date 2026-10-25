@@ -69,6 +69,9 @@ pub(crate) struct Field {
     pub(crate) module: usize,
     pub(crate) name: String,
     pub(crate) annotation: ast::Expr,
+    /// Untyped exception fields assigned directly from a formal use that
+    /// constructor's checked call type. The source expression locates diagnostics.
+    pub(crate) constructor_parameter: Option<(DefinitionId, usize)>,
     pub(crate) default: Option<FieldDefault>,
     pub(crate) kw_only: bool,
     pub(crate) repr: bool,
@@ -187,6 +190,7 @@ impl Classes {
                     }
                     .into(),
                     annotation,
+                    constructor_parameter: None,
                     default: None,
                     kw_only: false,
                     repr: false,
@@ -526,7 +530,13 @@ fn collect_class(
         && fields.len() == inherited_fields.len()
         && let Some(init) = initializer
     {
-        inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
+        inheritance::infer_fields(
+            graph,
+            definition,
+            &methods[init],
+            &mut fields,
+            exception_layout,
+        )?;
     }
     let generated_initializer =
         initializer.is_none() && dataclass.is_some_and(|options| options.init);

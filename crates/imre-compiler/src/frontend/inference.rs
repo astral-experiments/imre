@@ -168,6 +168,71 @@ impl Inference {
         self.pending.borrow()[id].params[index]
     }
 
+    /// A field inherited through several records still uses the declaring
+    /// constructor's checked parameter type and one physical slot.
+    pub(super) fn constructor_field(
+        &self,
+        classes: &ClassInfo,
+        origin: DefinitionId,
+        parameter: usize,
+    ) -> Result<Type, String> {
+        let class = classes.declarations.ids[&origin];
+        let initializer = &classes.methods[class]["__init__"];
+        self.parameter(initializer.id, parameter)
+            .ok_or_else(|| DEFERRED.to_owned())
+    }
+
+    /// An inherited initializer may be called only through a marker child.
+    /// Share its formal types (except self) with the original function. Both
+    /// checked bodies must agree on any field stored in the shared base layout.
+    fn update_constructor_fields(
+        &self,
+        classes: &mut ClassInfo,
+        graph: &SourceGraph,
+    ) -> Result<(), String> {
+        if classes.constructor_fields.is_empty() {
+            return Ok(());
+        }
+        for (class, declaration) in classes.declarations.definitions.iter().enumerate() {
+            let Some(index) = declaration.initializer else {
+                continue;
+            };
+            let origin = declaration.method_origins[index];
+            if origin == declaration.definition
+                || !declaration
+                    .fields
+                    .iter()
+                    .any(|f| f.constructor_parameter.is_some_and(|(d, _)| d == origin))
+            {
+                continue;
+            }
+            let inherited = &classes.methods[class]["__init__"];
+            let original = &classes.methods[classes.declarations.ids[&origin]]["__init__"];
+            for formal in 1..original.params.len() {
+                match (
+                    self.parameter(original.id, formal),
+                    self.parameter(inherited.id, formal),
+                ) {
+                    (Some(ty), None) => self.learn_parameter(inherited.id, formal, ty),
+                    (None, Some(ty)) => self.learn_parameter(original.id, formal, ty),
+                    (Some(a), Some(b)) if a != b => {
+                        return Err(graph.modules[origin.module].error(
+                            &declaration.node,
+                            "inherited exception initializers require a consistent argument type",
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for &(class, field, origin, formal) in &classes.constructor_fields {
+            if let Ok(ty) = self.constructor_field(classes, origin, formal) {
+                classes.fields[class][field] = ty;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn learn_parameter(&self, id: usize, index: usize, ty: Type) {
         let mut pending = self.pending.borrow_mut();
         let slot = &mut pending[id].params[index];
@@ -238,6 +303,7 @@ impl Inference {
         types: &Types,
     ) -> Result<(), String> {
         while self.widened.replace(false) || self.unresolved() {
+            self.update_constructor_fields(classes, graph)?;
             for (_, _, signature) in definitions.iter_mut() {
                 self.update(signature);
             }
@@ -380,6 +446,23 @@ impl Inference {
                 }
                 unreachable!("an unresolved signature has a missing parameter or return");
             }
+        }
+        self.update_constructor_fields(classes, graph)?;
+        for &(class, offset, origin, formal) in &classes.constructor_fields {
+            let ty = self.constructor_field(classes, origin, formal)?;
+            let field = &classes.declarations.definitions[class].fields[offset];
+            if callables::contains_callable(ty, types) || !ClassInfo::valid_field_keys(ty, types) {
+                return Err(graph.modules[field.module].error(
+                    &field.annotation,
+                    "inferred exception field requires a storable type with valid mapping keys",
+                ));
+            }
+        }
+        if !classes.constructor_fields.is_empty()
+            && let Some(root) = ClassInfo::cyclic_field_root(&classes.fields, types)
+        {
+            let declaration = &classes.declarations.definitions[root];
+            return Err(graph.modules[declaration.definition.module].error(&declaration.node, "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
         }
         for (_, _, signature) in definitions.iter_mut() {
             self.update(signature);

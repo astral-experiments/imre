@@ -98,15 +98,25 @@ pub(crate) fn super_init(call: &ast::ExprCall) -> bool {
 
 pub(super) fn infer_fields(
     graph: &SourceGraph,
-    module: usize,
+    definition: DefinitionId,
     init: &ast::StmtFunctionDef,
     fields: &mut Vec<Field>,
+    exception_layout: bool,
 ) -> Result<(), String> {
+    let module = definition.module;
     let params = init
         .parameters
         .iter_non_variadic_params()
         .filter_map(|p| p.annotation().map(|ann| (p.name().as_str(), ann.clone())))
         .collect::<HashMap<_, _>>();
+    let unannotated: HashMap<_, _> = init
+        .parameters
+        .iter_non_variadic_params()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, p)| exception_layout && p.annotation().is_none())
+        .map(|(idx, p)| (p.name().as_str(), idx))
+        .collect();
     for stmt in &init.body {
         let ast::Stmt::Assign(assign) = stmt else {
             continue;
@@ -167,11 +177,19 @@ pub(super) fn infer_fields(
             }
             _ => None,
         };
-        if let Some(annotation) = ann {
+        let constructor_parameter = assign
+            .value
+            .as_name_expr()
+            .and_then(|name| unannotated.get(name.id.as_str()))
+            .map(|&index| (definition, index));
+        if let Some(annotation) =
+            ann.or_else(|| constructor_parameter.map(|_| (*assign.value).clone()))
+        {
             fields.push(Field {
                 module,
                 name: target.attr.to_string(),
                 annotation,
+                constructor_parameter,
                 default: None,
                 kw_only: false,
                 repr: true,

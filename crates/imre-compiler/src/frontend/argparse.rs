@@ -703,6 +703,7 @@ fn namespace_class(
                 module: definition.module,
                 name: field.name.clone(),
                 annotation: field.annotation.clone(),
+                constructor_parameter: None,
                 default: None,
                 kw_only: false,
                 repr: true,
