@@ -1,0 +1,116 @@
+name: Audit original itertools native default fixtures
+on:
+  push:
+    branches: [codex/itertools-default-fixture-hosted]
+permissions:
+  contents: read
+jobs:
+  default-fixture:
+    runs-on: github-ubuntu-24.04-x86_64-4
+    timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+      PYTHONHASHSEED: '0'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14.5'
+      - name: Install Clang 18
+        run: sudo apt-get update && sudo apt-get install -y clang-18
+      - name: Build the published compiler source
+        run: |
+          test "$(git rev-parse HEAD^1)" = af18c4762c01be0a8a914a1855fe0aa86b22b46b
+          test "$(git rev-parse HEAD^2)" = 4cd5d5f84e044c6977d0336220a19c5e2d44b88b
+          test "$(git diff --name-only HEAD^1 HEAD)" = .github/workflows/itertools-default-fixture-hosted.yml
+          git checkout --detach 4cd5d5f84e044c6977d0336220a19c5e2d44b88b
+          cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+          mkdir -p "$RUNNER_TEMP/itertools-default"
+          git rev-parse HEAD 'HEAD^{tree}' > "$RUNNER_TEMP/itertools-default/compiler-source.txt"
+          sha256sum target/debug/imre target/debug/libimre_runtime.a > "$RUNNER_TEMP/itertools-default/binaries.sha256"
+          git checkout --detach af18c4762c01be0a8a914a1855fe0aa86b22b46b
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-stdlib-reference
+          sparse-checkout: Lib
+          persist-credentials: false
+      - name: Run the untouched methods and native default fixtures in all four modes
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools
+          python3 -B benchmarks/cpython_stdlib/suite_modes.py --source af18c4762c01be0a8a914a1855fe0aa86b22b46b --entry "$dir/default_fixture.py" --reference "$dir/reference-linux.json" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --output "$RUNNER_TEMP/itertools-default"
+          cat "$RUNNER_TEMP/itertools-default/source.json"
+      - name: Reject the wrong original method and a host-executed operation
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools/runs/af18c4762c01
+          mkdir -p "$dir"
+          cat > "$dir/review_controls.py" <<'REVIEW_CONTROLS'
+          """Check that an original native pass refuses unrelated or host operation evidence."""
+          import argparse
+          import copy
+          import json
+          from pathlib import Path
+          import sys
+          import tempfile
+
+          HERE = Path(__file__).resolve().parents[2]
+          sys.path.insert(0, str(HERE))
+          from default_fixture import Toolchain, attempt, cases, load_suite, stage_test_tree
+
+
+          def main():
+              parser = argparse.ArgumentParser(description=__doc__)
+              for name in ("imre", "runtime", "clang", "cpython-source", "result"):
+                  parser.add_argument("--" + name, type=Path, required=True)
+              args = parser.parse_args()
+              if sys.version_info[:3] != (3, 14, 5) or not sys._is_gil_enabled():
+                  parser.error("requires the regular pinned CPython 3.14.5 interpreter")
+              sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
+              manifest = json.loads((HERE / "UPSTREAM.json").read_bytes())
+              prior = json.loads((HERE / "evidence-linux.json").read_bytes())
+              path = "Lib/test/test_itertools.py"
+              name = "test.test_itertools.TestExamples.test_filter"
+              case, = [c for c in cases(load_suite(manifest["module"])) if c.id() == name]
+              records = []
+              with tempfile.TemporaryDirectory() as tmp:
+                  root = Path(tmp).resolve()
+                  count = stage_test_tree(args.cpython_source, root,
+                                          json.loads((HERE.parent / "unittest/cpython-test-tree.json").read_bytes()))
+                  for part in prior:
+                      level = part["opt_level"]
+                      row = next(r for r in part["records"] if r["id"] == name)
+                      tool = Toolchain(args.imre, args.runtime, args.clang, level, False, root)
+                      for label in ("wrong method bytes", "operation executed on host"):
+                          altered = copy.deepcopy(row)
+                          if label == "wrong method bytes":
+                              altered["evidence"]["method_sha256"] = "0" * 64
+                          else:
+                              altered["roles"]["operation"] = "cpython"
+                          try:
+                              attempt(case, tool, root, HERE / "upstream" / path, manifest["files"][path], altered)
+                          except ValueError as error:
+                              if str(error) != "a new native fixture pass needs a review of its original operation: " + name:
+                                  raise
+                              records.append({"opt_level": level, "control": label, "result": str(error)})
+                          else:
+                              raise ValueError(f"O{level}: incorrect prior accepted: {label}")
+              args.result.write_text(json.dumps({"source": name, "verified_fixture_blobs": count, "controls": records}, indent=2) + "\n")
+
+
+          if __name__ == "__main__":
+              main()
+          REVIEW_CONTROLS
+          python3 -B "$dir/review_controls.py" --imre "$PWD/target/debug/imre" --runtime "$PWD/target/debug/libimre_runtime.a" --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/itertools-default/review-controls.json"
+      - name: Save exact source and both occurrence reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: itertools-native-default-fixtures
+          path: ${{ runner.temp }}/itertools-default/
+          if-no-files-found: error
