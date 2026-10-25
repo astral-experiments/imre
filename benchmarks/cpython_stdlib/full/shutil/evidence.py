@@ -71,6 +71,7 @@ def reference_skips(suite, reference, level):
 
 
 def run_level(args, module, reference, level, directory):
+    from attempt_methods import proof_for
     tools = Toolchain(args.imre, args.runtime, args.clang, level)
     executions, calls = which_cases.executors(tools, directory, SOURCE, module)
     executions.update(copyfile.executors(args, module, directory, level, with_roles=True))
@@ -91,10 +92,46 @@ def run_level(args, module, reference, level, directory):
                                      "roles": roles(body="unobserved", assertions="unobserved",
                                                     operation="unobserved", fixture="unobserved"),
                                      "evidence": {"operation": "shutil.rmtree", "fixture": reason}}
+    attempts = json.loads(args.method_attempts.read_text())
+    if (attempts["schema"] != "imre.shutil-method-attempts.v1"
+            or attempts["cpython_commit"] != reference["cpython_commit"]
+            or set(attempts["cases"]) != set(reference["reference"])):
+        raise ValueError("complete-method probes do not cover the pinned denominator")
+    proof = {}
+    for name, ref in reference["reference"].items():
+        if ref != "pass":
+            continue
+        record = proof_for(attempts, name, level)
+        stage = record["status"]
+        if stage not in {"compile-blocked", "body-completed", "failed", "fixture-error", "fixture-skip"}:
+            raise ValueError(f"{name}: incomplete method attempt: {record['status']}")
+        proof[name] = {"artifact": args.method_attempts.name, "stage": stage}
+        if "source" in record:
+            proof[name].update(source=record["source"], method_sha256=record["method_sha256"])
+        if stage in {"failed", "fixture-error", "fixture-skip"}:
+            # A working adapter must not hide a real failure in the complete routine.
+            executions.pop(name, None)
+            preflight[name, 1] = {
+                "outcome": {"failed": "failure", "fixture-error": "error", "fixture-skip": "skip"}[stage],
+                "reason": record["reason"],
+                "roles": roles(body="imre" if stage == "failed" else "unobserved",
+                               assertions="unobserved", operation="unobserved", fixture="cpython"),
+                "evidence": {"stage": stage, "fixture": attempts["fixture_execution"]}}
+            continue
+        if name not in executions and (name, 1) not in preflight:
+            if record["status"] != "compile-blocked":
+                raise ValueError(f"{name}: review the successful compile before classifying it")
+            preflight[name, 1] = {
+                "outcome": "blocked", "reason": record["reason"],
+                "roles": roles(body="unobserved", assertions="unobserved", operation="unobserved", fixture="cpython"),
+                "evidence": {"stage": "compile", "fixture": attempts["fixture_execution"],
+                             "detail": "complete unchanged method could not be compiled; operation unobserved"}}
     suite = load_suite(reference["module"])
     report = run_evidence(suite, executions, reference, level, preflight=preflight,
                           exceptions=reference_skips(suite, reference, level))
     for row in report["records"]:
+        if row["id"] in proof:
+            row["evidence"]["complete_method_attempt"] = proof[row["id"]]
         if row["outcome"] == "failure" and calls.get(row["id"]):
             # A failed assertion prevents the adapter from returning its normal
             # observation. Its counter still proves the native lookup occurred.
@@ -111,6 +148,8 @@ def main():
     for arg in ("imre", "runtime", "clang"):
         parser.add_argument("--" + arg, required=True, type=lambda v: Path(v).resolve())
     parser.add_argument("--result", type=Path, default=HERE / "evidence-linux.json")
+    parser.add_argument("--method-attempts", type=lambda p: Path(p).resolve(),
+                        default=HERE / "method-attempts-linux.json")
     parser.add_argument("--cpython-source", type=Path)
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5) or sys.platform != "linux":
@@ -135,7 +174,7 @@ def main():
     write_reports(args.result, reports, reference)
     for r in reports:
         print(f"-O{r['opt_level']}: {r['denominator']} occurrences, {r['counts']}")
-    return int(any(r["counts"].get("failed", 0) for r in reports))
+    return int(any(r["counts"].get(k, 0) for r in reports for k in ("failed", "unexpected-skip")))
 
 
 if __name__ == "__main__":
