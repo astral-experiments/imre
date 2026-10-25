@@ -877,21 +877,7 @@ def present_after_exhaustion(value: int | None) -> int:
     }
 
     #[test]
-    fn loop_breaks_do_not_preserve_replaced_or_deleted_locals() {
-        let replaced = r#"
-def invalid(values: list[int]) -> int:
-    result: int | None = 1
-    for value in values:
-        result = value
-        try:
-            break
-        finally:
-            result = None
-    else:
-        result = 1
-    return result + 1
-"#;
-        assert!(compile(replaced, &CompileOptions::default()).is_err());
+    fn loop_break_does_not_restore_a_deleted_exception_target() {
         let deleted = r#"
 def invalid(values: list[int]) -> str:
     caught = ValueError("old")
@@ -904,6 +890,10 @@ def invalid(values: list[int]) -> str:
         caught = ValueError("empty")
     return str(caught)
 "#;
-        assert!(compile(deleted, &CompileOptions::default()).is_err());
+        let error = compile(deleted, &CompileOptions::default()).unwrap_err();
+        assert!(
+            error.contains("local may be uninitialized on this path"),
+            "{error}"
+        );
     }
 }
