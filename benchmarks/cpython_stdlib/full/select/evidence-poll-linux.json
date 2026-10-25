@@ -8,9 +8,9 @@
     "denominator": 7,
     "distinct_ids": 7,
     "counts": {
-      "host-driven-native-operation": 1,
+      "host-driven-native-operation": 3,
       "native-body-host-fixture": 1,
-      "reference-only": 4,
+      "reference-only": 2,
       "reference-skip": 1
     },
     "records": [
@@ -86,14 +86,18 @@
         "opt_level": 0,
         "fixture_variant": "integer-fd readiness",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "native poll with None, integer and float negative timeouts",
+          "fixture": "CPython owns the thread, pipe writes and timing assertions; forcing zero fails the original test"
+        },
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_poll.PollTests.test_poll_c_limits",
@@ -101,14 +105,18 @@
         "opt_level": 0,
         "fixture_variant": "integer-fd readiness",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "native register, modify and poll validate actual C bounds",
+          "fixture": "CPython imports _testcapi, translates native exceptions and runs assertRaises; suppressing overflow fails the original test"
+        },
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_poll.PollTests.test_poll_unit_tests",
@@ -151,9 +159,9 @@
     "denominator": 7,
     "distinct_ids": 7,
     "counts": {
-      "host-driven-native-operation": 1,
+      "host-driven-native-operation": 3,
       "native-body-host-fixture": 1,
-      "reference-only": 4,
+      "reference-only": 2,
       "reference-skip": 1
     },
     "records": [
@@ -229,14 +237,18 @@
         "opt_level": 3,
         "fixture_variant": "integer-fd readiness",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "native poll with None, integer and float negative timeouts",
+          "fixture": "CPython owns the thread, pipe writes and timing assertions; forcing zero fails the original test"
+        },
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_poll.PollTests.test_poll_c_limits",
@@ -244,14 +256,18 @@
         "opt_level": 3,
         "fixture_variant": "integer-fd readiness",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "native register, modify and poll validate actual C bounds",
+          "fixture": "CPython imports _testcapi, translates native exceptions and runs assertRaises; suppressing overflow fails the original test"
+        },
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_poll.PollTests.test_poll_unit_tests",

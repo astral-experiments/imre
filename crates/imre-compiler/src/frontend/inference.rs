@@ -517,6 +517,11 @@ impl Checker<'_> {
         // as 0 or 1; ordinary annotated Python functions retain their own types.
         let stat_mode = matches!(self.resolve(&call.func), Some(Binding::Definition(id))
             if self.graph.modules[id.module].is_bundled("stat"));
+        let selector_wait = signature.method.is_some_and(|method| {
+            let class = &self.classes.declarations.definitions[method.class];
+            self.graph.modules[class.definition.module].is_bundled("selectors")
+                && class.methods[method.index].name.as_str() == "select"
+        });
         let inference = self.inference;
         let args = self.bind_supplied(
             call,
@@ -526,6 +531,12 @@ impl Checker<'_> {
             |checker, index, argument| {
                 let index = index + skip;
                 let parameter = &signature.params[index];
+                if selector_wait && parameter.name == "timeout" {
+                    let node = argument.site();
+                    let value = argument.value(checker)?;
+                    let value = checker.selector_seconds(value);
+                    return checker.coerce(value, parameter.ty, node);
+                }
                 if stat_mode && parameter.ty == Type::Int {
                     let node = argument.site();
                     let value = argument.value(checker)?;

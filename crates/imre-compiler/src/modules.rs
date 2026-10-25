@@ -432,7 +432,7 @@ impl IntrinsicModule {
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
             "difflib" => Some(Self::Difflib),
-            "select" => Some(Self::Select),
+            "select" if cfg!(any(target_os = "linux", target_os = "macos")) => Some(Self::Select),
             "_imre_doctest" => Some(Self::DoctestRuntime),
             "_imre_mock" => Some(Self::MockRuntime),
             "pathlib" => Some(Self::Pathlib),
@@ -2231,6 +2231,9 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            "selectors" if cfg!(any(target_os = "linux", target_os = "macos")) => {
+                Some(("selectors.py", include_str!("../stdlib/selectors.py")))
+            }
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "string" => Some((
                 "string/__init__.py",
