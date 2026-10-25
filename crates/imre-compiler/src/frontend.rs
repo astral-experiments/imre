@@ -6499,7 +6499,7 @@ impl<'a> Checker<'a> {
             }
             let receiver = if matches!(
                 attribute.attr.as_str(),
-                "append" | "pop" | "extend" | "sort"
+                "append" | "pop" | "extend" | "sort" | "clear"
             ) {
                 self.json_mutation_receiver(receiver, call)?
             } else {
@@ -6838,11 +6838,12 @@ impl<'a> Checker<'a> {
                     (Builtin::Append, Type::None)
                 }
                 "pop" if call.arguments.args.is_empty() => (Builtin::Pop, element),
+                "clear" if call.arguments.args.is_empty() => (Builtin::ListClear, Type::None),
                 _ => {
                     return Err(error(
                         self.source,
                         call,
-                        "supported list methods are append(value), extend(iterable), and pop()",
+                        "supported list methods are append(value), extend(iterable), pop(), and clear()",
                     ));
                 }
             };
