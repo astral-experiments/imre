@@ -7514,7 +7514,7 @@ impl<'a> Checker<'a> {
             {
                 return self.expandtabs(Self::string_value(receiver), call);
             }
-            if matches!(attribute.attr.as_str(), "lower" | "capitalize")
+            if matches!(attribute.attr.as_str(), "lower" | "upper" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.text_method(
