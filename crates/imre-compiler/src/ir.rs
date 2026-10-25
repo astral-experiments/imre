@@ -720,6 +720,7 @@ pub(crate) enum Builtin {
     /// Python representation of a value with a fully known storage shape.
     Repr,
     Len,
+    LengthResult,
     Abs,
     /// Stable permutation of a fully typed list by precomputed scalar keys.
     SortByKeys,
@@ -940,7 +941,12 @@ pub(crate) enum Builtin {
     BinaryOpen(u32),
     GzipOpen,
     /// The compile-time validated pattern is independent of the source spelling.
-    RegexCompile(String),
+    RegexCompile {
+        source: String,
+        spelling: String,
+    },
+    RegexSpelling,
+    UnittestCompilePattern,
     RegexSearch,
     RegexSub(Vec<u8>),
     RegexGroupDict,

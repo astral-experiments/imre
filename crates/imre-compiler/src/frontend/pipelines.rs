@@ -1918,7 +1918,7 @@ impl Checker<'_> {
             step.push(Statement::If(
                 self.local(input.ready),
                 vec![Statement::If(
-                    self.truth_value(operation),
+                    self.test_truth(operation, call)?,
                     vec![Statement::Assign(ready, boolean(true))],
                     vec![Statement::Clear(input.value)],
                 )],
@@ -2263,10 +2263,13 @@ impl Checker<'_> {
             clear.push(captured);
             body.push(Statement::Assign(captured, iterable.clone()));
             for (index, ty) in fields.into_iter().enumerate() {
-                let value = self.truth_value(Expr {
-                    ty,
-                    kind: ExprKind::Field(Box::new(self.local(captured)), index),
-                });
+                let value = self.test_truth(
+                    Expr {
+                        ty,
+                        kind: ExprKind::Field(Box::new(self.local(captured)), index),
+                    },
+                    call,
+                )?;
                 body.push(Statement::If(
                     if all {
                         self.local(result)
@@ -2279,7 +2282,7 @@ impl Checker<'_> {
             }
         } else {
             body.extend(self.expand_items(input, call, |checker, value| {
-                let value = checker.truth_value(value);
+                let value = checker.test_truth(value, call)?;
                 let deciding = if all { not(value) } else { value };
                 Ok(vec![Statement::If(
                     deciding,
