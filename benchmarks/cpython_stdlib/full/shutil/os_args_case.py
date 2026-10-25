@@ -8,6 +8,9 @@ def missing(path: str) -> object:
         shutil.disk_usage(path)
     except FileNotFoundError as exc:
         print(repr(exc.filename))
+        print(len(exc.args))
+        print(repr(exc.args[0]))
+        print(repr(exc.args[-1]))
         return exc.args
     raise AssertionError('fixture path exists')
 
@@ -15,9 +18,6 @@ def missing(path: str) -> object:
 def main(path: str) -> None:
     saved = missing(path)
     print(repr(saved))
-    print(len(saved))
-    print(repr(saved[0]))
-    print(repr(saved[-1]))
     print(saved == (2, 'No such file or directory'))
     try:
         raise OSError()
