@@ -264,7 +264,7 @@ pub unsafe extern "C" fn imre_list_slice(
             let mut result = crate::take_list_buffer(slice.len());
             result
                 .try_reserve_exact(slice.len())
-                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+                .map_err(|_| Error::allocation())?;
             result.extend(slice.map(|at| values[at].clone()));
             Ok(result)
         })
@@ -364,7 +364,7 @@ pub unsafe extern "C" fn imre_seq_slice(
             result
                 .values
                 .try_reserve_exact(slice.len())
-                .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+                .map_err(|_| Error::allocation())?;
             for at in slice {
                 result
                     .values
