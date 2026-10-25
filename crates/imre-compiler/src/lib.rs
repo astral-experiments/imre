@@ -4,7 +4,7 @@ mod callables;
 mod classes;
 mod contracts;
 mod effects;
-mod fixed_regex;
+use imre_regex as fixed_regex;
 mod frontend;
 mod guarded_text;
 mod ir;
