@@ -26,7 +26,19 @@ METHOD = ITEM + "    @classmethod\n    def make(cls, value: int) -> \"Item\":\n 
 PROPERTY = ITEM + "    @property\n    def double(self) -> int:\n        return self.value * 2\n"
 ITEMS_METHOD = ITEM + "    def items(self, value: int) -> list[int]:\n        return [value]\n"
 
+STRUCT = "from imre import struct\n@struct\nclass Point:\n    x: float\n"
 REJECTED = {
+    "struct_identity": STRUCT + "p = Point(1.0)\nprint(p is p)\n",
+    "struct_id": STRUCT + "print(id(Point(1.0)))\n",
+    "struct_field_write": STRUCT + "p = Point(1.0)\np.x = 2.0\n",
+    "struct_subclass": STRUCT + "class Child(Point):\n    pass\n",
+    "struct_owning_field": STRUCT.replace("x: float", "x: list[float]"),
+    "struct_python_int": STRUCT.replace("x: float", "x: int"),
+    "struct_weakref": STRUCT + "from weakref import ref\nref(Point(1.0))\n",
+    "struct_optional_identity": STRUCT + "def same(a: Point | None, b: Point | None) -> bool:\n    return a is b\n",
+    "struct_wrong_argument": STRUCT + "Point(True)\n",
+    "struct_custom_eq": STRUCT + "    def __eq__(self, other: object) -> bool:\n        return True\n",
+    "struct_post_init": STRUCT + "    def __post_init__(self) -> None:\n        print(self.x)\n",
     "unproven_post_init_conversion": """from dataclasses import dataclass
 @dataclass(frozen=True)
 class Wrapper:

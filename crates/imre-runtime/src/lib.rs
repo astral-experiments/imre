@@ -1103,31 +1103,52 @@ pub unsafe extern "C" fn imre_list_release(value: *const List) {
 
 /// Converts an index before a storage borrow, without truncating large integers.
 #[inline]
-fn decode_index(value: &Int) -> Result<isize> {
-    if let Some(raw) = value
-        .as_small()
-        .and_then(|value| isize::try_from(value).ok())
-    {
-        Ok(raw)
+fn signed_index(value: &Int) -> Option<isize> {
+    if let Some(raw) = value.as_small().and_then(|n| isize::try_from(n).ok()) {
+        Some(raw)
     } else {
-        big_index(&value.big()).ok_or_else(Error::index)
+        big_index(&value.big())
     }
 }
 
-/// Normalizes negative indices and rejects out-of-bounds accesses.
-// Expose the bounds check to get/set so LLVM can remove their redundant checks.
+fn decode_index(value: &Int) -> Result<isize> {
+    signed_index(value).ok_or_else(Error::index)
+}
+
 #[inline]
-fn index(raw: isize, length: usize) -> Result<usize> {
-    let normalized = if raw < 0 {
-        // An underflow wraps above `length`, so the same bounds check rejects it.
+fn normalized_index(raw: isize, length: usize) -> Option<usize> {
+    // An underflow wraps above length, so the same bounds check rejects it.
+    let at = if raw < 0 {
         length.wrapping_add_signed(raw)
     } else {
         raw as usize
     };
-    if normalized >= length {
-        return Err(Error::index());
-    }
-    Ok(normalized)
+    (at < length).then_some(at)
+}
+
+/// Normalizes negative list indices and rejects out-of-bounds accesses.
+#[inline]
+fn index(raw: isize, length: usize) -> Result<usize> {
+    normalized_index(raw, length).ok_or_else(Error::index)
+}
+
+/// Returns a bounded fixed-tuple field offset, or sets IndexError before the load.
+///
+/// # Safety
+/// The caller roots the exact integer and supplies the tuple's real length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_tuple_index(word: usize, length: usize) -> usize {
+    // SAFETY: the generated call preserves the exact integer for this conversion.
+    let value = unsafe { Int::borrow(word) };
+    let Some(raw) = signed_index(&value) else {
+        return Error::new(
+            Kind::IndexError,
+            "cannot fit 'int' into an index-sized integer",
+        )
+        .returning(0);
+    };
+    normalized_index(raw, length)
+        .unwrap_or_else(|| Error::new(Kind::IndexError, "tuple index out of range").returning(0))
 }
 
 /// Keeps arbitrary-precision conversion out of the common indexed-access path.
