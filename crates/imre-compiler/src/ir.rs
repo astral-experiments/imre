@@ -950,6 +950,7 @@ pub(crate) enum Builtin {
     /// Reads immutable bytes already proved valid by BytesValidateUtf8.
     DictGatherBytesInt,
     DictGetDefault,
+    DictSetDefault,
     /// The stored value type determines optional promotion on successful lookup.
     /// A third argument, when present, already has the flattened result type.
     DictTryGet(Type),

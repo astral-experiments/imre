@@ -5514,7 +5514,7 @@ impl Emitter<'_, '_> {
                 Type::ListInt,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::DictGetDefault | Builtin::DictPop => {
+            Builtin::DictGetDefault | Builtin::DictSetDefault | Builtin::DictPop => {
                 let key = self.key_word(&args[1].value);
                 let default = args.get(2).map(|arg| self.word(&arg.value));
                 let receiver = &args[0].value.operand;
@@ -5523,6 +5523,11 @@ impl Emitter<'_, '_> {
                     let default = default.as_deref().unwrap_or("0");
                     self.checked_instruction(format!(
                         "call i64 @imre_dict_pop(ptr {receiver}, i64 {key}, i64 {default}, i32 {required})"
+                    ))
+                } else if matches!(builtin, Builtin::DictSetDefault) {
+                    let default = default.unwrap();
+                    self.checked_instruction(format!(
+                        "call i64 @imre_dict_setdefault(ptr {receiver}, i64 {key}, i64 {default})"
                     ))
                 } else {
                     let default = default.unwrap();
@@ -7245,6 +7250,7 @@ declare i32 @imre_dict_try_get(ptr, i64, ptr)
 declare i32 @imre_dict_try_pop(ptr, i64, ptr)
 declare i64 @imre_dict_pop(ptr, i64, i64, i32)
 declare i64 @imre_dict_get_default(ptr, i64, i64)
+declare i64 @imre_dict_setdefault(ptr, i64, i64)
 declare void @imre_dict_set(ptr, i64, i64)
 declare void @imre_dict_delete(ptr, i64)
 declare void @imre_dict_clear(ptr)

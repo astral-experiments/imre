@@ -420,6 +420,7 @@ impl Builtin {
             | Self::NamespaceDelete
             | Self::DictDelete
             | Self::DictPop
+            | Self::DictSetDefault
             | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
