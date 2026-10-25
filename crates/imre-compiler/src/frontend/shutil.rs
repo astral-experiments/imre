@@ -23,6 +23,7 @@ impl Checker<'_> {
                 module: self.module,
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: self.graph.modules[self.module].error(
                     site,
                     "recursive calls through this shutil operation are unsupported",
