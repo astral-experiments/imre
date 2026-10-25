@@ -219,10 +219,8 @@ impl Checker<'_> {
             if !args.args.is_empty() {
                 for keyword in &args.keywords {
                     if keyword.arg.as_deref() == Some("depth") {
-                        self.graph.checked_argument(
-                            self.module,
-                            crate::analysis::CheckedDiagnostic::RepeatedKeyword(keyword.range()),
-                        );
+                        self.graph
+                            .checked_repeated_keyword(self.module, keyword.range());
                     }
                 }
             }
