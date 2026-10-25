@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 64 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 32 modules with recorded suites, 92 complete test executions pass natively at both optimization levels; 12,443 of 12,590 upstream executions have a classification.
+**At a glance:** 65 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 32 modules with recorded suites, 92 complete test executions pass natively at both optimization levels; 12,443 of 12,590 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -17,6 +17,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `abc` | Yes | Abstract bases and `@abstractmethod` on fixed-layout classes. [Evidence](../tests/fixtures/classes/fixed_lineage.py) | — | — | — |
 | `annotationlib` | Yes | `get_annotations`, `Format` and `type_repr` for supported declarations. [Evidence](../tests/fixtures/callables/annotations.py) | — | — | — |
 | `argparse` | Yes | `ArgumentParser`, typed options, subcommands and generated help. [Evidence](../benchmarks/cpython_stdlib/full/argparse/README.md) | [0 / 1,893](../benchmarks/cpython_stdlib/full/argparse/) | 5 | 925 |
+| `array` | Yes | `array.array` class identity, metadata, and virtual registration with `Sequence` and `MutableSequence`. [Evidence](../tests/fixtures/containers/array_registration.py) | — | — | — |
 | `asyncio` | Yes | Run subprocess tasks, wait for a task group and handle cancellation. [Evidence](../tests/fixtures/processes/async_groups.py) | — | — | — |
 | `base64` | Yes | `urlsafe_b64encode` on bytes. [Evidence](../benchmarks/cpython_stdlib/native_base64.py) | — | — | — |
 | `builtins` | Yes | Read, assign and delete `builtins._`; escape supported representations with `ascii` and f-string `!a`. [Evidence](../benchmarks/cpython_stdlib/full/builtins/README.md) | [— / 147 (0 assessed)](../benchmarks/cpython_stdlib/full/builtins/) | — | — |
@@ -84,7 +85,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 
 | Module |
 | --- |
-| `array` |
 | `ast` |
 | `atexit` |
 | `bdb` |
