@@ -39,6 +39,29 @@ def output(command, env, root):
     return result.stdout, result.stderr
 
 
+def check_assertion_bindings(compiler, env, root):
+    bodies = [
+        "assert (x := 2)\n    return x",
+        "assert (x := 2)\n    return 1 + x",
+        "assert [(x := item) for item in range(2)]\n    return x",
+        "assert (lambda y=(x := 2): y)\n    return x",
+        "assert (lambda: (x := 2))\n    return x",
+        "assert [x for x in range(2)]\n    return x",
+        "assert (x := 2)\n    def inner() -> int:\n        return x\n    return inner()",
+        "assert (x := 2)\n    return [x for i in range(2)][0]",
+        "value = 9\n    assert (value := 2)\n    return value",
+    ]
+    for level in ("-O", "-OO"):
+        for body in bodies:
+            program = ("x = 41\ndef read() -> int:\n    " + body
+                       + "\ntry:\n    print(read())"
+                       + "\nexcept UnboundLocalError as e:\n    print('local: ' + str(e))"
+                       + "\nexcept NameError as e:\n    print('free: ' + str(e))")
+            args = [level, "-c", program]
+            if output([compiler, *args], env, root) != output([sys.executable, *args], env, root):
+                raise AssertionError((level, body))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--imre", required=True, type=Path)
@@ -89,7 +112,8 @@ def main():
         expected = output([sys.executable, "-E", script], env, root)
         if output([binary], dict(env, PYTHONOPTIMIZE="2"), root) != expected:
             raise AssertionError("the native executable changed Python settings at runtime")
-    print(f"{len(cases) + 1} command launches and a file build matched at LLVM -O{args.opt_level}")
+        check_assertion_bindings(compiler, env, root)
+    print(f"{len(cases) + 1} startup commands, a file build, and assertion scopes matched at LLVM -O{args.opt_level}")
 
 
 if __name__ == "__main__":

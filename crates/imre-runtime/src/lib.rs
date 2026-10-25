@@ -578,8 +578,8 @@ fn write_output(write: impl FnOnce(&mut Output) -> io::Result<()>) -> io::Result
 
 /// Handles write failures only after releasing the writer lock.
 fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
-    if write_output(write).is_err() {
-        Error::new(Kind::OSError, "could not write standard output").raise();
+    if let Err(error) = write_output(write) {
+        objects::errno_error(error).raise();
     }
 }
 
@@ -591,8 +591,8 @@ fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
 pub unsafe extern "C" fn imre_stderr_line(text: *const Str) {
     // SAFETY: the caller owns the text for this call.
     let text = unsafe { &*text };
-    if sys::write_stderr(text, true).is_err() {
-        Error::new(Kind::OSError, "could not write standard error").raise();
+    if let Err(error) = sys::write_stderr(text, true) {
+        objects::errno_error(error).raise();
     }
 }
 
