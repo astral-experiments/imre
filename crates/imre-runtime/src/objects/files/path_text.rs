@@ -15,7 +15,12 @@ enum Codec {
 impl Codec {
     fn lookup(name: Option<&str>) -> Result<Self> {
         let value = name.unwrap_or("utf-8");
-        let key = value.to_ascii_lowercase().replace(['-', ' '], "_");
+        let mut key = Str::try_with_capacity(value.len()).map_err(|_| Error::allocation())?;
+        // ASCII folding and separator replacement preserve each character's UTF-8 width.
+        key.extend(value.chars().map(|ch| match ch {
+            '-' | ' ' => '_',
+            ch => ch.to_ascii_lowercase(),
+        }));
         match key.as_str() {
             "utf8" | "utf_8" | "u8" | "utf" | "utf8_ucs2" | "utf8_ucs4" | "cp65001" | "locale" => {
                 Ok(Self::Utf8 { signature: false })
@@ -28,9 +33,11 @@ impl Codec {
             "ascii" | "us" | "us_ascii" | "646" | "ansi_x3.4_1968" | "ansi_x3_4_1968"
             | "ansi_x3.4_1986" | "cp367" | "csascii" | "ibm367" | "iso646_us"
             | "iso_646.irv_1991" | "iso_ir_6" => Ok(Self::Ascii),
-            _ => Err(Error::new(
+            _ => Err(option_error(
                 Kind::LookupError,
-                format!("unknown encoding: {value}"),
+                "unknown encoding: ",
+                value,
+                "",
             )),
         }
     }
@@ -148,11 +155,24 @@ fn escaped(ch: char) -> String {
     }
 }
 
+fn option_error(kind: Kind, prefix: &str, value: &str, suffix: &str) -> Error {
+    let capacity = prefix
+        .len()
+        .saturating_add(value.len())
+        .saturating_add(suffix.len());
+    let Ok(mut message) = Str::try_with_capacity(capacity) else {
+        return Error::allocation();
+    };
+    message.push_str(prefix);
+    message.push_str(value);
+    message.push_str(suffix);
+    Error::new(kind, message)
+}
+
 fn unknown_handler(name: &str) -> Error {
-    Error::new(
-        Kind::LookupError,
-        format!("unknown error handler name '{name}'"),
-    )
+    // CPython includes at most 400 UTF-8 bytes, ending before any partial character.
+    let name = &name[..name.floor_char_boundary(400)];
+    option_error(Kind::LookupError, "unknown error handler name '", name, "'")
 }
 
 fn decoding_error(
@@ -180,9 +200,11 @@ fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
     if let Some(value) = newline
         && !matches!(value, "" | "\n" | "\r" | "\r\n")
     {
-        return Err(Error::new(
+        return Err(option_error(
             Kind::ValueError,
-            format!("illegal newline value: {value}"),
+            "illegal newline value: ",
+            value,
+            "",
         ));
     }
     Codec::lookup(encoding)
