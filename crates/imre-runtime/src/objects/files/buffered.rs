@@ -7,7 +7,7 @@ use std::mem::MaybeUninit;
 use smallvec::SmallVec;
 
 use super::gzip::{GzipError, GzipReader};
-use super::{Bytes, Error, Kind, Result, Str, decode_utf8_text, os_error};
+use super::{Bytes, Error, Kind, Result, Str, decode_text, os_error};
 
 pub(super) struct Output {
     raw: BufWriter<File>,
@@ -133,6 +133,10 @@ impl Input {
         }
     }
 
+    pub(super) fn preserve_newlines(&mut self) {
+        self.text.preserve_newlines = true;
+    }
+
     pub(super) fn read_bytes(&mut self, size: Option<usize>) -> Result<Bytes> {
         let mut bytes = Vec::new();
         if let Some(limit) = size {
@@ -208,7 +212,7 @@ impl Input {
     pub(super) fn read_text(&mut self) -> Result<Str> {
         let mut bytes = self.text.carry.to_vec();
         self.raw.read_to_end(&mut bytes).map_err(os_error)?;
-        let remaining = decode_utf8_text(bytes)?;
+        let remaining = decode_text(bytes, self.text.preserve_newlines)?;
         self.text.carry.clear();
         let prefix = &self.text.decoded[self.text.pos..];
         if prefix.is_empty() {
@@ -226,8 +230,17 @@ impl Input {
         line.clear();
         loop {
             let available = &self.text.decoded[self.text.pos..];
-            if let Some(newline) = memchr::memchr(b'\n', available.as_bytes()) {
-                let len = newline + 1;
+            let bytes = available.as_bytes();
+            let line_end = if self.text.preserve_newlines {
+                // The decoder holds a trailing CR until the next chunk or EOF,
+                // so an available CRLF always belongs to this same line.
+                memchr::memchr2(b'\r', b'\n', bytes).map(|i| {
+                    i + 1 + usize::from(bytes[i] == b'\r' && bytes.get(i + 1) == Some(&b'\n'))
+                })
+            } else {
+                memchr::memchr(b'\n', bytes).map(|i| i + 1)
+            };
+            if let Some(len) = line_end {
                 self.text.pos += len;
                 if line.is_empty() {
                     self.text.line_scratch = line;
@@ -261,6 +274,7 @@ impl Input {
 
 #[derive(Default)]
 struct TextBuffer {
+    preserve_newlines: bool,
     decoded: String,
     line_scratch: String,
     pos: usize,
@@ -306,6 +320,10 @@ impl TextBuffer {
         self.carry.extend_from_slice(&bytes[text.len()..]);
         self.pos = 0;
         self.decoded.clear();
+        if self.preserve_newlines {
+            self.decoded.push_str(text);
+            return Ok(());
+        }
         while let Some(cr) = memchr::memchr(b'\r', text.as_bytes()) {
             self.decoded.push_str(&text[..cr]);
             self.decoded.push('\n');

@@ -557,7 +557,7 @@ REJECTED = {
     "append_mode": 'open("input.txt", "a", encoding="utf-8")',
     "encoding": 'open("input.txt", "r", encoding="latin1")',
     "dynamic_encoding": 'encoding = "utf-8"\nopen("input.txt", "r", encoding=encoding)',
-    "newline_keyword": 'open("input.txt", "r", encoding="utf-8", newline="")',
+    "unsupported_newline": 'open("input.txt", "r", encoding="utf-8", newline="other")',
     "read_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.read(1)',
     "readline_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.readline(2)',
     "gzip_write": 'import gzip\ngzip.open("output.gz", "wb")',

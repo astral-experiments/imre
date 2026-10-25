@@ -275,6 +275,10 @@ for multiline fields. Errors use `csv.Error`; the default field limit is
 keywords customize it. Other dialects, writers, dictionary adapters, and
 changing the field limit are outside the subset.
 
+Use `open(path, encoding="utf-8", newline="")` or `Path.open(..., newline="")`
+to preserve original line endings inside quoted fields. The default text reader
+recognizes the same physical lines and translates their endings to `\n`.
+
 ## Fixed regular expressions
 
 `re.compile` accepts a literal string and an optional flag of `0` or `re.VERBOSE`.
