@@ -10,12 +10,26 @@ class BadDisplay(Exception):
         raise ValueError(self.label)
 
 
+class TracedDisplay(Exception):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+
+    def __repr__(self) -> str:
+        self.events.append("rendered")
+        return "TracedDisplay()"
+
+
 async def fail() -> None:
     raise ValueError("child")
 
 
 async def bad() -> None:
     raise BadDisplay("repr failed")
+
+
+async def traced(events: list[str]) -> None:
+    raise TracedDisplay(events)
 
 
 async def ordinary() -> None:
@@ -47,7 +61,25 @@ async def failed_repr() -> None:
             repr(failures.args)
         except ValueError as error:
             print(str(error))
+        try:
+            str(failures.args)
+        except ValueError as error:
+            print(str(error))
+
+
+async def mutations() -> None:
+    events: list[str] = []
+    try:
+        async with asyncio.TaskGroup() as group:
+            group.create_task(traced(events))
+    except ExceptionGroup as failures:
+        print(len(events))
+        print(str(failures.args))
+        print(len(events))
+        print(repr(failures.args))
+        print(events)
 
 
 asyncio.run(ordinary())
 asyncio.run(failed_repr())
+asyncio.run(mutations())

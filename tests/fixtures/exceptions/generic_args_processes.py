@@ -26,6 +26,11 @@ except BaseException as e:
     show(e)
 
 try:
+    subprocess.run(["/bin/sh", "-c", "printf 'a\\377'"], capture_output=True, text=True)
+except UnicodeDecodeError as e:
+    show(e)
+
+try:
     subprocess.run(["/bin/sleep", "3"], capture_output=True, timeout=0.03)
 except subprocess.TimeoutExpired as e:
     show(e)

@@ -73,6 +73,14 @@ try:
     json.loads("{")
 except json.JSONDecodeError as error:
     show(error)
+for raw in [
+    b"\xff\xfe{\x00x", b"\xfe\xff\x00{x", b"\x00\x00\xfe\xff\x00\x00\x00{x",
+    b"\xff\xfe\x00\x00\x00\x00\x11\x00", b"\xef\xbb\xbf\xff",
+]:
+    try:
+        json.loads(raw)
+    except UnicodeDecodeError as error:
+        show(error)
 try:
     open("nonexistent-exception-args-probe", "rb")
 except OSError as error:
@@ -85,6 +93,20 @@ with TemporaryDirectory() as directory:
         target.read_text(encoding="ASCII")
     except UnicodeDecodeError as error:
         show(error)
+    with target.open("r") as handle:
+        try:
+            handle.read()
+        except UnicodeDecodeError as error:
+            show(error)
+    for suffix, rest in [(b"\r", b"\xffB"), (b"\xf0", b"\xffQ"), (b"\r\xf0", b"\xffB")]:
+        count = 8192 - len(suffix)
+        target.write_bytes(b"A" * (count - 1) + b"\n" + suffix + rest)
+        with target.open("r") as handle:
+            print(len(handle.readline()))
+            try:
+                handle.readline()
+            except UnicodeDecodeError as error:
+                show(error)
     for encoding in ["ascii", "latin-1"]:
         try:
             target.write_text("a\n\u0141\u0142", encoding=encoding, newline="\r\n")

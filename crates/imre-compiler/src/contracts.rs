@@ -59,14 +59,14 @@ impl Builtin {
         match self {
             Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
-                if args
-                    .first()
-                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
+                if args.first().is_some_and(|e| {
+                    matches!(
+                        e.ty,
+                        Type::Exception | Type::NamedException(_) | Type::ObjectValue
+                    )
+                }) =>
             {
                 Contract::new(true, Unknown)
-            }
-            Self::Str if args.first().is_some_and(|e| e.ty == Type::ObjectValue) => {
-                Contract::new(true, PreservesOwners)
             }
             Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
