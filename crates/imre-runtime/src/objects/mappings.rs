@@ -743,11 +743,12 @@ impl Mapping {
     /// Render an unquoted attribute label and borrow its value from the rooted dictionary.
     pub(super) fn namespace_repr_entry(
         &self,
-        output: &mut String,
+        output: &mut super::values::ReprWriter<'_>,
         position: usize,
-    ) -> Option<(usize, usize, WordKind)> {
+    ) -> Result<Option<(usize, usize, WordKind)>, std::fmt::Error> {
+        use std::fmt::Write as _;
         if position == 0 {
-            output.push_str("namespace(");
+            output.write_str("namespace(")?;
         }
         let mut cursor = position;
         while let Some((next, key, value)) = self.tables.next(cursor) {
@@ -758,14 +759,14 @@ impl Mapping {
                 continue;
             }
             if position != 0 {
-                output.push_str(", ");
+                output.write_str(", ")?;
             }
-            output.push_str(label);
-            output.push('=');
-            return Some((next, value, self.value_kind));
+            output.write_str(label)?;
+            output.write_char('=')?;
+            return Ok(Some((next, value, self.value_kind)));
         }
-        output.push(')');
-        None
+        output.write_char(')')?;
+        Ok(None)
     }
 
     /// Copies entries in insertion order, retains immutable keys, and lets the
@@ -991,11 +992,12 @@ impl Mapping {
     /// Copies the next entry while the original table roots both words.
     pub(super) fn repr_entry(
         &self,
-        output: &mut String,
+        output: &mut super::values::ReprWriter<'_>,
         position: usize,
-    ) -> Option<super::values::ReprEntry> {
+    ) -> Result<Option<super::values::ReprEntry>, std::fmt::Error> {
+        use std::fmt::Write as _;
         if self.missing == Missing::Zero {
-            output.push_str("Counter(");
+            output.write_str("Counter(")?;
             if self.tables.len() != 0 {
                 let mut entries = Vec::with_capacity(self.tables.len());
                 self.tables.all(|key, count| {
@@ -1005,48 +1007,48 @@ impl Mapping {
                 // Stable sorting preserves first appearance for ties.
                 // SAFETY: the immutable table roots both exact integer counts.
                 entries.sort_by(|a, b| unsafe { crate::imre_int_compare(b.1, a.1) }.cmp(&0));
-                output.push('{');
+                output.write_char('{')?;
                 for (index, (key, count)) in entries.into_iter().enumerate() {
                     if index != 0 {
-                        output.push_str(", ");
+                        output.write_str(", ")?;
                     }
                     // SAFETY: only immutable scalar keys and integer counts are supported.
                     unsafe {
-                        super::values::write_repr(
+                        super::values::try_write_repr(
                             output,
                             key,
                             WordKind::new(self.tables.key_kind()),
-                        );
-                        output.push_str(": ");
-                        super::values::write_repr(output, count, self.value_kind);
+                        )?;
+                        output.write_str(": ")?;
+                        super::values::try_write_repr(output, count, self.value_kind)?;
                     }
                 }
-                output.push('}');
+                output.write_char('}')?;
             }
-            output.push(')');
-            return None;
+            output.write_char(')')?;
+            return Ok(None);
         }
         if position == 0 {
             if matches!(self.missing, Missing::List(_)) {
-                output.push_str("defaultdict(<class 'list'>, ");
+                output.write_str("defaultdict(<class 'list'>, ")?;
             }
-            output.push('{');
+            output.write_char('{')?;
         }
         let Some((next, key, value)) = self.tables.next(position) else {
-            output.push('}');
+            output.write_char('}')?;
             if matches!(self.missing, Missing::List(_)) {
-                output.push(')');
+                output.write_char(')')?;
             }
-            return None;
+            return Ok(None);
         };
         if position != 0 {
-            output.push_str(", ");
+            output.write_str(", ")?;
         }
-        Some(super::values::ReprEntry {
+        Ok(Some(super::values::ReprEntry {
             next,
             key: (key.word, key.kind),
             value: Some((value, self.value_kind)),
-        })
+        }))
     }
 
     pub(super) fn new(key_kind: u32, value_kind: u32) -> Self {
@@ -1112,28 +1114,29 @@ impl Set {
     /// Copies the next key while the original set roots it.
     pub(super) fn repr_entry(
         &self,
-        output: &mut String,
+        output: &mut super::values::ReprWriter<'_>,
         position: usize,
-    ) -> Option<super::values::ReprEntry> {
+    ) -> Result<Option<super::values::ReprEntry>, std::fmt::Error> {
+        use std::fmt::Write as _;
         if position == 0 {
             if self.tables.len() == 0 {
-                output.push_str("set()");
-                return None;
+                output.write_str("set()")?;
+                return Ok(None);
             }
-            output.push('{');
+            output.write_char('{')?;
         }
         let Some((next, key, ())) = self.tables.next(position) else {
-            output.push('}');
-            return None;
+            output.write_char('}')?;
+            return Ok(None);
         };
         if position != 0 {
-            output.push_str(", ");
+            output.write_str(", ")?;
         }
-        Some(super::values::ReprEntry {
+        Ok(Some(super::values::ReprEntry {
             next,
             key: (key.word, key.kind),
             value: None,
-        })
+        }))
     }
 }
 fn release_next_key<K, V>(entries: &mut [Option<Entry<K, V>>], next: &mut usize) -> bool {

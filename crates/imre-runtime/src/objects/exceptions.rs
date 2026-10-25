@@ -951,6 +951,32 @@ pub(crate) fn string_repr(value: &str) -> Str {
 }
 
 pub(super) fn push_string_repr(value: &str, out: &mut String) {
+    write_quoted_repr(value, out).expect("writing to a String cannot fail");
+}
+
+pub(super) fn write_quoted_repr(
+    value: &str,
+    out: &mut impl super::values::ReprTarget,
+) -> std::fmt::Result {
+    // These printable ASCII strings use single quotes and have no escapes.
+    if value
+        .bytes()
+        .all(|byte| (b' '..=b'~').contains(&byte) && !matches!(byte, b'\'' | b'\\'))
+    {
+        let size = value.len().checked_add(2).ok_or(std::fmt::Error)?;
+        let buffer = out.quoted_buffer(size)?;
+        buffer.push('\'');
+        buffer.push_str(value);
+        buffer.push('\'');
+        return Ok(());
+    }
+    let (escaped, correct_printability, size) = quoted_layout(value)?;
+    write_escaped_string(&escaped, out.quoted_buffer(size)?, correct_printability)
+}
+
+fn quoted_layout(
+    value: &str,
+) -> std::result::Result<(UnicodeEscape<'_>, bool, usize), std::fmt::Error> {
     let escaped = UnicodeEscape::new_repr(value);
     let extra = if value.is_ascii() {
         0
@@ -963,15 +989,12 @@ pub(super) fn push_string_repr(value: &str, out: &mut String) {
                 extra.saturating_add(width - ch.len_utf8())
             })
     };
-    if out.is_empty()
-        && let Some(size) = escaped
-            .layout()
-            .len
-            .and_then(|body| body.checked_add(2)?.checked_add(extra))
-    {
-        out.reserve_exact(size);
-    }
-    write_escaped_string(&escaped, out, extra != 0).expect("writing to a String cannot fail");
+    let size = escaped
+        .layout()
+        .len
+        .and_then(|body| body.checked_add(2)?.checked_add(extra))
+        .ok_or(std::fmt::Error)?;
+    Ok((escaped, extra != 0, size))
 }
 
 pub(crate) fn write_string_repr(value: &str, out: &mut impl std::fmt::Write) -> std::fmt::Result {
@@ -980,41 +1003,51 @@ pub(crate) fn write_string_repr(value: &str, out: &mut impl std::fmt::Write) -> 
 
 /// Render the portable spelling into a container repr without first copying the whole path.
 /// A literal backslash is the only character whose quoted spelling starts with two backslashes.
-pub(super) fn push_windows_path_repr(value: &str, out: &mut String) {
+pub(super) fn write_windows_path_repr(
+    value: &str,
+    out: &mut impl super::values::ReprTarget,
+) -> std::fmt::Result {
     struct PosixSeparators<'a> {
         out: &'a mut String,
         escape: bool,
     }
 
     impl std::fmt::Write for PosixSeparators<'_> {
-        fn write_str(&mut self, text: &str) -> std::fmt::Result {
-            for ch in text.chars() {
-                if self.escape {
-                    if ch == '\\' {
-                        self.out.push('/');
-                    } else {
-                        self.out.push('\\');
-                        self.out.push(ch);
-                    }
-                    self.escape = false;
-                } else if ch == '\\' {
-                    self.escape = true;
+        fn write_char(&mut self, ch: char) -> std::fmt::Result {
+            if self.escape {
+                if ch == '\\' {
+                    self.out.push('/');
                 } else {
+                    self.out.push('\\');
                     self.out.push(ch);
                 }
+                self.escape = false;
+            } else if ch == '\\' {
+                self.escape = true;
+            } else {
+                self.out.push(ch);
+            }
+            Ok(())
+        }
+
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            for ch in text.chars() {
+                self.write_char(ch)?;
             }
             Ok(())
         }
     }
 
-    let mut writer = PosixSeparators { out, escape: false };
-    write_escaped_string(
-        &UnicodeEscape::new_repr(value),
-        &mut writer,
-        !value.is_ascii(),
-    )
-    .unwrap();
+    let (escaped, correct_printability, size) = quoted_layout(value)?;
+    // Each quoted backslash is replaced by a single slash.
+    let size = size - value.bytes().filter(|&byte| byte == b'\\').count();
+    let mut writer = PosixSeparators {
+        out: out.quoted_buffer(size)?,
+        escape: false,
+    };
+    write_escaped_string(&escaped, &mut writer, correct_printability)?;
     debug_assert!(!writer.escape);
+    Ok(())
 }
 
 fn write_escaped_string(
@@ -2268,7 +2301,7 @@ mod tests {
             r"C:\x00\next",
         ] {
             let mut rendered = String::from("prefix ");
-            push_windows_path_repr(raw, &mut rendered);
+            write_windows_path_repr(raw, &mut rendered).unwrap();
             assert_eq!(
                 &rendered[7..],
                 string_repr(&raw.replace('\\', "/")).as_str()

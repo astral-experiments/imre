@@ -165,20 +165,26 @@ fn repr(value: &[u8]) -> Str {
 }
 
 pub(super) fn write_repr(output: &mut String, value: &[u8]) {
+    write_quoted_repr(output, value).expect("writing to a String cannot fail");
+}
+
+pub(super) fn write_quoted_repr(
+    output: &mut impl super::values::ReprTarget,
+    value: &[u8],
+) -> std::fmt::Result {
     let escaped = AsciiEscape::new_repr(value);
     let layout = escaped.layout();
-    if output.is_empty()
-        && let Some(size) = layout.len.and_then(|body| body.checked_add(3))
-    {
-        output.reserve_exact(size);
-    }
+    use std::fmt::Write as _;
+    let size = layout
+        .len
+        .and_then(|body| body.checked_add(3))
+        .ok_or(std::fmt::Error)?;
+    let output = output.quoted_buffer(size)?;
     let quote = layout.quote.as_char();
-    output.push('b');
-    output.push(quote);
-    escaped
-        .write_body(output)
-        .expect("writing to a String cannot fail");
-    output.push(quote);
+    output.write_char('b')?;
+    output.write_char(quote)?;
+    escaped.write_body(output)?;
+    output.write_char(quote)
 }
 
 /// # Safety

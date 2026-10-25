@@ -393,7 +393,10 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             18 => usize::from(matches!(doc(a), Value::String(_))),
             19 => {
                 let mut repr = String::new();
-                doc(a).view()?.write_repr(&mut repr);
+                doc(a)
+                    .view()?
+                    .write_repr(&mut crate::objects::values::ReprWriter(&mut repr))
+                    .map_err(|_| Error::allocation())?;
                 Rc::into_raw(Rc::new(Str::new(repr))) as usize
             }
             20 => usize::from(doc(a).truth()),

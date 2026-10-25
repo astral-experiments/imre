@@ -334,6 +334,55 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
     }
 }
 
+/// A representation can outgrow the available address space while its input is live.
+pub(super) struct ReprWriter<'a>(pub(super) &'a mut String);
+
+impl Write for ReprWriter<'_> {
+    #[inline]
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        if text.len() > self.0.capacity() - self.0.len() {
+            self.0
+                .try_reserve(text.len())
+                .or_else(|_| self.0.try_reserve_exact(text.len()))
+                .map_err(|_| std::fmt::Error)?;
+        }
+        self.0.push_str(text);
+        Ok(())
+    }
+}
+
+/// Obtain a buffer with room for the whole quoted spelling before emitting escapes.
+pub(super) trait ReprTarget {
+    fn quoted_buffer(&mut self, len: usize) -> Result<&mut String, std::fmt::Error>;
+}
+
+impl ReprTarget for String {
+    fn quoted_buffer(&mut self, len: usize) -> Result<&mut String, std::fmt::Error> {
+        if self.is_empty() {
+            self.reserve_exact(len);
+        } else {
+            self.reserve(len);
+        }
+        Ok(self)
+    }
+}
+
+impl ReprTarget for ReprWriter<'_> {
+    fn quoted_buffer(&mut self, len: usize) -> Result<&mut String, std::fmt::Error> {
+        if len > self.0.capacity() - self.0.len() {
+            if self.0.is_empty() {
+                self.0.try_reserve_exact(len)
+            } else {
+                self.0
+                    .try_reserve(len)
+                    .or_else(|_| self.0.try_reserve_exact(len))
+            }
+            .map_err(|_| std::fmt::Error)?;
+        }
+        Ok(self.0)
+    }
+}
+
 /// Returns one owned Python representation, borrowing every input until the
 /// string is complete. Compiler validation excludes resource representations.
 ///
@@ -354,6 +403,17 @@ pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
 /// The word and all descendants are rooted with the supplied representation;
 /// no runtime mutation or user callback can overlap formatting.
 pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind) {
+    // SAFETY: the caller roots the word and all its descendants throughout formatting.
+    if unsafe { try_write_repr(&mut ReprWriter(output), word, kind) }.is_err() {
+        super::exceptions::Error::allocation().raise();
+    }
+}
+
+pub(super) unsafe fn try_write_repr(
+    output: &mut ReprWriter<'_>,
+    word: usize,
+    kind: WordKind,
+) -> std::fmt::Result {
     let mut pending = Vec::new();
     let mut current = Some(ReprTask::Word(word, kind));
     while let Some(task) = current.take().or_else(|| pending.pop()) {
@@ -370,111 +430,118 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         Some(ReprTask::Word(member, kind))
                     }
                     _ => {
-                        write_scalar(output, word, kind);
+                        write_scalar(output, word, kind)?;
                         None
                     }
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
                         Storage::Plain => {
-                            write!(output, "<object object at {owner:p}>").unwrap();
-                            None
+                            write!(output, "<object object at {owner:p}>")?;
+                            Ok(None)
                         }
                         Storage::StrDescriptor(index) => {
                             write!(
                                 output,
                                 "<method '{}' of 'str' objects>",
                                 super::inspect::descriptor_name(*index)
-                            )
-                            .unwrap();
-                            None
+                            )?;
+                            Ok(None)
                         }
                         Storage::IteratorAdapter(adapter) => {
-                            adapter.write_repr(output, owner);
-                            None
+                            adapter.write_repr(output, owner)?;
+                            Ok(None)
                         }
                         Storage::Repeat(repeat) => {
                             if position == 0 {
-                                output.push_str("repeat(");
+                                output.write_str("repeat(")?;
+                                pending.try_reserve(1).map_err(|_| std::fmt::Error)?;
                                 pending.push(ReprTask::Object(owner, 1));
-                                Some(ReprTask::Word(repeat.value.word, repeat.value.kind))
+                                Ok(Some(ReprTask::Word(repeat.value.word, repeat.value.kind)))
                             } else {
                                 if let Some(count) = repeat.remaining {
-                                    write!(output, ", {count}").unwrap();
+                                    write!(output, ", {count}")?;
                                 }
-                                output.push(')');
-                                None
+                                output.write_char(')')?;
+                                Ok(None)
                             }
                         }
                         Storage::Sequence(values) => {
                             let values = values.resolved();
                             if position == 0 {
-                                output.push('[');
+                                output.write_char('[')?;
                             }
                             for (index, &value) in values.values.iter().enumerate().skip(position) {
                                 if index != 0 {
-                                    output.push_str(", ");
+                                    output.write_str(", ")?;
                                 }
                                 if value != 0 && matches!(values.kind.raw() & !NULLABLE, 5 | 6 | 9)
                                 {
+                                    pending.try_reserve(1).map_err(|_| std::fmt::Error)?;
                                     pending.push(ReprTask::Object(owner, index + 1));
-                                    return Some(ReprTask::Word(value, values.kind));
+                                    return Ok(Some(ReprTask::Word(value, values.kind)));
                                 }
-                                write_scalar(output, value, values.kind);
+                                write_scalar(output, value, values.kind)?;
                             }
-                            output.push(']');
-                            None
+                            output.write_char(']')?;
+                            Ok(None)
                         }
                         Storage::Dictionary(mapping) => {
-                            format_entry(owner, mapping.repr_entry(output, position), &mut pending)
+                            format_entry(owner, mapping.repr_entry(output, position)?, &mut pending)
                         }
-                        Storage::SimpleNamespace(dict) => dict
-                            .0
-                            .with(|state| state.dictionary().namespace_repr_entry(output, position))
-                            .map(|(next, word, kind)| {
+                        Storage::SimpleNamespace(dict) => {
+                            let entry = dict.0.with(|state| {
+                                state.dictionary().namespace_repr_entry(output, position)
+                            })?;
+                            if let Some((next, word, kind)) = entry {
+                                pending.try_reserve(1).map_err(|_| std::fmt::Error)?;
                                 pending.push(ReprTask::Object(owner, next));
-                                ReprTask::Word(word, kind)
-                            }),
+                                Ok(Some(ReprTask::Word(word, kind)))
+                            } else {
+                                Ok(None)
+                            }
+                        }
                         Storage::Set(set) => {
-                            format_entry(owner, set.repr_entry(output, position), &mut pending)
+                            format_entry(owner, set.repr_entry(output, position)?, &mut pending)
                         }
                         Storage::Json(value) => {
-                            value.write_repr(output);
-                            None
+                            value.write_repr(output)?;
+                            Ok(None)
                         }
                         Storage::Document(value) => {
                             match value.view() {
-                                Ok(view) => view.write_repr(output),
+                                Ok(view) => view.write_repr(output)?,
                                 Err(error) => error.raise(),
                             }
-                            None
+                            Ok(None)
                         }
                         Storage::PurePath(path) => {
-                            output.push_str(path.class());
-                            output.push('(');
-                            path.push_posix_repr(output);
-                            output.push(')');
-                            None
+                            output.write_str(path.class())?;
+                            output.write_char('(')?;
+                            path.write_posix_repr(output)?;
+                            output.write_char(')')?;
+                            Ok(None)
                         }
                         path @ Storage::Path { .. } => {
-                            output.push_str("PosixPath(");
-                            super::exceptions::push_string_repr(path.path(), output);
-                            output.push(')');
-                            None
+                            output.write_str("PosixPath(")?;
+                            super::exceptions::write_quoted_repr(path.path(), output)?;
+                            output.write_char(')')?;
+                            Ok(None)
                         }
                         _ => fail("SystemError", "unsupported resource representation"),
-                    })
+                    })?
                 }
                 ReprTask::Record(payload, position, written) => {
-                    record_field_repr(output, payload, position, written, &mut pending)
+                    record_field_repr(output, payload, position, written, &mut pending)?
                 }
                 ReprTask::KeySeparator => {
-                    output.push_str(": ");
+                    output.write_str(": ")?;
                     None
                 }
             }
         };
     }
+    Ok(())
 }
 
 enum ReprTask {
@@ -494,65 +561,77 @@ fn format_entry(
     owner: *const Object,
     entry: Option<ReprEntry>,
     pending: &mut Vec<ReprTask>,
-) -> Option<ReprTask> {
-    let entry = entry?;
+) -> Result<Option<ReprTask>, std::fmt::Error> {
+    let Some(entry) = entry else {
+        return Ok(None);
+    };
+    pending
+        .try_reserve(if entry.value.is_some() { 3 } else { 1 })
+        .map_err(|_| std::fmt::Error)?;
     pending.push(ReprTask::Object(owner, entry.next));
     if let Some((word, kind)) = entry.value {
         pending.push(ReprTask::Word(word, kind));
         pending.push(ReprTask::KeySeparator);
     }
-    Some(ReprTask::Word(entry.key.0, entry.key.1))
+    Ok(Some(ReprTask::Word(entry.key.0, entry.key.1)))
 }
 
 /// # Safety
 /// The rooted word has its declared scalar, integer-list, or nullable representation.
-unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
+unsafe fn write_scalar(
+    output: &mut ReprWriter<'_>,
+    word: usize,
+    kind: WordKind,
+) -> std::fmt::Result {
     let raw = kind.raw();
     if raw & NULLABLE != 0 && word == 0 {
-        output.push_str("None");
-        return;
+        output.write_str("None")?;
+        return Ok(());
     }
     // SAFETY: each branch borrows only its exact immutable scalar or container.
     unsafe {
         match raw & !NULLABLE {
-            0 => output.push_str("None"),
-            10 => super::string_enums::write_repr(output, word),
-            11 => write!(output, "<class '{}'>", *(word as *const Str)).unwrap(),
+            0 => output.write_str("None")?,
+            10 => super::string_enums::write_repr(output, word)?,
+            11 => write!(output, "<class '{}'>", *(word as *const Str))?,
             1 => {
                 let value = if raw & NULLABLE != 0 { word - 1 } else { word };
-                output.push_str(if value == 0 { "False" } else { "True" });
+                output.write_str(if value == 0 { "False" } else { "True" })?;
             }
             2 => {
                 let value = Int::borrow(word);
                 if let Some(value) = value.as_small() {
-                    write!(output, "{value}").unwrap();
+                    output.write_str(itoa::Buffer::new().format(value))?;
                 } else {
-                    write!(output, "{}", value.big()).unwrap();
+                    write!(output, "{}", value.big())?;
                 }
             }
-            3 => super::exceptions::push_string_repr(&*(word as *const Str), output),
-            4 => (&*(word as *const List)).0.with(|values| {
-                output.push('[');
-                for (index, value) in values.iter().enumerate() {
-                    if index != 0 {
-                        output.push_str(", ");
+            3 => super::exceptions::write_quoted_repr(&*(word as *const Str), output)?,
+            4 => (&*(word as *const List))
+                .0
+                .with(|values| -> std::fmt::Result {
+                    output.write_char('[')?;
+                    for (index, value) in values.iter().enumerate() {
+                        if index != 0 {
+                            output.write_str(", ")?;
+                        }
+                        write_scalar(output, value.0, WordKind::new(2))?;
                     }
-                    write_scalar(output, value.0, WordKind::new(2));
-                }
-                output.push(']');
-            }),
+                    output.write_char(']')
+                })?,
             7 => {
                 let value = if raw & NULLABLE != 0 {
                     *(word as *const f64)
                 } else {
                     f64::from_bits(word as u64)
                 };
-                output.push_str(&crate::floats::render(value));
+                output.write_str(&crate::floats::render(value))?;
             }
-            8 => super::bytes::write_repr(output, &*(word as *const Bytes)),
+            8 => super::bytes::write_quoted_repr(output, &*(word as *const Bytes))?,
             _ => unreachable!("WordKind validates concrete representations"),
         }
     }
+    Ok(())
 }
 
 /// The compiler emits these bytes from already validated source identifiers.
@@ -562,12 +641,12 @@ unsafe fn text<'a>(pointer: *const u8, length: usize) -> &'a str {
 }
 
 unsafe fn record_field_repr(
-    output: &mut String,
+    output: &mut ReprWriter<'_>,
     payload: *const usize,
     position: usize,
     mut written: usize,
     pending: &mut Vec<ReprTask>,
-) -> Option<ReprTask> {
+) -> Result<Option<ReprTask>, std::fmt::Error> {
     // SAFETY: the caller roots a fully initialized record and its descriptor.
     let layout = unsafe { descriptor(payload) };
     // SAFETY: public record representations always have static semantic metadata.
@@ -580,16 +659,15 @@ unsafe fn record_field_repr(
                 output,
                 "<{} object at {payload:p}>",
                 text(semantics.qualified_name, semantics.qualified_name_len)
-            )
-            .unwrap();
-            return None;
+            )?;
+            return Ok(None);
         }
         let plain_tuple = semantics.kind == TUPLE && semantics.name.is_null();
         if position == 0 {
             if !plain_tuple {
-                output.push_str(text(semantics.name, semantics.name_len));
+                output.write_str(text(semantics.name, semantics.name_len))?;
             }
-            output.push('(');
+            output.write_char('(')?;
         }
         for index in position..layout.length {
             let field = if plain_tuple {
@@ -601,26 +679,27 @@ unsafe fn record_field_repr(
                 continue;
             }
             if written != 0 {
-                output.push_str(", ");
+                output.write_str(", ")?;
             }
             if let Some(field) = field {
-                output.push_str(text(field.name, field.name_len));
-                output.push('=');
+                output.write_str(text(field.name, field.name_len))?;
+                output.write_char('=')?;
             }
             let kind = WordKind::new(*layout.kinds.add(index));
             let word = kind.read_record_field(payload.add(index));
             written += 1;
             if word != 0 && matches!(kind.raw() & !NULLABLE, 5 | 6 | 9) {
+                pending.try_reserve(1).map_err(|_| std::fmt::Error)?;
                 pending.push(ReprTask::Record(payload, index + 1, written));
-                return Some(ReprTask::Word(word, kind));
+                return Ok(Some(ReprTask::Word(word, kind)));
             }
-            write_scalar(output, word, kind);
+            write_scalar(output, word, kind)?;
         }
         if plain_tuple && written == 1 {
-            output.push(',');
+            output.write_char(',')?;
         }
-        output.push(')');
-        None
+        output.write_char(')')?;
+        Ok(None)
     }
 }
 
@@ -630,6 +709,15 @@ mod tests {
     use crate::objects::records::{
         RecordDescriptor, RecordField, RecordSemantics, imre_record_new, imre_record_release,
     };
+
+    #[test]
+    fn refused_repr_growth_leaves_the_buffer_usable() {
+        let mut text = String::from("prefix ");
+        let mut writer = ReprWriter(&mut text);
+        assert!(writer.quoted_buffer(usize::MAX).is_err());
+        super::super::exceptions::write_quoted_repr("a\nb", &mut writer).unwrap();
+        assert_eq!(text, "prefix 'a\\nb'");
+    }
 
     #[test]
     fn deeply_nested_tuple_order_resumes_only_after_equal_children() {
