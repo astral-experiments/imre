@@ -3,6 +3,7 @@
 //! stable suffix sort can instead select just the rows they observe.
 
 use super::difflib::{Output, materialize_words};
+use super::exceptions::Error;
 use super::{Object, Str, Words, object};
 use std::cell::{OnceCell, Ref, RefCell};
 use std::rc::{Rc, Weak};
@@ -180,14 +181,18 @@ fn filter(
     result
 }
 
-/// Share equal immutable payloads across snapshots without changing either
-/// sequence. A merge finds every common sorted run; on unsorted input it can
-/// miss sharing opportunities, but it still substitutes only equal strings.
-fn snapshot_right(left: &Words, right: &Words) -> Words {
+/// A merge can reuse equal strings from the first snapshot when copying the second.
+fn snapshot<'a>(
+    words: &Words,
+    candidates: impl Iterator<Item = (usize, &'a Str)>,
+) -> Result<Words, Error> {
     let mut result = Words::new(3);
-    result.values.reserve(right.values.len());
-    let mut candidates = left.strings().peekable();
-    for (word, text) in right.strings() {
+    result
+        .values
+        .try_reserve(words.values.len())
+        .map_err(|_| Error::allocation())?;
+    let mut candidates = candidates.peekable();
+    for (word, text) in words.strings() {
         while candidates
             .next_if(|(_, candidate)| *candidate < text)
             .is_some()
@@ -195,13 +200,13 @@ fn snapshot_right(left: &Words, right: &Words) -> Words {
         let word = candidates
             .next_if(|(_, candidate)| *candidate == text)
             .map_or(word, |(word, _)| word);
-        // SAFETY: both snapshots own every borrowed word throughout the merge.
+        // SAFETY: the source and candidate buffers root every borrowed string.
         result
             .values
-            .push(unsafe { right.kind.acquire(word) }.into_word());
+            .push(unsafe { words.kind.acquire(word) }.into_word());
     }
     result.update_header();
-    result
+    Ok(result)
 }
 
 /// # Safety
@@ -212,26 +217,31 @@ pub unsafe extern "C" fn imre_ndiff_deferred(
     left: *const Object,
     right: *const Object,
 ) -> *const Object {
-    // SAFETY: acquiring the elements cannot invoke callbacks or alias a mutable borrow.
-    let left = unsafe {
-        object(left)
-            .0
-            .with(|storage| storage.sequence().copy_strings())
-    };
-    // SAFETY: sharing equal strings acquires independent references on both sides.
-    let right = unsafe {
-        object(right)
-            .0
-            .with(|storage| snapshot_right(&left, storage.sequence()))
-    };
-    let source = Rc::new(Snapshots {
-        nonempty: !left.values.is_empty() || !right.values.is_empty(),
-        inputs: RefCell::new(Inputs::Original(left, right)),
-        full: OnceCell::new(),
-        signed: OnceCell::new(),
-        projected: OnceCell::new(),
-    });
-    Rc::into_raw(Words::deferred(Deferred(View::Full(source))).into_object())
+    let result = (|| {
+        // SAFETY: acquiring the elements cannot invoke callbacks or alias a mutable borrow.
+        let left = unsafe {
+            object(left)
+                .0
+                .with(|storage| snapshot(storage.sequence(), std::iter::empty()))
+        }?;
+        // SAFETY: sharing equal strings acquires independent references on both sides.
+        let right = unsafe {
+            object(right)
+                .0
+                .with(|storage| snapshot(storage.sequence(), left.strings()))
+        }?;
+        let source = Rc::new(Snapshots {
+            nonempty: !left.values.is_empty() || !right.values.is_empty(),
+            inputs: RefCell::new(Inputs::Original(left, right)),
+            full: OnceCell::new(),
+            signed: OnceCell::new(),
+            projected: OnceCell::new(),
+        });
+        Ok(Rc::into_raw(
+            Words::deferred(Deferred(View::Full(source))).into_object(),
+        ))
+    })();
+    crate::finish(result, std::ptr::null())
 }
 
 /// # Safety

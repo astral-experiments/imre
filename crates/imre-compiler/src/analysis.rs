@@ -117,6 +117,16 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // Popen tests and programs pass shell=0/1. Preserve all of typeshed's
+        // overloads while admitting the integer truth values CPython accepts.
+        let subprocess = vendored
+            .read_to_string("stdlib/subprocess.pyi")
+            .map_err(|error| error.to_string())?
+            .replace("shell: bool =", "shell: bool | int =");
+        system
+            .fs()
+            .write_file_all(SystemPathBuf::from(root).join("subprocess.pyi"), subprocess)
+            .map_err(|error| error.to_string())?;
         // CPython's POSIX which() accepts a byte search path independently of
         // the command's type. The cross-platform typeshed overloads omit it.
         system

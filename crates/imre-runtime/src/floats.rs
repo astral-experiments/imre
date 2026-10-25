@@ -7,11 +7,11 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::rc::Rc;
 
-use icu_properties::props::{EnumeratedProperty, GeneralCategory};
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
 
 use super::{Bytes, Error, Int, Kind, Result, Str, finish, output_bytes};
+use crate::integer_text::decimal_digit;
 
 /// Returns a nullable-word owner. Bare float storage never calls this helper.
 #[unsafe(no_mangle)]
@@ -142,25 +142,6 @@ pub extern "C" fn imre_float_int(value: f64) -> usize {
         .returning(1);
     }
     Int::new(BigInt::from_f64(value).unwrap()).into_raw()
-}
-
-/// Decimal digit blocks contain consecutive groups of ten characters. ICU's
-/// category check excludes numeric characters such as fractions and superscripts.
-fn decimal_digit(value: char) -> Option<u8> {
-    if value.is_ascii_digit() {
-        return Some(value as u8 - b'0');
-    }
-    if GeneralCategory::for_char(value) != GeneralCategory::DecimalNumber {
-        return None;
-    }
-    let mut start = value as u32;
-    while let Some(previous) = char::from_u32(start - 1) {
-        if GeneralCategory::for_char(previous) != GeneralCategory::DecimalNumber {
-            break;
-        }
-        start -= 1;
-    }
-    Some(((value as u32 - start) % 10) as u8)
 }
 
 /// Validates Python's decimal grammar before Rust performs correctly rounded
