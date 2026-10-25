@@ -29,6 +29,7 @@ mod documents;
 mod enums;
 mod expansions;
 mod fixed_tuples;
+mod fnmatch;
 mod function_caches;
 mod functools;
 mod hashlib;
@@ -44,6 +45,7 @@ mod logging_formatters;
 mod logging_records;
 mod matching;
 mod module_values;
+mod namedtuples;
 mod native_generators;
 mod os;
 mod partials;
@@ -69,6 +71,7 @@ mod truthiness;
 mod unbound_locals;
 mod unions;
 mod unittest;
+mod unittest_equality;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -431,6 +434,7 @@ pub(crate) fn lower_with_owners(
     graph: &SourceGraph,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
     let types = Types::default();
+    namedtuples::collect(graph, &types)?;
     let mut classes = ClassInfo::new(graph, &types)?;
     dataclass_values::validate(&classes, graph, &types)?;
     let mut signatures = HashMap::new();
@@ -440,13 +444,18 @@ pub(crate) fn lower_with_owners(
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
-                && !(name == "open"
-                    && matches!(
-                        binding,
+                && !matches!(
+                    (name.as_str(), binding),
+                    (
+                        "open",
                         Binding::Intrinsic(
                             Intrinsic::GzipOpen | Intrinsic::Fd(ir::FdOperation::Open)
                         )
-                    ))
+                    ) | (
+                        "filter",
+                        Binding::Intrinsic(Intrinsic::Fnmatch(ir::FnmatchOperation::Filter { .. }))
+                    )
+                )
             {
                 return Err(module.error(
                     module.parsed.syntax(),
@@ -660,6 +669,14 @@ pub(crate) fn lower_with_owners(
                     .map(|value| (value, signature.returns)),
             );
         for (annotation, ty) in annotated {
+            if let Some(definition) = namedtuples::annotation(graph, *module, annotation, &types)
+                && types.namedtuple_definition(ty) != Some(definition)
+            {
+                return Err(graph.modules[*module].error(
+                    annotation,
+                    "inferred value must be an instance of the annotated namedtuple",
+                ));
+            }
             if graph.resolve(*module, annotation)
                 == Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                 && !matches!(ty, Type::Class(id) if classes.parsers.namespace(id))
@@ -1054,6 +1071,7 @@ fn signature(
                 .filter(|value| {
                     graph.resolve(module, value)
                         != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+                        && namedtuples::annotation(graph, module, value, types).is_none()
                 })
                 .map(|value| {
                     if let ast::Expr::Subscript(sequence) = value
@@ -1130,6 +1148,7 @@ fn signature(
         .as_deref()
         .filter(|value| {
             graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+                && namedtuples::annotation(graph, module, value, types).is_none()
         })
         .map(|value| {
             if let ast::Expr::Subscript(subscript) = value
@@ -4082,7 +4101,10 @@ impl<'a> Checker<'a> {
                 expressions
                     .iter()
                     .map(|target| {
-                        if let Some(kind) = self.exception_category(target) {
+                        if let Some(kind) = self
+                            .exception_category(target)
+                            .or_else(|| self.fixed_testcase_failure_kind(target))
+                        {
                             return Ok(kind);
                         }
                         Err(error(
@@ -4349,6 +4371,64 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn binary_operation(&mut self, binary: &ast::ExprBinOp) -> Result<Expr, String> {
+        let (mut left, mut right) = if matches!(
+            binary.op,
+            ast::Operator::BitOr | ast::Operator::BitAnd | ast::Operator::Sub
+        ) {
+            let (left, left_key) = self.union_operand(&binary.left)?;
+            let (right, right_key) = self.union_operand(&binary.right)?;
+            if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
+                self.expect(left_key, right_key, binary)?;
+                return Ok(Expr {
+                    ty: self.types.set(left_key),
+                    kind: ExprKind::Builtin(
+                        match binary.op {
+                            ast::Operator::Sub => Builtin::KeyDifference,
+                            ast::Operator::BitAnd => Builtin::KeyIntersection,
+                            _ => Builtin::KeyUnion,
+                        },
+                        vec![left, right],
+                    ),
+                });
+            }
+            (left, right)
+        } else {
+            (self.expr(&binary.left)?, self.expr(&binary.right)?)
+        };
+        if binary.op == ast::Operator::Add
+            && left.ty == Type::JsonValue
+            && right.ty == Type::JsonValue
+        {
+            return Ok(json::add(left, right));
+        }
+        if binary.op == ast::Operator::Add
+            && matches!(left.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
+            && matches!(right.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
+        {
+            left = Self::string_value(left);
+            right = Self::string_value(right);
+        }
+        if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
+            return self.path_join(left, right, binary);
+        }
+        if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
+            if matches!(&left.kind, ExprKind::List(items) if items.is_empty())
+                && self.types.element(right.ty).is_some()
+            {
+                left.ty = right.ty;
+            } else if matches!(&right.kind, ExprKind::List(items) if items.is_empty()) {
+                right.ty = left.ty;
+            }
+            self.expect(left.ty, right.ty, binary)?;
+            return self.concat_lists(left, right, binary);
+        }
+        if self.types.is_counter(left.ty) && self.types.is_counter(right.ty) {
+            return self.counter_math(binary.op, left, right, false, binary);
+        }
+        self.binary_expr(binary.op, left, right, binary)
+    }
+
     fn binary_expr(
         &self,
         op: ast::Operator,
@@ -4450,10 +4530,11 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        // A chained method checks its receiver before its arguments. Keep the
-        // large general expression frame off that recursive path in debug builds.
+        // Calls and binary operators recursively check their operands. Keep
+        // the large general expression frame off both paths in debug builds.
         match expression {
             ast::Expr::Call(call) => self.call(call),
+            ast::Expr::BinOp(binary) => self.binary_operation(binary),
             _ => self.non_call_expr(expression),
         }
     }
@@ -4716,63 +4797,6 @@ impl<'a> Checker<'a> {
                     .types
                     .tuple(values.iter().map(|value| value.ty).collect());
                 (ty, ExprKind::Tuple(values))
-            }
-            ast::Expr::BinOp(binary) => {
-                let (mut left, mut right) = if matches!(
-                    binary.op,
-                    ast::Operator::BitOr | ast::Operator::BitAnd | ast::Operator::Sub
-                ) {
-                    let (left, left_key) = self.union_operand(&binary.left)?;
-                    let (right, right_key) = self.union_operand(&binary.right)?;
-                    if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
-                        self.expect(left_key, right_key, binary)?;
-                        return Ok(Expr {
-                            ty: self.types.set(left_key),
-                            kind: ExprKind::Builtin(
-                                match binary.op {
-                                    ast::Operator::Sub => Builtin::KeyDifference,
-                                    ast::Operator::BitAnd => Builtin::KeyIntersection,
-                                    _ => Builtin::KeyUnion,
-                                },
-                                vec![left, right],
-                            ),
-                        });
-                    }
-                    (left, right)
-                } else {
-                    (self.expr(&binary.left)?, self.expr(&binary.right)?)
-                };
-                if binary.op == ast::Operator::Add
-                    && left.ty == Type::JsonValue
-                    && right.ty == Type::JsonValue
-                {
-                    return Ok(json::add(left, right));
-                }
-                if binary.op == ast::Operator::Add
-                    && matches!(left.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
-                    && matches!(right.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
-                {
-                    left = Self::string_value(left);
-                    right = Self::string_value(right);
-                }
-                if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
-                    return self.path_join(left, right, binary);
-                }
-                if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
-                    if matches!(&left.kind, ExprKind::List(items) if items.is_empty())
-                        && self.types.element(right.ty).is_some()
-                    {
-                        left.ty = right.ty;
-                    } else if matches!(&right.kind, ExprKind::List(items) if items.is_empty()) {
-                        right.ty = left.ty;
-                    }
-                    self.expect(left.ty, right.ty, binary)?;
-                    return self.concat_lists(left, right, binary);
-                }
-                if self.types.is_counter(left.ty) && self.types.is_counter(right.ty) {
-                    return self.counter_math(binary.op, left, right, false, expression);
-                }
-                return self.binary_expr(binary.op, left, right, expression);
             }
             ast::Expr::UnaryOp(unary) => {
                 let value = if unary.op == ast::UnaryOp::Not {
@@ -5041,8 +5065,11 @@ impl<'a> Checker<'a> {
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
                         && matches!((ty, right), (Type::Class(_), Type::Class(_)));
+                    let tuples = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                        && matches!((ty, right), (Type::Tuple(_), Type::Tuple(_)))
+                        && self.types.fields(ty) == self.types.fields(right);
                     let paths = ty.is_path() && right.is_path();
-                    if !numeric && !records && !paths {
+                    if !numeric && !records && !paths && !tuples {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
@@ -5257,6 +5284,11 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if let Some(Binding::Definition(definition)) = self.resolve(&attribute.value)
+                    && let Some(declaration) = self.types.namedtuple(definition)
+                {
+                    return self.namedtuple_class_attribute(attribute, &declaration);
+                }
                 if attribute.attr.as_str() == "join"
                     && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
                     && !self.names.contains_key("str")
@@ -5281,6 +5313,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some(definition) = self.types.namedtuple_definition(receiver.ty) {
+                    return self.namedtuple_instance_attribute(attribute, receiver, definition);
+                }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
                     return Ok(self.string_join_value(Some(receiver), attribute));
                 }
@@ -5378,6 +5413,20 @@ impl<'a> Checker<'a> {
                         return Ok(value);
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
+                        name @ ("errno" | "strerror" | "filename" | "filename2") => {
+                            let (index, ty) = match name {
+                                "errno" => (0, Type::Int),
+                                "strerror" => (1, Type::Str),
+                                _ => (
+                                    if name == "filename" { 2 } else { 3 },
+                                    self.types.union(&[Type::Str, Type::Bytes]).unwrap(),
+                                ),
+                            };
+                            (
+                                self.types.optional(ty),
+                                Builtin::Process(ir::ProcessOperation::OsErrorField(index)),
+                            )
+                        }
                         field @ ("args" | "msg" | "name" | "path" | "name_from")
                             if receiver.ty == Type::ImportException =>
                         {
@@ -5445,7 +5494,7 @@ impl<'a> Checker<'a> {
                 }
                 (ty, ExprKind::Field(Box::new(receiver), field))
             }
-            ast::Expr::Call(_) => unreachable!("call dispatched by typed_expr"),
+            ast::Expr::Call(_) | ast::Expr::BinOp(_) => unreachable!("dispatched by typed_expr"),
             ast::Expr::Generator(_) => {
                 return Err(error(
                     self.source,
@@ -5622,8 +5671,19 @@ impl<'a> Checker<'a> {
         key_view: Option<&mut bool>,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
+        if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
+            && let Some(declaration) = self.types.namedtuple(definition)
+        {
+            return self.namedtuple_call(definition, &declaration, call);
+        }
         if crate::classes::super_init(call) {
             return self.call_super_initializer(call);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "most_common"
+            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+        {
+            return self.counter_most_common(call, None);
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
@@ -5829,6 +5889,19 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::Strerror)) => {
+                self.reject_builtin_keywords(call)?;
+                let [code] = call.arguments.args.as_ref() else {
+                    return Err(error(self.source, call, "os.strerror requires one integer"));
+                };
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(
+                        Builtin::Process(ir::ProcessOperation::Strerror),
+                        vec![self.expr_expected(code, Type::Int)?],
+                    ),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
@@ -5870,6 +5943,12 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return self.clock_time(call),
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::DictConfig)) => {
+                return self.logging_dictionary_config(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::FileConfig)) => {
+                return self.logging_file_config(call);
             }
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
@@ -5915,6 +5994,9 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::Fnmatch(operation))) => {
+                return self.fnmatch_call(operation, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexSub)) => return self.sub_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
@@ -6171,10 +6253,14 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
-            if attribute.attr.as_str() == "lower"
+            if matches!(attribute.attr.as_str(), "lower" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.text_method(Self::string_value(receiver), "lower", call);
+                return self.text_method(
+                    Self::string_value(receiver),
+                    attribute.attr.as_str(),
+                    call,
+                );
             }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -6194,6 +6280,7 @@ impl<'a> Checker<'a> {
             }
             if self.types.is_counter(receiver.ty) {
                 match attribute.attr.as_str() {
+                    "most_common" => return self.counter_most_common(call, Some(receiver)),
                     "update" => return self.counter(call, Some(receiver), None),
                     "subtract" => {
                         return self.counter_counts(call, Some(receiver), None, Binary::Subtract);

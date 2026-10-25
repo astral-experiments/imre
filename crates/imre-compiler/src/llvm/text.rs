@@ -50,6 +50,9 @@ impl Emitter<'_, '_> {
             TextOperation::Lower => {
                 self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))
             }
+            TextOperation::Capitalize => {
+                self.checked_instruction(format!("call ptr @imre_str_capitalize(ptr {source})"))
+            }
             TextOperation::Split(reverse) => {
                 let separator =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));

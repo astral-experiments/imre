@@ -254,6 +254,33 @@ pub unsafe extern "C" fn imre_record_try_new(descriptor: *const RecordDescriptor
     record
 }
 
+/// Shallow-copies a plain class instance without evaluating Python code.
+///
+/// # Safety
+/// The caller roots a live record throughout the call. Its immutable descriptor
+/// describes all public fields and any cached-property storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_record_shallow_copy(source: *const usize) -> *mut usize {
+    // SAFETY: the source descriptor outlives these allocations. The allocation
+    // helper reports MemoryError before we acquire any field references.
+    unsafe {
+        let layout = descriptor(source);
+        let copy = imre_record_try_new(layout);
+        if copy.is_null() {
+            return copy;
+        }
+        for i in 0..layout.length {
+            let kind = WordKind::new(layout.kinds.add(i).read());
+            // A cold cached property may carry a zero, uninitialized owner.
+            kind.retain(kind.read_record_field(source.add(i)));
+        }
+        // Byte-copy the original scalar and pointer representations, including
+        // their provenance. Private hash-cache storage starts cold in the copy.
+        std::ptr::copy_nonoverlapping(source, copy, layout.length);
+        copy
+    }
+}
+
 /// Returns a record with zeroed fields, or null on allocation failure.
 ///
 /// # Safety

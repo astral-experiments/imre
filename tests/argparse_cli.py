@@ -14,12 +14,14 @@ CASES = {
         ["-i", "0" * 4301], ["-i", "\x1c34\x1f"],
         ["-i", "bad", "-i", "1"], ["-i", "bad", "--help"], ["--help", "-i", "bad"],
         ["--scale=-0.0"], ["--scale", "1e-1000"], ["--scale=inf"], ["--scale=nan"],
+        ["--scale=\U00011de0"],
         ["--scale", "1", "--scale", "bad"],
         ["--ids", "-02", "0_4"], ["--ids", "3", "bad"], ["--ids", "3", "2"],
         ["--choice=0.0"], ["--choice=2"], ["--maybe"], ["--maybe=01"], ["--maybe=42"],
         ["--unit", "ab"], ["--unit=c", "-.１２"], ["--label"], ["--label=-42"],
         ["--note", "red"], ["--note=42"],
     ],
+    "format": [[], ["--help"], ["--mode", "text"], ["--unknown"]],
     "counts": [
         [], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
         ["--", "a", "b"], ["a", "--", "--", "b"], ["a", "b", "-v", "c"],
@@ -177,6 +179,8 @@ def main():
                     samples.extend((["foo", "check", "--help"], width, color) for color in (False, True))
             for width in (" 34\t", "+3_4", "٣٤", "3__4", "9" * 20, "0" * 4300 + "34"):
                 samples.append((["--help"], width, False))
+            for separator in ("\x1c", "\x1d", "\x1e", "\x1f"):
+                samples.append((["--help"], separator + "34" + separator, False))
             for level in args.opt_levels:
                 subprocess.run(
                     [
