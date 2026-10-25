@@ -1,6 +1,9 @@
 """Native unittest operations for Imre's fixed-layout test cases."""
 
 
+from types import ModuleType
+
+
 class SkipTest(Exception):
     pass
 
@@ -63,6 +66,14 @@ class TestCase:
     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
         if first == second:
             self.fail(self._formatMessage(msg, f"{first!r} == {second!r}"))
+
+    def assertHasAttr(self, obj: ModuleType, name: str, msg: str | None = None) -> None:
+        if not hasattr(obj, name):
+            self.fail(self._formatMessage(msg, "module " + repr(obj.__name__) + " has no attribute " + repr(name)))
+
+    def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+        if member not in container:
+            self.fail(self._formatMessage(msg, repr(member) + " not found in " + repr(container)))
 
     def setUp(self) -> None:
         pass

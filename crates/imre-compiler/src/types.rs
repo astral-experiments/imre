@@ -431,7 +431,6 @@ impl Types {
             | Type::AsyncProcess(_)
             | Type::NativeModule
             | Type::ModuleNamespace
-            | Type::ModuleMember
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime

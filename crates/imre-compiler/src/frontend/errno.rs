@@ -57,6 +57,17 @@ impl Checker<'_> {
         if name.id == "vars" && call.arguments.args.len() == 1 {
             return Ok(Some(op(Op::Namespace, Type::ModuleNamespace, vec![owner])));
         }
+        if name.id == "getattr"
+            && let [_, key, default] = call.arguments.args.as_ref()
+        {
+            let key = self.expr_expected(key, Type::Str)?;
+            let default = self.expr_expected(default, Type::ModuleMember)?;
+            return Ok(Some(op(
+                Op::DefaultLookup,
+                Type::ModuleMember,
+                vec![owner, key, default],
+            )));
+        }
         let [_, key] = call.arguments.args.as_ref() else {
             return Err(error(
                 self.source,

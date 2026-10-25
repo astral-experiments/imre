@@ -362,9 +362,13 @@ pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
     for c in text.chars() {
         if c.is_ascii_uppercase() {
             seen = true;
-        } else if c.is_ascii_lowercase() {
+        } else if c.is_ascii_lowercase() || c == '\u{295}' {
+            // U+0295 was lowercase in Unicode 16, uncased in newer ICU data.
             return 0;
-        } else if !c.is_ascii() && CodePointSetData::new::<Cased>().contains(c) {
+        } else if !c.is_ascii()
+            && CodePointSetData::new::<Cased>().contains(c)
+            && !integer_text::newer_printable(c)
+        {
             if !CodePointSetData::new::<Uppercase>().contains(c) {
                 return 0;
             }

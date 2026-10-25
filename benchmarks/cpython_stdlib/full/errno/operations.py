@@ -2,6 +2,11 @@
 import errno
 from errno import EDOM as DOMAIN, ERANGE, errorcode as reverse
 
+def evaluate(value: int) -> int:
+    print("evaluated")
+    return value
+
+
 def main() -> None:
     mod = errno
     names = 0
@@ -44,6 +49,36 @@ def main() -> None:
     print(-99 in reverse)
     print(repr(getattr(errno, "__loader__")))
     print(repr(getattr(errno, "__spec__")))
+    dynamic = "__dict__"
+    print(repr(getattr(errno, dynamic)))
+    dynamic = "__class__"
+    print(repr(getattr(errno, dynamic)))
+    dynamic = "__dir__"
+    print(repr(getattr(errno, dynamic)))
+    for dynamic in ["__annotations__", "__annotate__"]:
+        print(dynamic in vars(errno))
+        print(hasattr(errno, dynamic))
+        print(dynamic in vars(errno))
+        print(repr(getattr(errno, dynamic)))
+        print(repr(vars(errno)[dynamic]))
+    print(repr(getattr(errno, "EDOM", evaluate(170141183460469231731687303715884105728))))
+    print(repr(getattr(errno, "unknown_name", evaluate(170141183460469231731687303715884105728))))
+    print(repr(getattr(errno, "unknown_name", b"fallback")))
+    print(repr(getattr(errno, "unknown_name", None)))
+    print(repr(getattr(errno, "unknown_name", True)))
+    print(repr(getattr(errno, "unknown_name", "fallback")))
+    for key in ["EDOM", "__package__", "__annotations__", "__annotate__", "__loader__"]:
+        item = getattr(errno, key)
+        print(bool(item))
+        print(item is None)
+        print(isinstance(item, int))
+        print(isinstance(item, str))
+        print(isinstance(item, dict))
+    print(getattr(errno, "unknown_name", False) == 0)
+    print(getattr(errno, "unknown_name", b"fallback") == b"fallback")
+    for sample in ["", "!?A", "A1", "ǅ", "Aǅ", "Aʕ", "A꟎", "A𖺠"]:
+        print(sample.isupper())
+
 
 
 main()

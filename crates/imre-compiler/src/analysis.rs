@@ -68,12 +68,6 @@ impl Session {
         // compatibility implementation or weakening unresolved-import checks.
         let intrinsic = SystemPathBuf::from(root).join("imre");
         for (name, stub) in [
-            // The errno mapping is mutable in CPython, and available integer
-            // names depend on the target headers rather than the analysis host.
-            (
-                "errno",
-                "errorcode: dict[int, str]\ndef __getattr__(name: str) -> int: ...\n",
-            ),
             (
                 "hashlib",
                 // The bundled OpenSSL stub still names the input `string`. CPython
@@ -425,13 +419,17 @@ struct CheckedFile<'db> {
 pub(crate) enum CheckedOverload {
     Decorator(TextRange),
     Call(TextRange),
+    DictDeletion(TextRange),
 }
 
 impl CheckedOverload {
-    fn covers(self, range: TextRange) -> bool {
+    fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
-            Self::Decorator(decorator) => decorator.contains_range(range),
-            Self::Call(call) => call == range,
+            Self::Decorator(decorator) => {
+                diagnostic == "no-matching-overload" && decorator.contains_range(range)
+            }
+            Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
         }
     }
 }
@@ -458,8 +456,9 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (diagnostic.id().as_str() == "no-matching-overload"
-                                && overloads.iter().any(|scope| scope.covers(range)))
+                            || overloads
+                                .iter()
+                                .any(|scope| scope.covers(diagnostic.id().as_str(), range))
                     })
         })
         .map(|diagnostic| {

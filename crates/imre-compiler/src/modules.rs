@@ -81,6 +81,7 @@ pub(crate) enum IntrinsicModule {
     Declaration(&'static str),
     Argparse,
     Errno,
+    Types,
     Future,
     Sys,
     Typing,
@@ -182,6 +183,7 @@ pub(crate) enum Intrinsic {
     OsName,
     ErrnoConstant(ErrnoName),
     ErrnoErrorcode,
+    ModuleType,
     GetSysconfigPath,
     OsPathExists,
     OsDevnull,
@@ -320,6 +322,7 @@ impl IntrinsicModule {
             "imre.json" => Some(Self::ImreJson),
             "imre.toml" => Some(Self::ImreToml),
             "errno" => Some(Self::Errno),
+            "types" => Some(Self::Types),
             "tomllib" => Some(Self::Tomllib),
             _ => declarations::module(name).map(Self::Declaration),
         }
@@ -395,6 +398,7 @@ impl IntrinsicModule {
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
             (Self::Os, "name") => Intrinsic::OsName,
+            (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Errno, "errorcode") => Intrinsic::ErrnoErrorcode,
             (Self::Errno, name) if ErrnoName::new(name).is_some() => {
                 Intrinsic::ErrnoConstant(ErrnoName::new(name).unwrap())
@@ -559,6 +563,7 @@ impl SourceModule {
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    checked_dict_deletions: std::cell::RefCell<Vec<Vec<TextRange>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -681,6 +686,11 @@ impl SourceGraph {
         self.checked_calls.borrow_mut()[module].push(call);
     }
 
+    /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
+    pub(crate) fn checked_dict_deletion(&self, module: ModuleId, target: TextRange) {
+        self.checked_dict_deletions.borrow_mut()[module].push(target);
+    }
+
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
     pub(crate) fn diagnostic_scopes(
         &self,
@@ -719,6 +729,12 @@ impl SourceGraph {
                         calls.sort_unstable_by_key(|range| (range.start(), range.end()));
                         calls.dedup();
                         calls.into_iter().map(CheckedOverload::Call)
+                    })
+                    .chain({
+                        let mut targets = self.checked_dict_deletions.borrow()[id].clone();
+                        targets.sort_unstable_by_key(|r| (r.start(), r.end()));
+                        targets.dedup();
+                        targets.into_iter().map(CheckedOverload::DictDeletion)
                     })
                     .collect()
             })
@@ -1028,6 +1044,7 @@ impl<'a> Loader<'a> {
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_dict_deletions: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?

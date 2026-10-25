@@ -1300,6 +1300,7 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
+        Some(Binding::Intrinsic(Intrinsic::ModuleType)) => return Ok(Type::NativeModule),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
@@ -1312,6 +1313,7 @@ fn annotation_at(
     };
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
+            "object" => Ok(Type::ModuleMember),
             "int" => Ok(Type::Int),
             "float" => Ok(Type::Float),
             "bool" => Ok(Type::Bool),
@@ -1896,6 +1898,18 @@ impl<'a> Checker<'a> {
         }
         if value.ty == expected {
             return Ok(value);
+        }
+        if expected == Type::ModuleMember
+            && matches!(
+                value.ty,
+                Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_) | Type::Bytes
+            )
+        {
+            return Ok(errno::op(
+                crate::ir::ErrnoOperation::BoxValue,
+                expected,
+                vec![value],
+            ));
         }
         if expected == Type::StringIterable
             && (self.types.element(value.ty) == Some(Type::Str)
@@ -3488,6 +3502,8 @@ impl<'a> Checker<'a> {
                         )
                     })?;
                     let key = self.expr_expected(&target.slice, key)?;
+                    self.graph
+                        .checked_dict_deletion(self.module, target.range());
                     statements.push(Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::DictDelete, vec![receiver, key]),
@@ -4454,7 +4470,9 @@ impl<'a> Checker<'a> {
                         .into_owned(),
                 ),
             ),
-            ast::Expr::Name(name) if name.id == "__name__" => {
+            ast::Expr::Name(name)
+                if name.id == "__name__" && !self.names.contains_key("__name__") =>
+            {
                 let name = if self.module == self.graph.entry {
                     "__main__"
                 } else {
@@ -4568,6 +4586,18 @@ impl<'a> Checker<'a> {
                 } else {
                     (self.expr(&binary.left)?, self.expr(&binary.right)?)
                 };
+                if binary.op == ast::Operator::Mod
+                    && let ExprKind::Str(pattern) = &left.kind
+                    && matches!(right.ty, Type::Str | Type::StrLiteral(_))
+                {
+                    return self.percent_string(pattern, right).ok_or_else(|| {
+                        error(
+                            self.source,
+                            binary,
+                            "literal percent formatting supports one %s field and %% escapes",
+                        )
+                    });
+                }
                 if binary.op == ast::Operator::Add
                     && left.ty == Type::JsonValue
                     && right.ty == Type::JsonValue
@@ -4830,7 +4860,13 @@ impl<'a> Checker<'a> {
                         || !values.iter().all(|v| {
                             matches!(
                                 v.ty,
-                                Type::ModuleMember | Type::Int | Type::Str | Type::StrLiteral(_)
+                                Type::ModuleMember
+                                    | Type::None
+                                    | Type::Bool
+                                    | Type::Int
+                                    | Type::Str
+                                    | Type::StrLiteral(_)
+                                    | Type::Bytes
                             )
                         })
                     {

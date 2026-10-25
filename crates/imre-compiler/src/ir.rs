@@ -987,6 +987,8 @@ pub(crate) enum LogOperation {
 /// Synchronous process operations cannot invoke language callbacks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ErrnoOperation {
+    BoxValue,
+    DefaultLookup,
     Module,
     Namespace,
     Keys,

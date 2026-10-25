@@ -4011,6 +4011,12 @@ impl Emitter<'_, '_> {
             Builtin::Errno(op) => {
                 use crate::ir::ErrnoOperation as Op;
                 let call = match op {
+                    Op::BoxValue => {
+                        let value = &args[0].value;
+                        let kind = representation_kind(value.ty, &self.module.types);
+                        let word = self.word(value);
+                        format!("call ptr @imre_module_value(i32 {kind}, i64 {word})")
+                    }
                     Op::Module => "call ptr @imre_errno_module()".to_string(),
                     Op::Namespace | Op::Keys | Op::Errorcode => {
                         let f = match op {
@@ -4031,6 +4037,10 @@ impl Emitter<'_, '_> {
                             args[0].value.operand, args[1].value.operand
                         )
                     }
+                    Op::DefaultLookup => format!(
+                        "call ptr @imre_errno_lookup_default(ptr {}, ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand, args[2].value.operand
+                    ),
                     Op::Lookup | Op::Items => format!(
                         "call ptr @imre_errno_lookup(ptr {}, ptr {}, i32 {})",
                         args[0].value.operand,
@@ -4059,7 +4069,12 @@ impl Emitter<'_, '_> {
                 };
                 let raw = if matches!(
                     op,
-                    Op::Module | Op::Number | Op::Lookup | Op::Items | Op::MemberContains
+                    Op::Module
+                        | Op::Number
+                        | Op::Lookup
+                        | Op::DefaultLookup
+                        | Op::Items
+                        | Op::MemberContains
                 ) {
                     self.checked_instruction(call)
                 } else {
@@ -5078,6 +5093,13 @@ impl Emitter<'_, '_> {
             Builtin::IsNone => Value {
                 ty: Type::Bool,
                 operand: match args[0].value.ty {
+                    Type::ModuleMember => {
+                        let kind = self.instruction(format!(
+                            "call i32 @imre_module_value_kind(ptr {})",
+                            args[0].value.operand
+                        ));
+                        self.instruction(format!("icmp eq i32 {kind}, 0"))
+                    }
                     Type::JsonRoot | Type::JsonValue => {
                         let bit = self.instruction(format!(
                             "call i32 @imre_json_null(ptr {})",
@@ -6547,6 +6569,9 @@ declare ptr @imre_sys_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)
 declare i32 @imre_str_is_upper(ptr)
+declare ptr @imre_module_value(i32, i64)
+declare i32 @imre_module_value_truth(ptr)
+declare i32 @imre_module_value_kind(ptr)
 declare ptr @imre_errno_module()
 declare ptr @imre_errno_namespace(ptr)
 declare ptr @imre_errno_keys(ptr)
@@ -6555,6 +6580,7 @@ declare i64 @imre_errno_number(ptr,ptr)
 declare ptr @imre_errno_text(ptr,ptr)
 declare i32 @imre_errno_has(ptr,ptr)
 declare ptr @imre_errno_lookup(ptr,ptr,i32)
+declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
 declare ptr @imre_errno_member_text(ptr,i32)
 declare i32 @imre_errno_member_contains(ptr,ptr)
 declare i32 @imre_errno_member_equal(ptr,i32,i64)

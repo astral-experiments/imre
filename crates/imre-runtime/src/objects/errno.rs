@@ -3,8 +3,9 @@ use super::exceptions::{Error, Kind, imre_error_pending};
 use super::mappings::{
     imre_dict_contains, imre_dict_new, imre_dict_set, imre_set_add, imre_set_new,
 };
+use super::words::{OwnedWord, WordKind};
 use super::{Int, Object, Storage, StorageCell, Str, object, values};
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_int};
 use std::rc::Rc;
@@ -23,6 +24,9 @@ const LOADER: &str = "<class '_frozen_importlib.BuiltinImporter'>";
 const SPEC: &str = "ModuleSpec(name='errno', loader=<class '_frozen_importlib.BuiltinImporter'>, origin='built-in')";
 
 pub(super) struct Registry {
+    ordered: RefCell<Vec<&'static str>>,
+    annotations: OnceCell<Rc<Object>>,
+    annotate: Cell<bool>,
     codes: HashMap<&'static str, i32>,
     keys: Rc<Object>,
     errorcode: Rc<Object>,
@@ -35,11 +39,15 @@ pub(super) struct Module {
 
 #[derive(Clone)]
 pub(super) enum Member {
+    Scalar(OwnedWord),
     Number(i32),
     Text(Rc<Str>),
     Dictionary(Rc<Object>),
     Loader,
     Spec,
+    Class,
+    Namespace(Rc<Registry>),
+    Bound(&'static str, usize),
 }
 
 fn into_object(storage: Storage) -> Rc<Object> {
@@ -70,6 +78,7 @@ fn build() -> Option<Rc<Object>> {
         unsafe { imre_set_add(Rc::as_ptr(&keys), Rc::as_ptr(text) as usize) };
         imre_error_pending() == 0
     };
+    let mut ordered = Vec::new();
     for name in [
         "__name__",
         "__doc__",
@@ -78,6 +87,7 @@ fn build() -> Option<Rc<Object>> {
         "__spec__",
         "errorcode",
     ] {
+        ordered.push(name);
         if !add_key(&Rc::new(Str::from(name))) {
             return None;
         }
@@ -87,6 +97,7 @@ fn build() -> Option<Rc<Object>> {
         let name = unsafe { CStr::from_ptr(entry.name) }
             .to_str()
             .expect("ASCII errno symbol");
+        ordered.push(name);
         let text = Rc::new(Str::from(name));
         if !add_key(&text) {
             return None;
@@ -102,6 +113,9 @@ fn build() -> Option<Rc<Object>> {
         codes.insert(name, entry.code);
     }
     let registry = Rc::new(Registry {
+        ordered: RefCell::new(ordered),
+        annotations: OnceCell::new(),
+        annotate: Cell::new(false),
         codes,
         keys,
         errorcode,
@@ -129,7 +143,7 @@ pub extern "C" fn imre_errno_module() -> *const Object {
     })
 }
 
-fn with_registry<T>(owner: *const Object, f: impl FnOnce(&Registry) -> T) -> T {
+fn with_registry<T>(owner: *const Object, f: impl FnOnce(&Rc<Registry>) -> T) -> T {
     // SAFETY: callers root a checked module or namespace object.
     unsafe {
         object(owner).0.with(|s| match s {
@@ -141,11 +155,38 @@ fn with_registry<T>(owner: *const Object, f: impl FnOnce(&Registry) -> T) -> T {
 }
 
 impl Registry {
-    fn lookup(&self, name: &str) -> Option<Member> {
+    fn append_export(&self, name: &'static str) {
+        let text = Rc::new(Str::from(name));
+        // SAFETY: insertion acquires this exact key while the canonical keyset is rooted.
+        unsafe { imre_set_add(Rc::as_ptr(&self.keys), Rc::as_ptr(&text) as usize) };
+        self.ordered.borrow_mut().push(name);
+    }
+
+    fn lookup(self: &Rc<Self>, name: &str, mapping: bool) -> Option<Member> {
         Some(match name {
             "__name__" => Member::Text(Rc::new(Str::from("errno"))),
             "__doc__" => Member::Text(Rc::new(Str::from(DOC))),
             "__package__" => Member::Text(Rc::new(Str::new(""))),
+            "__dict__" if !mapping => Member::Namespace(self.clone()),
+            "__class__" if !mapping => Member::Class,
+            "__annotations__" if !mapping || self.annotations.get().is_some() => {
+                let dict = self.annotations.get_or_init(|| {
+                    self.append_export("__annotations__");
+                    // SAFETY: a fresh empty annotations dictionary owns its storage.
+                    unsafe { Rc::from_raw(imre_dict_new(3, 3)) }
+                });
+                Member::Dictionary(dict.clone())
+            }
+            "__annotate__" if !mapping || self.annotate.get() => {
+                if !self.annotate.replace(true) {
+                    self.append_export("__annotate__");
+                }
+                // SAFETY: CPython installs None for a builtin's annotation function.
+                Member::Scalar(unsafe { WordKind::new(0).acquire(0) })
+            }
+            _ if !mapping && bound(name).is_some() => {
+                Member::Bound(bound(name).unwrap(), Rc::as_ptr(self) as usize)
+            }
             "__loader__" => Member::Loader,
             "__spec__" => Member::Spec,
             "errorcode" => Member::Dictionary(self.errorcode.clone()),
@@ -211,43 +252,39 @@ pub unsafe extern "C" fn imre_errno_text(owner: *const Object, name: *const Str)
     // SAFETY: the compiler supplies an exact text metadata name.
     let name = unsafe { &*name };
     with_registry(owner, |r| {
-        let Some(Member::Text(s)) = r.lookup(name) else {
+        let Some(Member::Text(s)) = r.lookup(name, false) else {
             unreachable!()
         };
         Rc::into_raw(s)
     })
 }
 
-fn inherited(name: &str) -> bool {
-    matches!(
-        name,
-        "__class__"
-            | "__dict__"
-            | "__new__"
-            | "__repr__"
-            | "__getattribute__"
-            | "__init__"
-            | "__dir__"
-            | "__hash__"
-            | "__str__"
-            | "__setattr__"
-            | "__delattr__"
-            | "__lt__"
-            | "__le__"
-            | "__eq__"
-            | "__ne__"
-            | "__gt__"
-            | "__ge__"
-            | "__reduce_ex__"
-            | "__reduce__"
-            | "__getstate__"
-            | "__subclasshook__"
-            | "__init_subclass__"
-            | "__format__"
-            | "__sizeof__"
-            | "__annotations__"
-            | "__annotate__"
-    )
+fn bound(name: &str) -> Option<&'static str> {
+    const METHODS: &[&str] = &[
+        "__new__",
+        "__repr__",
+        "__getattribute__",
+        "__init__",
+        "__dir__",
+        "__hash__",
+        "__str__",
+        "__setattr__",
+        "__delattr__",
+        "__lt__",
+        "__le__",
+        "__eq__",
+        "__ne__",
+        "__gt__",
+        "__ge__",
+        "__reduce_ex__",
+        "__reduce__",
+        "__getstate__",
+        "__subclasshook__",
+        "__init_subclass__",
+        "__format__",
+        "__sizeof__",
+    ];
+    METHODS.iter().copied().find(|method| *method == name)
 }
 
 /// # Safety
@@ -256,9 +293,7 @@ fn inherited(name: &str) -> bool {
 pub unsafe extern "C" fn imre_errno_has(owner: *const Object, name: *const Str) -> u32 {
     // SAFETY: the caller supplies a valid string.
     let name = unsafe { &*name };
-    with_registry(owner, |r| {
-        u32::from(inherited(name) || r.lookup(name).is_some())
-    })
+    with_registry(owner, |r| u32::from(r.lookup(name, false).is_some()))
 }
 
 /// # Safety
@@ -271,11 +306,68 @@ pub unsafe extern "C" fn imre_errno_lookup(
 ) -> *const Object {
     // SAFETY: the name is valid through construction of the result or error.
     let name = unsafe { &*name };
-    with_registry(owner, |r| match r.lookup(name) {
+    with_registry(owner, |r| match r.lookup(name, mapping != 0) {
         Some(member) => Rc::into_raw(into_object(Storage::ModuleMember(member))),
         None if mapping != 0 => Error::string_key(name.clone()).returning(std::ptr::null()),
         None => missing(name).returning(std::ptr::null()),
     })
+}
+
+/// # Safety
+/// The caller roots the errno module, exact string, and already evaluated default.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_errno_lookup_default(
+    owner: *const Object,
+    name: *const Str,
+    default: *const Object,
+) -> *const Object {
+    // SAFETY: the name and the default remain rooted during lookup and acquisition.
+    unsafe {
+        with_registry(owner, |r| match r.lookup(&*name, false) {
+            Some(member) => Rc::into_raw(into_object(Storage::ModuleMember(member))),
+            None => {
+                Rc::increment_strong_count(default);
+                default
+            }
+        })
+    }
+}
+
+/// Preserve an exact scalar while it is passed as a dynamic module attribute or default.
+///
+/// # Safety
+/// The LLVM caller roots the scalar with its matching word descriptor.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_module_value(kind: u32, word: usize) -> *const Object {
+    let kind = WordKind::new(kind);
+    // SAFETY: keep our own reference to the checked word after this call returns.
+    let owned = unsafe { kind.acquire(word) };
+    Rc::into_raw(into_object(Storage::ModuleMember(Member::Scalar(owned))))
+}
+
+impl Member {
+    fn scalar(&self) -> Option<(u32, usize)> {
+        Some(match self {
+            Self::Number(n) => (2, Int::small(i64::from(*n)).unwrap().0),
+            Self::Text(s) => (3, Rc::as_ptr(s) as usize),
+            Self::Scalar(s) => (s.kind.raw(), s.word),
+            _ => return None,
+        })
+    }
+}
+
+fn scalar_equal((left_kind, left): (u32, usize), (right_kind, right): (u32, usize)) -> bool {
+    let normalize = |kind, word: usize| {
+        if kind == 1 {
+            (2, Int::small(word as i64).unwrap().0)
+        } else {
+            (kind, word)
+        }
+    };
+    let (a, x) = normalize(left_kind, left);
+    let (b, y) = normalize(right_kind, right);
+    // SAFETY: both callers root the matched scalar descriptors.
+    a == b && unsafe { values::equal(x, y, WordKind::new(a)) }
 }
 
 fn with_member<T>(owner: *const Object, f: impl FnOnce(&Member) -> T) -> T {
@@ -291,18 +383,96 @@ fn with_member<T>(owner: *const Object, f: impl FnOnce(&Member) -> T) -> T {
 }
 
 /// # Safety
+/// The caller roots the dynamic member; 15 denotes a module descriptor outside the supported instance types.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_module_value_kind(value: *const Object) -> u32 {
+    with_member(value, |m| {
+        m.scalar().map_or_else(
+            || match m {
+                Member::Dictionary(_) | Member::Namespace(_) => 5,
+                _ => 15,
+            },
+            |(kind, _)| kind,
+        )
+    })
+}
+
+/// # Safety
+/// The caller roots the dynamic member through the truth test.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_module_value_truth(value: *const Object) -> u32 {
+    with_member(value, |m| {
+        let yes = if let Some((kind, word)) = m.scalar() {
+            match kind {
+                0 => false,
+                1 => word != 0,
+                2 => word != Int::small(0).unwrap().0,
+                // SAFETY: the owned member roots its exact string or byte buffer.
+                3 => !unsafe { &*(word as *const Str) }.is_empty(),
+                // SAFETY: kind 8 denotes the byte buffer owned by the member.
+                8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
+                _ => unreachable!("supported boxed scalar"),
+            }
+        } else if let Member::Dictionary(d) = m {
+            // SAFETY: the caller roots a live exact dictionary through the member.
+            unsafe { super::mappings::imre_dict_len(Rc::as_ptr(d)) != Int::small(0).unwrap().0 }
+        } else {
+            true
+        };
+        u32::from(yes)
+    })
+}
+
+/// # Safety
 /// Root an immutable module member view. Mutable dictionaries are formatted at observation time.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_errno_member_text(owner: *const Object, repr: u32) -> *const Str {
-    with_member(owner, |m| match m {
-        Member::Text(text) if repr == 0 => Rc::into_raw(text.clone()),
-        Member::Text(text) => Rc::into_raw(Rc::new(super::exceptions::string_repr(text))),
-        Member::Number(n) => Rc::into_raw(Rc::new(Str::from(n.to_string()))),
-        // SAFETY: the actual dictionary remains rooted by the live attribute.
-        Member::Dictionary(d) => unsafe { values::imre_value_repr(Rc::as_ptr(d) as usize, 5) },
-        Member::Loader => Rc::into_raw(Rc::new(Str::from(LOADER))),
-        Member::Spec => Rc::into_raw(Rc::new(Str::from(SPEC))),
-    })
+    fn text(m: &Member, repr: u32) -> *const Str {
+        match m {
+            Member::Scalar(s) if s.kind.raw() == 3 && repr == 0 => {
+                // SAFETY: kind 3 is an owned exact string; acquire it for the result.
+                unsafe { Rc::increment_strong_count(s.word as *const Str) };
+                s.word as *const Str
+            }
+            // SAFETY: the owned scalar remains live throughout formatting.
+            Member::Scalar(s) => unsafe { values::imre_value_repr(s.word, s.kind.raw()) },
+            Member::Text(text) if repr == 0 => Rc::into_raw(text.clone()),
+            Member::Text(text) => Rc::into_raw(Rc::new(super::exceptions::string_repr(text))),
+            Member::Number(n) => Rc::into_raw(Rc::new(Str::from(n.to_string()))),
+            // SAFETY: the actual dictionary remains rooted by the live attribute.
+            Member::Dictionary(d) => unsafe { values::imre_value_repr(Rc::as_ptr(d) as usize, 5) },
+            Member::Loader => Rc::into_raw(Rc::new(Str::from(LOADER))),
+            Member::Spec => Rc::into_raw(Rc::new(Str::from(SPEC))),
+            Member::Class => Rc::into_raw(Rc::new(Str::from("<class 'module'>"))),
+            Member::Bound(name, addr) => {
+                let value = match *name {
+                    "__new__" | "__init_subclass__" | "__subclasshook__" => {
+                        format!("<built-in method {name} of type object at 0x{addr:x}>")
+                    }
+                    "__dir__" | "__getstate__" | "__reduce__" | "__reduce_ex__" | "__format__"
+                    | "__sizeof__" => format!("<built-in function {name}>"),
+                    _ => format!("<method-wrapper '{name}' of module object at 0x{addr:x}>"),
+                };
+                Rc::into_raw(Rc::new(Str::from(value)))
+            }
+            Member::Namespace(r) => {
+                let mut result = String::from("{");
+                for (i, &name) in r.ordered.borrow().iter().enumerate() {
+                    if i != 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&super::exceptions::string_repr(name));
+                    result.push_str(": ");
+                    // SAFETY: each member's renderer transfers a fresh owning reference.
+                    let value = unsafe { Rc::from_raw(text(&r.lookup(name, true).unwrap(), 1)) };
+                    result.push_str(&value);
+                }
+                result.push('}');
+                Rc::into_raw(Rc::new(Str::from(result)))
+            }
+        }
+    }
+    with_member(owner, |member| text(member, repr))
 }
 
 /// # Safety
@@ -317,8 +487,21 @@ pub unsafe extern "C" fn imre_errno_member_contains(
         Member::Number(n) => unsafe {
             imre_dict_contains(mapping, Int::small(i64::from(*n)).unwrap().0)
         },
-        Member::Text(_) | Member::Loader => 0,
-        Member::Dictionary(_) => {
+        Member::Scalar(s) if matches!(s.kind.raw(), 1 | 2) => {
+            let key = if s.kind.raw() == 1 {
+                Int::small(s.word as i64).unwrap().0
+            } else {
+                s.word
+            };
+            // SAFETY: the dictionary has integer keys and the scalar holds this one live.
+            unsafe { imre_dict_contains(mapping, key) }
+        }
+        Member::Scalar(_)
+        | Member::Text(_)
+        | Member::Loader
+        | Member::Class
+        | Member::Bound(..) => 0,
+        Member::Dictionary(_) | Member::Namespace(_) => {
             Error::new(Kind::TypeError, "unhashable type: 'dict'").returning(0)
         }
         Member::Spec => Error::new(Kind::TypeError, "unhashable type: 'ModuleSpec'").returning(0),
@@ -334,17 +517,23 @@ pub unsafe extern "C" fn imre_errno_member_equal(
     word: usize,
 ) -> u32 {
     let a = with_member(left, Clone::clone);
-    let eq = match (kind, &a) {
-        (2, Member::Number(n)) => unsafe { Int::borrow(word) }.as_small() == Some(i64::from(*n)),
-        (3, Member::Text(sa)) => sa.as_ref() == unsafe { &*(word as *const Str) },
-        (5, _) => with_member(word as *const Object, |b| match (&a, b) {
-            (Member::Number(a), Member::Number(b)) => a == b,
-            (Member::Text(a), Member::Text(b)) => a == b,
-            (Member::Dictionary(a), Member::Dictionary(b)) => Rc::ptr_eq(a, b),
-            (Member::Loader, Member::Loader) | (Member::Spec, Member::Spec) => true,
-            _ => false,
-        }),
-        _ => false,
+    let eq = if kind == 5 {
+        with_member(word as *const Object, |b| {
+            if let (Some(a), Some(b)) = (a.scalar(), b.scalar()) {
+                return scalar_equal(a, b);
+            }
+            match (&a, b) {
+                (Member::Dictionary(a), Member::Dictionary(b)) => Rc::ptr_eq(a, b),
+                (Member::Loader, Member::Loader)
+                | (Member::Spec, Member::Spec)
+                | (Member::Class, Member::Class) => true,
+                (Member::Bound(a, x), Member::Bound(b, y)) => a == b && x == y,
+                (Member::Namespace(a), Member::Namespace(b)) => Rc::ptr_eq(a, b),
+                _ => false,
+            }
+        })
+    } else {
+        a.scalar().is_some_and(|a| scalar_equal(a, (kind, word)))
     };
     u32::from(eq)
 }
