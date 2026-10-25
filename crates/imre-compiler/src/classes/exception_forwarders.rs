@@ -21,9 +21,21 @@ impl ForwardingInitializer {
         definition: DefinitionId,
         node: &ast::StmtClassDef,
         parent: Option<&Class>,
-        source: &str,
+        module: &crate::modules::SourceModule,
     ) -> Option<Self> {
         let inherited = parent.and_then(|c| c.forwarder.as_ref());
+        let source = &module.source;
+        if !node.decorator_list.is_empty()
+            || module.bindings.contains_key("super")
+            || node.body.iter().filter_map(ast::Stmt::as_function_def_stmt).any(|method|
+                !method.decorator_list.is_empty() || matches!(method.name.as_str(),"__new__"|"__setattr__"|"__delattr__"|"__getattribute__"))
+            || node
+                .body
+                .iter()
+                .any(|s| matches!(s, ast::Stmt::AnnAssign(_)))
+        {
+            return None;
+        }
         let Some(init) = node
             .body
             .iter()
@@ -33,10 +45,21 @@ impl ForwardingInitializer {
             return inherited.cloned();
         };
         let p = &init.parameters;
+        if p.iter_non_variadic_params().any(|p|p.name().as_str()=="super") || p.vararg.as_ref().is_some_and(|p|p.name.as_str()=="super") {
+            return None;
+        }
         if (p.vararg.is_none() && inherited.is_none())
             || p.kwarg.is_some()
+            || p.vararg.as_ref().is_some_and(|v| v.annotation.is_some())
+            || p.iter_non_variadic_params()
+                .next()
+                .is_none_or(|p| p.default.is_some())
             || !p.posonlyargs.is_empty()
             || !init.decorator_list.is_empty()
+            || init
+                .returns
+                .as_deref()
+                .is_some_and(|r| !matches!(r, ast::Expr::NoneLiteral(_)))
             || parent.is_some() && inherited.is_none()
             || p.iter_non_variadic_params()
                 .skip(1)

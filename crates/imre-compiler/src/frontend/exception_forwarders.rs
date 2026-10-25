@@ -41,11 +41,12 @@ impl Checker<'_> {
             .payload(ty)
             .or_else(|| self.types.element(ty))
             .is_some_and(|item| self.forwarding_value_supported(item))
-            || self.types.fields(ty).is_some_and(|items| {
-                items
-                    .into_iter()
-                    .all(|item| self.forwarding_value_supported(item))
-            })
+            || !self.types.is_partial_frame(ty)
+                && self.types.fields(ty).is_some_and(|items| {
+                    items
+                        .into_iter()
+                        .all(|item| self.forwarding_value_supported(item))
+                })
     }
 
     /// Prove only the exact argument ranges independently diagnosed by ty.

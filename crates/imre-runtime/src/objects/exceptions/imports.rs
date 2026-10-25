@@ -224,7 +224,10 @@ pub unsafe extern "C" fn imre_exception_formatter_result(
         let hook = if repr == 0 { "__str__" } else { "__repr__" };
         Error::new(
             Kind::TypeError,
-            format!("{hook} returned non-string (type {})", type_name(kind)),
+            format!(
+                "{hook} returned non-string (type {})",
+                type_name(kind, word)
+            ),
         )
         .returning(std::ptr::null())
     }
@@ -353,18 +356,30 @@ pub unsafe extern "C" fn imre_exception_field_repr(value: *const Object) -> *con
     Rc::into_raw(word_text(kind, word, true))
 }
 
-fn type_name(kind: WordKind) -> &'static str {
-    match kind.raw() {
+fn type_name(kind: WordKind, word: usize) -> std::borrow::Cow<'static, str> {
+    let plain = match kind.raw() {
         0 => "NoneType",
         1 => "bool",
         2 => "int",
         3 => "str",
         4 | 5 => "list",
-        6 => "tuple",
+        6 => {
+            // SAFETY: the rooted public tuple owns a descriptor with immutable UTF-8 names.
+            unsafe {
+                if let Some(semantic) = records::descriptor(word as *const usize).semantics.as_ref()
+                    && !semantic.name.is_null()
+                {
+                    let bytes = std::slice::from_raw_parts(semantic.name, semantic.name_len);
+                    return std::str::from_utf8_unchecked(bytes).to_owned().into();
+                }
+            }
+            "tuple"
+        }
         7 => "float",
         8 => "bytes",
         _ => unreachable!("checked exception field"),
-    }
+    };
+    plain.into()
 }
 
 pub(super) fn length(kind: WordKind, word: usize) -> Option<usize> {
@@ -394,7 +409,7 @@ pub unsafe extern "C" fn imre_exception_field_len(value: *const Object) -> usize
         Some(n) => Int::from_usize(n).into_raw(),
         None => Error::new(
             Kind::TypeError,
-            format!("object of type '{}' has no len()", type_name(kind)),
+            format!("object of type '{}' has no len()", type_name(kind, word)),
         )
         .returning(0),
     }
@@ -434,7 +449,7 @@ pub unsafe extern "C" fn imre_exception_field_index(
         let Some(len) = length(kind, word) else {
             return Error::new(
                 Kind::TypeError,
-                format!("'{}' object is not subscriptable", type_name(kind)),
+                format!("'{}' object is not subscriptable", type_name(kind, word)),
             )
             .returning(std::ptr::null());
         };

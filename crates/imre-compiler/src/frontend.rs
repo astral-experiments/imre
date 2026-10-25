@@ -5315,7 +5315,16 @@ impl<'a> Checker<'a> {
                                 Builtin::Document(ir::DocumentOp::IsNull),
                                 vec![value],
                             ),
-                            _ if value.ty == Type::ExceptionField => ExprKind::Builtin(Builtin::ExceptionFieldIdentity{reversed:false},vec![value,Expr{ty:Type::None,kind:ExprKind::None}]),
+                            _ if value.ty == Type::ExceptionField => ExprKind::Builtin(
+                                Builtin::ExceptionFieldIdentity { reversed: false },
+                                vec![
+                                    value,
+                                    Expr {
+                                        ty: Type::None,
+                                        kind: ExprKind::None,
+                                    },
+                                ],
+                            ),
                             _ => ExprKind::Builtin(Builtin::IsNone, vec![value]),
                         },
                     };
@@ -5478,10 +5487,7 @@ impl<'a> Checker<'a> {
                     let reversed = values[0].ty != Type::ExceptionField;
                     let eq = Expr {
                         ty: Type::Bool,
-                        kind: ExprKind::Builtin(
-                            Builtin::SystemExitCodeEqual { reversed },
-                            values,
-                        ),
+                        kind: ExprKind::Builtin(Builtin::SystemExitCodeEqual { reversed }, values),
                     };
                     return Ok(
                         if matches!(compare.ops[0], ast::CmpOp::NotEq | ast::CmpOp::IsNot) {

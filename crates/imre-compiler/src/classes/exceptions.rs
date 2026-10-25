@@ -159,6 +159,7 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
     let mut named: Vec<NamedException> = Vec::new();
     let mut layouts = HashSet::new();
     let mut storage_parent = HashMap::new();
+    let mut implementation = HashMap::<DefinitionId, DefinitionId>::new();
     loop {
         let before = ids.len();
         for (module_id, module) in graph.modules.iter().enumerate() {
@@ -203,6 +204,8 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                             if layouts.contains(&parent) {
                                 match storage {
                                     None => storage = Some(parent),
+                                    // Two pass-only branches can share exactly the same layout and methods.
+                                    Some(earlier) if implementation[&earlier] == implementation[&parent] => {}
                                     Some(earlier) if named[(ids[&earlier] - FIRST_USER_EXCEPTION) as usize]
                                         .ancestors.contains(&id) => {}
                                     Some(earlier) if named[(id - FIRST_USER_EXCEPTION) as usize]
@@ -258,10 +261,13 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                         validate_layout(module, node)?;
                     }
                     layouts.insert(def);
+                    implementation.insert(def, def);
                 }
                 if let Some(parent) = storage {
                     storage_parent.insert(def, parent);
                     layouts.insert(def);
+                    let origin = implementation[&parent];
+                    implementation.entry(def).or_insert(origin);
                 }
                 ids.insert(def, id);
                 named.push(NamedException {

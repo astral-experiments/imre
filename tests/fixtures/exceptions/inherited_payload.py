@@ -1,3 +1,18 @@
+from collections import namedtuple
+
+
+Pair = namedtuple("Pair", "first second")
+
+
+class Display(Exception):
+    def __init__(self, msg, *args):
+        self.msg = msg
+        super().__init__(msg, *args)
+
+    def __str__(self):
+        return self.msg
+
+
 class Family(ValueError):
     def __init__(self, message: str, code: int) -> None:
         self.message = message
@@ -15,6 +30,18 @@ class Extra(Family):
 
 
 class Passive(Extra):
+    pass
+
+
+class Left(Passive):
+    pass
+
+
+class Right(Passive):
+    pass
+
+
+class Joined(Left, Right):
     pass
 
 
@@ -54,6 +81,15 @@ class Replaced(Original):
 
 
 exercise()
+try:
+    print(str(Display(Pair("a", "b"))))
+except TypeError as caught:
+    print(str(caught))
+joined = Joined("shared", 3, "detail")
+print(isinstance(joined, Left))
+print(isinstance(joined, Right))
+print(str(joined))
+print(joined.details)
 changed = Replaced("before", detail="final")
 print(str(changed))
 print(repr(changed.args))

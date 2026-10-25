@@ -942,6 +942,22 @@ class Shared(Exception):
         super().__init__(item, *tail)
 print(Shared())
 """,
+    "exception_shadowed_super": """
+class Report(Exception):
+    def __init__(self, super, *tail):
+        self.value = super
+        super().__init__(super, *tail)
+print(Report("argument"))
+""",
+    "exception_intercepted_field": """
+class Report(Exception):
+    def __setattr__(self, key: str, value: str) -> None:
+        raise TypeError(key)
+    def __init__(self, message, *tail):
+        self.message = message
+        super().__init__(message, *tail)
+print(Report("message"))
+""",
     "explicit_base_missing_inherited_field": """
         class Parent(Exception):
             def __init__(self, text: str):

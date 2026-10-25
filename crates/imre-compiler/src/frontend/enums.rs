@@ -149,10 +149,26 @@ impl Checker<'_> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
         if [left.ty, right.ty].contains(&Type::ExceptionField)
-            && [left.ty,right.ty].iter().any(|ty|matches!(ty, Type::ListInt | Type::List(_))) {
+            && [left.ty, right.ty]
+                .iter()
+                .any(|ty| matches!(ty, Type::ListInt | Type::List(_)))
+        {
             let reversed = right.ty == Type::ExceptionField;
-            let same = Expr {ty: Type::Bool, kind: ExprKind::Builtin(Builtin::ExceptionFieldIdentity{reversed}, vec![left,right])};
-            return Ok(if op==ast::CmpOp::IsNot {Expr{ty:Type::Bool,kind:ExprKind::Not(Box::new(same))}} else {same});
+            let same = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::ExceptionFieldIdentity { reversed },
+                    vec![left, right],
+                ),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(same)),
+                }
+            } else {
+                same
+            });
         }
         // A comparison with a bool singleton only observes whether the other
         // operand is that same singleton; integer object identity is irrelevant.

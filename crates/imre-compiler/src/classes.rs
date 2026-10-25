@@ -219,7 +219,7 @@ fn collect_class(
     let dataclass = dataclasses::options(graph, definition.module, node)?;
     let forwarder = exception_layout
         .then(|| {
-            ForwardingInitializer::collect(definition, node, base.map(|(_, c)| c), &module.source)
+            ForwardingInitializer::collect(definition, node, base.map(|(_, c)| c), module)
         })
         .flatten();
     if base.is_some_and(|(_, c)| c.forwarder.is_some()) && forwarder.is_none() {
@@ -427,6 +427,11 @@ fn collect_class(
                     .first()
                     .or_else(|| method.parameters.args.first());
                 let receiver = match kind {
+                    MethodKind::Instance
+                        if method.name.as_str() == "__init__" && forwarder.is_some() =>
+                    {
+                        forwarder.as_ref().map(|plan| plan.receiver.as_str())
+                    }
                     MethodKind::Instance | MethodKind::Property | MethodKind::PropertySetter => {
                         Some("self")
                     }
@@ -651,6 +656,9 @@ fn collect_class(
     };
     if let Some(initializer) = initializer
         && method_origins[initializer] == definition
+        // The transparent plan initializes a fresh record once with each field's final owner.
+        // Python can assign an inherited field on either side of the proved super call.
+        && forwarder.is_none()
     {
         check_initializer(
             module,
