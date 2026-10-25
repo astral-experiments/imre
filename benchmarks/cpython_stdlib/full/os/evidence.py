@@ -39,6 +39,8 @@ BODY_OPERATIONS = {
     "PosixTester.test_pread": "posix.pread, posix.read and os.lseek",
     "PosixTester.test_pwrite": "posix.pwrite, posix.read and os.lseek",
     "DeviceEncodingTests.test_bad_fd": "os.device_encoding",
+    "PosixUidGidTests.test_setreuid_neg1": "os.setreuid(-1, -1)",
+    "PosixUidGidTests.test_setregid_neg1": "os.setregid(-1, -1)",
 }
 PRIVATE = {"test_argument_required", "test_bad_pathlike", "test_garbage_in_exception_out",
            "test_return_bytes", "test_return_string"}
@@ -54,7 +56,9 @@ def proof_for(name, row, path, sources, level):
     proof = {"fixture": "; ".join(hooks), "artifact": path.name, "opt_level": level}
     short_name = ".".join(name.split(".")[-2:])
     if "method_sha256" in row:
-        if row.get("status") != "native_body_host_fixture":
+        child = row.get("child_operation")
+        host_child = child and child["interpreter"] == "cpython"
+        if row.get("status") != ("native_body_host_operation" if host_child else "native_body_host_fixture"):
             raise ValueError(f"{name}: inconsistent location for this native method")
         if row["method_sha256"] not in sources.get(short_name, {}):
             raise ValueError(f"{name}: native body is not a complete release method")
@@ -67,7 +71,12 @@ def proof_for(name, row, path, sources, level):
                      source=sources[short_name][row["method_sha256"]])
         if type(n) is int:
             proof["native_assertion_count"] = n
-        location = roles(body="imre", assertions="none" if n == 0 else "imre", operation="imre", fixture="mixed")
+        location = roles(body="imre", assertions="none" if n == 0 else "imre",
+                         operation="cpython" if host_child else "imre", fixture="mixed")
+        if child:
+            if child["operation"] != proof["operation"] or child["interpreter"] not in {"imre", "cpython"}:
+                raise ValueError(f"{name}: inconsistent child operation")
+            proof["child"] = child
     else:
         calls = Counter(row.get("native_calls", []))
         if "native_getcwd_calls" in row:
@@ -159,9 +168,9 @@ def generate(suite, output, runs, probes):
         if name.startswith(manifest["module"] + ".") and multiplicity[name] != 1:
             raise ValueError(f"method preflight is not an original, unambiguous occurrence: {name}")
     evidence = {}
-    for artifact in ("values-linux.json", "descriptors-linux.json", "paired-paths-linux.json", "device-encoding-linux.json"):
+    for artifact in ("values-linux.json", "descriptors-linux.json", "paired-paths-linux.json", "device-encoding-linux.json", "credential-children-linux.json"):
         path = HERE / artifact
-        if not path.exists():
+        if artifact not in runs and not path.exists():
             continue
         data = runs[artifact] if artifact in runs else json.loads(path.read_bytes())
         if data["cpython_commit"] != manifest["commit"]:
@@ -216,6 +225,8 @@ def main():
                         help="fold the two independent value runs and use their observations")
     parser.add_argument("--descriptor-results", type=Path, nargs=4, metavar=("NATIVE0", "HOST0", "NATIVE3", "HOST3"),
                         help="fold both descriptor adapters at both optimization levels")
+    parser.add_argument("--credential-results", type=Path, nargs=2, metavar=("O0", "O3"),
+                        help="fold both runs of the isolated credential child methods")
     parser.add_argument("--method-results", type=Path, nargs=2, metavar=("O0", "O3"),
                         help="refresh the individual method diagnostics from two independent compiler runs")
     parser.add_argument("--compiler-commit", help="exact Imre revision for --method-results")
@@ -227,6 +238,7 @@ def main():
         sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     runs = {name: paired_runs(paths) for name, paths in [
         ("values-linux.json", args.values_results), ("descriptors-linux.json", args.descriptor_results),
+        ("credential-children-linux.json", args.credential_results),
     ] if paths}
     if bool(args.method_results) != bool(args.compiler_commit):
         parser.error("--method-results and --compiler-commit must be supplied together")
