@@ -95,21 +95,25 @@ impl Checker<'_> {
                 self.copy_result(op, *dst),
                 vec![local(0), local(1), flag(true)],
             ),
-            (Intrinsic::RmTree, [src] | [src, Type::Bool]) if path(*src) => (
-                ir::ProcessOperation::RmTree,
-                Type::None,
-                vec![
-                    self.fspath_value(local(0), site)?,
-                    if params.len() == 2 {
-                        local(1)
-                    } else {
-                        flag(false)
-                    },
-                    none.clone(),
-                    none.clone(),
-                    none,
-                ],
-            ),
+            (Intrinsic::RmTree, [src] | [src, Type::Bool])
+                if matches!(*src, Type::Str | Type::Bytes) || src.is_path() =>
+            {
+                (
+                    ir::ProcessOperation::RmTree,
+                    Type::None,
+                    vec![
+                        local(0),
+                        if params.len() == 2 {
+                            local(1)
+                        } else {
+                            flag(false)
+                        },
+                        none.clone(),
+                        none.clone(),
+                        none,
+                    ],
+                )
+            }
             _ => {
                 return Err(error(
                     self.source,

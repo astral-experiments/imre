@@ -1,4 +1,4 @@
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from shutil import copy, copy2, copyfile, copymode, rmtree
 from typing import Callable
 
@@ -33,6 +33,22 @@ remove: Callable[[Path, bool], None] = rmtree
 remove(Path("nested"), False)
 print(Path("nested").exists())
 remove(Path("nested"), True)
+
+missing_root = Path("missing-callback-root")
+try:
+    remove(missing_root, False)
+except FileNotFoundError as exc:
+    filename = exc.filename
+    print(repr(filename))
+    print(isinstance(filename, Path) and filename is missing_root)
+
+remove_pure: Callable[[PurePosixPath], None] = rmtree
+try:
+    remove_pure(PurePosixPath("missing-callback-root"))
+except FileNotFoundError as exc:
+    print(repr(exc.filename))
+    print(repr(exc.filename2))
+    print(repr(exc.errno))
 
 for visit in (bind("first"), bind("second")):
     print(visit("!"))
