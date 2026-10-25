@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ca977019d95d473873bc5bab8043d5c02a218dd8
+          ref: ca977019d95d473818bc5bab8043d5c02a218dd8
           fetch-depth: 0
           persist-credentials: true
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           base_checkout="$PWD"
-          pr=ca977019d95d473873bc5bab8043d5c02a218dd8
+          pr=ca977019d95d473818bc5bab8043d5c02a218dd8
           cat > "$RUNNER_TEMP/argparse-driver" <<'SH'
           #!/bin/sh
           if test "$1" = build; then
