@@ -50,7 +50,7 @@ impl Checker<'_> {
             MethodKind::Instance => usize::from(bound),
             MethodKind::Class => 1,
             MethodKind::Static => 0,
-            MethodKind::Property => return None,
+            MethodKind::Property | MethodKind::PropertySetter => return None,
         };
         let owner = &classes.definitions[*classes.ids.get(&record.method_origins[index])?].name;
         arity_error(
