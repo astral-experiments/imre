@@ -62,6 +62,15 @@ except OSError as error:
             if not messages[0] or messages[0] != messages[1]:
                 raise AssertionError(("stderr write error", messages))
 
+            recovery = Path(__file__).parent / "full/sys/stream_errno.py"
+            executable = native(recovery.read_text())
+            for mode in ("stdout-write", "stderr-write", "stdout-flush", "stderr-flush"):
+                stock, actual = [subprocess.run([*cmd, mode], capture_output=True, check=True, timeout=10)
+                                 for cmd in ([args.python, recovery], [executable])]
+                if (actual.stdout, actual.stderr) != (stock.stdout, stock.stderr):
+                    raise AssertionError((mode, stock, actual))
+            print("Matched errno, strerror and recovery for four standard stream failures")
+
         def command(argv):
             if len(argv) != 3 or argv[:2] != [sys.executable, "-c"]:
                 raise ValueError(f"unexpected upstream child invocation: {argv!r}")
