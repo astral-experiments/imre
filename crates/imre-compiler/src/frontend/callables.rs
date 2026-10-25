@@ -169,6 +169,13 @@ impl Checker<'_> {
         expected: Option<Type>,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if self.classes.producer_items.contains_key(&signature.id) {
+            return Err(error(
+                self.source,
+                node,
+                "generator functions require direct iteration",
+            ));
+        }
         let skip = usize::from(receiver.is_some());
         if signature.params[skip..]
             .iter()

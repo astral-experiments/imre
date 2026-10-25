@@ -87,6 +87,25 @@ def main():
                 raise AssertionError((mode, result))
         print(f"Matched exit status, stdout, and stderr in {len(modes)} native sys fixture cases")
 
+        payloads = Path(__file__).parent / "full/sys/exit_payloads.py"
+        program = native(payloads.read_text())
+        modes = ("empty-call", "singleton", "singleton-none", "tuple", "nested",
+                 "constructor", "constructor-empty", "constructor-pair", "extra", "keyword")
+        for mode in modes:
+            for action in ("catch", "uncaught"):
+                outputs = [subprocess.run([*command, action, mode], capture_output=True, timeout=10)
+                           for command in ([args.python, payloads], [program])]
+                # Native traceback frames are a separate open introspection item.
+                # For an uncaught TypeError compare the final exception and both other outputs.
+                def observed(p):
+                    err = p.stderr
+                    if action == "uncaught" and mode in ("extra", "keyword"):
+                        err = err.splitlines()[-1:]
+                    return p.returncode, p.stdout, err
+                if observed(outputs[0]) != observed(outputs[1]):
+                    raise AssertionError((mode, action, outputs))
+        print("Matched 20 caught and uncaught SystemExit payload observations")
+
 
 if __name__ == "__main__":
     main()

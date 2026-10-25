@@ -28,6 +28,7 @@ CELL = """class Cell:
 
 
 REJECTED = {
+    "overridden_static_binding": "import hashlib\nclass Base:\n    make = staticmethod(hashlib.sha256)\nclass Child(Base):\n    def make(self, x: int) -> int:\n        return x\n",
     "literal_unknown_value": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> str:\n    return s\nf("c")\n',
     "literal_unproven_string": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    return s\n',
     "literal_wider_domain": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> Literal["a"]:\n    return s\n',

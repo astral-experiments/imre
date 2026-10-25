@@ -29,3 +29,6 @@ executables: three hierarchy tests delegate output comparison to the upstream
 host assertion, and the root alias test checks identity in the executable.
 It supplies replacement setup and assertion helpers; it does not execute
 CPython's full TestCase lifecycle natively.
+
+[Log record execution](records.md) lists the separate native-body and host-driven
+coverage for record representation, metadata and flag changes.
