@@ -69,9 +69,14 @@ def main():
                       and not hasattr(errno, line.split()[0]))
         unknown = "a_deliberately_missing_platform_attribute_well_over_32_bytes"
         (root / "side_effect.py").write_text('print("child initialized")\n')
+        (root / "prior.py").write_text('print("prior initialized")\n')
         missing = {"platform-missing": absent, "unknown": unknown, "close-spelling": "EDAOM"}
         for case, name in missing.items():
-            (root / f"{case}.py").write_text(f"from errno import {name} as unused\nimport side_effect\nprint('entry initialized')\n")
+            source = f"from errno import {name} as unused\nimport side_effect\n"
+            if case == "close-spelling":
+                # Class tuples own entry globals; the import must still run between the two children.
+                source = "import prior\n" + source + 'class Local:\n    names = ("one", "two")\nprint(Local.names[0])\n'
+            (root / f"{case}.py").write_text(source + "print('entry initialized')\n")
         for opt in args.opt_levels:
             for prog in sorted({c[0] for c in cases}):
                 command = [args.compiler.resolve(), "build", root / (prog + ".py"), "--module-root", root,
@@ -125,7 +130,8 @@ def main():
                     return 1
                 expected = run(args.python, "-E", root / (case + ".py"), cwd=root)
                 actual = run(root / case, cwd=root)
-                assert expected.returncode == actual.returncode == 1 and expected.stdout == actual.stdout == b""
+                stdout = b"prior initialized\n" if case == "close-spelling" else b""
+                assert expected.returncode == actual.returncode == 1 and expected.stdout == actual.stdout == stdout
                 assert actual.stderr.startswith(b"ImportError: cannot import name ")
                 if case == "close-spelling":
                     assert b"Did you mean: 'EDOM'?" in expected.stderr

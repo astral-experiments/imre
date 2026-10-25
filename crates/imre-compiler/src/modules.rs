@@ -978,13 +978,17 @@ impl SourceGraph {
         )
     }
 
-    /// The entry must initialize stored globals and validate platform imports before the next module.
-    pub(crate) fn initializers(&self) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
+    /// Entry segments initialize class and module globals and validate platform imports in order.
+    pub(crate) fn initializers(
+        &self,
+        class_globals: bool,
+    ) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
         self.initialization
             .iter()
-            .filter(|(id, segment)| {
+            .filter(move |(id, segment)| {
                 let module = &self.modules[*id];
                 *id != self.entry
+                    || class_globals
                     || !module.entry_globals.is_empty()
                     || (!segment.is_empty()
                         && errno_import(&module.parsed.syntax().body[segment.end - 1]).is_some())

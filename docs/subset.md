@@ -919,6 +919,12 @@ Use `typing.assert_never(member)` as a statement to check that every alternative
 
 ## Fixed classes
 
+Class bodies may bind a string literal or a fixed tuple of up to 1024 string
+literals. A tuple may alias an earlier tuple in the same class or concatenate
+it with a literal suffix. Reads through the class, an instance, and an
+inheriting class share the stored value. These attributes cannot be reassigned
+or shadowed by an instance field or a subclass.
+
 A class has one nominal identity and a fixed set of declared fields. Import aliases and package re-exports preserve that identity; another class with identical fields remains a different type. Fields may store any supported scalar, concrete container, optional value, or another fixed class. Class names and module-qualified class names are accepted in annotations, including quoted type expressions. Quote forward references when the class is not yet defined, including a method's reference to its own class.
 
 ```python

@@ -688,9 +688,13 @@ impl Checker<'_> {
             *self.classes.declarations.ids.get(&id)?
         };
         let owner = &self.classes.declarations.definitions[class];
-        let binding = *owner.static_bindings.get(attr.attr.as_str())?;
+        let crate::classes::ClassValue::Binding(binding) =
+            owner.static_bindings.get(attr.attr.as_str())?
+        else {
+            return None;
+        };
         self.class_reads.borrow_mut().insert(owner.definition);
-        Some(binding)
+        Some(*binding)
     }
 
     /// The class binding is usable in static dispatch, never as a runtime value.
@@ -832,6 +836,27 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        let owner = &self.classes.declarations.definitions[class];
+        let literal = match owner.static_bindings.get(attribute.attr.as_str()) {
+            Some(crate::classes::ClassValue::String(value)) => Some(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Str(value.clone()),
+            }),
+            Some(crate::classes::ClassValue::Strings { owner, ordinal, .. }) => {
+                Some(self.globals.class_tuple(*owner, *ordinal).ok_or_else(|| {
+                    error(
+                        self.source,
+                        attribute,
+                        "class tuple is read before its declaration",
+                    )
+                })?)
+            }
+            _ => None,
+        };
+        if let Some(literal) = literal {
+            self.class_reads.borrow_mut().insert(owner.definition);
+            return Ok(self.evaluated_receiver(receiver, literal));
+        }
         if self.classes.has_concrete_subclasses(class)
             && let Some(receiver) = receiver
         {
