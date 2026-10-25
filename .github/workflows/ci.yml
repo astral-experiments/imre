@@ -1,4 +1,4 @@
-name: Argparse 968 prospective runtime
+name: Argparse 1145 prospective runtime
 on:
   workflow_dispatch:
 permissions:
@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 45375ede540b8bd3912f95b1345a4fc586505673
+          ref: cc8a48c1c96509c299ecb38a2f9f2952a7c2fd3e
           fetch-depth: 0
           persist-credentials: true
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -36,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           base_checkout="$PWD"
-          pr=45375ede540b8bd3912f95b1345a4fc586505673
+          pr=cc8a48c1c96509c299ecb38a2f9f2952a7c2fd3e
           cat > "$RUNNER_TEMP/argparse-driver" <<'SH'
           #!/bin/sh
           if test "$1" = build; then
@@ -205,11 +205,61 @@ jobs:
                   assert row['outcome']=='compile-blocked' and row['module_operations']=='not-run' and 'unsupported sealed standard-library export dataclasses.Field' in row['diagnostic'], row
               print(f'Stock argparse {label}: {revision} tree={report["imre_tree"]}; original reference 1893/1893, eight O0/O3 builds stop at _colorize.py:5 dataclasses.Field; zero native test bodies. Four theme controls stop at Field.',flush=True)
           PY
+          cat > "$RUNNER_TEMP/argparse-groups.py" <<'PY'
+          import hashlib,json,sys,tempfile,unittest
+          from collections import Counter
+          from pathlib import Path
+          from test import test_argparse as upstream
+          rev,folder=sys.argv[1:]
+          root=Path.cwd();out=Path(folder);module=root/'benchmarks/cpython_stdlib/full/argparse'
+          sys.path.insert(0,str(module));sys.path.insert(0,str(module.parents[1]))
+          from native_methods import Fixtures
+          from mutex_cases import measure,selected
+          from suite_inventory import load_suite,cases,verify_files
+          from suite_native import Toolchain,native_method,run_in_fixtures
+          source=Path(upstream.__file__);manifest=json.loads((module/'UPSTREAM.json').read_bytes())
+          assert source.read_bytes()==(module/'upstream/Lib/test/test_argparse.py').read_bytes()
+          verify_files(module/'upstream',manifest['files'])
+          ref=json.loads((module/'reference-linux.json').read_bytes())['reference'];all_cases=list(cases(load_suite(manifest['module'])))
+          members=[c for c in all_cases if selected(c,upstream)]
+          assert len(ref)==len(all_cases)==1893
+          print('original',len(members),'of',len(all_cases),flush=True)
+          fixtures=Fixtures(source);summary={'revision':rev,'denominator':len(ref),'selected':len(members),'modes':{}}
+          for level in (0,3):
+           tc=Toolchain(root/'target/debug/imre',root/'target/debug/libimre_runtime.a',Path('/usr/bin/clang-18'),level)
+           rows={};cache={};native={}
+           with tempfile.TemporaryDirectory() as tmp:
+            for c in members:
+             name=c.id();owner=fixtures.owner(type(c),c._testMethodName);node=fixtures.methods[owner,c._testMethodName]
+             if node.decorator_list:
+              reason='upstream method decorator: '+', '.join(__import__('ast').unparse(x) for x in node.decorator_list)+'; shared native method extraction requires a dedicated adapter'
+             else:
+              try:
+               fixture=fixtures.fixture(type(c),node);key=(owner,c._testMethodName,fixture)
+               if key not in cache:
+                location=Path(tmp)/str(len(cache));location.mkdir()
+                try: cache[key]=native_method(tc,location,source,owner,name,fixture,operation=None)
+                except (RuntimeError,ValueError) as e: cache[key]=str(e).replace(str(location),'<work>')
+               value=cache[key]
+               if not isinstance(value,str):
+                native[name]=value
+                continue
+               reason=value
+              except ValueError as e:reason=str(e)
+             rows[name]={'outcome':'blocked','reason':reason}
+            assert not native, list(native)
+            measure(tc,manifest['module'],ref,rows)
+           assert set(rows)=={c.id() for c in members}
+           total=sum((Counter(r.get('evidence',{}).get('native_calls',{})) for r in rows.values() if r['outcome']=='pass'),Counter())
+           result=Counter(r['outcome'] for r in rows.values());print('O'+str(level),dict(result),'native calls',dict(total),flush=True)
+           summary['modes'][str(level)]={'outcomes':dict(result),'calls':dict(total),'rows':rows}
+           (out/'original-methods.json').write_text(json.dumps(summary,indent=2)+'\n')
+          PY
           for attempt in 1 2 3 4 5; do
             git fetch --no-tags origin refs/heads/main
             base=$(git rev-parse FETCH_HEAD)
             tree=$(git merge-tree --write-tree "$base" "$pr")
-            candidate=$(git -c user.name='Argparse preflight' -c user.email='noreply@github.com' commit-tree "$tree" -p "$base" -p "$pr" -m 'Hosted validation of PR #968')
+            candidate=$(git -c user.name='Argparse preflight' -c user.email='noreply@github.com' commit-tree "$tree" -p "$base" -p "$pr" -m 'Hosted validation of PR #1145')
             git checkout --detach "$base"
             cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
             python3 -B "$RUNNER_TEMP/argparse-stock.py" "$base" canonical
@@ -229,10 +279,14 @@ jobs:
             done
             python3 benchmarks/cpython_stdlib/full/logging/null_handler.py --imre "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/argparse-null-handler.json"
             python3 "$RUNNER_TEMP/argparse-cross.py"
+            gdir="$RUNNER_TEMP/argparse-stock-receipts/groups-$candidate"
+            mkdir -p "$gdir"
+            PYTHONPATH="$base_checkout/.cpython-argparse/Lib" python3 -B "$RUNNER_TEMP/argparse-groups.py" "$candidate" "$gdir"
+            echo "Checked the 94 original group routines on tree=$tree"
             echo "Passed: base=$base pr=$pr tree=$tree (-O0 and -O3 stdout, stderr and exit; runtime ownership)." >> "$GITHUB_STEP_SUMMARY"
             git fetch --no-tags origin refs/heads/main
             latest=$(git rev-parse FETCH_HEAD)
-            inputs=(tests/fixtures/classes/mapping_abc.py tests/fixtures/classes/mapping_alias.py benchmarks/cpython_stdlib/full/collections/theme_section.py benchmarks/cpython_stdlib/full/argparse/UPSTREAM.json benchmarks/cpython_stdlib/full/functools/optimization_mode.py tests/classes.py tests/fixtures/containers/defaultdict_factory_arguments.py tests/exceptions.py tests/fixtures/exceptions/warning_hierarchy.py tests/fixtures/files/nonblocking_write.py benchmarks/cpython_stdlib/full/unittest/context_regex.py benchmarks/cpython_stdlib/full/logging/null_handler.py benchmarks/cpython_stdlib/full/logging/UPSTREAM.json tests/paths.py tests/files.py tests/fixtures/paths tests/fixtures/sys/streams_exit.py benchmarks/cpython_stdlib/native_sys.py benchmarks/cpython_stdlib/upstream.py benchmarks/cpython_stdlib/UPSTREAM.json benchmarks/cpython_stdlib/upstream benchmarks/cpython_stdlib/full/sys/stream_errno.py benchmarks/cpython_stdlib/full/sys/exit_payloads.py benchmarks/cpython_stdlib/full/unittest/mock_reset.py tests/fixtures/containers/dict_method_copy.py tests/io.py tests/unittest_main.py tests/fixtures/unittest_main crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse
+            inputs=(benchmarks/cpython_stdlib/suite_native.py benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/suite_inventory.py benchmarks/cpython_stdlib/full/argparse/mutex_cases.py benchmarks/cpython_stdlib/full/argparse/native_cases.py benchmarks/cpython_stdlib/full/argparse/subparser_cases.py benchmarks/cpython_stdlib/full/argparse/native_methods.py tests/fixtures/classes/mapping_abc.py tests/fixtures/classes/mapping_alias.py benchmarks/cpython_stdlib/full/collections/theme_section.py benchmarks/cpython_stdlib/full/argparse/UPSTREAM.json benchmarks/cpython_stdlib/full/functools/optimization_mode.py tests/classes.py tests/fixtures/containers/defaultdict_factory_arguments.py tests/exceptions.py tests/fixtures/exceptions/warning_hierarchy.py tests/fixtures/files/nonblocking_write.py benchmarks/cpython_stdlib/full/unittest/context_regex.py benchmarks/cpython_stdlib/full/logging/null_handler.py benchmarks/cpython_stdlib/full/logging/UPSTREAM.json tests/paths.py tests/files.py tests/fixtures/paths tests/fixtures/sys/streams_exit.py benchmarks/cpython_stdlib/native_sys.py benchmarks/cpython_stdlib/upstream.py benchmarks/cpython_stdlib/UPSTREAM.json benchmarks/cpython_stdlib/upstream benchmarks/cpython_stdlib/full/sys/stream_errno.py benchmarks/cpython_stdlib/full/sys/exit_payloads.py benchmarks/cpython_stdlib/full/unittest/mock_reset.py tests/fixtures/containers/dict_method_copy.py tests/io.py tests/unittest_main.py tests/fixtures/unittest_main crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse
                     tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py
                     benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py
                     tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py
@@ -253,7 +307,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: argparse-968-stock-mapping
+          name: argparse-1145-stock-mapping
           path: ${{ runner.temp }}/argparse-stock-receipts/
           if-no-files-found: error
           retention-days: 14
