@@ -88,7 +88,7 @@ impl FileState {
         .into_object()
     }
 
-    fn into_object(self) -> Rc<Object> {
+    pub(super) fn into_object(self) -> Rc<Object> {
         Rc::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
     }
 
@@ -168,7 +168,7 @@ impl FileState {
             Stream::Read(input) => input.seek(at),
             Stream::Memory(m) => m.seek(at),
             Stream::Member(m) => m.seek(at),
-            Stream::Write(_) => Err(Error::new(Kind::UnsupportedOperation, "seek")),
+            Stream::Write(_) | Stream::TextMemory(_) => Err(Error::new(Kind::UnsupportedOperation, "seek")),
         }
     }
 
@@ -186,7 +186,7 @@ impl FileState {
                 buf[..bytes.len()].copy_from_slice(&bytes);
                 Ok(bytes.len())
             }
-            Stream::Write(_) => Err(Error::new(Kind::UnsupportedOperation, "read")),
+            Stream::Write(_) | Stream::TextMemory(_) => Err(Error::new(Kind::UnsupportedOperation, "read")),
         }
     }
 }
