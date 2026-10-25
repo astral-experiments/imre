@@ -1,0 +1,69 @@
+{
+  "module": "test.test_pathlib",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "discovered_occurrences": 1369,
+  "native_methods_executed_by_these_checks": 0,
+  "observations": [
+    {
+      "imre_commit": "76d74f9fb0ac09808b43be6ad7aee5c45083f81f",
+      "operation": "unchanged package import and runner startup",
+      "checks": {
+        "imports-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: imports must precede executable module statements"
+          ]
+        },
+        "imports-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: imports must precede executable module statements"
+          ]
+        },
+        "run-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: imports must precede executable module statements"
+          ]
+        },
+        "run-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:6:1: Imre: imports must precede executable module statements"
+          ]
+        }
+      }
+    },
+    {
+      "imre_commit": "03977539a984a794bf05b5bb4d8d236883bfd3b4",
+      "operation": "unchanged package import",
+      "checks": {
+        "all": {
+          "phase": "check",
+          "diagnostic_source": "Lib/test/support/__init__.py:6",
+          "next_unsupported_import": "annotationlib"
+        },
+        "reachable": {
+          "phase": "check",
+          "diagnostic_source": "Lib/test/support/__init__.py:6",
+          "next_unsupported_import": "annotationlib"
+        }
+      },
+      "wrong_name_guard": {
+        "configurations": [
+          "CPython 3.14.5",
+          "Imre O0 with ASan",
+          "Imre O3"
+        ],
+        "exception": "ImportError",
+        "message": "support must be imported from the test package",
+        "child_initializer_executed": false
+      }
+    }
+  ],
+  "next_shared_blocker": "annotationlib import in test.support; owned by the shared compiler thread"
+}
