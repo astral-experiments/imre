@@ -7,7 +7,7 @@ import tempfile
 import textwrap
 
 HERE = Path(__file__).resolve().parent
-CASES = ("bindings", "tasks", "cancel", "old_values", "representations", "first_use")
+CASES = ("bindings", "tasks", "cancel", "old_values", "representations", "first_use", "error_order")
 BLOCKED = {
     "thread": ("""
         import threading
@@ -34,6 +34,15 @@ BLOCKED = {
         from contextvars import Context
         print(Context() == Context())
     """, "Context mapping equality"),
+    "nested_call": ("""
+        from contextvars import Context
+        def only(x: int) -> int:
+            return x
+        try:
+            Context().get(7, only())
+        except TypeError as exc:
+            print(str(exc))
+    """, "missing"),
     "retains_token": ("""
         from contextvars import ContextVar, Token
         owner: ContextVar[int] = ContextVar('owner')
@@ -49,7 +58,7 @@ BLOCKED = {
                 return "custom"
         v = ContextVar("name", default=Display())
         print("custom" in repr(v))
-    """, "unsupported special method"),
+    """, ("unsupported special method", "default with native repr")),
 }
 
 
@@ -85,7 +94,8 @@ def main():
                         cmd.append("--reachable-only")
                     built = run(cmd)
                     if diagnostic is not None:
-                        if not built.returncode or diagnostic not in built.stderr.decode():
+                        expected = diagnostic[int(reachable)] if isinstance(diagnostic, tuple) else diagnostic
+                        if not built.returncode or expected not in built.stderr.decode():
                             raise AssertionError((name, level, reachable, built.stderr))
                     else:
                         if built.returncode:

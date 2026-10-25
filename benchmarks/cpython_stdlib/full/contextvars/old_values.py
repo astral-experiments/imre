@@ -1,4 +1,4 @@
-from contextvars import Context, ContextVar, Token
+from contextvars import Context, ContextVar, Token, copy_context
 
 dynamic = ContextVar("no default")
 first = dynamic.set(None)
@@ -19,6 +19,12 @@ print(dynamic.get() is None)
 dynamic.reset(first)
 print(dynamic.get(None) is None)
 number: ContextVar[int] = ContextVar("count", default=1)
+large = 2 ** 180 + 101
+number.set(large)
+copied = copy_context()
+prior = number.set(2)
+print(prior.old_value == large)
+print(copied[number] == large)
 domain = Context()
 token = domain.run(number.set, 5)
 print(domain.run(number.get))

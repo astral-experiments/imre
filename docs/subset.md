@@ -1386,6 +1386,20 @@ python3 tests/bytes.py --compiler target/release/imre --runtime target/release/l
 
 A profile can select a named arm of a simple `match`, or exclude the true arm of a named Boolean condition. The executable evaluates the original test. Entering an excluded arm raises a `ValueError` with the required value. A missing function or unmatched selector is a build error.
 
+### Context variables
+
+`contextvars.ContextVar[T]` stores bindings by variable identity. The native
+scheduler copies the current context when scheduling a task and restores it at
+every resume; directly awaiting a cold coroutine shares the caller's context.
+`ContextVar.get`, `set`, `reset`, token context managers, `copy_context`,
+and `Context.run` support nested and exceptional execution.
+
+Contexts support shallow copies, lookup, membership and size. Callback arguments
+in `Context.run` currently need an exact positional signature. Thread startup,
+explicit task `context=`, context iteration and mapping equality remain outside
+the subset. See the [contextvars scope and CPython evidence](../benchmarks/cpython_stdlib/full/contextvars/README.md)
+for value layouts and test roles.
+
 ### Native asyncio subprocesses
 
 Typed coroutines support `await`, `asyncio.TaskGroup`, `asyncio.gather` and `asyncio.Semaphore` for subprocess-backed work. A coroutine starts when it is awaited or scheduled. A callback with an `Awaitable[T]` return type must be an `async def` function. A synchronous function that creates a coroutine can be called directly. A task retains its result across awaits. Exceptions returned by `gather(..., return_exceptions=True)` retain their positions among the results. Standard output and standard error are drained concurrently. Ruff’s live ecosystem checker also exercises loop signal handlers, `functools.cache`, suspended generator context managers, and `TemporaryDirectory` cleanup on exception paths.

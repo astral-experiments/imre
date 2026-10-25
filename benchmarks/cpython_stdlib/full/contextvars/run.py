@@ -15,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_evidence import roles, write_reports
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, run_evidence
+from suite_native import Toolchain, method_bytes, run_evidence
 
 CASES = (
     "test_context_copy_1", "test_context_getset_2", "test_context_getset_4",
@@ -26,6 +26,9 @@ CASES = (
     "test_token_contextmanager_with_explicit_reset_the_same_token",
     "test_token_contextmanager_with_explicit_reset_another_token",
 )
+
+
+NATIVE = ("test_context_run_1", "test_context_typerrors_1")
 
 
 class Calls:
@@ -151,6 +154,23 @@ def exercise(binary, level):
     return run
 
 
+def native_case(tools, directory, name):
+    # Both methods create their own fixtures and have no custom host hooks.
+    method = method_bytes(HERE / "upstream/Lib/test/test_context.py", "ContextTest", name)
+    source = b"import contextvars\nimport unittest\n\nclass Case(unittest.TestCase):\n" + method
+    source += f"\nCase().{name}()\nprint('completed')\n".encode()
+    program = tools.build(source, directory)
+    def execute(case, original):
+        result = subprocess.run([program], capture_output=True, timeout=10)
+        if (result.returncode, result.stdout, result.stderr) != (0, b"completed\n", b""):
+            raise AssertionError((name, result))
+        return {"roles": roles(body="imre", assertions="imre", operation="imre", fixture="imre"),
+                "evidence": {"operation": "Context errors and native unittest.assertRaisesRegex",
+                             "fixture": "The byte-identical method creates its own native Context and assertion managers.",
+                             "opt_level": tools.level, "method_sha256": hashlib.sha256(method).hexdigest()}}
+    return execute
+
+
 def bridge_source():
     # Native functions cannot recurse yet. The original selected fixtures enter at
     # most four nested contexts/with blocks; emit an acyclic transport stack.
@@ -212,6 +232,10 @@ def main():
         with tempfile.TemporaryDirectory() as tmp:
             bridge = tools.build(bridge_source(), Path(tmp))
             cases = {spec["module"] + ".ContextTest." + name: exercise(bridge, level) for name in CASES}
+            for name in NATIVE:
+                work = Path(tmp) / name
+                work.mkdir()
+                cases[spec["module"] + ".ContextTest." + name] = native_case(tools, work, name)
             fixture = spec["module"] + ".HamtTest"
             skipped = {(fixture + ".test_hamt_stress", 1, level): {
                 "kind": "upstream-skip", "platform": "linux", "fixture_variant": fixture,
@@ -227,7 +251,8 @@ def main():
                 if row["outcome"] not in {"pass", "not-run"}:
                     print(row["id"], row.get("reason"), file=sys.stderr)
     write_reports(args.result, reports, ref)
-    return int(any(r["counts"].get("host-driven-native-operation") != len(CASES) for r in reports))
+    return int(any(r["counts"].get("host-driven-native-operation") != len(CASES) or
+                   r["counts"].get("fully-native") != len(NATIVE) for r in reports))
 
 
 if __name__ == "__main__":

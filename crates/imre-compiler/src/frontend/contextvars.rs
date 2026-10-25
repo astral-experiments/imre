@@ -41,7 +41,17 @@ impl Checker<'_> {
                 | Type::PlainObject => {}
                 Type::Class(id) => {
                     // The runtime formatter cannot invoke user repr on constructor defaults.
-                    if has_default && self.classes.methods[id].contains_key("__repr__") {
+                    let classes = &self.classes.declarations.definitions;
+                    let overrides_repr = || {
+                        std::iter::once(id)
+                        .chain(classes[id].bases.iter().copied())
+                        .any(|owner| classes[owner].node.body.iter().any(|statement| {
+                            matches!(statement, ast::Stmt::FunctionDef(method) if method.name.as_str() == "__repr__")
+                        }))
+                    };
+                    // A reachable-only build may have omitted the method from
+                    // the lowered table. Its declaration still affects Python repr.
+                    if has_default && overrides_repr() {
                         return false;
                     }
                     pending.extend_from_slice(&self.classes.fields[id]);
@@ -389,12 +399,17 @@ impl Checker<'_> {
             (Type::Context, "copy", []) => Ok(op(Op::Copy, Type::Context, vec![receiver])),
             (Type::Context, "get", [key, rest @ ..]) if rest.len() <= 1 => {
                 let key = self.expr(key)?;
+                let invalid_key = !matches!(key.ty, Type::ContextVar(_));
                 let fallback = if let [d] = rest {
                     Self::string_value(self.expr(d)?)
                 } else {
                     none()
                 };
-                self.context_get(Some(receiver), key, Some(fallback), call)
+                let checked = self.context_get(Some(receiver), key, Some(fallback), call)?;
+                if invalid_key {
+                    self.graph.checked_overload(self.module, call.range());
+                }
+                Ok(checked)
             }
             _ => Err(error(
                 self.source,
@@ -410,6 +425,8 @@ impl Checker<'_> {
                 Type::None,
                 "run() missing 1 required positional argument".to_string(),
             )?;
+            self.graph
+                .checked_missing_argument(self.module, call.range());
             return Ok(Expr {
                 ty: Type::None,
                 kind: ExprKind::Scope {
