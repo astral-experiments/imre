@@ -309,6 +309,8 @@ The bundled `string` module exports its nine ASCII character sets in CPython ord
 
 `string.Template` supports its default ASCII dollar grammar, a writable string `template`, `substitute`, `safe_substitute`, `is_valid`, `get_identifiers`, and its shared compiled `pattern`. Substitution accepts positional native string-key dictionaries and typed keyword values: None, bool, int, str, bytes, and fixed tuples of these types. Only referenced values are rendered; keywords override mapping entries. Passing `None` as the mapping is distinct from omitting it. Custom mapping callbacks, arbitrary placeholder objects, customized subclass patterns, `Formatter`, `string.templatelib`, and arbitrary module reflection are outside this subset. `Pattern.finditer(text)` streams native `Match` objects for fixed patterns proved to consume input; zero-width patterns are rejected.
 
+The `object` annotation is shared by concrete scalar/tuple values, structured exception fields, and dynamic native module attributes. Metadata and mutable dictionary aliases retain their existing owners.
+
 Native `Mapping[str, object]` is a read-only view of supported concrete dictionaries. It provides string-key lookup, membership, length and truth tests. Typed `**name: T` parameters on a direct source call receive an insertion-ordered dictionary; values are evaluated left to right, and positional-only names can occur as keys. Such functions are not first-class callables in this subset.
 
 `str.split(sep=None, maxsplit=-1)` and `str.rsplit(sep=None, maxsplit=-1)` accept both positional and named arguments. With no separator, they group Python whitespace and omit empty fields; an explicit string separator preserves empty fields and must be nonempty. The split limit follows Python's left or right scanning rules. `str.strip([chars])`, `str.lstrip([chars])`, and `str.rstrip([chars])` accept an optional positional string or `None`: omitted/`None` removes Python whitespace, while a string names a set of Unicode scalar values to remove.
@@ -735,9 +737,9 @@ Call `format_help()` or `format_usage()` to obtain a string, including its final
 
 Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser.
 
-A parser can require a subcommand with `add_subparsers(dest="command", required=True)`. Each literal `add_parser("name", help="...")` introduces a child parser with its own options. The namespace carries the selected command and that child's fields. A `match args.command` case or `if args.command == "name"` branch selects its concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
+A subcommand is optional by default. With `add_subparsers(dest="command")`, the namespace contains `command=None` when omitted. Without `dest`, no command field is added. Use `required=True` or set the group's `required` attribute to require a selection. Each literal `add_parser("name", aliases=["alias"], help="...")` introduces a child parser with its own options. The destination retains the spelling the caller used; child help uses its canonical name. A `match args.command` case or `if args.command == "alias"` branch selects the child's concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
-Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()`. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested or optional subcommands are outside this grammar.
+Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()`. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested subcommands are outside this grammar.
 
 ## Standard logging
 
@@ -1308,3 +1310,20 @@ The [shared suite runner](../benchmarks/cpython_stdlib/SUITE_RUNNER.md) shows
 which parts of a complete pinned test run natively. The full CPython unittest
 API, dynamic method discovery in a native process, traceback reports, and
 arbitrary assertion operand types are not supported by this implementation.
+
+### Native errno registry
+
+`import errno` exposes the target platform's integer constants and one mutable
+`dict[int, str]` at `errno.errorcode`. Forward aliases stay distinct names;
+the reverse dictionary uses the last registered name for each value.
+Module aliases share the same registry and dictionary. `vars(errno)` and
+`errno.__dict__` provide insertion-ordered key iteration, membership, and lookup.
+The module supports dynamic `hasattr` and `getattr`, including scalar defaults.
+Changing the module namespace and calling bound module descriptors are outside
+this subset. The reverse dictionary supports ordinary insertion, replacement,
+and deletion.
+
+Native `TestCase.assertHasAttr` currently accepts a native module and a string;
+`assertIn` accepts a scalar or native module member and a `dict[int, str]`.
+Both use the normal assertion failure and optional test message. The errno
+suite runs every original method; see the [reference and native evidence](../benchmarks/cpython_stdlib/full/errno/README.md).

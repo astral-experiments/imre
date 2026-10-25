@@ -36,6 +36,8 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::Semaphore
         | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::NativeModule
+        | Type::ModuleNamespace
         | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger

@@ -36,7 +36,6 @@ const INTRINSIC_MODULES: &[&str] = &[
     "_types",
 ];
 
-/// A source definition's identity, independent of its eventual runtime representation.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct DefinitionId {
     pub(crate) module: ModuleId,
@@ -56,8 +55,12 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    AnnotationLib,
+    AnnotationFormat,
     Declaration(&'static str),
     Argparse,
+    Errno,
+    Types,
     Future,
     Sys,
     Typing,
@@ -111,6 +114,9 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    GetAnnotations,
+    AnnotationTypeRepr,
+    AnnotationFormat(i64),
     Declaration(&'static str),
     ArgumentParser,
     ArgparseNamespace,
@@ -175,6 +181,9 @@ pub(crate) enum Intrinsic {
     SysException,
     Stdin,
     OsName,
+    ErrnoAttribute,
+    ErrnoFrom(usize),
+    ModuleType,
     GetSysconfigPath,
     OsPathExists,
     OsDevnull,
@@ -293,6 +302,7 @@ impl Intrinsic {
 impl IntrinsicModule {
     fn named(name: &str) -> Option<Self> {
         match name {
+            "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
             "logging.config" => Some(Self::LoggingConfig),
@@ -342,12 +352,17 @@ impl IntrinsicModule {
             "imre" => Some(Self::Imre),
             "imre.json" => Some(Self::ImreJson),
             "imre.toml" => Some(Self::ImreToml),
+            "errno" => Some(Self::Errno),
+            "types" => Some(Self::Types),
             "tomllib" => Some(Self::Tomllib),
             _ => declarations::module(name).map(Self::Declaration),
         }
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::AnnotationLib && name == "Format" {
+            return Some(Binding::IntrinsicModule(Self::AnnotationFormat));
+        }
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
@@ -375,6 +390,12 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
         let symbol = match (self, name) {
+            (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
+            (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
+            (Self::AnnotationFormat, "VALUE") => Intrinsic::AnnotationFormat(1),
+            (Self::AnnotationFormat, "VALUE_WITH_FAKE_GLOBALS") => Intrinsic::AnnotationFormat(2),
+            (Self::AnnotationFormat, "FORWARDREF") => Intrinsic::AnnotationFormat(3),
+            (Self::AnnotationFormat, "STRING") => Intrinsic::AnnotationFormat(4),
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
@@ -453,6 +474,8 @@ impl IntrinsicModule {
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
             (Self::Os, "name") => Intrinsic::OsName,
+            (Self::Types, "ModuleType") => Intrinsic::ModuleType,
+            (Self::Errno, _) => Intrinsic::ErrnoAttribute,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
@@ -650,6 +673,7 @@ pub(crate) struct SourceGraph {
     /// Split literal prefixes at imports so allocations and package exports are
     /// available to the child at the original point in Python's initialization.
     initialization: Vec<(ModuleId, Range<usize>)>,
+    pub(crate) errno_names: Vec<String>,
 }
 
 impl SourceGraph {
@@ -772,6 +796,11 @@ impl SourceGraph {
             .push(CheckedDiagnostic::MissingArgument(call));
     }
 
+    /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
+    pub(crate) fn checked_dict_deletion(&self, module: ModuleId, target: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,
@@ -779,6 +808,12 @@ impl SourceGraph {
     ) {
         self.checked_diagnostics.borrow_mut()[module]
             .extend(keywords.map(CheckedDiagnostic::Keyword));
+    }
+
+    /// Target headers decide whether an errno from-import succeeds or raises ImportError.
+    pub(crate) fn checked_platform_import(&self, module: ModuleId, alias: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::PlatformImport(alias));
     }
 
     /// Record the exact list read proved by lowering a fixed-width tuple spread.
@@ -838,11 +873,17 @@ impl SourceGraph {
         )
     }
 
-    /// The entry needs its own initializer when it declares globals for later definitions.
+    /// The entry must initialize stored globals and validate platform imports before the next module.
     pub(crate) fn initializers(&self) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
         self.initialization
             .iter()
-            .filter(|(id, _)| *id != self.entry || !self.modules[*id].entry_globals.is_empty())
+            .filter(|(id, segment)| {
+                let module = &self.modules[*id];
+                *id != self.entry
+                    || !module.entry_globals.is_empty()
+                    || (!segment.is_empty()
+                        && errno_import(&module.parsed.syntax().body[segment.end - 1]).is_some())
+            })
             .cloned()
     }
 
@@ -1044,6 +1085,7 @@ struct Loader<'a> {
     allow_imports: bool,
     reachable_only: bool,
     initialization: Vec<(ModuleId, Range<usize>)>,
+    pub(crate) errno_names: Vec<String>,
 }
 
 impl<'a> Loader<'a> {
@@ -1081,6 +1123,7 @@ impl<'a> Loader<'a> {
             allow_imports: true,
             reachable_only: false,
             initialization: Vec::new(),
+            errno_names: Vec::new(),
         })
     }
 
@@ -1215,6 +1258,7 @@ impl<'a> Loader<'a> {
             modules: self.modules,
             entry,
             initialization: self.initialization,
+            errno_names: self.errno_names,
         };
         graph.reachable = reachable_only.then(|| reachability::Reachable::collect(&graph));
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
@@ -1320,6 +1364,12 @@ impl<'a> Loader<'a> {
                     }
                     self.import(id, statement)
                         .map_err(|error| self.modules[id].error(statement, &error))?;
+                    if errno_import(statement).is_some() {
+                        // The target decides which forward symbols exist. A failed from-import
+                        // must precede the next imported module, even if its alias is unused.
+                        self.initialization.push((id, segment..index + 1));
+                        segment = index + 1;
+                    }
                 }
                 ast::Stmt::Expr(value)
                     if matches!(&*value.value, ast::Expr::StringLiteral(_)) && !executable => {}
@@ -1440,23 +1490,36 @@ impl<'a> Loader<'a> {
                     && let Some(module) = self.intrinsic_module(&name)?
                 {
                     for alias in &import.names {
-                        let binding = stdlib_symbol(&self.modules, module, alias.name.as_str())
-                            .filter(|binding| {
-                                self.reachable_only
-                                    || !matches!(
-                                        binding,
-                                        Binding::Intrinsic(Intrinsic::Declaration(_))
-                                            | Binding::IntrinsicModule(
-                                                IntrinsicModule::Declaration(_)
-                                            )
+                        let binding = if module == IntrinsicModule::Errno {
+                            let name = alias.name.as_str();
+                            let slot = self
+                                .errno_names
+                                .iter()
+                                .position(|n| n == name)
+                                .unwrap_or_else(|| {
+                                    self.errno_names.push(name.to_owned());
+                                    self.errno_names.len() - 1
+                                });
+                            Binding::Intrinsic(Intrinsic::ErrnoFrom(slot))
+                        } else {
+                            stdlib_symbol(&self.modules, module, alias.name.as_str())
+                                .filter(|binding| {
+                                    self.reachable_only
+                                        || !matches!(
+                                            binding,
+                                            Binding::Intrinsic(Intrinsic::Declaration(_))
+                                                | Binding::IntrinsicModule(
+                                                    IntrinsicModule::Declaration(_)
+                                                )
+                                        )
+                                })
+                                .ok_or_else(|| {
+                                    format!(
+                                        "unsupported sealed standard-library export {name}.{}",
+                                        alias.name
                                     )
-                            })
-                            .ok_or_else(|| {
-                                format!(
-                                    "unsupported sealed standard-library export {name}.{}",
-                                    alias.name
-                                )
-                            })?;
+                                })?
+                        };
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
@@ -1768,6 +1831,18 @@ impl<'a> Loader<'a> {
         }
         Ok(id)
     }
+}
+
+pub(crate) fn errno_import(statement: &ast::Stmt) -> Option<&ast::StmtImportFrom> {
+    let ast::Stmt::ImportFrom(import) = statement else {
+        return None;
+    };
+    (import.level == 0
+        && import
+            .module
+            .as_ref()
+            .is_some_and(|name| name.as_str() == "errno"))
+    .then_some(import)
 }
 
 /// Allow an identity check with a closed builtin raise before importing a dependency.

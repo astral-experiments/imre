@@ -7,6 +7,8 @@ pub(crate) enum Type {
     Int,
     Float,
     Bool,
+    /// A builtin class object. Its name is interned; the handle is never a Python string.
+    BuiltinClass,
     Str,
     /// A closed domain of strings with ordinary string storage and ownership.
     StrLiteral(usize),
@@ -40,7 +42,7 @@ pub(crate) enum Type {
     Exception,
     /// An exception object known to own the given fixed payload layout.
     NamedException(usize),
-    /// A retained value projected from a structured builtin exception.
+    /// An owned view of a concrete Python scalar, tuple, or native module attribute.
     ObjectValue,
     ReadOnlyObjectMapping,
     /// A builtin ImportError (including its ModuleNotFoundError and marker subclasses).
@@ -70,6 +72,8 @@ pub(crate) enum Type {
     Semaphore,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
+    NativeModule,
+    ModuleNamespace,
     LogRecord,
     LogFormatter,
     Logger,
@@ -155,6 +159,7 @@ impl std::fmt::Display for Type {
             Self::Int => "int",
             Self::Float => "float",
             Self::Bool => "bool",
+            Self::BuiltinClass => "type",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -185,6 +190,8 @@ impl std::fmt::Display for Type {
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::NativeModule => "builtin module",
+            Self::ModuleNamespace => "module namespace",
             Self::LogFormatter => "logging.Formatter",
             Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
@@ -513,6 +520,7 @@ pub(crate) enum Builtin {
         member: usize,
     },
     StrEnumName,
+    ClassNameView,
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
@@ -536,6 +544,9 @@ pub(crate) enum Builtin {
     },
     SysPlatform,
     OsName,
+    Errno(ErrnoOperation),
+    StrIsUpper,
+    FreezeStrings,
     SystemExitNew {
         omit_none: bool,
     },
@@ -1155,6 +1166,21 @@ pub(crate) enum CopyOperation {
 }
 
 /// Synchronous process operations cannot invoke language callbacks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ErrnoOperation {
+    DefaultLookup,
+    Module,
+    Namespace,
+    Keys,
+    Errorcode,
+    Number,
+    Text,
+    Lookup,
+    Has,
+    Items,
+    MemberContains,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
     Executable,

@@ -65,6 +65,8 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::FreezeStrings => Contract::new(true, PreservesLists),
+            Self::Errno(_) => Contract::new(true, PreservesLists),
             Self::Str if args.first().is_some_and(|e| e.ty == Type::ObjectValue) => {
                 Contract::new(true, PreservesOwners)
             }
@@ -375,12 +377,12 @@ impl Builtin {
             | Self::Split
             | Self::StringListCopy
             | Self::StringListFilter(_)
-            | Self::StringListSortSuffix(_)
             | Self::StringListNonempty
             | Self::Str
             | Self::NominalIdentity
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
+            | Self::ClassNameView
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
@@ -394,6 +396,7 @@ impl Builtin {
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
+            | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::DictDelete
@@ -432,6 +435,7 @@ impl Builtin {
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
+            | Self::StrIsUpper
             | Self::OsName
             | Self::SysOrigArgv
             | Self::SysArgv
@@ -846,6 +850,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
                 | "imre_ndiff_deferred"
+                | "imre_str_list_sorted_suffix"
                 | "imre_dict_delete"
                 | "imre_dict_pop"
                 | "imre_cursor_length_hint"

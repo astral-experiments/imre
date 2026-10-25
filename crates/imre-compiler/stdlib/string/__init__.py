@@ -24,6 +24,10 @@ def capwords(s: str, sep: str | None = None) -> str:
 # Default Template groups. The ASCII spelling keeps Unicode case folding out of
 # identifiers, just as CPython's inline (?a:...) scope does under IGNORECASE.
 _template_pattern = re.compile(r"\$(?:(?P<escaped>\$)|(?P<named>[A-Za-z_][A-Za-z_0-9]*)|\{(?P<braced>[A-Za-z_][A-Za-z_0-9]*)\}|(?P<invalid>))")
+# Consume plain text in the same forward scan as placeholders, so producing a
+# literal gap never recounts all preceding Unicode code points. Template.pattern
+# remains CPython's public four-group matcher, which skips these literal runs.
+_template_tokens = re.compile(r"(?P<literal>[^$]+)|\$(?:(?P<escaped>\$)|(?P<named>[A-Za-z_][A-Za-z_0-9]*)|\{(?P<braced>[A-Za-z_][A-Za-z_0-9]*)\}|(?P<invalid>))")
 
 
 class Template:
@@ -50,10 +54,11 @@ class Template:
     def _render(self, mapping: Mapping[str, object] | None, keywords: dict[str, object], safe: bool) -> str:
         source = self.template
         pieces: list[str] = []
-        end = 0
-        for match in _template_pattern.finditer(source):
-            pieces.append(source[end:match.start()])
-            end = match.end()
+        for match in _template_tokens.finditer(source):
+            literal = match.group("literal")
+            if literal is not None:
+                pieces.append(literal)
+                continue
             name = match.group("named") or match.group("braced")
             if name is not None:
                 if name in keywords:
@@ -73,9 +78,8 @@ class Template:
             else:
                 # The prefix ends with the non-newline delimiter. splitlines()
                 # therefore gives the final line and its exact code-point column.
-                lines = source[:end].splitlines()
+                lines = source[:match.end()].splitlines()
                 raise ValueError(f"Invalid placeholder in string: line {len(lines)}, col {len(lines[-1])}")
-        pieces.append(source[end:])
         return "".join(pieces)
 
     def substitute(self, mapping: Mapping[str, object] | None = {}, /, **kws: object) -> str:

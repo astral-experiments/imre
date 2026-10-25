@@ -114,3 +114,10 @@ mapping_state({"other": 123})
 
 print(Order(early=marked("constructor early"), key=marked("constructor key"),
             late=marked("constructor late")).value)
+
+# Exercise many separated captures without printing the growing output.
+for prefix in ["a", "é𐐨"]:
+    dense = Template((prefix + "$k|${k}|$$") * 2048).substitute(k="Ω")
+    print(len(dense))
+    print(dense[:5])
+    print(dense[-5:])

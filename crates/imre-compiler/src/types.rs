@@ -97,6 +97,7 @@ impl Types {
             Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
             Type::Int
             | Type::Float
+            | Type::BuiltinClass
             | Type::Bool
             | Type::Str
             | Type::Bytes
@@ -120,6 +121,8 @@ impl Types {
             | Type::GeneratorContext
             | Type::Semaphore
             | Type::Document(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -453,6 +456,8 @@ impl Types {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger

@@ -736,6 +736,20 @@ impl Mapping {
         }
     }
 
+    /// Look up an integer through an object view without reading a string-key
+    /// table as a tagged integer. The result retains its exact value descriptor.
+    pub(super) fn integer_word(&self, key: &Int) -> Option<OwnedWord> {
+        let Tables::Int(table) = &self.tables else {
+            return None;
+        };
+        // SAFETY: the caller roots an exact integer; the table owns the value.
+        unsafe {
+            table
+                .lookup(key.0)
+                .map(|entry| self.value_kind.acquire(entry.value))
+        }
+    }
+
     pub(super) fn integer_entries(&self) -> impl Iterator<Item = (&Int, usize)> {
         let Tables::Int(table) = &self.tables else {
             fail("SystemError", "expected an integer-key dictionary");
@@ -1873,6 +1887,29 @@ pub extern "C" fn imre_set_new(kind: u32) -> *const Object {
             tables: Tables::new(kind),
         },
     ))))))
+}
+
+/// Materialize an immutable string set from an exact list of strings.
+///
+/// # Safety
+/// The caller roots the list and checks pending state before using the result.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_frozenset_strings(source: *const Object) -> *const Object {
+    // SAFETY: a fresh set cannot alias the list or reenter it during hashing.
+    unsafe {
+        let set = Rc::from_raw(imre_set_new(3));
+        let ok = object(source).0.with(|s| {
+            s.sequence().strings().all(|(word, _)| {
+                imre_set_add(Rc::as_ptr(&set), word);
+                super::exceptions::imre_error_pending() == 0
+            })
+        });
+        if ok {
+            Rc::into_raw(set)
+        } else {
+            std::ptr::null()
+        }
+    }
 }
 
 /// Reads distinct string keys directly from their source indexes and sorts the

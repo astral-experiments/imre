@@ -51,6 +51,9 @@ def controls(args, level, work, compile_run):
     cases = (HERE / "template_differential.py").read_bytes()
     expected = oracle(args, cases, work)
     assert compile_run(args, level, cases, work) == expected, "Template behavior differs from CPython"
+    module = (HERE / "template_object_values.py").read_bytes()
+    module_expected = oracle(args, module, work)
+    assert compile_run(args, level, module, work) == module_expected, "shared Python object values differ"
     logging = oracle(args, b"from logging import StringTemplateStyle as Style\n" + CHECK, work)
     assert compile_run(args, level, STYLE_FIXTURE + method + CHECK, work) == logging, "upstream logging validator differs"
     for name, (source, expected_error) in DIAGNOSTICS.items():
@@ -58,4 +61,4 @@ def controls(args, level, work, compile_run):
         path.write_text(source + "\n")
         r = subprocess.run([args.imre.resolve(), "check", path], capture_output=True, text=True, cwd=work)
         assert r.returncode and expected_error in r.stderr, (name, r.returncode, r.stderr)
-    return len(expected.splitlines()), len(logging.splitlines())
+    return len(expected.splitlines()) + len(module_expected.splitlines()), len(logging.splitlines())

@@ -15,6 +15,7 @@ mod contexts;
 mod csv;
 mod deferred_diff;
 mod difflib;
+mod errno;
 pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
@@ -65,6 +66,9 @@ enum Storage {
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
     Sha256(Box<sha2::Sha256>),
+    NativeModule(errno::Module),
+    ModuleNamespace(Rc<errno::Registry>),
+    ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
     ObjectValue(OwnedWord),

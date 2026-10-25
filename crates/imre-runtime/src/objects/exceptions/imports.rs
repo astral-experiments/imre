@@ -36,6 +36,21 @@ impl Import {
         }
     }
 
+    /// A live native module supplies candidates just before uncaught display.
+    pub(super) fn suggestion(&self) -> Option<&'static str> {
+        let text = |field: &OwnedWord| {
+            (field.kind == WordKind::new(3)).then(|| {
+                // SAFETY: the concrete field owns this exact string through the lookup.
+                unsafe { &*(field.word as *const Str) }.as_str()
+            })
+        };
+        if text(&self.fields[0])? != "errno" {
+            return None;
+        }
+        let wrong = text(&self.fields[2])?;
+        super::suggestions::closest(wrong, crate::objects::errno::exported_names())
+    }
+
     pub(super) fn repr_args(&self) -> Str {
         let mut result = String::new();
         for i in 0..self.len() {
@@ -176,6 +191,11 @@ pub unsafe extern "C" fn imre_import_error_reject_reset(
 /// The caller roots a view of a concrete exception field.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_exception_field_repr(value: *const Object) -> *const Str {
+    // SAFETY: the caller roots the boxed value throughout the immutable observation.
+    let owner = unsafe { object(value) };
+    if let Some(text) = super::super::errno::with_nonscalar_member(owner, |m| m.text(1)) {
+        return text;
+    }
     // SAFETY: the view retains the original value.
     unsafe {
         let (kind, word) = exit_word(value);
@@ -211,6 +231,11 @@ fn length(kind: WordKind, word: usize) -> Option<usize> {
 /// The caller roots an exception field and checks pending state for TypeError.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_exception_field_len(value: *const Object) -> usize {
+    // SAFETY: the caller roots the boxed value throughout the immutable observation.
+    let owner = unsafe { object(value) };
+    if let Some(n) = super::super::errno::with_nonscalar_member(owner, |m| m.length()) {
+        return n;
+    }
     // SAFETY: the view retains the original value.
     let (kind, word) = unsafe { exit_word(value) };
     match length(kind, word) {
@@ -230,6 +255,14 @@ pub unsafe extern "C" fn imre_exception_field_index(
     value: *const Object,
     index: usize,
 ) -> *const Object {
+    // SAFETY: the caller roots the boxed value throughout the immutable observation.
+    let owner = unsafe { object(value) };
+    // SAFETY: the caller passes a rooted integer for the index.
+    let index_word = unsafe { Int::borrow(index) };
+    if let Some(item) = super::super::errno::with_nonscalar_member(owner, |m| m.index(&index_word))
+    {
+        return item;
+    }
     // SAFETY: the field and integer stay live throughout indexing.
     unsafe {
         let (kind, word) = exit_word(value);

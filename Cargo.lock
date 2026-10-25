@@ -654,6 +654,7 @@ dependencies = [
  "rpds",
  "ruff_db",
  "ruff_python_ast",
+ "ruff_python_codegen",
  "ruff_python_parser",
  "ruff_python_stdlib",
  "ruff_text_size",
@@ -674,6 +675,7 @@ name = "imre-runtime"
 version = "0.1.2"
 dependencies = [
  "base64",
+ "cc",
  "compact_str",
  "corosensei",
  "flate2",

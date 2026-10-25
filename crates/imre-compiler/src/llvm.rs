@@ -51,6 +51,7 @@ impl Type {
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
+            | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
@@ -83,6 +84,8 @@ impl Type {
             | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
+            | Self::NativeModule
+            | Self::ModuleNamespace
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -108,6 +111,7 @@ impl Type {
             Self::Int => "1",
             Self::Float => "0.0",
             Self::Str
+            | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
@@ -140,6 +144,8 @@ impl Type {
             | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
+            | Self::NativeModule
+            | Self::ModuleNamespace
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -696,7 +702,7 @@ impl Emitter<'_, '_> {
         let family = match ty {
             Type::Int => "int",
             Type::Union(_) | Type::StringIterable => "union",
-            Type::Str | Type::StrLiteral(_) => "str",
+            Type::Str | Type::StrLiteral(_) | Type::BuiltinClass => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
             Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => {
@@ -728,6 +734,8 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -3203,7 +3211,7 @@ impl Emitter<'_, '_> {
                     "icmp {predicate} i64 {}, {}",
                     left.operand, right.operand
                 )),
-                Type::Str | Type::StrLiteral(_) | Type::Optional(_) => {
+                Type::Str | Type::StrLiteral(_) | Type::BuiltinClass | Type::Optional(_) => {
                     let equal = if matches!(left.ty, Type::Optional(_))
                         || matches!(right.ty, Type::Optional(_))
                     {
@@ -3351,6 +3359,8 @@ impl Emitter<'_, '_> {
                 | Type::Semaphore
                 | Type::Popen(..)
                 | Type::AsyncProcess(_)
+                | Type::NativeModule
+                | Type::ModuleNamespace
                 | Type::LogFormatter
                 | Type::LogRecord
                 | Type::Logger
@@ -3525,6 +3535,7 @@ impl Emitter<'_, '_> {
         if matches!(
             builtin,
             Builtin::LiteralStringView
+                | Builtin::ClassNameView
                 | Builtin::DictAsBase
                 | Builtin::RecordView
                 | Builtin::DirectoryContextView
@@ -3656,6 +3667,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::LiteralStringView
+            | Builtin::ClassNameView
             | Builtin::DictAsBase
             | Builtin::RecordView
             | Builtin::DirectoryContextView => {
@@ -4260,6 +4272,86 @@ impl Emitter<'_, '_> {
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
+            Builtin::FreezeStrings => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_frozenset_strings(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::StrIsUpper => {
+                let bit = self.instruction(format!(
+                    "call i32 @imre_str_is_upper(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::Errno(op) => {
+                use crate::ir::ErrnoOperation as Op;
+                let call = match op {
+                    Op::Module => "call ptr @imre_errno_module()".to_string(),
+                    Op::Namespace | Op::Keys | Op::Errorcode => {
+                        let f = match op {
+                            Op::Namespace => "namespace",
+                            Op::Keys => "keys",
+                            _ => "errorcode",
+                        };
+                        format!("call ptr @imre_errno_{f}(ptr {})", args[0].value.operand)
+                    }
+                    Op::Number | Op::Text | Op::Has => {
+                        let (ty, f) = match op {
+                            Op::Number => ("i64", "number"),
+                            Op::Text => ("ptr", "text"),
+                            _ => ("i32", "has"),
+                        };
+                        format!(
+                            "call {ty} @imre_errno_{f}(ptr {}, ptr {})",
+                            args[0].value.operand, args[1].value.operand
+                        )
+                    }
+                    Op::DefaultLookup => format!(
+                        "call ptr @imre_errno_lookup_default(ptr {}, ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand, args[2].value.operand
+                    ),
+                    Op::Lookup | Op::Items => format!(
+                        "call ptr @imre_errno_lookup(ptr {}, ptr {}, i32 {})",
+                        args[0].value.operand,
+                        args[1].value.operand,
+                        u32::from(matches!(op, Op::Items))
+                    ),
+                    Op::MemberContains => format!(
+                        "call i32 @imre_errno_member_contains(ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand
+                    ),
+                };
+                let raw = if matches!(
+                    op,
+                    Op::Module
+                        | Op::Number
+                        | Op::Lookup
+                        | Op::DefaultLookup
+                        | Op::Items
+                        | Op::MemberContains
+                ) {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
+                Value {
+                    ty: returns,
+                    operand: if returns == Type::Bool {
+                        self.instruction(format!("icmp ne i32 {raw}, 0"))
+                    } else {
+                        raw
+                    },
+                    small_integer: false,
+                }
+            }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::SysStreamWrite { stderr } => Value {
                 ty: returns,
@@ -4301,7 +4393,12 @@ impl Emitter<'_, '_> {
             Builtin::SystemExitCodeEqual { reversed } => {
                 let i = usize::from(*reversed);
                 let other = &args[1 - i].value;
-                let kind = representation_kind(other.ty, &self.module.types);
+                // Kind 5 denotes another object view in this ABI.
+                let kind = if self.module.types.mapping(other.ty).is_some() {
+                    17
+                } else {
+                    representation_kind(other.ty, &self.module.types)
+                };
                 let word = self.word(other);
                 let bit = self.instruction(format!(
                     "call i32 @imre_system_exit_code_equal(ptr {}, i32 {kind}, i64 {word})",
@@ -5521,6 +5618,7 @@ impl Emitter<'_, '_> {
                     }
                     Type::None => self.void_call("imre_print_none", &[]),
                     Type::ListInt
+                    | Type::BuiltinClass
                     | Type::Class(_)
                     | Type::List(_)
                     | Type::Dict(_)
@@ -5548,6 +5646,8 @@ impl Emitter<'_, '_> {
                     | Type::Semaphore
                     | Type::Popen(..)
                     | Type::AsyncProcess(_)
+                    | Type::NativeModule
+                    | Type::ModuleNamespace
                     | Type::LogFormatter
                     | Type::LogRecord
                     | Type::Logger
@@ -5761,6 +5861,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
@@ -5793,6 +5894,8 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -5832,6 +5935,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
@@ -5864,6 +5968,8 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -6417,6 +6523,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Int => 2,
         Type::Float => 7,
         Type::Str | Type::StrLiteral(_) => 3,
+        Type::BuiltinClass => 11,
         Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
@@ -6448,6 +6555,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Semaphore
         | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::NativeModule
+        | Type::ModuleNamespace
         | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
@@ -7040,6 +7149,18 @@ declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
+declare ptr @imre_frozenset_strings(ptr)
+declare i32 @imre_str_is_upper(ptr)
+declare ptr @imre_errno_module()
+declare ptr @imre_errno_namespace(ptr)
+declare ptr @imre_errno_keys(ptr)
+declare ptr @imre_errno_errorcode(ptr)
+declare i64 @imre_errno_number(ptr,ptr)
+declare ptr @imre_errno_text(ptr,ptr)
+declare i32 @imre_errno_has(ptr,ptr)
+declare ptr @imre_errno_lookup(ptr,ptr,i32)
+declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
+declare i32 @imre_errno_member_contains(ptr,ptr)
 declare ptr @imre_os_name()
 declare i64 @imre_sys_stream_write(i32, ptr)
 declare void @imre_sys_stream_flush(i32)

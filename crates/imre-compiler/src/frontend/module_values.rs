@@ -145,6 +145,25 @@ impl Initialization {
                     available.insert(definition);
                     continue;
                 }
+                ast::Stmt::ImportFrom(import)
+                    if crate::modules::errno_import(statement).is_some() =>
+                {
+                    let start = body.len();
+                    body.extend(import.names.iter().map(|alias| {
+                        checker
+                            .graph
+                            .checked_platform_import(checker.module, alias.range());
+                        checker.check_errno_import(alias.name.as_str())
+                    }));
+                    checkpoints.push(Checkpoint {
+                        statement: index,
+                        body: start..body.len(),
+                        initialized: checker.globals.types.borrow().len(),
+                        definitions: available.clone(),
+                        class_reads: std::mem::take(checker.class_reads.get_mut()),
+                    });
+                    continue;
+                }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => continue,
                 _ if crate::modules::value_name(statement).is_some_and(|name| {
                     module.bindings.get(name) == Some(&Binding::Definition(definition))
