@@ -18,6 +18,67 @@ use std::sync::Arc;
 
 type Pipes = [Option<crate::ObjectOwner>; 3];
 
+#[derive(Default)]
+pub(super) struct ChildPipes {
+    pub(super) ends: [Option<Stdio>; 3],
+    pub(super) closed_descriptor: bool,
+    pub(super) devnull: Option<fs::File>,
+}
+
+impl ChildPipes {
+    /// Open all pipe handles before allocating their Python stream buffers.
+    fn open(
+        modes: [u32; 3],
+        descriptors: [RawFd; 3],
+        pipe_capacity: Option<u32>,
+    ) -> Result<(Self, [Option<OwnedFd>; 3])> {
+        let mut child = Self::default();
+        let mut parents = [None, None, None];
+        if modes.iter().any(|mode| matches!(mode, 1 | 2)) {
+            // Remember closed explicit descriptors before a new pipe can reuse their number.
+            child.closed_descriptor = descriptors.into_iter().any(|fd| {
+                // SAFETY: F_GETFD checks the integer without taking ownership.
+                fd >= 0 && unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0
+            });
+        }
+        for (i, mode) in modes.into_iter().enumerate() {
+            if mode == 1 {
+                let (read, write) = super::pipe_size::open(pipe_capacity).map_err(errno_error)?;
+                let (read, write): (OwnedFd, OwnedFd) = (read.into(), write.into());
+                let (parent, other) = if i == 0 { (write, read) } else { (read, write) };
+                parents[i] = Some(parent);
+                child.ends[i] = Some(Stdio::from(other));
+            } else if mode == 2 && child.devnull.is_none() {
+                child.devnull = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open("/dev/null")
+                        .map_err(errno_error)?,
+                );
+            }
+        }
+        Ok((child, parents))
+    }
+}
+
+/// Explicit descriptors and any handles already opened by Popen's constructor.
+pub(super) struct Redirects {
+    pub(super) fds: [RawFd; 3],
+    pub(super) oversized: bool,
+    pub(super) prepared: Option<ChildPipes>,
+}
+
+impl Default for Redirects {
+    fn default() -> Self {
+        Self {
+            fds: [-1; 3],
+            oversized: false,
+            prepared: None,
+        }
+    }
+}
+
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
     control: Arc<ChildControl>,
@@ -282,8 +343,12 @@ pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *cons
     finish(result, std::ptr::null())
 }
 
-/// Popen acquires these handles before opening a parent stream with bufsize.
-fn check_buffer_error_handles(modes: [u32; 3], pipe_capacity: Option<u32>) -> io::Result<()> {
+/// Check only on a validation failure: a successful launch creates its own handles.
+fn check_handles(
+    modes: &[u32],
+    fork_error_pipe: bool,
+    pipe_capacity: Option<u32>,
+) -> io::Result<()> {
     let mut pipes = [const { None }; 3];
     let mut devnull = None;
     for (pipe, mode) in pipes.iter_mut().zip(modes) {
@@ -300,7 +365,20 @@ fn check_buffer_error_handles(modes: [u32; 3], pipe_capacity: Option<u32>) -> io
             _ => {}
         }
     }
+    if fork_error_pipe {
+        let (_read, write) = io::pipe()?;
+        // The fork child needs its error writer above the standard descriptors.
+        if write.as_raw_fd() < 3 {
+            let _above_stdio = write.try_clone()?;
+        }
+    }
     Ok(())
+}
+
+pub(super) fn error_after_handles(modes: &[u32], fork_error_pipe: bool, error: Error) -> Error {
+    check_handles(modes, fork_error_pipe, None)
+        .err()
+        .map_or(error, errno_error)
 }
 
 /// Create a native child with independently owned pipe ends and the original argv owner.
@@ -357,49 +435,52 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
                 object(extras.redirects[i] as *const Object)
                     .0
                     .with(|s| s.file().fileno())
-            }?,
+            }
+            .map_err(|error| {
+                check_handles(&modes[..i], false, pipe_capacity)
+                    .err()
+                    .map_or(error, errno_error)
+            })?,
             _ => -1,
         };
     }
+    let (prepared, parents) = ChildPipes::open(modes, descriptors, pipe_capacity)?;
     // Python opens the parent-side pipe wrappers after it collects the file handles.
     let bufsize = if modes.contains(&1) {
         // SAFETY: the caller roots the buffer-size integer.
         let size = unsafe { Int::borrow(config.bufsize) };
         match c_int(&size) {
             Some(size) => size,
-            None => {
-                // Before reporting bufsize, preserve any error acquiring the pipe handles.
-                check_buffer_error_handles(modes, pipe_capacity).map_err(errno_error)?;
-                return Err(c_int_overflow());
-            }
+            None => return Err(c_int_overflow()),
         }
     } else {
         -1
     };
-    let child = |may_spawn| {
-        let defaults = ChildAttributes {
-            pipe_capacity,
-            ..ChildAttributes::default()
-        };
-        let Some((group, mask, new_session)) = extras.child else {
-            return Ok(defaults);
-        };
+    let child_args = extras.child.map(|(group, mask, new_session)| {
         let group = (group != 0).then(|| {
             // SAFETY: a non-null group is a rooted Python integer.
             unsafe { Int::borrow(group) }
         });
-        // SAFETY: the caller roots the requested mask and descriptor collection.
-        let mask = unsafe { Int::borrow(mask) };
-        let direct = may_spawn
-            && !new_session
-            && group.as_ref().is_none_or(|n| n.as_small() == Some(-1))
-            && mask.big().sign() == num_bigint::Sign::Minus
-            && extras.keep.is_none_or(|(word, kind)| {
-                // SAFETY: the bit-19 trailer supplies the collection's exact kind.
-                !unsafe { super::pass_fds::nonempty(word, kind) }
-            });
+        // SAFETY: the launch trailer roots the mask through argument conversion.
+        (group, unsafe { Int::borrow(mask) }, new_session)
+    });
+    let allow_spawn = child_args
+        .as_ref()
+        .is_none_or(|(group, mask, new_session)| {
+            !new_session
+                && group.as_ref().is_none_or(|n| n.as_small() == Some(-1))
+                && mask.big().sign() == num_bigint::Sign::Minus
+        })
+        && extras.keep.is_none_or(|(word, kind)| {
+            // SAFETY: the bit-19 trailer supplies the collection's exact kind.
+            !unsafe { super::pass_fds::nonempty(word, kind) }
+        });
+    let child = |direct| {
+        let Some((group, mask, new_session)) = child_args else {
+            return Ok(ChildAttributes::default());
+        };
         if direct {
-            return Ok(defaults);
+            return Ok(ChildAttributes::default());
         }
         // Fork/exec iterates pass_fds before C narrows the group and mask.
         if extras.keep.is_some_and(|(_, kind)| kind == 0) {
@@ -422,27 +503,29 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             group,
             mask: (mask >= 0).then_some(mask as libc::mode_t),
             keep,
-            ..defaults
         })
+    };
+    let text = streams & (1 << 16) != 0;
+    let mut pipes: Pipes = [None, None, None];
+    for (i, parent) in parents.into_iter().enumerate() {
+        if let Some(fd) = parent {
+            pipes[i] = Some(FileState::pipe(fd.into(), i != 0, text, bufsize)?);
+        }
+    }
+    let redirects = Redirects {
+        fds: descriptors,
+        oversized,
+        prepared: Some(prepared),
     };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
     let child =
-        unsafe { launch_error::spawn(&args, config, streams, descriptors, oversized, child) };
-    child.map(|mut child| {
-        let text = streams & (1 << 16) != 0;
-        let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
-        let pipes = [
-            child.stdin.take().map(|fd| pipe(fd.into(), false)),
-            child.stdout.take().map(|fd| pipe(fd.into(), true)),
-            child.stderr.take().map(|fd| pipe(fd.into(), true)),
-        ];
-        Popen {
-            pipes,
-            args,
-            control: Arc::new(ChildControl::new(child)),
-            communication: Default::default(),
-            finalized: false,
-        }
+        unsafe { launch_error::spawn(&args, config, streams, redirects, allow_spawn, child) }?;
+    Ok(Popen {
+        pipes,
+        args,
+        control: Arc::new(ChildControl::new(child)),
+        communication: Default::default(),
+        finalized: false,
     })
 }
 

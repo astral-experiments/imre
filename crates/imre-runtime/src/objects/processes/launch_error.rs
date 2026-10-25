@@ -114,36 +114,46 @@ pub(super) unsafe fn spawn(
     cmd: &OwnedWord,
     config: &popen::LaunchConfig,
     streams: u32,
-    fds: [RawFd; 3],
-    oversized_fd: bool,
+    redirects: popen::Redirects,
+    allow_spawn: bool,
     child_attributes: impl FnOnce(bool) -> Result<ChildAttributes>,
 ) -> Result<Child> {
+    let modes = [12, 0, 4].map(|shift| (streams >> shift) & 15);
+    // Popen already holds its pipes and shared devnull; legacy callers open
+    // their handles at launch and must still probe them on validation errors.
+    let pending = if redirects.prepared.is_some() {
+        &[][..]
+    } else {
+        &modes[..]
+    };
+    // SAFETY: the original command and configuration are still rooted.
+    unsafe { validate_command_shape(cmd, config) }
+        .map_err(|e| popen::error_after_handles(pending, false, e))?;
     // SAFETY: the caller roots the command until both launch APIs finish validation.
-    let may_spawn = uses_posix_spawn(
-        unsafe { has_directory(cmd, config) },
-        !config.cwd.is_null(),
-        streams,
-        fds,
-    );
+    let direct = allow_spawn
+        && uses_posix_spawn(
+            unsafe { has_directory(cmd, config) },
+            !config.cwd.is_null(),
+            streams,
+            redirects.fds,
+        );
     // SAFETY: validation and copying complete before the command may fork.
     let (launch, cwd, attributes) = unsafe {
         prepare_command(cmd, config, || {
-            let attributes = child_attributes(may_spawn)?;
-            if oversized_fd && (!may_spawn || attributes.requires_fork()) {
+            let attributes = child_attributes(direct)?;
+            if redirects.oversized && !direct {
                 return Err(c_int_overflow());
             }
             Ok(attributes)
-        })?
-    };
-    let direct = may_spawn && !attributes.requires_fork();
-    if launch.argv.strings.is_empty() && direct {
-        return Err(Error::new(
-            Kind::ValueError,
-            "posix_spawn: argv must not be empty",
-        ));
+        })
     }
-    if oversized_fd {
-        return Err(c_int_overflow());
+    .map_err(|e| popen::error_after_handles(pending, !direct, e))?;
+    if launch.argv.strings.is_empty() && direct {
+        let error = Error::new(Kind::ValueError, "posix_spawn: argv must not be empty");
+        return Err(popen::error_after_handles(pending, false, error));
+    }
+    if redirects.oversized {
+        return Err(popen::error_after_handles(pending, false, c_int_overflow()));
     }
     let streams = if attributes.keep.is_empty() {
         streams
@@ -151,7 +161,7 @@ pub(super) unsafe fn spawn(
         streams & !(1 << 17) // pass_fds closes all other inherited descriptors
     };
     launch
-        .spawn_tagged(cwd.as_ref(), streams, fds, attributes)
+        .spawn_tagged(cwd.as_ref(), streams, redirects, attributes)
         .map_err(|err| {
             let (site, err) = decode(err);
             // SAFETY: failure does not release the original command or its arguments.

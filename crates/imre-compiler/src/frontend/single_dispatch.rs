@@ -79,6 +79,9 @@ fn class(ty: Type) -> Option<(&'static str, InstanceType)> {
 
 /// Test bool before int: both match an int instance test.
 fn value_class(types: &Types, arg: &Expr) -> Option<Expr> {
+    if types.is_unread_argument(arg.ty) {
+        return Some(field(arg.clone(), 0, Type::Str));
+    }
     if let Some(inner) = types.payload(arg.ty) {
         let present = Expr {
             ty: inner,
@@ -150,6 +153,29 @@ impl Registration {
 }
 
 impl Checker<'_> {
+    /// Store the class alongside the original owned value. Its concrete record
+    /// descriptor releases the payload after the caller and callback finish.
+    pub(super) fn unread_argument(&mut self, arg: &ast::Expr, ty: Type) -> Result<Expr, String> {
+        let value = self.expr(arg)?;
+        if value.ty == ty {
+            return Ok(value);
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let value = scope.hold(self, value);
+        let name = value_class(self.types, &value).ok_or_else(|| {
+            error(
+                self.source,
+                arg,
+                "this callback argument needs a known builtin class",
+            )
+        })?;
+        let frame = Expr {
+            ty: self.types.tuple(vec![Type::Str, value.ty]),
+            kind: ExprKind::Tuple(vec![name, value]),
+        };
+        Ok(scope.finish(builtin(Builtin::RecordView, ty, vec![frame])))
+    }
+
     /// An unbound function cannot retain its dispatcher through a captured receiver.
     fn dispatch_target(&mut self, node: &ast::Expr) -> Result<Expr, String> {
         let value = self.expr(node)?;
@@ -244,6 +270,7 @@ impl Checker<'_> {
                 module: self.module,
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: self.graph.modules[self.module]
                     .error(node, "recursive indirect single dispatch is unsupported"),
                 function,

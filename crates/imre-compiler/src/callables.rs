@@ -80,6 +80,7 @@ mod tests {
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![function(vec![Statement::Expr(Expr {
                 ty: first,
                 kind: ExprKind::Scope {

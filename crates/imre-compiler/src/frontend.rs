@@ -28,11 +28,13 @@ mod calls;
 mod chainmap;
 mod class_data;
 mod closed_calls;
+mod codecs;
 mod comprehensions;
 mod consuming_lists;
 mod contexts;
 mod contextvars;
 mod copying;
+mod count_elements;
 mod counter;
 mod csv;
 mod dataclass_values;
@@ -935,6 +937,7 @@ pub(crate) fn lower_with_caller_cache(
                     function,
                     calls,
                     class_reads: reads,
+                    source_frame: false,
                     recursion_error: module.error(
                         definition,
                         "recursive calls are unsupported in this prototype",
@@ -1035,7 +1038,12 @@ pub(crate) fn lower_with_caller_cache(
     // Entry code and inactive module guards can create helpers too. Validate the
     // complete graph only after every source expression has been lowered.
     let list_builds = helpers.list_builds.take();
+    let mut python_frames: Vec<_> = owners
+        .iter()
+        .map(|&module| graph.modules[module].archive.is_none())
+        .collect();
     for helper in helpers.into_functions() {
+        python_frames.push(helper.source_frame);
         owners.push(helper.module);
         functions.push(helper.function);
         call_graph.push(helper.calls);
@@ -1069,6 +1077,39 @@ pub(crate) fn lower_with_caller_cache(
             &callable_targets,
         )?;
     }
+    python_frames.push(true); // The program entry runs a Python module body.
+    let mut names = false;
+    let mut count = python_frames.iter().filter(|&&frame| frame).count() > 1000;
+    for function in functions.iter().chain([&entry]) {
+        ir::walk_expressions(&function.body, &mut |value| match value.kind {
+            ExprKind::Builtin(Builtin::SysGetFrameModuleName, _) => names = true,
+            ExprKind::Builtin(Builtin::SysSetRecursionLimit, _) => count = true,
+            _ => {}
+        });
+    }
+    // The native call graph is acyclic. Programs that cannot inspect frames,
+    // lower their limit, or reach the default depth need no tracking at all.
+    let source_frames = if names || count {
+        python_frames
+            .into_iter()
+            .zip(owners.iter().copied().chain([graph.entry]))
+            .map(|(frame, module)| {
+                frame.then(|| {
+                    if names {
+                        ir::SourceFrame::Module(if module == graph.entry {
+                            "__main__".to_owned()
+                        } else {
+                            graph.modules[module].name.clone()
+                        })
+                    } else {
+                        ir::SourceFrame::Depth
+                    }
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
     for (id, sums) in zip_sums {
         zip_sums::fuse(&mut functions, id, &sums);
@@ -1094,6 +1135,7 @@ pub(crate) fn lower_with_caller_cache(
             class_fields: classes.fields,
             json_records,
             globals,
+            source_frames,
             functions,
             entry,
         },
@@ -1271,6 +1313,7 @@ fn signature(
     }
     let mut params = Vec::new();
     let mut parameter_types = Vec::new();
+    let mut none_defaults = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
         let origin = defaults
             .forwarded
@@ -1370,6 +1413,14 @@ fn signature(
                     })
                     .transpose()?)
         };
+        if parameter.annotation().is_none()
+            && matches!(
+                parameter.default.as_deref(),
+                Some(ast::Expr::NoneLiteral(_))
+            )
+        {
+            none_defaults.push(index);
+        }
         parameter_types.push(ty);
         // Unresolved types exist only in the discarded discovery pass. solve()
         // fills every slot before ordinary lowering can construct executable IR.
@@ -1515,7 +1566,7 @@ fn signature(
             (Some(_), "__bool__") => Some(Type::Bool),
             _ => None,
         });
-    let id = inference.register(parameter_types, returns);
+    let id = inference.register(parameter_types, returns, none_defaults);
     Ok(Signature {
         id,
         asynchronous: function.is_async,
@@ -2704,6 +2755,9 @@ impl<'a> Checker<'a> {
                 });
             }
             return self.coerce(value, expected, expression);
+        }
+        if self.types.is_unread_argument(expected) {
+            return self.unread_argument(expression, expected);
         }
         // A record can carry user fields with distinct types. An expected scalar type
         // permits reading such a field; the runtime checks its actual representation.
@@ -5668,6 +5722,12 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::CodecBom(bytes) => {
+                    return Ok(Expr {
+                        ty: Type::Bytes,
+                        kind: ExprKind::Bytes(bytes.to_vec()),
+                    });
+                }
                 Intrinsic::BuiltinsLast => {
                     return Ok(Expr {
                         ty: Type::ObjectValue,
@@ -6992,6 +7052,36 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::CsvLineNumber, vec![receiver]),
                     });
                 }
+                if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "name" {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(Builtin::CodecName, vec![receiver]),
+                    });
+                }
+                if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "streamwriter" {
+                    return Ok(codecs::writer(
+                        ir::WriterOperation::Class,
+                        Type::CodecWriterClass,
+                        vec![receiver],
+                    ));
+                }
+                if matches!(receiver.ty, Type::CodecWriterClass | Type::CodecWriter) {
+                    let (op, ty) = match (receiver.ty, attribute.attr.as_str()) {
+                        (_, "encoding") => (ir::WriterOperation::Encoding, Type::Str),
+                        (Type::CodecWriter, "errors") => (ir::WriterOperation::Errors, Type::Str),
+                        (Type::CodecWriter, "stream") => {
+                            (ir::WriterOperation::Stream, Type::BinaryIO)
+                        }
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                attribute,
+                                "unsupported stream writer attribute",
+                            ));
+                        }
+                    };
+                    return Ok(codecs::writer(op, ty, vec![receiver]));
+                }
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
                 }
@@ -7823,7 +7913,11 @@ impl<'a> Checker<'a> {
                 check_string(target, self.source)?;
                 return self.typed_expr(value);
             }
+            Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
             Some(Binding::Intrinsic(Intrinsic::Socket)) => return self.socket_constructor(call),
+            Some(Binding::Intrinsic(Intrinsic::CodecGetWriter)) => {
+                return self.codec_getwriter(call);
+            }
             Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
                 return self.sha256_constructor(call, op == Intrinsic::HashNew);
             }
@@ -7870,6 +7964,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Deque)) => return self.deque_new(call, None),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),
+            Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }
@@ -8246,6 +8341,9 @@ impl<'a> Checker<'a> {
             || !matches!(&*call.func, ast::Expr::Name(_) | ast::Expr::Attribute(_))
         {
             let callable = self.expr(&call.func)?;
+            if callable.ty == Type::CodecWriterClass {
+                return self.codec_writer_new(callable, call);
+            }
             return self.invoke(call, callable);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
@@ -8378,11 +8476,17 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
             }
+            if receiver.ty == Type::CodecInfo {
+                return self.codec_method(receiver, attribute, call);
+            }
             if receiver.ty == Type::Poll {
                 return self.poll_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Socket {
                 return self.socket_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::CodecWriter {
+                return self.codec_writer_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);
@@ -8592,6 +8696,7 @@ impl<'a> Checker<'a> {
                     ),
                     ("read", 1) if binary => (Builtin::BinaryReadSize, Type::Bytes),
                     ("tell", 0) if binary => (Builtin::BinaryTell, Type::Int),
+                    ("getvalue", 0) if binary => (Builtin::BytesIoValue, Type::Bytes),
                     ("readline", 0) => (Builtin::FileReadline, data_type),
                     ("write", 1) => (
                         if binary {
@@ -9349,6 +9454,7 @@ impl<'a> Checker<'a> {
                             | Type::Set(_)
                             | Type::Deque(_)
                             | Type::StringKeys
+                            | Type::CodecInfo
                             | Type::Tuple(_)
                             | Type::VarTuple(_)
                     ) =>

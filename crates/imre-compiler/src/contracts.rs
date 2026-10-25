@@ -57,7 +57,7 @@ impl Builtin {
         match self {
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
             Self::FunctionWrappedGet => Contract::new(true, PreservesLists),
-            Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
+            Self::Repr => Contract::new(true, Unknown),
             Self::Str
                 if args.first().is_some_and(|e| {
                     matches!(
@@ -71,6 +71,7 @@ impl Builtin {
             Self::Str if args.first().is_some_and(|e| e.ty == Type::Int) => {
                 Contract::new(true, PreservesOwners)
             }
+            Self::Str => Contract::new(true, PreservesLists),
             Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
             Self::Calendar(op) => Contract::new(
                 matches!(
@@ -364,6 +365,11 @@ impl Builtin {
             | Self::Decode
             | Self::DecodeAscii
             | Self::UrlsafeB64encode
+            | Self::CodecLookup
+            | Self::CodecEncode
+            | Self::CodecDecode
+            | Self::BytesIoValue
+            | Self::CodecWriter(_)
             | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
@@ -435,6 +441,7 @@ impl Builtin {
             | Self::DictSumValues
             | Self::Encode
             | Self::CsvLineNumber
+            | Self::CodecName
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::StrDescriptor(_)
@@ -458,6 +465,7 @@ impl Builtin {
             | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
+            | Self::SysGetRecursionLimit
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
             | Self::IsBuiltinSubclass
@@ -488,7 +496,6 @@ impl Builtin {
             | Self::SequenceGetInBounds
             | Self::Split
             | Self::StringListNonempty
-            | Self::Str
             | Self::SourceModule
             | Self::SourceModuleAttribute { .. }
             | Self::NominalIdentity
@@ -582,6 +589,8 @@ impl Builtin {
             | Self::SysDisplayHook
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
+            | Self::SysGetFrameModuleName
+            | Self::SysSetRecursionLimit
             | Self::RaiseException
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
@@ -1033,6 +1042,13 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_fnmatch_translate"
                 | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
+                | "imre_codec_lookup"
+                | "imre_codec_encode"
+                | "imre_codec_decode"
+                | "imre_bytes_io_value"
+                | "imre_codec_writer_encoding"
+                | "imre_codec_writer_write"
+                | "imre_codec_writer_control"
                 | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
@@ -1050,6 +1066,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_sys_displayhook"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
+                | "imre_sys_getframemodulename"
+                | "imre_sys_setrecursionlimit"
                 | "imre_path_as_posix"
                 | "imre_path_join"
                 | "imre_path_join_object"

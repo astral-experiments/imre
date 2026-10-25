@@ -5,6 +5,14 @@ def put(source: dict[str, int]) -> None:
     source['through base'] = 6
 
 
+def keys_from_ordered(source: OrderedDict[str, int]) -> OrderedDict[str, int]:
+    return source.fromkeys(["b", "a", "b"], 1)
+
+
+def keys_from_base(source: dict[str, int]) -> dict[str, int]:
+    return source.fromkeys(["b", "a", "b"], 1)
+
+
 def tuple_key(n: int) -> tuple[tuple[int, int], int]:
     return ((n, n + 1), n)
 
@@ -12,6 +20,11 @@ def tuple_key(n: int) -> tuple[tuple[int, int], int]:
 def main() -> None:
     empty: OrderedDict[str, int] = OrderedDict()
     print(empty)
+    reversed_keys = OrderedDict(a=1, b=1)
+    print(keys_from_ordered(empty))
+    print(keys_from_ordered(empty) == reversed_keys)
+    print(keys_from_base(empty) == reversed_keys)
+    print(keys_from_base({"ignored": 9}) == reversed_keys)
     made = OrderedDict([('c', 1), ('b', 2), ('c', 3)], last=4)
     print(made)
     print(list(made))
@@ -78,6 +91,15 @@ def main() -> None:
         single['two'] = 2
         print(key)
     print(single)
+
+    for target in ['b', 'c']:
+        entries = OrderedDict(a=1, b=2)
+        try:
+            for key, value in entries.items():
+                print(repr((key, value, entries.setdefault(target, 3))))
+        except RuntimeError as error:
+            print(error)
+        print(list(entries))
 
 
 main()

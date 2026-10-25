@@ -41,10 +41,41 @@ static ALLOCATOR: FailNth = FailNth;
 unsafe extern "C" {
     fn imre_py_bytes_from_string_and_size(data: *const c_char, size: isize) -> *const c_void;
     fn imre_py_decref(value: *const c_void);
+    fn imre_record_error_init();
     fn imre_error_take() -> *const c_void;
     fn imre_exception_repr(value: *const c_void) -> *const c_void;
     fn imre_object_release(value: *const c_void);
     fn imre_str_release(value: *const c_void);
+}
+
+fn assert_memory_error() {
+    // SAFETY: take transfers a rooted exception, and repr transfers its rooted string.
+    unsafe {
+        let error = imre_error_take();
+        assert!(!error.is_null());
+        let message = imre_exception_repr(error);
+        assert!(!message.is_null());
+        assert_eq!((&*message.cast::<Str>()).as_str(), "MemoryError()");
+        imre_str_release(message);
+        imre_object_release(error);
+    }
+}
+
+#[test]
+fn invalid_size_diagnostics_remain_catchable() {
+    // SAFETY: invalid lengths are diagnosed before the null source can be read.
+    unsafe {
+        imre_record_error_init();
+        for size in [-1, isize::MAX] {
+            for allocation in [1, 2] {
+                FAIL_AT.set(allocation);
+                let value = imre_py_bytes_from_string_and_size(ptr::null(), size);
+                assert_eq!(FAIL_AT.replace(0), 0);
+                assert!(value.is_null());
+                assert_memory_error();
+            }
+        }
+    }
 }
 
 #[test]
@@ -59,13 +90,7 @@ fn payload_and_owner_failures_reach_the_caller() {
                 imre_py_bytes_from_string_and_size(data.as_ptr().cast(), data.len() as isize);
             assert_eq!(FAIL_AT.replace(0), 0);
             assert!(value.is_null());
-            let error = imre_error_take();
-            assert!(!error.is_null());
-            let message = imre_exception_repr(error);
-            assert!(!message.is_null());
-            assert_eq!((&*message.cast::<Str>()).as_str(), "MemoryError()");
-            imre_str_release(message);
-            imre_object_release(error);
+            assert_memory_error();
 
             let value =
                 imre_py_bytes_from_string_and_size(data.as_ptr().cast(), data.len() as isize);

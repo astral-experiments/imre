@@ -1,0 +1,32 @@
+{
+  "fixture_sha256": "eaa2995c3e519460338fb8fe875212080f6ded1cb15ef09761037771f1264a3f",
+  "imre_sha256": "fa3d4704f106a7842de08d96afb05611f927b787f0b03f2d5ca441c521fc3762",
+  "runtime_sha256": "aa33ddbe2b45fabcedce70f1f42aeadf44470bd17ecef15e114fc26dcd3482e1",
+  "reference": "None\n{'z': -3, '\u00a3': 1000000000000000000000000, 'a': 3, 'b': 1}\nNone\n{'z': -2, '\u00a3': 1000000000000000000000000, 'a': 3, 'b': 2}\n{'z': -1, '\u00a3': 1000000000000000000000001, 'a': 4, 'b': 3}\nNone\nCounter({'a': 2, 'b': 2, 'c': 1})\nthird pull\n[10, 20, 2, 1, 3]\n{2: 1, 1: 1}\n{'a': 2, 'b': 1}\n['get a', 'set a', 'get b', 'set b', 'get a', 'set a']\nbad get\nbad set\n{'a': 2, 'b': 1, 'before': 2}\n['get a', 'set a', 'get b', 'set b', 'get a', 'set a', 'get before', 'set before', 'get bad get', 'get before', 'set before', 'get bad set', 'set bad set']\n{'x': 6}\n['biased x', 'set x', 'biased x', 'set x']\n[1, 2, 3]\n8\n'int' object is not iterable\n'NoneType' object has no attribute 'get'\n_count_elements expected 2 arguments, got 1\n_collections._count_elements() takes no keyword arguments\n",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "None\n{'z': -3, '\u00a3': 1000000000000000000000000, 'a': 3, 'b': 1}\nNone\n{'z': -2, '\u00a3': 1000000000000000000000000, 'a': 3, 'b': 2}\n{'z': -1, '\u00a3': 1000000000000000000000001, 'a': 4, 'b': 3}\nNone\nCounter({'a': 2, 'b': 2, 'c': 1})\nthird pull\n[10, 20, 2, 1, 3]\n{2: 1, 1: 1}\n{'a': 2, 'b': 1}\n['get a', 'set a', 'get b', 'set b', 'get a', 'set a']\nbad get\nbad set\n{'a': 2, 'b': 1, 'before': 2}\n['get a', 'set a', 'get b', 'set b', 'get a', 'set a', 'get before', 'set before', 'get bad get', 'get before', 'set before', 'get bad set', 'set bad set']\n{'x': 6}\n['biased x', 'set x', 'biased x', 'set x']\n[1, 2, 3]\n8\n'int' object is not iterable\n'NoneType' object has no attribute 'get'\n_count_elements expected 2 arguments, got 1\n_collections._count_elements() takes no keyword arguments\n",
+      "stderr": ""
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "None\n{'z': -3, '\u00a3': 1000000000000000000000000, 'a': 3, 'b': 1}\nNone\n{'z': -2, '\u00a3': 1000000000000000000000000, 'a': 3, 'b': 2}\n{'z': -1, '\u00a3': 1000000000000000000000001, 'a': 4, 'b': 3}\nNone\nCounter({'a': 2, 'b': 2, 'c': 1})\nthird pull\n[10, 20, 2, 1, 3]\n{2: 1, 1: 1}\n{'a': 2, 'b': 1}\n['get a', 'set a', 'get b', 'set b', 'get a', 'set a']\nbad get\nbad set\n{'a': 2, 'b': 1, 'before': 2}\n['get a', 'set a', 'get b', 'set b', 'get a', 'set a', 'get before', 'set before', 'get bad get', 'get before', 'set before', 'get bad set', 'set bad set']\n{'x': 6}\n['biased x', 'set x', 'biased x', 'set x']\n[1, 2, 3]\n8\n'int' object is not iterable\n'NoneType' object has no attribute 'get'\n_count_elements expected 2 arguments, got 1\n_collections._count_elements() takes no keyword arguments\n",
+      "stderr": ""
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "None\n{'z': -3, '\u00a3': 1000000000000000000000000, 'a': 3, 'b': 1}\nNone\n{'z': -2, '\u00a3': 1000000000000000000000000, 'a': 3, 'b': 2}\n{'z': -1, '\u00a3': 1000000000000000000000001, 'a': 4, 'b': 3}\nNone\nCounter({'a': 2, 'b': 2, 'c': 1})\nthird pull\n[10, 20, 2, 1, 3]\n{2: 1, 1: 1}\n{'a': 2, 'b': 1}\n['get a', 'set a', 'get b', 'set b', 'get a', 'set a']\nbad get\nbad set\n{'a': 2, 'b': 1, 'before': 2}\n['get a', 'set a', 'get b', 'set b', 'get a', 'set a', 'get before', 'set before', 'get bad get', 'get before', 'set before', 'get bad set', 'set bad set']\n{'x': 6}\n['biased x', 'set x', 'biased x', 'set x']\n[1, 2, 3]\n8\n'int' object is not iterable\n'NoneType' object has no attribute 'get'\n_count_elements expected 2 arguments, got 1\n_collections._count_elements() takes no keyword arguments\n",
+      "stderr": ""
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "None\n{'z': -3, '\u00a3': 1000000000000000000000000, 'a': 3, 'b': 1}\nNone\n{'z': -2, '\u00a3': 1000000000000000000000000, 'a': 3, 'b': 2}\n{'z': -1, '\u00a3': 1000000000000000000000001, 'a': 4, 'b': 3}\nNone\nCounter({'a': 2, 'b': 2, 'c': 1})\nthird pull\n[10, 20, 2, 1, 3]\n{2: 1, 1: 1}\n{'a': 2, 'b': 1}\n['get a', 'set a', 'get b', 'set b', 'get a', 'set a']\nbad get\nbad set\n{'a': 2, 'b': 1, 'before': 2}\n['get a', 'set a', 'get b', 'set b', 'get a', 'set a', 'get before', 'set before', 'get bad get', 'get before', 'set before', 'get bad set', 'set bad set']\n{'x': 6}\n['biased x', 'set x', 'biased x', 'set x']\n[1, 2, 3]\n8\n'int' object is not iterable\n'NoneType' object has no attribute 'get'\n_count_elements expected 2 arguments, got 1\n_collections._count_elements() takes no keyword arguments\n",
+      "stderr": ""
+    }
+  }
+}

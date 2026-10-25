@@ -58,16 +58,3 @@ pub(super) fn open(size: Option<u32>) -> io::Result<(io::PipeReader, io::PipeWri
     let _ = size;
     Ok((read, write))
 }
-
-/// Return the parent and child ends when the platform supports resizing a new pipe.
-pub(super) fn pair(size: Option<u32>, parent_writes: bool) -> io::Result<Option<(OwnedFd, Stdio)>> {
-    if cfg!(any(target_os = "linux", target_os = "android")) && size.is_some() {
-        let (read, write) = open(size)?;
-        return Ok(Some(if parent_writes {
-            (write.into(), Stdio::from(read))
-        } else {
-            (read.into(), Stdio::from(write))
-        }));
-    }
-    Ok(None)
-}
