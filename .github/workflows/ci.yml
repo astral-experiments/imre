@@ -55,9 +55,10 @@ jobs:
           persist-credentials: false
       - name: Check Darwin stat functions and exports against CPython
         run: |
+          export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
           dir=benchmarks/cpython_stdlib/full/stat
-          python3 "$dir/run_operations.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang "$(xcrun -f clang)" --cpython-source .cpython-stdlib-stat --result "$RUNNER_TEMP/cpython-stat.json"
-          python3 "$dir/check_modes.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang "$(xcrun -f clang)"
+          python3 "$dir/run_operations.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang --cpython-source .cpython-stdlib-stat --result "$RUNNER_TEMP/cpython-stat.json"
+          python3 "$dir/check_modes.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang
 
       - name: Check pinned PyPA RECORD fixtures with reference CPython
         run: python3 tests/wheel_record.py --reference-only
