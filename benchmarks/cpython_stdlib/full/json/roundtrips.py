@@ -28,6 +28,13 @@ UNEQUAL = (('[1, {"k": 1}]', '[1, {"k": 2}]'), ('[[["a"]]]', '[[["b"]]]'),
            ('{"a": {"b": "c"}}', '{"a": {"b": "d"}}'))
 
 
+def definitions():
+    for n in (1, 2, 3):
+        module, owner = f"test.test_json.test_pass{n}", f"TestPass{n}"
+        path = BENCH / f"upstream/Lib/test/test_json/test_pass{n}.py"
+        yield module, owner, path, f"{module}.{owner}.test_parse"
+
+
 def output(binary):
     child = subprocess.run([binary], capture_output=True, check=True, timeout=60)
     if child.stderr:
@@ -40,10 +47,7 @@ def run(tools, work):
     for case in cases(load_suite("test.test_json")):
         ids[routine(case)].append(case.id())
     methods = {}
-    for n in (1, 2, 3):
-        module, owner = f"test.test_json.test_pass{n}", f"TestPass{n}"
-        path = BENCH / f"upstream/Lib/test/test_json/test_pass{n}.py"
-        source = f"{module}.{owner}.test_parse"
+    for module, owner, path, source in definitions():
         names = ids[source]
         if len(names) != 2 or len(set(names)) != 2:
             raise ValueError(f"expected two distinct inherited IDs: {names}")
