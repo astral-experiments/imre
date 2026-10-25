@@ -24,19 +24,6 @@ class Counter:
         return self.count
 
 
-counter = Counter()
-print(f"{counter.next_value} {counter.next_value} {counter.reads}")
-counter.values.append(9)
-print(sum(counter.items))
-print(counter.checked)
-counter.count = -1
-try:
-    print(counter.checked)
-except ValueError as error:
-    print(str(error))
-print(counter.reads)
-
-
 @dataclass
 class Item:
     value: int
@@ -50,8 +37,20 @@ class Item:
         self.value = value // 2
 
 
+counter = Counter()
+print(f"{counter.next_value} {counter.next_value} {counter.reads}")
+counter.values.append(9)
+print(sum(counter.items))
+print(counter.checked)
+counter.count = -1
+try:
+    print(counter.checked)
+except ValueError as error:
+    print(str(error))
+print(counter.reads)
+
 item = Item(1)
 item.double = 9
-print(item.value, item.double)
+print(f"{item.value} {item.double}")
 item.double += 7
-print(item.value, item.double)
+print(f"{item.value} {item.double}")
