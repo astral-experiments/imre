@@ -4,6 +4,35 @@ Import `suite_inventory` and `suite_native` from this directory. Use the release
 test-enabled Python for discovery, shared fixtures and host assertions. Build each
 native entry at both `Toolchain(..., level=0)` and `level=3`.
 
+## Run an existing suite in both compiler modes
+
+[suite_modes.py](suite_modes.py) invokes the selected checkout's own runner
+twice. It passes `--reachable-only` to native builds on the second invocation.
+The owner supplies a runner that accepts `--imre`, `--runtime`, `--clang`,
+`--cpython-source` and `--result` and emits a full O0/O3 evidence pair. The
+launcher uses that checkout's validator and reference; it copies no outcomes
+between modes. For example, from a clean checkout with the pinned Python:
+
+```sh
+python3 benchmarks/cpython_stdlib/suite_modes.py \
+  --source "$(git rev-parse HEAD)" --entry benchmarks/cpython_stdlib/full/unittest/run.py \
+  --reference benchmarks/cpython_stdlib/full/unittest/reference-linux.json \
+  --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 \
+  --cpython-source /path/to/cpython-3.14.5 --output /tmp/unittest-evidence
+```
+
+Choose a fresh output directory. `ordinary.json` and `reachable.json` each
+retain every original occurrence and its body, assertions, operation, fixture,
+and reason. `source.json` identifies the suite revision, inputs and binary
+hashes, and both runner and validator exit codes. A runner failure, missing
+report or invalid pair fails the command, even if the other mode succeeds.
+
+The **CI** workflow's optional `unittest_source` dispatch builds an exact Imre
+commit on Linux and uploads those three files as `unittest-evidence-linux`.
+It uses the suite and validator at the selected commit, including when that
+commit predates this launcher. The build step in the dispatch establishes the
+compiler's provenance; a local invocation records the supplied binary hashes.
+
 ## A verified upstream example
 
 This is the `test_stop` case used by [the unittest gate](full/unittest/run.py).
