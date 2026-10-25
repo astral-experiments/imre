@@ -131,6 +131,7 @@ pub(crate) enum Intrinsic {
     Declaration(&'static str),
     ArgumentParser,
     ArgparseNamespace,
+    BooleanOptionalAction,
     RawDescriptionHelpFormatter,
     FutureAnnotations,
     ShallowCopy,
@@ -198,6 +199,9 @@ pub(crate) enum Intrinsic {
     SysFlags,
     SysDontWriteBytecode,
     SysPlatform,
+    SysVersionInfo,
+    SysVersion,
+    SysHexversion,
     SysEncoding(&'static str),
     SysException,
     SysJitPredicate(&'static str),
@@ -557,11 +561,15 @@ impl IntrinsicModule {
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
             (Self::Sys, "flags") => Intrinsic::SysFlags,
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
+            (Self::Sys, "version_info") => Intrinsic::SysVersionInfo,
+            (Self::Sys, "version") => Intrinsic::SysVersion,
+            (Self::Sys, "hexversion") => Intrinsic::SysHexversion,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
             (Self::Os, "name") => Intrinsic::OsName,
             (Self::Errno, _) => Intrinsic::ErrnoAttribute,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
+            (Self::Argparse, "BooleanOptionalAction") => Intrinsic::BooleanOptionalAction,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
                 Intrinsic::RawDescriptionHelpFormatter
             }

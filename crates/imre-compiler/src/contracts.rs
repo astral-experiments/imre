@@ -481,6 +481,7 @@ impl Builtin {
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::ExceptionFieldIdentity { .. }
+            | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName
             | Self::SysOrigArgv

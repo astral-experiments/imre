@@ -27,8 +27,17 @@ impl ForwardingInitializer {
         let source = &module.source;
         if !node.decorator_list.is_empty()
             || module.bindings.contains_key("super")
-            || node.body.iter().filter_map(ast::Stmt::as_function_def_stmt).any(|method|
-                !method.decorator_list.is_empty() || matches!(method.name.as_str(),"__new__"|"__setattr__"|"__delattr__"|"__getattribute__"))
+            || node
+                .body
+                .iter()
+                .filter_map(ast::Stmt::as_function_def_stmt)
+                .any(|method| {
+                    !method.decorator_list.is_empty()
+                        || matches!(
+                            method.name.as_str(),
+                            "__new__" | "__setattr__" | "__delattr__" | "__getattribute__"
+                        )
+                })
             || node
                 .body
                 .iter()
@@ -45,7 +54,12 @@ impl ForwardingInitializer {
             return inherited.cloned();
         };
         let p = &init.parameters;
-        if p.iter_non_variadic_params().any(|p|p.name().as_str()=="super") || p.vararg.as_ref().is_some_and(|p|p.name.as_str()=="super") {
+        if p.iter_non_variadic_params()
+            .any(|p| p.name().as_str() == "super")
+            || p.vararg
+                .as_ref()
+                .is_some_and(|p| p.name.as_str() == "super")
+        {
             return None;
         }
         if (p.vararg.is_none() && inherited.is_none())

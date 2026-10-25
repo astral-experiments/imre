@@ -218,9 +218,7 @@ fn collect_class(
     }
     let dataclass = dataclasses::options(graph, definition.module, node)?;
     let forwarder = exception_layout
-        .then(|| {
-            ForwardingInitializer::collect(definition, node, base.map(|(_, c)| c), module)
-        })
+        .then(|| ForwardingInitializer::collect(definition, node, base.map(|(_, c)| c), module))
         .flatten();
     if base.is_some_and(|(_, c)| c.forwarder.is_some()) && forwarder.is_none() {
         return Err(module.error(
