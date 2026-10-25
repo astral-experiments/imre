@@ -178,10 +178,12 @@ impl Checker<'_> {
             ));
         }
         let skip = usize::from(receiver.is_some());
-        if signature.params[skip..]
-            .iter()
-            .any(|parameter| parameter.kind == ParameterKind::KeywordOnly)
-        {
+        if signature.params[skip..].iter().any(|parameter| {
+            matches!(
+                parameter.kind,
+                ParameterKind::KeywordOnly | ParameterKind::KeywordRest
+            )
+        }) {
             return Err(error(
                 self.source,
                 node,

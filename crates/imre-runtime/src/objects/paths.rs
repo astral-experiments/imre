@@ -424,7 +424,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
     let mut resolved = if path.starts_with('/') {
         Str::from("/")
     } else {
-        let directory = std::env::current_dir().map_err(files::os_error)?;
+        let directory = std::env::current_dir().map_err(files::errno_error)?;
         path_utf8(directory.into_os_string())?
     };
     let mut source = path.split('/');
@@ -460,9 +460,10 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         // Validate at the actual lookup, so an earlier strict filesystem error
         // still precedes a later component containing a NUL.
         check_nul(&next)?;
+        let component_error = |error| files::errno_with_filename(error, Some(&next));
         let metadata = match fs::symlink_metadata(next.as_str()) {
             Ok(metadata) => metadata,
-            Err(error) if strict => return Err(files::os_error(error)),
+            Err(error) if strict => return Err(component_error(error)),
             Err(_) => {
                 resolved = next;
                 continue;
@@ -470,7 +471,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         };
         if !metadata.file_type().is_symlink() {
             if strict && remaining != 0 && !metadata.is_dir() {
-                return Err(files::os_error(io::Error::from_raw_os_error(libc::ENOTDIR)));
+                return Err(component_error(io::Error::from_raw_os_error(libc::ENOTDIR)));
             }
             resolved = next;
             continue;
@@ -482,7 +483,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
             }
             Some(None) => {
                 if strict {
-                    return Err(files::os_error(io::Error::from_raw_os_error(libc::ELOOP)));
+                    return Err(component_error(io::Error::from_raw_os_error(libc::ELOOP)));
                 }
                 resolved = next;
                 continue;
@@ -491,7 +492,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         }
         let target = match fs::read_link(next.as_str()) {
             Ok(target) => path_utf8(target.into_os_string())?,
-            Err(error) if strict => return Err(files::os_error(error)),
+            Err(error) if strict => return Err(component_error(error)),
             Err(_) => {
                 resolved = next;
                 continue;
