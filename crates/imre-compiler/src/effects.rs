@@ -9,7 +9,6 @@
 
 use crate::callables::Targets;
 use crate::ir::{Expr, ExprKind, Module, Statement};
-use crate::types::Types;
 
 pub(crate) struct ExceptionEffects {
     functions: Vec<bool>,
@@ -27,7 +26,7 @@ impl ExceptionEffects {
 #[derive(Clone, Copy)]
 struct Context<'a> {
     calls: &'a Targets,
-    types: &'a Types,
+    types: &'a crate::types::Types,
 }
 
 /// Removes fallibility only after every operation and callee is proved safe.
@@ -55,7 +54,7 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
 }
 
 /// Check a fragment during lowering, when no callee is yet proven infallible.
-pub(crate) fn may_raise_locally(body: &[Statement], types: &Types) -> bool {
+pub(crate) fn may_raise_locally(body: &[Statement], types: &crate::types::Types) -> bool {
     block(
         body,
         &[],
@@ -244,6 +243,48 @@ mod tests {
             ty: Type::Int,
             kind: ExprKind::Call(id, CallArgs::positional(args)),
         }
+    }
+
+    #[test]
+    fn local_and_final_analysis_agree_on_packed_list_allocations() {
+        let types = crate::types::Types::default();
+        types.set_value_structs([0].into());
+        let local = |ty, slot| Expr {
+            ty,
+            kind: ExprKind::Local(slot),
+        };
+        let mut functions = Vec::new();
+        for (item, packed) in [(Type::Class(0), true), (Type::Float, false)] {
+            let list = types.list(item);
+            let literal = Expr {
+                ty: list,
+                kind: ExprKind::List(vec![local(item, 0)]),
+            };
+            let read = Expr {
+                ty: item,
+                kind: ExprKind::Builtin(
+                    Builtin::SequenceGetInBounds,
+                    vec![local(list, 1), integer()],
+                ),
+            };
+            for value in [literal, read] {
+                let mut f = function(vec![Statement::Expr(value)]);
+                f.params = vec![0, 1];
+                f.locals = vec![item, list];
+                assert_eq!(may_raise_locally(&f.body, &types), packed);
+                functions.push(f);
+            }
+        }
+        let module = Module {
+            types,
+            functions,
+            class_fields: Vec::new(),
+            class_metadata: Vec::new(),
+            json_records: Vec::new(),
+            globals: Vec::new(),
+            entry: function(Vec::new()),
+        };
+        assert_eq!(analyze(&module).functions, [true, true, false, false]);
     }
 
     #[test]
