@@ -588,7 +588,10 @@ impl Checker<'_> {
         if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Document(_)) {
             return Ok(documents::op(ir::DocumentOp::Repr, Type::Str, vec![value]));
         }
-        if field.conversion == ast::ConversionFlag::Repr || self.types.element(value.ty).is_some() {
+        if field.conversion == ast::ConversionFlag::Repr
+            || self.types.element(value.ty).is_some()
+            || matches!(value.ty, Type::Set(_))
+        {
             if !dataclass_values::can_format(value.ty, self.types, self.classes) {
                 return Err(error(
                     self.source,
