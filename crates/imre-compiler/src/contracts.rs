@@ -77,6 +77,7 @@ impl Builtin {
                 matches!(
                     operation,
                     PosixPathOperation::MixedJoin { .. }
+                        | PosixPathOperation::Commonpath
                         | PosixPathOperation::Splitext
                         | PosixPathOperation::Normpath
                         | PosixPathOperation::Abspath

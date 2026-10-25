@@ -4104,6 +4104,12 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
+                Intrinsic::OsDevnull => {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str("/dev/null".into()),
+                    });
+                }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::SysExecutable | Intrinsic::SysPlatform => {
                     let operation = match symbol {
