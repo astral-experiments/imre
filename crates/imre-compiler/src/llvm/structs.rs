@@ -142,7 +142,11 @@ impl Emitter<'_, '_> {
             let native = self.instruction(format!("lshr i64 {}, 1", index.value.operand));
             let view = self.length_roots[slot].and_then(|root| self.length_snapshots[root].clone());
             if let Some(view) = view
-                && let Some(ListBuffer::Struct { data, index_mask }) = view.data
+                && let Some(ListBuffer::Struct {
+                    data,
+                    index_mask,
+                    cursor,
+                }) = view.data
             {
                 let current = self.instruction(format!(
                     "icmp eq ptr {}, {}",
@@ -160,13 +164,28 @@ impl Emitter<'_, '_> {
                 ));
                 self.jump(&end);
                 self.start(&no);
+                let (same, other) = (self.label(), self.label());
+                self.branch(&current, &same, &other);
+                self.start(&same);
+                let Type::Class(class) = item.ty else {
+                    unreachable!()
+                };
+                let width = self.module.class_fields[class].len();
+                let sparse = self.instruction(format!(
+                    "call ptr @imre_struct_cursor_row(ptr {}, i64 {native}, ptr {cursor}, i64 {width})",
+                    list.value.operand
+                ));
+                self.jump(&end);
+                self.start(&other);
                 let alt = self.instruction(format!(
                     "call ptr @imre_struct_row(ptr {}, i64 {native})",
                     list.value.operand
                 ));
                 self.jump(&end);
                 self.start(&end);
-                self.instruction(format!("phi ptr [{p}, %{yes}], [{alt}, %{no}]"))
+                self.instruction(format!(
+                    "phi ptr [{p}, %{yes}], [{sparse}, %{same}], [{alt}, %{other}]"
+                ))
             } else {
                 self.instruction(format!(
                     "call ptr @imre_struct_row(ptr {}, i64 {native})",

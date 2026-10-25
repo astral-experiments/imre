@@ -1,9 +1,11 @@
-//! Scalar struct lists: dense rows, or one immutable record for a repeated singleton.
+//! Scalar struct lists: dense rows, or one immutable default with sparse edits.
+mod overrides;
 use super::exceptions::{Error, Result};
 use super::records::{RecordDescriptor, allocate_record};
 use super::sequences::SliceIndices;
 use super::words::{OwnedWord, WordKind};
 use super::{MAX_LIST_LEN, Object, Storage, Words, object};
+use overrides::Overrides;
 use std::cell::OnceCell;
 use std::rc::Rc;
 
@@ -20,8 +22,7 @@ pub(super) fn float_key(word: usize) -> usize {
 
 enum RowStorage {
     Packed(Vec<usize>),
-    // Every logical slot reads this one immutable, independently owned record.
-    Repeated(OwnedWord),
+    Repeated(OwnedWord, Overrides),
 }
 
 pub(super) struct Rows {
@@ -38,6 +39,15 @@ fn tile(words: &mut Vec<usize>, target: usize) {
     while words.len() < target {
         words.extend_from_within(..words.len().min(target - words.len()));
     }
+}
+
+// A sparse edit has a lookup cost as well as a payload. The benchmark report
+// records the measured crossover for scattered and clustered writes.
+const SPARSE_DIVISOR: usize = 2;
+
+fn base_row(base: &OwnedWord, width: usize) -> &[usize] {
+    // SAFETY: the shared owner roots a complete record of the list's exact layout.
+    unsafe { std::slice::from_raw_parts(base.word as *const usize, width) }
 }
 
 impl Rows {
@@ -59,42 +69,63 @@ impl Rows {
         self.layout
     }
 
-    fn repeated(&self) -> bool {
-        matches!(self.storage, RowStorage::Repeated(_))
-    }
-
-    /// Repeated lists expose only one physical row, regardless of logical length.
-    fn words(&self) -> &[usize] {
+    fn direct_view(&self) -> Option<(*const usize, usize)> {
         match &self.storage {
-            RowStorage::Packed(words) => words,
-            // SAFETY: the stored owner roots one initialized record of this layout.
-            RowStorage::Repeated(word) => unsafe { self.payload(word.word as *const usize) },
+            RowStorage::Packed(words) => Some((words.as_ptr(), usize::MAX)),
+            RowStorage::Repeated(base, edits) if edits.len == 0 => {
+                Some((base.word as *const usize, 0))
+            }
+            _ => None,
         }
     }
 
-    pub(super) fn swap(&mut self, a: usize, b: usize) {
-        if let RowStorage::Packed(words) = &mut self.storage {
-            self.boxed.take();
-            let width = self.layout.length;
-            for i in 0..width {
-                words.swap(a * width + i, b * width + i);
+    /// A sort already has its permutation. Move only changed slots in a sparse
+    /// list, publishing the new mapping after all allocations have succeeded.
+    pub(super) fn reorder_shared(&mut self, order: &[usize]) -> Result<bool> {
+        let RowStorage::Repeated(_, edits) = &mut self.storage else {
+            return Ok(false);
+        };
+        debug_assert_eq!(order.len(), self.len);
+        if edits.len != 0 {
+            let mut out = Overrides::default();
+            for (new, &old) in order.iter().enumerate() {
+                if let Some(row) = edits.get(old, self.layout.length) {
+                    out.put(new, row)?;
+                }
             }
+            *edits = out;
+            self.boxed.take();
+        }
+        Ok(true)
+    }
+
+    pub(super) fn swap(&mut self, a: usize, b: usize) {
+        let RowStorage::Packed(words) = &mut self.storage else {
+            unreachable!()
+        };
+        self.boxed.take();
+        let width = self.layout.length;
+        for i in 0..width {
+            words.swap(a * width + i, b * width + i);
         }
     }
 
     pub(super) fn row(&self, at: usize) -> &[usize] {
         debug_assert!(at < self.len);
-        let start = if self.repeated() {
-            0
-        } else {
-            at * self.layout.length
-        };
-        &self.words()[start..start + self.layout.length]
+        let width = self.layout.length;
+        match &self.storage {
+            RowStorage::Packed(words) => &words[at * width..(at + 1) * width],
+            RowStorage::Repeated(base, edits) => edits
+                .get(at, width)
+                .unwrap_or_else(|| base_row(base, width)),
+        }
     }
 
     fn owned_row(&self, at: usize) -> Result<OwnedWord> {
-        if let RowStorage::Repeated(word) = &self.storage {
-            return Ok(word.clone());
+        if let RowStorage::Repeated(base, edits) = &self.storage
+            && edits.get(at, self.layout.length).is_none()
+        {
+            return Ok(base.clone());
         }
         // SAFETY: the new allocation owns room for the exact initialized scalar row.
         unsafe {
@@ -144,13 +175,17 @@ impl Rows {
     /// Reserve before replacing shared storage, so a failed write leaves the list intact.
     fn writable(&mut self, len: usize) -> Result<&mut Vec<usize>> {
         let target = self.word_count(len)?;
-        if self.repeated() {
+        if let RowStorage::Repeated(base, edits) = &self.storage {
+            let width = self.layout.length;
             let mut words = Vec::new();
             words
                 .try_reserve_exact(target)
                 .map_err(|_| Error::allocation())?;
-            words.extend_from_slice(self.words());
-            tile(&mut words, self.len * self.layout.length);
+            words.extend_from_slice(base_row(base, width));
+            tile(&mut words, self.len * width);
+            for (at, row) in edits.iter(width) {
+                words[at * width..(at + 1) * width].copy_from_slice(row);
+            }
             self.storage = RowStorage::Packed(words);
         }
         let RowStorage::Packed(words) = &mut self.storage else {
@@ -170,10 +205,8 @@ impl Rows {
                 .try_reserve(row.len())
                 .map_err(|_| Error::allocation())?;
             words.extend_from_slice(row);
-        } else if self.words() == row {
-            self.word_count(self.len + 1)?;
         } else {
-            self.writable(self.len + 1)?.extend_from_slice(row);
+            self.write_shared(self.len, self.len + 1, row)?;
         }
         self.len += 1;
         self.boxed.take();
@@ -184,13 +217,44 @@ impl Rows {
         if at >= self.len {
             return Err(Error::index());
         }
-        // Equal structs may contain observably different signed zeros or NaN bits.
-        if self.repeated() && self.words() == row {
-            return Ok(());
-        }
         let width = self.layout.length;
-        self.writable(self.len)?[at * width..(at + 1) * width].copy_from_slice(row);
+        if let RowStorage::Packed(words) = &mut self.storage {
+            words[at * width..(at + 1) * width].copy_from_slice(row);
+        } else {
+            self.write_shared(at, self.len, row)?;
+        }
         self.boxed.take();
+        Ok(())
+    }
+
+    fn write_shared(&mut self, at: usize, len: usize, row: &[usize]) -> Result<()> {
+        self.word_count(len)?;
+        let width = self.layout.length;
+        let RowStorage::Repeated(base, edits) = &mut self.storage else {
+            unreachable!()
+        };
+        // Equality of public values deliberately ignores signed zero and NaN bits.
+        // Storage must preserve them: fields can expose the original float bits.
+        if row == base_row(base, width) {
+            edits.remove(at, width);
+        } else if edits.len < len / SPARSE_DIVISOR || edits.get(at, width).is_some() {
+            edits.put(at, row)?;
+        } else {
+            let append = at == self.len;
+            let Ok(words) = self.writable(len) else {
+                // Packing is a performance choice. If its reservation fails,
+                // an independently affordable sparse write can still succeed.
+                let RowStorage::Repeated(_, edits) = &mut self.storage else {
+                    unreachable!()
+                };
+                return edits.put(at, row);
+            };
+            if append {
+                words.extend_from_slice(row);
+            } else {
+                words[at * width..(at + 1) * width].copy_from_slice(row);
+            }
+        }
         Ok(())
     }
 
@@ -205,6 +269,8 @@ impl Rows {
             words.truncate(last * self.layout.length);
         } else if last == 0 {
             self.storage = RowStorage::Packed(Vec::new());
+        } else if let RowStorage::Repeated(_, edits) = &mut self.storage {
+            edits.remove(last, self.layout.length);
         }
         self.boxed.take();
         Ok(result.into_word())
@@ -214,40 +280,67 @@ impl Rows {
         *self = Self::new(self.layout);
     }
 
-    fn single_value(&self, len: usize) -> Result<Words> {
-        let mut out = Self::new(self.layout);
-        if len != 0 {
-            out.storage = RowStorage::Repeated(self.owned_row(0)?);
-            out.len = len;
+    fn with_default(&self, base: OwnedWord, len: usize) -> Self {
+        Self {
+            layout: self.layout,
+            len,
+            storage: RowStorage::Repeated(base, Overrides::default()),
+            boxed: OnceCell::new(),
         }
-        Ok(Words::from_rows(out))
     }
 
     pub(super) fn slice(&self, indices: SliceIndices) -> Result<Words> {
         let len = indices.len();
-        if self.repeated() {
-            return self.single_value(len);
-        }
         let mut out = Self::new(self.layout);
-        let words = out.writable(len)?;
-        for i in indices {
-            words.extend_from_slice(self.row(i));
+        if len != 0 {
+            if let RowStorage::Repeated(base, edits) = &self.storage {
+                out = self.with_default(base.clone(), len);
+                // A sparse slice takes work proportional to the smaller side.
+                if len < edits.len {
+                    for (dest, source) in indices.enumerate() {
+                        if let Some(row) = edits.get(source, self.layout.length) {
+                            out.set(dest, row)?;
+                        }
+                    }
+                } else {
+                    for (source, row) in edits.iter(self.layout.length) {
+                        if let Some(dest) = indices.position_of(source) {
+                            out.set(dest, row)?;
+                        }
+                    }
+                }
+            } else {
+                let words = out.writable(len)?;
+                for i in indices {
+                    words.extend_from_slice(self.row(i));
+                }
+                out.len = len;
+            }
         }
-        out.len = len;
         Ok(Words::from_rows(out))
     }
 
     pub(super) fn repeat(&self, count: usize) -> Result<Words> {
         let len = self.len.checked_mul(count).ok_or_else(Error::allocation)?;
         let target = self.word_count(len)?;
-        if len == 0 || self.len == 1 || self.repeated() {
-            return self.single_value(len);
-        }
         let mut out = Self::new(self.layout);
-        let words = out.writable(len)?;
-        words.extend_from_slice(self.words());
-        tile(words, target);
-        out.len = len;
+        if len != 0 {
+            if self.len == 1 {
+                out = self.with_default(self.owned_row(0)?, len);
+            } else if let RowStorage::Repeated(base, edits) = &self.storage {
+                out = self.with_default(base.clone(), len);
+                for (at, row) in edits.iter(self.layout.length) {
+                    for copy in 0..count {
+                        out.set(copy * self.len + at, row)?;
+                    }
+                }
+            } else if let RowStorage::Packed(source) = &self.storage {
+                let words = out.writable(len)?;
+                words.extend_from_slice(source);
+                tile(words, target);
+                out.len = len;
+            }
+        }
         Ok(Words::from_rows(out))
     }
 
@@ -303,7 +396,7 @@ pub unsafe extern "C" fn imre_struct_append(
 /// # Safety
 /// A proven read-only loop keeps the list and storage unchanged. index_mask
 /// accepts one native word: zero selects row zero for repetitions; all ones
-/// preserves the index for packed rows. Null denotes ordinary record pointers.
+/// preserves the index for packed rows. Null requires an indexed read (sparse or boxed).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_struct_read_view(
     list: *const Object,
@@ -313,13 +406,63 @@ pub unsafe extern "C" fn imre_struct_read_view(
     unsafe {
         object(list).0.with(|s| {
             let rows = s.sequence_storage().rows();
-            *index_mask = if rows.is_some_and(Rows::repeated) {
-                0
-            } else {
-                usize::MAX
-            };
-            rows.map_or(std::ptr::null(), |r| r.words().as_ptr())
+            let (data, mask) = rows
+                .and_then(Rows::direct_view)
+                .unwrap_or((std::ptr::null(), 0));
+            *index_mask = mask;
+            data
         })
+    }
+}
+
+/// Private ABI shared with imre_struct_cursor_row in the compiler. Set bits
+/// index compact scalar rows by rank; clear bits all address the same default.
+#[repr(C)]
+pub struct ReadBlock {
+    start: usize,
+    len: usize,
+    bits: u64,
+    base: *const usize,
+    edits: *const usize,
+}
+
+impl ReadBlock {
+    fn uniform(start: usize, len: usize, base: *const usize) -> Self {
+        Self {
+            start,
+            len,
+            bits: 0,
+            base,
+            edits: std::ptr::null(),
+        }
+    }
+}
+
+/// # Safety
+/// The list stays unchanged throughout the proven read-only loop, `at` is in
+/// bounds, and `out` points to the compiler's private five-word read cursor.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_struct_read_block(
+    list: *const Object,
+    at: usize,
+    out: *mut ReadBlock,
+) {
+    // SAFETY: all payload pointers borrow scalar words from this rooted list.
+    unsafe {
+        object(list).0.with(|s| {
+            let seq = s.sequence_storage();
+            let block = if let Some(rows) = seq.rows() {
+                match &rows.storage {
+                    RowStorage::Repeated(base, edits) => {
+                        edits.read_block(at, rows.len, base.word as *const usize)
+                    }
+                    RowStorage::Packed(_) => ReadBlock::uniform(at, 1, rows.row(at).as_ptr()),
+                }
+            } else {
+                ReadBlock::uniform(at, 1, seq.resolved().values[at] as *const usize)
+            };
+            out.write(block);
+        });
     }
 }
 
@@ -382,20 +525,48 @@ impl Rows {
             return false;
         }
         let width = self.layout.length;
-        if self.repeated() {
-            other
-                .words()
+        match (&self.storage, &other.storage) {
+            (RowStorage::Packed(a), RowStorage::Packed(b)) => a
                 .chunks_exact(width)
-                .all(|row| self.equal_row(self.words(), row))
-        } else if other.repeated() {
-            self.words()
+                .zip(b.chunks_exact(width))
+                .all(|(x, y)| self.equal_row(x, y)),
+            (RowStorage::Packed(words), _) => words
                 .chunks_exact(width)
-                .all(|row| self.equal_row(row, other.words()))
-        } else {
-            self.words()
+                .enumerate()
+                .all(|(i, row)| self.equal_row(row, other.row(i))),
+            (_, RowStorage::Packed(_)) => other.equal(self),
+            (RowStorage::Repeated(a, left), RowStorage::Repeated(b, right)) => {
+                let mut covered = left.len;
+                for (i, row) in left.iter(width) {
+                    if !self.equal_row(row, other.row(i)) {
+                        return false;
+                    }
+                }
+                for (i, row) in right.iter(width) {
+                    if left.get(i, width).is_none() {
+                        covered += 1;
+                        if !self.equal_row(base_row(a, width), row) {
+                            return false;
+                        }
+                    }
+                }
+                covered == self.len || self.equal_row(base_row(a, width), base_row(b, width))
+            }
+        }
+    }
+
+    fn contains(&self, needle: &[usize]) -> bool {
+        let width = self.layout.length;
+        match &self.storage {
+            RowStorage::Packed(words) => words
                 .chunks_exact(width)
-                .zip(other.words().chunks_exact(width))
-                .all(|(a, b)| self.equal_row(a, b))
+                .any(|row| self.equal_row(row, needle)),
+            RowStorage::Repeated(base, edits) => {
+                (edits.len < self.len && self.equal_row(base_row(base, width), needle))
+                    || edits
+                        .iter(width)
+                        .any(|(_, row)| self.equal_row(row, needle))
+            }
         }
     }
 }
@@ -412,11 +583,7 @@ pub unsafe extern "C" fn imre_struct_list_contains(
         object(list).0.with(|s| {
             if let Some(rows) = s.sequence_storage().rows() {
                 let needle = rows.payload(needle);
-                u32::from(
-                    rows.words()
-                        .chunks_exact(rows.layout.length)
-                        .any(|row| rows.equal_row(row, needle)),
-                )
+                u32::from(rows.contains(needle))
             } else {
                 u32::from(s.sequence().values.iter().any(|word| {
                     super::values::imre_record_equal(needle, *word as *const usize) != 0
@@ -474,7 +641,32 @@ mod tests {
     }
 
     #[test]
-    fn repeated_slots_share_one_record_until_a_bit_changes() {
+    #[cfg(target_pointer_width = "64")]
+    fn sparse_edits_above_u32_survive_reversal_and_allocation_failure() {
+        let mut seed = Rows::new(POINT);
+        ok(seed.append(&[0, 0]));
+        let n = (1usize << 32) + 400;
+        let mut list = ok(seed.repeat(n));
+        let rows = list.rows_mut().unwrap();
+        for at in [n - 1, 63, 64, n - 66] {
+            ok(rows.set(at, &[at, 1]));
+        }
+        assert!(rows.writable(MAX_LIST_LEN).is_err());
+        assert_eq!(rows.row(n - 66), [n - 66, 1]);
+        // SAFETY: zero omits the bounds, and -1 is a tagged small integer.
+        let reverse = ok(unsafe { SliceIndices::new(n, 0, 0, crate::Int::small(-1).unwrap().0) });
+        let copy = ok(rows.slice(reverse));
+        let mirrored = copy.rows().unwrap();
+        assert_eq!(mirrored.row(0), [n - 1, 1]);
+        assert_eq!(mirrored.row(65), [n - 66, 1]);
+        assert_eq!(mirrored.row(n - 65), [64, 1]);
+        assert_eq!(mirrored.row(n - 1), [0, 0]);
+        ok(rows.set(n - 1, &[0, 0]));
+        assert_eq!(mirrored.row(0), [n - 1, 1]);
+    }
+
+    #[test]
+    fn sparse_slots_restore_exact_float_bits_and_promote_only_on_a_new_exception() {
         let minus = [(-0.0_f64).to_bits() as usize, 1];
         let plus = [0, 1];
         let mut original = Rows::new(POINT);
@@ -482,22 +674,34 @@ mod tests {
         let mut list = ok(original.repeat(4096));
         let rows = list.rows_mut().unwrap();
         let saved = ok(rows.owned_row(12));
-        assert_eq!(rows.words().len(), 2);
+        assert_eq!(rows.direct_view().unwrap().1, 0);
         assert!(rows.boxed().values.iter().all(|&word| word == saved.word));
         assert_eq!(ok(rows.owned_row(99)).word, saved.word);
         assert!(rows.repeat(usize::MAX).is_err());
         assert!(rows.append(&minus).is_ok());
         assert!(rows.set(1000, &minus).is_ok());
-        assert!(rows.repeated());
+        assert_eq!(rows.direct_view().unwrap().1, 0);
         let copy = ok(rows.repeat(1));
         assert!(rows.set(4097, &plus).is_err());
-        assert!(rows.repeated());
+        assert_eq!(rows.direct_view().unwrap().1, 0);
         assert!(rows.set(1000, &plus).is_ok());
-        assert_eq!(rows.words().len(), 4097 * 2);
+        assert!(rows.direct_view().is_none());
         assert_eq!(rows.row(999), minus);
         assert_eq!(rows.row(1000), plus);
         assert_eq!(rows.row(1001), minus);
         assert_eq!(copy.rows().unwrap().row(1000), minus);
+        assert!(rows.set(1000, &minus).is_ok());
+        assert_eq!(rows.direct_view().unwrap().1, 0);
+        let cutoff = rows.len / SPARSE_DIVISOR;
+        for at in 0..cutoff {
+            assert!(rows.set(at, &plus).is_ok());
+        }
+        assert!(rows.set(0, &plus).is_ok());
+        assert!(rows.direct_view().is_none());
+        assert!(rows.set(cutoff, &plus).is_ok());
+        assert_eq!(rows.direct_view().unwrap().1, usize::MAX);
+        assert_eq!(rows.row(cutoff), plus);
+        assert_eq!(rows.row(cutoff + 1), minus);
         // The box captured before mutation remains independently rooted.
         // SAFETY: saved owns one initialized two-word POINT.
         assert_eq!(unsafe { *(saved.word as *const usize) }, minus[0]);

@@ -371,7 +371,11 @@ pub unsafe extern "C" fn imre_sort_by_keys(
         unsafe {
             object(values.cast()).0.with_mut(|storage| {
                 if let Some(rows) = storage.sequence_storage_mut().rows_mut() {
-                    permute_with(rows.len(), &mut order, |a, b| rows.swap(a, b));
+                    match rows.reorder_shared(&order) {
+                        Ok(false) => permute_with(rows.len(), &mut order, |a, b| rows.swap(a, b)),
+                        Ok(true) => {}
+                        Err(error) => error.raise(),
+                    }
                 } else {
                     let values = storage.sequence_mut();
                     values.check_kind(element_kind);

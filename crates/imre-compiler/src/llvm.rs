@@ -214,7 +214,11 @@ struct Operand {
 #[derive(Clone)]
 enum ListBuffer {
     Words(String),
-    Struct { data: String, index_mask: String },
+    Struct {
+        data: String,
+        index_mask: String,
+        cursor: String,
+    },
 }
 
 /// Loop-private views of unchanged incoming lists; no field owns a reference.
@@ -1231,7 +1235,15 @@ impl Emitter<'_, '_> {
                                 receiver.operand
                             ));
                             let index_mask = self.instruction(format!("load i64, ptr {mask}"));
-                            ListBuffer::Struct { data, index_mask }
+                            let cursor = self.entry_alloca("{ i64, i64, i64, ptr, ptr }");
+                            self.line(format!(
+                                "store {{ i64, i64, i64, ptr, ptr }} zeroinitializer, ptr {cursor}"
+                            ));
+                            ListBuffer::Struct {
+                                data,
+                                index_mask,
+                                cursor,
+                            }
                         } else {
                             let helper = match receiver.ty {
                                 Type::ListInt => "imre_list_data_readonly",
@@ -7621,6 +7633,8 @@ declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
 declare ptr @imre_struct_list_new(ptr)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
+declare void @imre_struct_read_block(ptr, i64, ptr) nounwind
+declare i64 @llvm.ctpop.i64(i64)
 declare ptr @imre_struct_row(ptr, i64) nounwind
 declare ptr @imre_struct_row_checked(ptr, i64)
 declare i32 @imre_struct_append(ptr, ptr, ptr)
@@ -7657,6 +7671,55 @@ deferred:
   %resolved = call i32 @imre_seq_resolve_header(ptr %sequence)
   ret i32 %resolved
 }
+; Fields match the runtime's repr(C) ReadBlock. Sparse cursors are private to
+; the proven read-only loop; unsigned subtraction handles reverse/random seeks.
+define internal ptr @imre_struct_cursor_row(ptr %list, i64 %at, ptr %cursor, i64 %width) alwaysinline nounwind {
+entry:
+  %lenptr = getelementptr inbounds {i64,i64,i64,ptr,ptr}, ptr %cursor, i32 0, i32 1
+  %bitsptr = getelementptr inbounds {i64,i64,i64,ptr,ptr}, ptr %cursor, i32 0, i32 2
+  %baseptr = getelementptr inbounds {i64,i64,i64,ptr,ptr}, ptr %cursor, i32 0, i32 3
+  %editsptr = getelementptr inbounds {i64,i64,i64,ptr,ptr}, ptr %cursor, i32 0, i32 4
+  %lo = load i64, ptr %cursor
+  %len = load i64, ptr %lenptr
+  %delta = sub i64 %at, %lo
+  %hit = icmp ult i64 %delta, %len
+  br i1 %hit, label %read, label %seek
+seek:
+  call void @imre_struct_read_block(ptr %list, i64 %at, ptr %cursor)
+  br label %read
+read:
+  %start = load i64, ptr %cursor
+  %bits = load i64, ptr %bitsptr
+  %relative = sub i64 %at, %start
+  %empty = icmp eq i64 %bits, 0
+  br i1 %empty, label %common, label %occupied
+occupied:
+  %full = icmp eq i64 %bits, -1
+  br i1 %full, label %consecutive, label %mixed
+consecutive:
+  %full_offset = mul i64 %relative, %width
+  %full_data = load ptr, ptr %editsptr
+  %full_row = getelementptr inbounds i64, ptr %full_data, i64 %full_offset
+  ret ptr %full_row
+mixed:
+  %slot = and i64 %relative, 63
+  %bit = shl i64 1, %slot
+  %present = and i64 %bits, %bit
+  %changed = icmp ne i64 %present, 0
+  br i1 %changed, label %edit, label %common
+edit:
+  %below = sub i64 %bit, 1
+  %before = and i64 %bits, %below
+  %rank = call i64 @llvm.ctpop.i64(i64 %before)
+  %offset = mul i64 %rank, %width
+  %data = load ptr, ptr %editsptr
+  %row = getelementptr inbounds i64, ptr %data, i64 %offset
+  ret ptr %row
+common:
+  %base = load ptr, ptr %baseptr
+  ret ptr %base
+}
+
 define internal i64 @imre_seq_len_fast(ptr %sequence) alwaysinline nounwind {
   %length = call i32 @sequence_header(ptr %sequence)
   %short = icmp ult i32 %length, -2
