@@ -1,0 +1,42 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 137,
+  "opt_level": 3,
+  "tests": {
+    "test.test_itertools.LengthTransparency.test_repeat": {
+      "method_sha256": "a9a1861622aa02f306fd1fcdc1345041b294f9c417f6412251abfa55e5bd99f1",
+      "assertions": 3,
+      "status": "native"
+    },
+    "test.test_itertools.LengthTransparency.test_repeat_with_negative_times": {
+      "method_sha256": "6c3897ece52b92a6716932b7ac4a09be41da76362aaab65854a9bf0d935f1564",
+      "assertions": 4,
+      "status": "native"
+    },
+    "test.test_itertools.TestBasicOps.test_repeat_with_negative_times": {
+      "method_sha256": "4d43525b4b7dc0ceff089dfbd869855e1fea4576b0e17df0c3551fead0f3720d",
+      "assertions": 4,
+      "status": "native"
+    },
+    "test.test_itertools.TestExamples.test_repeat": {
+      "method_sha256": "6bc3a8be25707d9df4b147bd9996c20d4343b6ddf0646e65130dfea92dced3a7",
+      "assertions": 1,
+      "status": "native"
+    },
+    "test.test_itertools.TestExamples.test_chain": {
+      "method_sha256": "17cd41d6cc9125a09a303d0659d6b4c98387a5405ed6d3871559a5d64cd6d9a8",
+      "assertions": 1,
+      "status": "native"
+    },
+    "test.test_itertools.TestExamples.test_filter": {
+      "method_sha256": "251daf5a1de9f85c255f7e91c63b527fcd18b3fc9c257ca51e262ec501d39fd0",
+      "assertions": 1,
+      "status": "native"
+    },
+    "test.test_itertools.TestExamples.test_zip": {
+      "method_sha256": "f96a31ea13f3663ba9ce40c8b6958f16bdc965bfbd7e13e3da16e97f6f5b92cd",
+      "assertions": 1,
+      "status": "native"
+    }
+  }
+}

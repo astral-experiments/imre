@@ -345,6 +345,7 @@ impl Builtin {
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
+            | Self::OsName
             | Self::SysArgv
             | Self::TextClose
             | Self::TextEnter
@@ -353,6 +354,7 @@ impl Builtin {
             | Self::TextRead
             | Self::TextWrite
             | Self::TomlKeys => Contract::new(true, Unknown),
+            Self::Repeat | Self::CursorLengthHint => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
             | Self::CounterNew
@@ -702,6 +704,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
                 | "imre_dict_delete"
+                | "imre_cursor_length_hint"
                 | "imre_mapping_iter_next"
                 | "imre_exception_raise"
                 | "imre_exception_reraise"
