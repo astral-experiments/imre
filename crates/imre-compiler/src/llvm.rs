@@ -5708,6 +5708,24 @@ impl Emitter<'_, '_> {
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::ChainMapNew => self.call("imre_chainmap_new", returns, &[&args[0].value]),
             Builtin::ChainMapMaps => self.call("imre_chainmap_maps", returns, &[&args[0].value]),
+            Builtin::ChainMapGetItem => {
+                let key = self.key_word(&args[1].value);
+                let kind = representation_kind(args[1].value.ty, &self.module.types);
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_chainmap_getitem(ptr {}, i64 {key}, i32 {kind})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            Builtin::ChainMapSetItem => {
+                let key = self.key_word(&args[2].value);
+                let word = self.word(&args[0].value);
+                self.checked_line(format!(
+                    "call void @imre_chainmap_setitem(ptr {}, i64 {key}, i64 {word})",
+                    args[1].value.operand
+                ));
+                none()
+            }
             Builtin::ChainMapSetMaps => {
                 self.line(format!(
                     "call void @imre_chainmap_set_maps(ptr {}, ptr {})",
@@ -5906,13 +5924,15 @@ impl Emitter<'_, '_> {
                 }
                 self.unpack_word(word, returns)
             }
-            Builtin::DictTryGet(stored) | Builtin::DictTryPop(stored) => {
-                let op = if matches!(builtin, Builtin::DictTryPop(_)) {
-                    "pop"
-                } else {
-                    "get"
+            Builtin::DictTryGet(stored)
+            | Builtin::DictTryPop(stored)
+            | Builtin::ChainMapGet(stored) => {
+                let function = match builtin {
+                    Builtin::DictTryPop(_) => "imre_dict_try_pop",
+                    Builtin::ChainMapGet(_) => "imre_chainmap_try_get",
+                    _ => "imre_dict_try_get",
                 };
-                let value = self.dict_try_lookup(op, *stored, &args, returns);
+                let value = self.dict_try_lookup(function, *stored, &args, returns);
                 if self
                     .module
                     .types
@@ -5991,12 +6011,12 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::DictContains | Builtin::SetContains => {
+            Builtin::DictContains | Builtin::SetContains | Builtin::ChainMapContains => {
                 let key = self.key_word(&args[0].value);
-                let family = if matches!(builtin, Builtin::SetContains) {
-                    "set"
-                } else {
-                    "dict"
+                let family = match builtin {
+                    Builtin::SetContains => "set",
+                    Builtin::ChainMapContains => "chainmap",
+                    _ => "dict",
                 };
                 let byte = self.instruction(format!(
                     "call i32 @imre_{family}_contains(ptr {}, i64 {key})",
@@ -6317,25 +6337,30 @@ impl Emitter<'_, '_> {
     /// cleanup can release the supplied fallback.
     fn dict_try_lookup(
         &mut self,
-        op: &str,
+        function: &str,
         stored: Type,
         args: &[Operand],
         returns: Type,
     ) -> Value {
         let key = self.key_word(&args[1].value);
-        let byte = self.instruction(format!(
-            "call i32 @imre_dict_try_{op}(ptr {}, i64 {key}, ptr %mapping_key_word)",
+        let call = format!(
+            "call i32 @{function}(ptr {}, i64 {key}, ptr %mapping_key_word)",
             args[0].value.operand
-        ));
-        self.check_key_comparison(args[1].value.ty);
+        );
+        let byte = self.instruction(call);
+        // An earlier defaultdict layer can allocate while resolving a later hit.
+        if matches!(args[0].value.ty, Type::ChainMap(_)) {
+            self.check_error();
+        } else {
+            self.check_key_comparison(args[1].value.ty);
+        }
         let found = self.instruction(format!("icmp ne i32 {byte}, 0"));
         let (present, absent, end) = (self.label(), self.label(), self.label());
         self.branch(&found, &present, &absent);
         self.start(&present);
         let word = self.instruction("load i64, ptr %mapping_key_word");
         let value = self.unpack_word(word, stored);
-        let value = if matches!(stored, Type::Optional(_) | Type::None) {
-            debug_assert_eq!(stored, returns);
+        let value = if stored == returns {
             value
         } else {
             debug_assert!(matches!(returns, Type::Optional(_)));
@@ -7751,6 +7776,10 @@ declare i64 @imre_deque_maxlen(ptr)
 declare ptr @imre_deque_iter(ptr, i32)
 declare ptr @imre_counter_new(i32)
 declare ptr @imre_chainmap_new(ptr)
+declare i64 @imre_chainmap_getitem(ptr, i64, i32)
+declare void @imre_chainmap_setitem(ptr, i64, i64)
+declare i32 @imre_chainmap_contains(ptr, i64)
+declare i32 @imre_chainmap_try_get(ptr, i64, ptr)
 declare ptr @imre_chainmap_maps(ptr)
 declare void @imre_chainmap_set_maps(ptr, ptr)
 declare i32 @imre_chainmap_truth(ptr)

@@ -1077,7 +1077,10 @@ types and exposes them in its mutable `maps` list. A no-argument constructor
 starts with a fresh dictionary. Replacing `maps` affects all aliases of the
 ChainMap; callers that saved the previous list still hold that list. Truth
 testing checks whether any underlying dictionary is nonempty. `repr` uses the
-current mappings in order.
+current mappings in order. Subscription searches the layers in order, including
+the missing-key behavior of a Counter or defaultdict. Membership never inserts a
+key. `get(key, default=None)` tests membership before subscribing, and indexed
+assignment writes through to the first dictionary.
 
 Direct `mapping.keys()` operands and sets of the same key type support `|`, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set. Stored key-view objects and arbitrary iterables as union operands are outside the supported subset.
 
