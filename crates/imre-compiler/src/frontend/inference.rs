@@ -558,8 +558,23 @@ impl Checker<'_> {
                 };
                 let node = argument.site();
                 let value = if let Some(ty) = inference.parameter(signature.id, index) {
-                    if closed_calls::keyword_field(node) {
+                    // Normalized inline keywords carry the value range; source names have their own.
+                    if closed_calls::keyword_field(node)
+                        || call.arguments.keywords.iter().any(|kw| {
+                            kw.arg.as_ref().is_some_and(|name| {
+                                name.range() == node.range() && kw.value.range() == node.range()
+                            })
+                        })
+                    {
                         let supplied = argument.value(checker)?;
+                        if supplied.ty == Type::None
+                            && ty != Type::None
+                            && checker.types.payload(ty).is_none()
+                        {
+                            let expected = checker.types.optional(ty);
+                            inference.widen_keyword(signature.id, index, expected);
+                            return checker.coerce(supplied, expected, node);
+                        }
                         if checker.types.payload(supplied.ty) == Some(ty) {
                             inference.widen_keyword(signature.id, index, supplied.ty);
                             return Ok(supplied);

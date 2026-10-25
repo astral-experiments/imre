@@ -788,6 +788,9 @@ pub(crate) fn lower_with_owners(
         graph,
         &types,
     )?;
+    if closed_calls::has_keyword_displays(graph) {
+        inference.discover_packed_arguments();
+    }
     for (module, function, _) in &mut definitions {
         assignments::alias_builtin_parameters(function, &graph.modules[*module].bindings);
         if closed_calls::prepare(function, graph, *module) {
