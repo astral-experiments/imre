@@ -79,5 +79,14 @@ def main() -> None:
         print(key)
     print(single)
 
+    for target in ['b', 'c']:
+        entries = OrderedDict(a=1, b=2)
+        try:
+            for key, value in entries.items():
+                print(repr((key, value, entries.setdefault(target, 3))))
+        except RuntimeError as error:
+            print(error)
+        print(list(entries))
+
 
 main()

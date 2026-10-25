@@ -2390,6 +2390,7 @@ pub unsafe extern "C" fn imre_dict_setdefault(
             if inserted {
                 mapping.value_kind.acquire(word).into_word();
                 mapping.update_ascii_int(key, word);
+                mapping.keys_changed();
             }
             Ok(mapping.value_kind.acquire(word).into_word())
         })
