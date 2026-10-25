@@ -74,7 +74,11 @@ pub unsafe extern "C" fn imre_codec_writer_new(
 
 impl Writer {
     /// Complete encoding before touching the stream, preserving the previous bytes on failure.
-    pub(in crate::objects) fn write(&self, text: &str) -> Result<()> {
+    pub(in crate::objects) fn write(
+        &self,
+        text: &str,
+        error_input: impl FnOnce() -> Rc<Str>,
+    ) -> Result<()> {
         let mut codec = inspect(&self.class, |s| match s {
             Storage::CodecWriterClass(class) => class.codec,
             _ => unreachable!(),
@@ -84,7 +88,7 @@ impl Writer {
                 signature: self.first.replace(false),
             };
         }
-        let bytes = codec.encode(text, Some(&self.errors.borrow()))?;
+        let bytes = codec.encode(text, Some(&self.errors.borrow()), error_input)?;
         // SAFETY: the wrapped object is a distinct binary file whose write cannot reenter.
         unsafe { self.stream.0.with_mut(|s| s.file_mut().write_bytes(&bytes)) }
     }
@@ -102,7 +106,10 @@ pub unsafe extern "C" fn imre_codec_writer_write(writer: *const Object, text: *c
     // SAFETY: the generated native types are a writer and a Unicode string.
     let (writer, text) = unsafe { (object(writer), &*text) };
     let result = inspect(writer, |s| match s {
-        Storage::CodecWriter(w) => w.write(text),
+        Storage::CodecWriter(w) => w.write(text, || {
+            // SAFETY: the generated caller retains this exact input for the whole write.
+            unsafe { acquire_rc(text as *const Str as usize) }
+        }),
         _ => unreachable!(),
     });
     if let Err(err) = result {
