@@ -570,6 +570,9 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysVersionInfo {
+        implementation: bool,
+    },
     OsName,
     DocCaptureStart,
     DocCaptureTake,
