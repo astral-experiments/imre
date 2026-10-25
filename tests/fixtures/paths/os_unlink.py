@@ -29,7 +29,9 @@ except OSError as error:
 try:
     os.remove(b"\xff-missing")
 except FileNotFoundError as error:
-    print(str(error))
+    print("missing " + str(error))
+except OSError as error:
+    print("os error " + str(error))
 try:
     os.unlink("input.txt/")
 except NotADirectoryError as error:
