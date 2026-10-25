@@ -10,7 +10,7 @@ on:
         description: Additional required native controls
         type: choice
         default: decoder
-        options: [decoder, key-body, number-hooks]
+        options: [decoder, decoder-merge, key-body, number-hooks]
 permissions:
   contents: read
 concurrency:
@@ -137,7 +137,7 @@ jobs:
               print(f"-O{level}: both unchanged methods completed; separate owners were rejected")
           PY
       - name: Compare the overlapping native shutil callable path
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.audit == 'key-body' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && (inputs.audit == 'key-body' || inputs.audit == 'decoder-merge') }}
         shell: bash
         run: |
           python3 -B - <<'PY'
