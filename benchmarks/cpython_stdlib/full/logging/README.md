@@ -25,23 +25,23 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The first run uses main `7630556`, which includes the level registry and timed
-file handler. The counts below are identical at both levels:
+This run adds record and configuration methods to the level registry and timed
+file handler coverage. The counts below are identical at both levels:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 3 |
+| Imre | Imre | Imre | CPython hooks and native child | 4 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
-| CPython | CPython | Imre | CPython | 22 |
-| Blocked before execution | | | | 240 |
+| CPython | CPython | Imre | CPython | 27 |
+| Blocked before execution | | | | 234 |
 | Unchanged reference skip | | | | 3 |
 
-No occurrence is fully native. The three native assertion cases are root
-logger identity, level-name mapping independence, and daily rollover with an
-explicit time. The four output cases verify emitted native stderr with the
-original CPython helper. The 22 host-driven methods call a persistent native
-process for the registry or file handler; setup and registered cleanup stay
-with their test. The report keeps original method locations, individual
+No occurrence is fully native. The four native assertion cases cover root
+logger identity, level-name mapping independence, daily rollover with an
+explicit time, and record representation. The four output cases verify emitted
+native stderr with the original CPython helper. The 27 host-driven methods
+exercise levels, timed handlers, record flags or [configuration](config.md).
+Setup and registered cleanup stay with their test. The report keeps original method locations, individual
 compiler or adapter blockers, and the three pinned skip conditions. It
 does not treat a compiled source or a passing CPython reference as a native pass.
 
