@@ -83,6 +83,7 @@ pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *
 }
 
 mod sources;
+mod tee;
 use std::cell::{Cell, RefCell};
 
 pub(super) enum Adapter {
@@ -90,6 +91,7 @@ pub(super) enum Adapter {
     Progression(sources::Progression),
     FloatCount { current: Cell<f64>, step: OwnedWord },
     Slice(Slice),
+    Tee(tee::Fork),
     Cycle(Cycle),
 }
 
@@ -137,6 +139,7 @@ impl Drop for Adapter {
 impl Adapter {
     fn take_source(&mut self) -> Option<Rc<Object>> {
         match self {
+            Self::Tee(fork) => fork.take_source(),
             Self::Slice(slice) => slice.source.get_mut().take(),
             Self::Cycle(cycle) => cycle.source.get_mut().take(),
             _ => None,
@@ -167,6 +170,7 @@ impl Adapter {
             }
             Self::Progression(_) => "range_iterator",
             Self::Sequence(_) => "iterator",
+            Self::Tee(_) => "itertools._tee",
             Self::Slice(_) => "itertools.islice",
             Self::Cycle(_) => "itertools.cycle",
         };
@@ -175,6 +179,7 @@ impl Adapter {
 
     fn advance(&self, item: Option<ItemResult>) -> Advance {
         match self {
+            Self::Tee(fork) => fork.advance(item),
             Self::Slice(slice) => slice.advance(item),
             Self::Cycle(cycle) => cycle.advance(item),
             _ => unreachable!("only composed cursors request source items"),
@@ -197,7 +202,10 @@ impl Adapter {
                     let composed = unsafe {
                         source.0.with(|storage| match storage {
                             Storage::IteratorAdapter(state)
-                                if matches!(**state, Self::Slice(_) | Self::Cycle(_)) =>
+                                if matches!(
+                                    **state,
+                                    Self::Tee(_) | Self::Slice(_) | Self::Cycle(_)
+                                ) =>
                             {
                                 Some(Rc::clone(state))
                             }
@@ -239,7 +247,7 @@ impl Adapter {
                     )))
                 }
             }
-            Self::Slice(_) | Self::Cycle(_) => self.next_composed(),
+            Self::Tee(_) | Self::Slice(_) | Self::Cycle(_) => self.next_composed(),
         }
     }
 }
