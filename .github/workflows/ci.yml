@@ -108,6 +108,9 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/test_stage_tests.py
           python3 benchmarks/cpython_stdlib/full/stage_tests.py "$RUNNER_TEMP/imre-cpython-fixtures"
           python3 -B benchmarks/cpython_stdlib/full/discover_staged.py "$RUNNER_TEMP/imre-cpython-fixtures"
+          PYTHONPATH="$RUNNER_TEMP/imre-cpython-fixtures/Lib" python3 -B benchmarks/cpython_stdlib/suite_inventory.py \
+            benchmarks/cpython_stdlib/full/inspect/UPSTREAM.json --result "$RUNNER_TEMP/inspect-staged-reference.json"
+          cmp benchmarks/cpython_stdlib/full/inspect/reference-linux.json "$RUNNER_TEMP/inspect-staged-reference.json"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -128,6 +131,7 @@ jobs:
           path: .cpython-stdlib-reference
           sparse-checkout: |
             Lib/test
+            Lib/logging
             Lib/ensurepip/_bundled
             Modules
           persist-credentials: false
@@ -186,6 +190,18 @@ jobs:
           jq -s . "$RUNNER_TEMP/sys-evidence-O0.json" "$RUNNER_TEMP/sys-evidence-O3.json" > "$RUNNER_TEMP/sys-evidence.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json "$RUNNER_TEMP/sys-evidence.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json benchmarks/cpython_stdlib/full/sys/evidence-linux.json
+          git rev-parse HEAD 'HEAD^{tree}' > "$RUNNER_TEMP/sys-source.txt"
+      - name: Retain the validated Linux sys reports and tested source
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sys-evidence-linux
+          path: |
+            ${{ runner.temp }}/sys-source.txt
+            ${{ runner.temp }}/sys-evidence.json
+            ${{ runner.temp }}/test-sys-O0.json
+            ${{ runner.temp }}/test-sys-O3.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Check pathlib file I/O, components and walking under the original CPython fixtures
         run: |
           for level in 0 3; do
@@ -241,6 +257,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/logging/native_levels.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
       - name: Run CPython logging record and formatter methods at O0 and O3
         run: |
+          python3 benchmarks/cpython_stdlib/full/logging/adapter_properties.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/logging-adapter-properties.json"
           for opt in 0 3; do
             python3 benchmarks/cpython_stdlib/full/logging/native_records.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-records-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_hierarchy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-children-O$opt.json"
