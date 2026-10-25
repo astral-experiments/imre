@@ -23,6 +23,7 @@ mod counter;
 mod csv;
 mod dataclass_values;
 mod dispatch;
+mod doctest;
 mod documents;
 mod enums;
 mod expansions;
@@ -4417,6 +4418,12 @@ impl<'a> Checker<'a> {
                 &format!("no native implementation for {symbol}"),
             ));
         }
+        if let Some(target @ (Binding::Module(_) | Binding::IntrinsicModule(_))) =
+            self.resolve(expression)
+            && let Some(module) = self.module_docs(target, expression)?
+        {
+            return Ok(module);
+        }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level) | Intrinsic::SignalNumber(level),
         )) = self.resolve(expression)
@@ -5451,6 +5458,9 @@ impl<'a> Checker<'a> {
         }
         if let Some(value) = self.cache_control(call)? {
             return Ok(value);
+        }
+        if let Some(suite) = self.doctest_suite(call)? {
+            return Ok(suite);
         }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);

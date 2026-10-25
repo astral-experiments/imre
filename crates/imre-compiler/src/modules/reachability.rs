@@ -48,6 +48,18 @@ impl<'a> Visitor<'a> for References<'_> {
         if let Some(Binding::Definition(id)) = self.graph.resolve_type(self.module, expr) {
             self.found.definitions.insert(id);
         }
+        if matches!(
+            self.graph.resolve(self.module, expr),
+            Some(Binding::Module(_) | Binding::IntrinsicModule(_))
+        ) && let Some(Binding::Definition(id)) = self
+            .graph
+            .modules
+            .iter()
+            .find(|m| m.name == "doctest")
+            .and_then(|m| m.bindings.get("_module_docs"))
+        {
+            self.found.definitions.insert(*id);
+        }
         if let ast::Expr::Attribute(attr) = expr {
             let name = attr.attr.to_string();
             if let Some(Binding::Definition(owner)) = self.graph.resolve(self.module, &attr.value) {

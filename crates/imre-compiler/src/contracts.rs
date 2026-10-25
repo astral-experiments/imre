@@ -407,6 +407,9 @@ impl Builtin {
             | Self::SysPlatform
             | Self::OsName
             | Self::SysOrigArgv
+            | Self::DocCaptureStart
+            | Self::DocCaptureTake
+            | Self::DocAscii
             | Self::SysArgv
             | Self::FileFileno
             | Self::TextClose

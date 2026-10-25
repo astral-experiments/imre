@@ -63,6 +63,7 @@ pub(crate) enum IntrinsicModule {
     Typing,
     Dataclasses,
     Difflib,
+    DoctestRuntime,
     Logging,
     LoggingHandlers,
     Datetime,
@@ -100,6 +101,8 @@ pub(crate) enum IntrinsicModule {
     Enum,
     Zlib,
     Json,
+    JsonEncoder,
+    JsonDecoder,
     Imre,
     ImreJson,
     ImreToml,
@@ -173,6 +176,10 @@ pub(crate) enum Intrinsic {
     SysExit,
     ShlexSplit,
     Ndiff,
+    DocCaptureStart,
+    DocCaptureTake,
+    DocDisplay,
+    DocAscii,
     Final,
     Argv,
     OrigArgv,
@@ -293,6 +300,7 @@ impl IntrinsicModule {
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
             "difflib" => Some(Self::Difflib),
+            "_imre_doctest" => Some(Self::DoctestRuntime),
             "pathlib" => Some(Self::Pathlib),
             "shlex" => Some(Self::Shlex),
             "tempfile" => Some(Self::Tempfile),
@@ -316,6 +324,8 @@ impl IntrinsicModule {
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
             "json" => Some(Self::Json),
+            "json.encoder" => Some(Self::JsonEncoder),
+            "json.decoder" => Some(Self::JsonDecoder),
             "imre" => Some(Self::Imre),
             "imre.json" => Some(Self::ImreJson),
             "imre.toml" => Some(Self::ImreToml),
@@ -336,6 +346,13 @@ impl IntrinsicModule {
                 return Some(Binding::Intrinsic(symbol));
             }
         }
+        if self == Self::Json && matches!(name, "encoder" | "decoder") {
+            return Some(Binding::IntrinsicModule(if name == "encoder" {
+                Self::JsonEncoder
+            } else {
+                Self::JsonDecoder
+            }));
+        }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
         }
@@ -349,6 +366,10 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
         let symbol = match (self, name) {
+            (Self::DoctestRuntime, "capture_start") => Intrinsic::DocCaptureStart,
+            (Self::DoctestRuntime, "capture_take") => Intrinsic::DocCaptureTake,
+            (Self::DoctestRuntime, "display") => Intrinsic::DocDisplay,
+            (Self::DoctestRuntime, "ascii_output") => Intrinsic::DocAscii,
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
@@ -1467,18 +1488,21 @@ impl<'a> Loader<'a> {
             }
             return Ok(id);
         }
-        if name == "unittest" {
+        let bundled = match name {
+            "unittest" => Some((
+                "unittest/__init__.py",
+                true,
+                include_str!("../stdlib/unittest/__init__.py"),
+            )),
+            "doctest" => Some(("doctest.py", false, include_str!("../stdlib/doctest.py"))),
+            _ => None,
+        };
+        if let Some((filename, is_package, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
             // ty resolves this immutable source at its Python import path in the
             // in-memory project. It is part of the compiler, not a disk input.
-            let path = self.root.join("unittest/__init__.py");
-            let id = self.add(
-                path.clone(),
-                path,
-                name.into(),
-                true,
-                include_str!("../stdlib/unittest/__init__.py"),
-            )?;
+            let path = self.root.join(filename);
+            let id = self.add(path.clone(), path, name.into(), is_package, source)?;
             self.modules[id].bundled = true;
             self.scan(id)?;
             return Ok(id);
