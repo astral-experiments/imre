@@ -4,6 +4,35 @@ use std::fmt::{self, Write};
 
 use crate::{Error, Kind, Str};
 
+pub(super) static MAX_STR_DIGITS: std::sync::LazyLock<u32> = std::sync::LazyLock::new(|| {
+    std::env::var("PYTHONINTMAXSTRDIGITS")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|limit| *limit == 0 || (640..=i32::MAX as u32).contains(limit))
+        .unwrap_or(4300)
+});
+
+pub(super) fn check_decimal_output(magnitude: &num_bigint::BigUint) -> Result<(), Error> {
+    let limit = *MAX_STR_DIGITS;
+    // Three bits per digit always fit. Avoid constructing a huge power of ten
+    // when a permissive configured limit is far above the actual value.
+    if limit == 0 || magnitude.bits() <= 3 * u64::from(limit) {
+        return Ok(());
+    }
+    static BOUND: std::sync::LazyLock<num_bigint::BigUint> =
+        std::sync::LazyLock::new(|| num_bigint::BigUint::from(10u8).pow(*MAX_STR_DIGITS));
+    if magnitude >= &*BOUND {
+        Err(Error::new(
+            Kind::ValueError,
+            compact_str::format_compact!(
+                "Exceeds the limit ({limit} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit"
+            ),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// Builds Python's base-ten conversion diagnostic from the original literal.
 /// CPython's `%.200R` limit truncates the rendered repr by code points.
 #[cold]

@@ -92,12 +92,23 @@ impl Checker<'_> {
             if value.ty == Type::Str {
                 value
             } else {
+                // The boxed formatter enforces Python's decimal digit limit for integers.
+                let value = if value.ty == Type::Int {
+                    Expr {
+                        ty: Type::ObjectValue,
+                        kind: ExprKind::Builtin(Builtin::BoxValue, vec![value]),
+                    }
+                } else {
+                    value
+                };
                 Expr {
                     ty: Type::Str,
                     kind: ExprKind::Builtin(Builtin::Str, vec![value]),
                 }
             }
         };
+        // A line-number conversion failure precedes the message's __str__.
+        let number = scope.hold(self, string(number));
         let (root, environment) = self.linecache_search();
         let text = Expr {
             ty: Type::Str,
@@ -110,7 +121,7 @@ impl Checker<'_> {
                     string(field(0)),
                     annotations::type_name(field(1)),
                     field(2),
-                    string(number),
+                    number,
                     index,
                     field(fields.len() - 1),
                     root,

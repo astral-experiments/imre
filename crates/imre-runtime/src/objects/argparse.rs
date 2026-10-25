@@ -34,10 +34,7 @@ fn decimal_digits_allowed(count: usize) -> bool {
     if count <= 640 {
         return true;
     }
-    let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(4300);
+    let limit = *crate::integer_text::MAX_STR_DIGITS as usize;
     limit == 0 || count <= limit
 }
 

@@ -421,6 +421,7 @@ static STDIO_SETTINGS: LazyLock<StdioSettings> = LazyLock::new(|| {
 /// Capture buffering from the startup descriptors before user code can replace them.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_stdio_init() {
+    LazyLock::force(&integer_text::MAX_STR_DIGITS);
     initialize_io();
     LazyLock::force(&STDIO_SETTINGS);
 }

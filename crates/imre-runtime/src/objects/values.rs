@@ -725,14 +725,12 @@ unsafe fn write_scalar(
                     write!(output, "{value}").unwrap();
                 } else {
                     let value = value.big();
-                    if check_digits {
-                        static LIMIT: std::sync::LazyLock<num_bigint::BigUint> =
-                            std::sync::LazyLock::new(|| num_bigint::BigUint::from(10u8).pow(4300));
-                        if value.magnitude() >= &*LIMIT {
-                            super::exceptions::Error::new(super::exceptions::Kind::ValueError,
-                                "Exceeds the limit (4300 digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit").raise();
-                            return false;
-                        }
+                    if check_digits
+                        && let Err(error) =
+                            crate::integer_text::check_decimal_output(value.magnitude())
+                    {
+                        error.raise();
+                        return false;
                     }
                     write!(output, "{value}").unwrap();
                 }
