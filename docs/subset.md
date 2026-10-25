@@ -317,8 +317,9 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 ## Native text operations
 
 String `%` formatting accepts an exact integer, a string, or a fixed tuple of
-integers and strings as positional operands. The entire tuple is evaluated before
-formatting begins. Width and precision arguments (`*`) consume tuple items in order.
+positional operands. Tuple items may be `None`, `bool`, `int`, `float`, `str`,
+or `bytes`. The entire tuple is evaluated before formatting begins. Width and
+precision arguments (`*`) consume tuple items in order.
 
 `str.lower()` uses Unicode 16 full lowercase mappings, including expanding characters and contextual Greek final sigma. `str.capitalize()` titlecases the first code point and lowercases the remainder in the original string context.
 
