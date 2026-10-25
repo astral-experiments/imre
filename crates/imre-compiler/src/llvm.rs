@@ -90,6 +90,7 @@ impl Type {
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
+            | Self::CsvReader
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -145,6 +146,7 @@ impl Type {
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
+            | Self::CsvReader
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -731,6 +733,7 @@ impl Emitter<'_, '_> {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -3314,6 +3317,7 @@ impl Emitter<'_, '_> {
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
+                | Type::CsvReader
                 | Type::Exception
                 | Type::NamedException(_)
                 | Type::ExceptionField
@@ -4317,6 +4321,63 @@ impl Emitter<'_, '_> {
             },
             Builtin::Encode => self.call("imre_str_encode", Type::Bytes, &[&args[0].value]),
             Builtin::Decode => self.call("imre_bytes_decode", Type::Str, &[&args[0].value]),
+            Builtin::CsvReader {
+                delimiter,
+                quote,
+                escape,
+                flags,
+            } => {
+                let source = &args[0].value;
+                let source_kind = match source.ty {
+                    Type::TextIO => 1,
+                    Type::Str => 2,
+                    _ => 0,
+                };
+                let (function, terminator) = match args.as_slice() {
+                    [_, text, bad_type] => {
+                        let text = if matches!(text.value.ty, Type::Optional(_)) {
+                            self.instruction(format!("inttoptr i64 {} to ptr", text.value.operand))
+                        } else {
+                            text.value.operand.clone()
+                        };
+                        (
+                            "imre_csv_reader_terminator",
+                            format!(", ptr {text}, ptr {}", bad_type.value.operand),
+                        )
+                    }
+                    [_] => ("imre_csv_reader", String::new()),
+                    _ => unreachable!("checked CSV arguments"),
+                };
+                let operand = self.checked_instruction(format!(
+                    "call ptr @{function}(ptr {}, i32 {source_kind}, i32 {}, i32 {}, i32 {}, i32 {flags}{terminator})",
+                    source.operand, u32::from(*delimiter), quote.map_or(u32::MAX, u32::from), escape.map_or(u32::MAX, u32::from),
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::CsvNext { required } => {
+                let pointer = self.checked_instruction(format!(
+                    "call ptr @imre_csv_next(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*required)
+                ));
+                let operand = if *required {
+                    pointer
+                } else {
+                    self.instruction(format!("ptrtoint ptr {pointer} to i64"))
+                };
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::CsvLineNumber => {
+                self.call("imre_csv_line_number", Type::Int, &[&args[0].value])
+            }
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::HashNew => self.call(
                 "imre_hash_new",
@@ -5321,6 +5382,7 @@ impl Emitter<'_, '_> {
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
+                    | Type::CsvReader
                     | Type::RegexPattern
                     | Type::JsonRoot
                     | Type::JsonValue
@@ -5564,6 +5626,7 @@ impl Emitter<'_, '_> {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -5633,6 +5696,7 @@ impl Emitter<'_, '_> {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -6215,6 +6279,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
+        | Type::CsvReader
         | Type::RegexPattern
         | Type::JsonRoot
         | Type::JsonValue
@@ -6517,6 +6582,10 @@ declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_bytes_decode_ascii(ptr)
 declare ptr @imre_urlsafe_b64encode(ptr)
 declare ptr @imre_sha256_hex(ptr)
+declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
+declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
+declare ptr @imre_csv_next(ptr, i32)
+declare i64 @imre_csv_line_number(ptr)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()

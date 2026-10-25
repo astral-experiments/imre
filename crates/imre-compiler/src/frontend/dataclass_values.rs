@@ -42,6 +42,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::TimedFileHandler
         | Type::ClockTime
         | Type::Sha256
+        | Type::CsvReader
         | Type::RegexPattern
         | Type::RegexMatch
         | Type::ExceptionField
@@ -140,6 +141,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::StringKeys
+            | Type::CsvReader
     ) || types
         .children(ty)
         .into_iter()

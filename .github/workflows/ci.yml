@@ -143,9 +143,6 @@ jobs:
           done
           python3 benchmarks/cpython_stdlib/native_shutil.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil.json"
           python3 benchmarks/cpython_stdlib/full/shutil/copyfile.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copyfile.json"
-          if test -f crates/imre-runtime/src/objects/csv.rs; then
-            python3 benchmarks/cpython_stdlib/full/shutil/check_csv_handlers.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
-          fi
           python3 benchmarks/cpython_stdlib/native_json.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
           python3 benchmarks/cpython_stdlib/native_json_values.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json-values.json"
           python3 benchmarks/cpython_stdlib/native_os.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
@@ -208,6 +205,10 @@ jobs:
           python3 -m pip install --no-deps tomli==2.5.0 tomli-w==1.2.0 unidiff==1.0.0
           target/release/imre check --entry-profile examples/ruff_ecosystem/check-entry.json examples/ruff_ecosystem/ruff_ecosystem/__main__.py
           python3 tests/ruff_ecosystem_live.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+      - name: Check CSV reader behavior with vendored CPython methods
+        run: |
+          python3 benchmarks/cpython_stdlib/native_csv.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+          python3 benchmarks/cpython_stdlib/full/shutil/check_csv_handlers.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Compare native suites with CPython
         run: |
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
