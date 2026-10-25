@@ -21,6 +21,7 @@ saved = cache[path]
 print(saved[0])
 print(saved[1] > 0.0)
 print(saved[3] == path)
+print(saved[3] is path)
 with open(path, "w", encoding="utf-8") as file:
     file.write("replacement")
 linecache.checkcache("unrelated")
@@ -53,6 +54,7 @@ print(linecache.getlines("<string>"))
 print(linecache.getlines("<frozen nowhere>"))
 print(linecache.getlines("<frozen source>", {"__file__": path}))
 print(linecache.getlines("<frozen source>") is linecache.cache["<frozen source>"][2])
+print(linecache.cache["<frozen source>"][3] is path)
 linecache.cache["virtual"] = (0, 1.0, ["injected"], extra)
 print(linecache.getlines("virtual") is linecache.cache["virtual"][2])
 linecache.checkcache("virtual")
@@ -61,3 +63,15 @@ print(linecache.getlines(extra))
 print(extra in cache)
 print(linecache.getlines(extra) is linecache.getlines(extra))
 print(linecache.lazycache(path, None))
+
+nothing = ""
+newline = "\n"
+empty_source = sys.argv[3]
+two_blank = sys.argv[4]
+miss = linecache.getline(extra, 1)
+print(miss is nothing)
+print(miss is linecache.getline(empty_source, 4))
+print(miss is linecache.getline(extra, 2.0))
+print(linecache.getline(empty_source, 1) is newline)
+print(linecache.getline(two_blank, 1) is newline)
+print(linecache.getline(two_blank, 1) is linecache.getline(two_blank, 2))

@@ -77,12 +77,13 @@ fn stamp(meta: &fs::Metadata) -> Option<(u64, f64)> {
     }
 }
 
-fn stat(
-    filename: &str,
-    globals: Option<&Object>,
-    root: &str,
-    env: bool,
-) -> Option<(PathBuf, (u64, f64))> {
+struct SourceFile {
+    path: PathBuf,
+    original: Option<Rc<Str>>,
+    stamp: (u64, f64),
+}
+
+fn stat(filename: &Rc<Str>, globals: Option<&Object>, root: &str, env: bool) -> Option<SourceFile> {
     if filename.is_empty()
         || filename.contains('\0')
         || (filename.starts_with('<')
@@ -91,37 +92,45 @@ fn stat(
     {
         return None;
     }
-    let name = Path::new(filename);
-    let probe = |path: PathBuf| Some((stamp(&fs::metadata(&path).ok()?)?, path));
     let fullname = if filename.starts_with("<frozen ") {
         let globals = globals?;
         let key = Rc::new(Str::new("__file__"));
-        // SAFETY: the dictionary and a real rooted Rc<Str> key live throughout lookup.
+        // SAFETY: globals is string-to-string and both it and the key are rooted.
         let file =
             unsafe { mappings::lookup(std::ptr::from_ref(globals), Rc::as_ptr(&key) as usize) }?;
-        // SAFETY: globals is a rooted string-to-string dictionary; file now owns its value.
-        PathBuf::from(unsafe { (&*(file.word as *const Str)).as_str() })
+        // SAFETY: transfer the acquired, correctly typed string owner.
+        unsafe { Rc::from_raw(file.into_word() as *const Str) }
     } else {
-        name.to_owned()
+        filename.clone()
     };
-    if fullname.as_os_str().as_encoded_bytes().contains(&0) {
+    if fullname.contains('\0') {
         return None;
     }
-    let (stamp, path) = probe(fullname).or_else(|| {
-        if name.is_absolute() {
-            return None;
-        }
-        (!root.is_empty() && !SAFE_PATH.get())
-            .then(|| probe(Path::new(root).join(name)))
-            .flatten()
-            .or_else(|| {
-                env.then(|| {
-                    SEARCH.with_borrow(|dirs| dirs.iter().find_map(|dir| probe(dir.join(name))))
-                })
-                .flatten()
-            })
-    })?;
-    Some((path, stamp))
+    let probe = |path: PathBuf, original| {
+        Some(SourceFile {
+            stamp: stamp(&fs::metadata(&path).ok()?)?,
+            path,
+            original,
+        })
+    };
+    if let Some(file) = probe(PathBuf::from(fullname.as_str()), Some(fullname)) {
+        return Some(file);
+    }
+    let name = Path::new(filename.as_str());
+    if name.is_absolute() {
+        return None;
+    }
+    if !root.is_empty()
+        && !SAFE_PATH.get()
+        && let Some(file) = probe(Path::new(root).join(name), None)
+    {
+        return Some(file);
+    }
+    if env {
+        SEARCH.with_borrow(|dirs| dirs.iter().find_map(|dir| probe(dir.join(name), None)))
+    } else {
+        None
+    }
 }
 
 fn empty() -> Rc<Object> {
@@ -147,13 +156,19 @@ fn remove(cache: &Rc<Object>, key: &Str) {
 
 fn load(
     cache: &Rc<Object>,
-    name: &Str,
+    name: &Rc<Str>,
     globals: Option<&Object>,
     root: &str,
+    newline: &Rc<Str>,
     env: bool,
     layout: *const records::RecordDescriptor,
 ) -> Result<Rc<Object>> {
-    let Some((path, (size, mtime))) = stat(name, globals, root, env) else {
+    let Some(SourceFile {
+        path,
+        original,
+        stamp: (size, mtime),
+    }) = stat(name, globals, root, env)
+    else {
         return Ok(empty());
     };
     let Ok(raw) = fs::read(&path) else {
@@ -167,16 +182,24 @@ fn load(
         list.values
             .try_reserve(1)
             .map_err(|_| Error::new(Kind::MemoryError, "source line allocation failed"))?;
-        let mut item = Str::new(line);
-        item.push('\n');
-        list.values.push(Rc::into_raw(Rc::new(item)) as usize);
+        let item = if line.is_empty() {
+            newline.clone()
+        } else {
+            let mut item = Str::new(line);
+            item.push('\n');
+            Rc::new(item)
+        };
+        list.values.push(Rc::into_raw(item) as usize);
     }
     let lines = list.into_object();
-    let Some(fullname) = path.to_str() else {
-        return Err(Error::new(
-            Kind::NotImplementedError,
-            "linecache: source search path contains a non-Unicode filename",
-        ));
+    let fullname = match original {
+        Some(original) => original,
+        None => Rc::new(Str::new(path.to_str().ok_or_else(|| {
+            Error::new(
+                Kind::NotImplementedError,
+                "linecache: source search path contains a non-Unicode filename",
+            )
+        })?)),
     };
     // SAFETY: the compiler supplies a static layout for (int,float,list[str],str).
     // The tuple owns a reference to its exact mutable list; the caller gains another.
@@ -193,7 +216,7 @@ fn load(
             (2, Int::new(size.into()).into_raw()),
             (7, mtime.to_bits() as usize),
             (5, Rc::into_raw(lines.clone()) as usize),
-            (3, Rc::into_raw(Rc::new(Str::new(fullname))) as usize),
+            (3, Rc::into_raw(fullname) as usize),
         ]
         .into_iter()
         .enumerate()
@@ -201,11 +224,7 @@ fn load(
             OwnedWord::from_owned(value, WordKind::new(kind))
                 .initialize_record_field(record.add(i));
         }
-        mappings::dict_set(
-            Rc::as_ptr(cache),
-            std::ptr::from_ref(name) as usize,
-            owner.word,
-        )?;
+        mappings::dict_set(Rc::as_ptr(cache), Rc::as_ptr(name) as usize, owner.word)?;
     }
     Ok(lines)
 }
@@ -217,6 +236,7 @@ pub unsafe extern "C" fn imre_linecache_lines(
     name: *const Str,
     globals: *const Object,
     root: *const Str,
+    newline: *const Str,
     env: u32,
     update: u32,
     layout: *const records::RecordDescriptor,
@@ -233,9 +253,10 @@ pub unsafe extern "C" fn imre_linecache_lines(
         remove(cache, name);
         match load(
             cache,
-            name,
+            &acquire_rc(std::ptr::from_ref(name) as usize),
             globals.as_ref(),
             (&*root).as_str(),
+            &acquire_rc::<Str>(newline as usize),
             env != 0,
             layout,
         ) {
@@ -306,7 +327,11 @@ pub unsafe extern "C" fn imre_linecache_check(name: *const Str) {
 /// # Safety
 /// The list and canonical integer are both rooted; an in-range element is an exact string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_linecache_line_int(lines: *const Object, n: usize) -> *const Str {
+pub unsafe extern "C" fn imre_linecache_line_int(
+    lines: *const Object,
+    n: usize,
+    missing: *const Str,
+) -> *const Str {
     // SAFETY: input owners survive the immutable access and the return acquires its own.
     let string = unsafe {
         super::object(lines).0.with(|s| {
@@ -317,14 +342,19 @@ pub unsafe extern "C" fn imre_linecache_line_int(lines: *const Object, n: usize)
                 .map(|&word| acquire_rc(word))
         })
     }
-    .unwrap_or_else(|| Rc::new(Str::default()));
+    // SAFETY: the caller roots the empty-string literal while a result is acquired.
+    .unwrap_or_else(|| unsafe { acquire_rc(missing as usize) });
     Rc::into_raw(string)
 }
 
 /// # Safety
 /// The exact string list remains rooted during the range check.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_linecache_line_float(lines: *const Object, n: f64) -> *const Str {
+pub unsafe extern "C" fn imre_linecache_line_float(
+    lines: *const Object,
+    n: f64,
+    missing: *const Str,
+) -> *const Str {
     // SAFETY: the list lives during its length query.
     let len = unsafe { super::object(lines).0.with(|s| s.sequence().values.len()) };
     if 1.0 <= n && n <= len as f64 {
@@ -334,6 +364,7 @@ pub unsafe extern "C" fn imre_linecache_line_float(lines: *const Object, n: f64)
         )
         .returning(std::ptr::null())
     } else {
-        Rc::into_raw(Rc::new(Str::default()))
+        // SAFETY: the rooted literal transfers an independent return reference.
+        Rc::into_raw(unsafe { acquire_rc(missing as usize) })
     }
 }

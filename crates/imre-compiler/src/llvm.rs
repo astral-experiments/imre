@@ -4642,7 +4642,10 @@ impl Emitter<'_, '_> {
                         let layout = self
                             .output
                             .global_ref(format!("layout_{}", record_name(*entry)));
-                        let list=self.checked_instruction(format!("call ptr @imre_linecache_lines(ptr {}, ptr {}, ptr {}, i32 {}, i32 {}, ptr @{layout})",pointer(0),pointer(globals),pointer(root),u32::from(*env),u32::from(*op==Op::Update)));
+                        let list = self.checked_instruction(format!(
+                            "call ptr @imre_linecache_lines(ptr {}, ptr {}, ptr {}, ptr {}, i32 {}, i32 {}, ptr @{layout})",
+                            pointer(0), pointer(globals), pointer(root), pointer(root+1), u32::from(*env), u32::from(*op == Op::Update)
+                        ));
                         let operand = if *op == Op::Getline {
                             let index = &args[1].value;
                             let ty = index.ty.llvm();
@@ -4652,8 +4655,9 @@ impl Emitter<'_, '_> {
                                 "imre_linecache_line_int"
                             };
                             let item = self.instruction(format!(
-                                "call ptr @{fname}(ptr {list}, {ty} {})",
-                                index.operand
+                                "call ptr @{fname}(ptr {list}, {ty} {}, ptr {})",
+                                index.operand,
+                                pointer(root + 2)
                             ));
                             self.line(format!("call void @imre_object_release(ptr {list})"));
                             self.check_error();
@@ -7010,9 +7014,9 @@ declare void @imre_linecache_init()
 declare ptr @imre_linecache_cache()
 declare void @imre_linecache_clear()
 declare void @imre_linecache_check(ptr)
-declare ptr @imre_linecache_lines(ptr, ptr, ptr, i32, i32, ptr)
-declare ptr @imre_linecache_line_int(ptr, i64)
-declare ptr @imre_linecache_line_float(ptr, double)
+declare ptr @imre_linecache_lines(ptr, ptr, ptr, ptr, i32, i32, ptr)
+declare ptr @imre_linecache_line_int(ptr, i64, ptr)
+declare ptr @imre_linecache_line_float(ptr, double, ptr)
 declare ptr @imre_inspect_sentinel()
 declare ptr @imre_inspect_str_descriptor(i32)
 declare ptr @imre_sha256_new(ptr)

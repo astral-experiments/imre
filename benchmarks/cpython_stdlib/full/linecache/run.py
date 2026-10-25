@@ -206,11 +206,17 @@ def aliases(lang, root):
     src = HERE / "controls.py"
     exe = lang.build(src.read_bytes(), directory)
     file, absent = root / "source.py", root / "absent.py"
+    empty, blank = root / "empty.py", root / "two-blank.py"
+    empty.write_bytes(b"")
+    blank.write_bytes(b"\r\n\n")
     outputs = []
     for invocation in ([sys.executable, src], [exe]):
         file.write_bytes("# cöldé\r\nsecond".encode())
         proc = subprocess.run(
-            [*invocation, file, absent], cwd=root, capture_output=True, check=True
+            [*invocation, file, absent, empty, blank],
+            cwd=root,
+            capture_output=True,
+            check=True,
         )
         outputs.append((proc.stdout, proc.stderr))
     assert outputs[0] == outputs[1] and not outputs[0][1], outputs

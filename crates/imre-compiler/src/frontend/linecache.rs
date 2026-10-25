@@ -83,6 +83,12 @@ impl Checker<'_> {
             };
             args.order.push(args.values.len());
             args.values.push(unpacking::string(path));
+            // CPython's '\n' and '' belong to the same literal pool as a
+            // caller's strings; using new equal strings would break identity.
+            for value in std::iter::once("\n").chain((op == Op::Getline).then_some("")) {
+                args.order.push(args.values.len());
+                args.values.push(unpacking::string(value));
+            }
         }
         let entry = self.linecache_entry();
         Ok(self.ordered_builtin(Builtin::Linecache(op, entry, environment), returns, args))

@@ -18,7 +18,9 @@ Supported public operations include getline, getlines, updatecache, clearcache
 and checkcache. The realized cache is an ordinary shared dictionary of
 string keys and (integer size, floating mtime, mutable lines, full name)
 tuples. Removing an entry does not invalidate a list already held by the
-caller. getlines reads stale entries until the caller clears, updates or
+caller. Direct and frozen-file entries retain the original filename string.
+Missing lines and physical blank lines share the program’s empty/newline literals.
+getlines reads stale entries until the caller clears, updates or
 checks the cache. Missing and undecodable files return fresh empty lists;
 a successfully opened empty file caches one newline. A frozen filename can
 use __file__ from a string-valued globals dictionary. lazycache returns false
