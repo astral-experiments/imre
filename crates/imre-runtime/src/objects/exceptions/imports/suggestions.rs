@@ -3,13 +3,18 @@
 /// Offer the first lexicographically tied candidate within CPython's edit budget.
 pub(super) fn closest<'a>(wrong: &str, mut names: Vec<&'a str>) -> Option<&'a str> {
     names.retain(|name| wrong.starts_with('_') || !name.starts_with('_'));
+    names.sort_unstable();
+    declaration_order(wrong, &names)
+}
+
+/// The function binder breaks equal edit distances by original parameter order.
+pub(super) fn declaration_order<'a>(wrong: &str, names: &[&'a str]) -> Option<&'a str> {
     if names.len() >= 750 {
         return None;
     }
-    names.sort_unstable();
     let mut best = None;
     let mut best_cost = usize::MAX;
-    for name in names {
+    for &name in names {
         if name == wrong {
             continue;
         }

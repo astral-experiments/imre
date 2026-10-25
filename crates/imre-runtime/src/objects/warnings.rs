@@ -1,5 +1,6 @@
-//! Native warning filters for subprocess launch and finalization. A warning
-//! raised during finalization must preserve the exception being unwound.
+//! Native warning filtering and display for explicit calls, subprocess launch, and finalizers.
+//! A warning raised during finalization must preserve the exception being unwound.
+mod display;
 use super::{Error, Int, Kind, Str, exceptions, finish};
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive};
@@ -277,4 +278,24 @@ pub(super) fn unobserved_child(pid: libc::pid_t) {
         Err(()) => format!("Exception ignored in Popen.__del__:\nOverflowError: {LINE_OVERFLOW}"),
     };
     let _ = crate::sys::write_stderr(&diagnostic, true);
+}
+
+/// CPython checks this argument combination before obtaining the stdio handles.
+pub(super) fn pass_fds_override() -> crate::Result<()> {
+    const LINE: isize = 862; // subprocess.Popen.__init__
+    match filtered(2, "subprocess", LINE, || {
+        "pass_fds overriding close_fds.".into()
+    })
+    .map_err(|()| Error::new(Kind::OverflowError, LINE_OVERFLOW))?
+    {
+        Some((Action::Error, message)) => return Err(Error::new(Kind::RuntimeWarning, message)),
+        Some((_, message)) => {
+            let _ = crate::sys::write_stderr(
+                &format!("subprocess.py:{LINE}: RuntimeWarning: {message}"),
+                true,
+            );
+        }
+        None => {}
+    }
+    Ok(())
 }

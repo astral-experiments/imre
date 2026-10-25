@@ -307,7 +307,7 @@ impl Inference {
                 }
             }
             let before = self.revision.get();
-            let class_globals = classes.declarations.owns_class_tuples(graph.entry);
+            let class_globals = classes.declarations.has_class_values(graph.entry);
             let helpers =
                 Helpers::new(definitions.len() + graph.initializers(class_globals).count());
             let globals = ModuleValues::default();
