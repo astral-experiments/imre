@@ -86,6 +86,14 @@ jobs:
             python3 -B "$mod/$helper.py" "${opts[@]}" --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/shutil/$helper-linux.json"
           done
           python3 -B tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-levels 0 3
+      - name: Preserve the first measured tree while final checks are running
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: shutil-initial-pair
+          path: ${{ runner.temp }}/shutil
+          if-no-files-found: error
+          retention-days: 7
       - name: Verify newer prospective sources until the PR checks finish
         if: inputs.follow
         env:

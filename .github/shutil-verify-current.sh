@@ -32,7 +32,19 @@ while (( SECONDS < deadline )); do
         exit 0
     fi
     if [[ $new_base == "$base" && $new_head == "$head" ]]; then
-        if jq -e --arg head "$head" '.headRefOid == $head and (.statusCheckRollup|length) >= 8 and all(.statusCheckRollup[]; .status == "COMPLETED" and .conclusion == "SUCCESS")' "$out/pr-checks.json" >/dev/null; then
+        # sys-source only runs on a manual dispatch with an explicit source.
+        # Require all eight ordinary checks by name, even if one disappears.
+        if jq -e --arg head "$head" '
+            ["check", "macos-arm64", "windows-compiler", "thinlto",
+             "build-release-artifacts / Shell installer",
+             "build-release-artifacts / x86_64-unknown-linux-gnu",
+             "build-release-artifacts / aarch64-unknown-linux-gnu",
+             "build-release-artifacts / aarch64-apple-darwin"] as $required |
+            [.statusCheckRollup[] | select(.status == "COMPLETED" and .conclusion == "SUCCESS") | .name] as $passed |
+            .headRefOid == $head and (($required - $passed) | length == 0) and
+            all(.statusCheckRollup[]; .status == "COMPLETED" and
+                (.conclusion == "SUCCESS" or (.name == "sys-source" and .conclusion == "SKIPPED")))
+        ' "$out/pr-checks.json" >/dev/null; then
             echo "Verified current main $base, head $head, tree $tree; all eight PR checks passed."
             exit 0
         fi
