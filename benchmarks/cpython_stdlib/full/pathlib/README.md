@@ -217,4 +217,9 @@ reached `TestFailedWithDetails(TestFailed)` in both normal checks
 both reachable-only checks (line 1613). A separate hosted check with the full
 CPython `Lib` on the module search path stopped at the package's first
 `import os` in all four modes because that root contains an `os.py`.
+With [the inherited exception layout change](https://github.com/astral-sh/imre/pull/971)
+(tested tree `97a191b`), both normal entry points passed line 133 and stopped at
+`_MemoryWatchdog.__init__` assigning `self.procfile` on line 1155. Both
+reachable-only entries still stopped on line 1613. The coordinator's source root
+and the shared runner with verified vendored files gave identical diagnostics.
 None of these startup checks executed an upstream method.
