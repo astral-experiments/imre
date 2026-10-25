@@ -7,6 +7,7 @@ from types import ModuleType, SimpleNamespace
 def module_has_code(module: ModuleType, name: str) -> bool:
     return SimpleNamespace(present=hasattr(module, name)).present
 
+
 def evaluate(value: int) -> int:
     print("evaluated")
     return value
@@ -104,7 +105,6 @@ def main() -> None:
             print(repr(exc))
     for sample in ["", "!?A", "A1", "ǅ", "Aǅ", "Aʕ", "A꟎", "A𖺠"]:
         print(sample.isupper())
-
 
 
 main()
