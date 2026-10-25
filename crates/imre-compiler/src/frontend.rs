@@ -342,6 +342,7 @@ const RESERVED: &[&str] = &[
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
     match name {
         "NotImplementedError" => return Some(37),
+        "UnicodeEncodeError" => return Some(38),
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
         _ => {}

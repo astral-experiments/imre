@@ -13,6 +13,7 @@ use super::{
 };
 mod buffered;
 mod gzip;
+mod path_text;
 mod seekable;
 use seekable::Memory;
 
@@ -394,7 +395,7 @@ fn with_path_file<T>(
 }
 
 pub(super) fn read_path_text(path: &str) -> Result<Str> {
-    with_path_file(path, 0, false, FileState::read)
+    path_text::read(path, None, None, None)
 }
 
 pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
