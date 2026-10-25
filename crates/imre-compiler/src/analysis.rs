@@ -544,13 +544,13 @@ impl CheckedDiagnostic {
             Self::Call(range) => (range, 1),
             Self::Keyword(range) => (range, 2),
             Self::TupleListRead(range) => (range, 3),
+            Self::RepeatedKeyword(range) => (range, 11),
             Self::DictDeletion(range) => (range, 8),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
             Self::ExcessArgument(range) => (range, 6),
             Self::PositionalKeyword(range) => (range, 7),
             Self::DeferredName(range) => (range, 9),
-            Self::RepeatedKeyword(range) => (range, 10),
         };
         (range.start(), range.end(), kind)
     }
