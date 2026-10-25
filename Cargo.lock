@@ -711,6 +711,7 @@ dependencies = [
  "smallvec",
  "toml",
  "toml_parser",
+ "triomphe",
  "unicode-case-mapping",
 ]
 

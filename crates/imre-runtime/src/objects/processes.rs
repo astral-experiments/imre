@@ -123,8 +123,8 @@ impl Deadline {
 pub(super) struct TimeoutError {
     cmd: OwnedWord,
     timeout: Deadline,
-    stdout: Option<Rc<Bytes>>,
-    stderr: Option<Rc<Bytes>>,
+    stdout: Option<crate::BytesOwner>,
+    stderr: Option<crate::BytesOwner>,
 }
 
 impl TimeoutError {
@@ -136,14 +136,12 @@ impl TimeoutError {
                 Deadline::Integer(seconds) => seconds.clone().into_raw(),
                 Deadline::Float(seconds) => seconds.to_bits() as usize,
             },
-            2 | 4 => self
-                .stdout
-                .as_ref()
-                .map_or(0, |value| Rc::into_raw(value.clone()) as usize),
-            3 => self
-                .stderr
-                .as_ref()
-                .map_or(0, |value| Rc::into_raw(value.clone()) as usize),
+            2 | 4 => self.stdout.as_ref().map_or(0, |value| {
+                crate::BytesOwner::into_raw(value.clone()) as usize
+            }),
+            3 => self.stderr.as_ref().map_or(0, |value| {
+                crate::BytesOwner::into_raw(value.clone()) as usize
+            }),
             _ => fail("SystemError", "invalid timeout exception field"),
         }
     }
@@ -1359,7 +1357,7 @@ fn completed_stream(data: Vec<u8>, kind: WordKind) -> Result<OwnedWord> {
     let word = match kind.raw() {
         0 => 0,
         3 => Rc::into_raw(Rc::new(decode_utf8_text(data)?)) as usize,
-        8 => Rc::into_raw(Rc::new(data)) as usize,
+        8 => crate::BytesOwner::into_raw(crate::BytesOwner::new(data)) as usize,
         _ => fail("SystemError", "invalid process output field kind"),
     };
     // SAFETY: each arm transfers its correctly typed owned allocation, or None.
@@ -1393,8 +1391,8 @@ unsafe fn run_process(
                 // SAFETY: the original argv stays rooted across launch and capture.
                 cmd: unsafe { WordKind::new(5).acquire(args as usize) },
                 timeout: timeout.expect("only a deadline produces a timeout"),
-                stdout: stdout.map(Rc::new),
-                stderr: stderr.map(Rc::new),
+                stdout: stdout.map(crate::BytesOwner::new),
+                stderr: stderr.map(crate::BytesOwner::new),
             });
             return std::ptr::null_mut();
         }
@@ -1793,11 +1791,11 @@ mod tests {
     }
 
     /// Reads one nullable immutable bytes owner from an exact timeout view.
-    fn timeout_bytes(error: &Rc<Object>, field: u32) -> Option<Rc<Bytes>> {
+    fn timeout_bytes(error: &Rc<Object>, field: u32) -> Option<crate::BytesOwner> {
         // SAFETY: the caller proves TimeoutExpired and selects a nullable byte field.
         unsafe {
             let word = imre_subprocess_timeout_field(Rc::as_ptr(error), field);
-            (word != 0).then(|| Rc::from_raw(word as *const Bytes))
+            (word != 0).then(|| crate::BytesOwner::from_raw(word as *const Bytes))
         }
     }
 
@@ -1815,7 +1813,7 @@ mod tests {
         assert_kind(&error, Kind::Exception);
         let stdout = timeout_bytes(&error, 2).unwrap();
         let output = timeout_bytes(&error, 4).unwrap();
-        assert!(Rc::ptr_eq(&stdout, &output));
+        assert!(crate::BytesOwner::ptr_eq(&stdout, &output));
         assert_eq!(stdout.as_slice(), b"raw\r\n\xff\xe2\x82");
         let stderr = timeout_bytes(&error, 3).unwrap();
         let pid: i32 = std::str::from_utf8(&stderr).unwrap().parse().unwrap();

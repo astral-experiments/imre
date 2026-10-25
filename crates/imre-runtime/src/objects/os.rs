@@ -3,7 +3,7 @@
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
-use super::{Bytes, Int, Str, c_int};
+use super::{Int, Str, c_int};
 use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
@@ -85,7 +85,7 @@ unsafe fn syscall_path(
     };
     if tag == 1 {
         // SAFETY: the caller roots this bytes handle through conversion.
-        let bytes: Rc<Bytes> = unsafe { super::acquire_rc(value as usize) };
+        let bytes: crate::BytesOwner = unsafe { crate::acquire_bytes(value as usize) };
         return Ok((terminated(&bytes)?, Filename::Bytes(bytes)));
     }
     // SAFETY: exact str is borrowed; Path.__fspath__ supplies an owned str.

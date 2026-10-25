@@ -556,7 +556,7 @@ pub unsafe extern "C" fn imre_binary_read(value: *const Object) -> *const Bytes 
             .with_mut(|storage| storage.file_mut().read_bytes(None))
     };
     finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }
@@ -575,7 +575,7 @@ pub unsafe extern "C" fn imre_binary_read_size(value: *const Object, size: usize
             .with_mut(|storage| storage.file_mut().read_size(&size))
     };
     finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }
@@ -593,7 +593,7 @@ pub unsafe extern "C" fn imre_binary_readline(value: *const Object) -> *const By
             .with_mut(|storage| storage.file_mut().read_line_bytes())
     };
     finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }

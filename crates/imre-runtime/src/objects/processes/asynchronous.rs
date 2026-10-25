@@ -179,7 +179,7 @@ pub unsafe extern "C" fn imre_async_process_communicate(
                 .enumerate()
             {
                 let owner: *const Bytes = if captured {
-                    Rc::into_raw(Rc::new(std::mem::take(bytes)))
+                    crate::BytesOwner::into_raw(crate::BytesOwner::new(std::mem::take(bytes)))
                 } else {
                     std::ptr::null()
                 };

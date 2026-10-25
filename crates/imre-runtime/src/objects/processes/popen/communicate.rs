@@ -174,8 +174,8 @@ pub unsafe extern "C" fn imre_run_config(
                 raise_timeout(TimeoutError {
                     cmd: p.args.clone(),
                     timeout: timeout.expect("timed communication"),
-                    stdout: stdout.map(Rc::new),
-                    stderr: stderr.map(Rc::new),
+                    stdout: stdout.map(crate::BytesOwner::new),
+                    stderr: stderr.map(crate::BytesOwner::new),
                 });
                 Ok(std::ptr::null())
             }
@@ -382,8 +382,8 @@ pub unsafe extern "C" fn imre_popen_communicate(
                     raise_timeout(TimeoutError {
                         cmd: p.args.clone(),
                         timeout: timeout.expect("timed communication"),
-                        stdout: stdout.map(Rc::new),
-                        stderr: stderr.map(Rc::new),
+                        stdout: stdout.map(crate::BytesOwner::new),
+                        stderr: stderr.map(crate::BytesOwner::new),
                     });
                     Ok(std::ptr::null_mut())
                 }

@@ -230,21 +230,21 @@ impl ScalarKey for Rc<Str> {
         Rc::into_raw(self) as usize
     }
 }
-impl ScalarKey for Rc<Bytes> {
+impl ScalarKey for crate::BytesOwner {
     const KIND: u32 = 8;
     fn word(&self) -> usize {
-        Rc::as_ptr(self) as usize
+        crate::BytesOwner::as_ptr(self) as usize
     }
     unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
         // SAFETY: the caller roots an exact bytes handle; ManuallyDrop does not consume it.
-        ManuallyDrop::new(unsafe { Rc::from_raw(word as *const Bytes) })
+        ManuallyDrop::new(unsafe { crate::BytesOwner::from_raw(word as *const Bytes) })
     }
     unsafe fn from_owned(word: usize) -> Self {
         // SAFETY: the caller transfers an independently acquired bytes owner.
-        unsafe { Rc::from_raw(word as *const Bytes) }
+        unsafe { crate::BytesOwner::from_raw(word as *const Bytes) }
     }
     fn into_word(self) -> usize {
-        Rc::into_raw(self) as usize
+        crate::BytesOwner::into_raw(self) as usize
     }
 }
 
@@ -536,7 +536,7 @@ enum Tables<V> {
     Enum(Table<usize, V>),
     Str(Table<Rc<Str>, V>),
     Object(Table<ObjectKey, V>),
-    Bytes(Table<Rc<Bytes>, V>),
+    Bytes(Table<crate::BytesOwner, V>),
     Tuple(Table<TupleKey, V>),
 }
 
@@ -2649,19 +2649,22 @@ mod tests {
             }
             for source in ["", "aaa", "aaé😺"] {
                 let text = Str::new(source);
-                let bytes = Rc::new(source.as_bytes().to_vec());
-                let validated = Rc::from_raw(super::super::bytes::imre_bytes_validate_utf8(
-                    Rc::as_ptr(&bytes),
-                ));
+                let bytes = crate::BytesOwner::new(source.as_bytes().to_vec());
+                let validated =
+                    crate::BytesOwner::from_raw(super::super::bytes::imre_bytes_validate_utf8(
+                        crate::BytesOwner::as_ptr(&bytes),
+                    ));
                 let from_text = Rc::from_raw(imre_dict_gather_str_int(&text, pointer));
-                let from_bytes =
-                    Rc::from_raw(imre_dict_gather_bytes_int(Rc::as_ptr(&validated), pointer));
+                let from_bytes = Rc::from_raw(imre_dict_gather_bytes_int(
+                    crate::BytesOwner::as_ptr(&validated),
+                    pointer,
+                ));
                 let words = |list: &List| {
                     list.0
                         .with(|values| values.iter().map(|value| value.0).collect::<Vec<_>>())
                 };
                 assert_eq!(words(&from_bytes), words(&from_text));
-                assert_eq!(Rc::strong_count(&bytes), 2);
+                assert_eq!(crate::BytesOwner::strong_count(&bytes), 2);
             }
         }
         assert_eq!(imre_error_pending(), 0);

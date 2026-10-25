@@ -347,6 +347,27 @@ pub type Str = compact_str::CompactString;
 
 /// Immutable byte storage; ABI handles own an Rc and never expose a mutable view.
 pub type Bytes = Vec<u8>;
+/// All byte handles crossing the native ABI point into this strong owner.
+pub(crate) type BytesOwner = triomphe::Arc<Bytes>;
+
+/// The caller roots a byte handle for the duration of this ownership increment.
+unsafe fn acquire_bytes(word: usize) -> BytesOwner {
+    if word == 0 {
+        fail("TypeError", "unexpected null runtime handle");
+    }
+    // SAFETY: the caller supplies the data pointer of a live BytesOwner.
+    unsafe { triomphe::ArcBorrow::from_ptr(word as *const Bytes) }.clone_arc()
+}
+
+unsafe fn retain_bytes(value: *const Bytes) {
+    // SAFETY: the caller roots this exact bytes handle.
+    let _ = BytesOwner::into_raw(unsafe { acquire_bytes(value as usize) });
+}
+
+unsafe fn release_bytes(value: *const Bytes) {
+    // SAFETY: the caller transfers one strong reference.
+    drop(unsafe { BytesOwner::from_raw(value) });
+}
 
 /// LLVM's C main bypasses Rust's SIGPIPE setup. Ignore it once before publishing
 /// buffered writers, so a disconnected pipe reports an ordinary I/O error. The

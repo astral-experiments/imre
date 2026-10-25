@@ -43,7 +43,7 @@ impl<'a> Spelling<'a> {
                         Rc::into_raw(super::acquire_rc::<Str>(std::ptr::from_ref(*text) as usize))
                             .cast()
                     }
-                    Self::Bytes(bytes) => Rc::into_raw(super::acquire_rc::<Bytes>(
+                    Self::Bytes(bytes) => crate::BytesOwner::into_raw(crate::acquire_bytes(
                         std::ptr::from_ref(*bytes) as usize,
                     ))
                     .cast(),
@@ -52,7 +52,9 @@ impl<'a> Spelling<'a> {
         }
         match self {
             Self::Text(s) => Rc::into_raw(Rc::new(Str::from(&s[range]))).cast(),
-            Self::Bytes(b) => Rc::into_raw(Rc::new(b[range].to_vec())).cast(),
+            Self::Bytes(b) => {
+                crate::BytesOwner::into_raw(crate::BytesOwner::new(b[range].to_vec())).cast()
+            }
         }
     }
 }
@@ -94,7 +96,7 @@ pub unsafe extern "C" fn imre_posix_join(
         let text = String::from_utf8(output).expect("ASCII separators preserve UTF-8");
         Rc::into_raw(Rc::new(Str::from(text))).cast()
     } else {
-        Rc::into_raw(Rc::new(output)).cast()
+        crate::BytesOwner::into_raw(crate::BytesOwner::new(output)).cast()
     }
 }
 
@@ -232,7 +234,7 @@ pub unsafe extern "C" fn imre_posix_commonpath(list: *const super::Object, kind:
             }
         }
         if bytes {
-            let owner = Rc::into_raw(Rc::new(prefix)) as usize;
+            let owner = crate::BytesOwner::into_raw(crate::BytesOwner::new(prefix)) as usize;
             Ok(owner | usize::from(kind == 2))
         } else {
             let value = std::str::from_utf8(&prefix).expect("joined UTF-8 path components");
@@ -318,7 +320,7 @@ pub unsafe extern "C" fn imre_posix_normalize(
         return std::ptr::null();
     };
     if bytes != 0 {
-        Rc::into_raw(Rc::new(output)).cast()
+        crate::BytesOwner::into_raw(crate::BytesOwner::new(output)).cast()
     } else {
         // An undecodable cwd component canceled by `..` never reaches the text result.
         match super::paths::path_utf8(OsString::from_vec(output)) {

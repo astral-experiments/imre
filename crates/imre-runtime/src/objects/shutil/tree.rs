@@ -148,7 +148,7 @@ fn entry(
 
 fn path_word(name: &Name) -> usize {
     match name {
-        Name::Bytes(b) => Rc::into_raw(Rc::clone(b)) as usize | 1,
+        Name::Bytes(b) => crate::BytesOwner::into_raw(crate::BytesOwner::clone(b)) as usize | 1,
         Name::Text(s) | Name::Path(s) => Rc::into_raw(Rc::clone(s)) as usize,
     }
 }

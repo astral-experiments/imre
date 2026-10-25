@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::rc::Rc;
 
 use crate::objects::{
-    Object, acquire_rc,
+    Object,
     bytes::{decode_error, decode_owned_error},
 };
 use crate::{Bytes, Error, Kind, finish};
@@ -34,14 +34,14 @@ impl Encoding {
     }
 }
 
-fn decode(bytes: &Rc<Bytes>) -> Result<Cow<'_, str>, Error> {
+fn decode(bytes: &crate::BytesOwner) -> Result<Cow<'_, str>, Error> {
     let (encoding, mut pos) = Encoding::detect(bytes);
     let (width, little, codec) = match encoding {
         Encoding::Utf8 => {
             let data = &bytes[pos..];
             return std::str::from_utf8(data).map(Cow::Borrowed).map_err(|err| {
                 if pos == 0 {
-                    decode_owned_error(Rc::clone(bytes), err)
+                    decode_owned_error(crate::BytesOwner::clone(bytes), err)
                 } else {
                     decode_error(data, err)
                 }
@@ -119,7 +119,7 @@ fn decode(bytes: &Rc<Bytes>) -> Result<Cow<'_, str>, Error> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_json_loads_bytes(bytes: *const Bytes) -> *const Object {
     // SAFETY: the caller supplies live immutable bytes until the parse completes.
-    let bytes = unsafe { acquire_rc::<Bytes>(bytes as usize) };
+    let bytes = unsafe { crate::acquire_bytes(bytes as usize) };
     let result = decode(&bytes).and_then(|text| {
         super::readonly::loads(&text, || {
             crate::Str::try_new(text.as_ref()).ok().map(Rc::new)
@@ -134,10 +134,10 @@ mod tests {
 
     #[test]
     fn invalid_utf8_retains_the_original_bytes() {
-        let bytes = Rc::new(vec![0xff]);
+        let bytes = crate::BytesOwner::new(vec![0xff]);
         let error = decode(&bytes).unwrap_err();
-        assert_eq!(Rc::strong_count(&bytes), 2);
+        assert_eq!(crate::BytesOwner::strong_count(&bytes), 2);
         drop(error);
-        assert_eq!(Rc::strong_count(&bytes), 1);
+        assert_eq!(crate::BytesOwner::strong_count(&bytes), 1);
     }
 }

@@ -162,9 +162,9 @@ mod tests {
     #[test]
     fn tagged_members_keep_exact_owners_and_truth_values() {
         let text = Rc::new(Str::from("text"));
-        let bytes = Rc::new(Bytes::new());
+        let bytes = crate::BytesOwner::new(Bytes::new());
         let text_word = Rc::as_ptr(&text) as usize;
-        let bytes_word = Rc::as_ptr(&bytes) as usize | 1;
+        let bytes_word = crate::BytesOwner::as_ptr(&bytes) as usize | 1;
         // SAFETY: both locals root their exact tagged payloads throughout.
         unsafe {
             assert_eq!(imre_union_truthy(text_word), 1);
@@ -172,11 +172,11 @@ mod tests {
             let text_owner = WordKind::new(9).acquire(text_word);
             let bytes_owner = WordKind::new(9).acquire(bytes_word);
             assert_eq!(Rc::strong_count(&text), 2);
-            assert_eq!(Rc::strong_count(&bytes), 2);
+            assert_eq!(crate::BytesOwner::strong_count(&bytes), 2);
             drop(text_owner);
             drop(bytes_owner);
             assert_eq!(Rc::strong_count(&text), 1);
-            assert_eq!(Rc::strong_count(&bytes), 1);
+            assert_eq!(crate::BytesOwner::strong_count(&bytes), 1);
             drop(WordKind::new(256 | 9).acquire(0));
         }
     }

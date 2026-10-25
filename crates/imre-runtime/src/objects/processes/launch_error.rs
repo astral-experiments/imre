@@ -185,7 +185,7 @@ unsafe fn filename(word: usize, kind: WordKind, keep_path: bool) -> Filename {
     unsafe {
         match kind.raw() {
             3 => Filename::Str(crate::objects::acquire_rc(word)),
-            8 => Filename::Bytes(crate::objects::acquire_rc(word)),
+            8 => Filename::Bytes(crate::acquire_bytes(word)),
             5 if keep_path => Filename::Path(crate::objects::acquire_rc(word)),
             5 => object(word as *const Object)
                 .0

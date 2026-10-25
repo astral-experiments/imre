@@ -522,15 +522,19 @@ impl Error {
 
     /// UnicodeDecodeError preserves the undecoded bytes and the half-open error bounds.
     pub(super) fn unicode_decode(
-        bytes: Rc<super::Bytes>,
+        bytes: crate::BytesOwner,
         start: usize,
         end: usize,
         reason: &'static str,
         message: String,
     ) -> Self {
         // SAFETY: kind 8 owns the original immutable bytes, retained by the failing decoder.
-        let object =
-            unsafe { OwnedWord::from_owned(Rc::into_raw(bytes) as usize, WordKind::new(8)) };
+        let object = unsafe {
+            OwnedWord::from_owned(
+                crate::BytesOwner::into_raw(bytes) as usize,
+                WordKind::new(8),
+            )
+        };
         let args = [
             Self::string_arg("utf-8"),
             object,
@@ -582,7 +586,7 @@ impl Error {
     }
 
     /// Use Python's argument-free MemoryError when an operation exhausts memory.
-    pub(super) fn memory_error() -> Self {
+    pub(crate) fn memory_error() -> Self {
         Self {
             kind: Kind::MemoryError,
             payload: Some(Payload::Empty),
