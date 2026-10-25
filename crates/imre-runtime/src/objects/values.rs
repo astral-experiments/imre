@@ -213,6 +213,20 @@ pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Res
                 match raw & !NULLABLE {
                     5 => object_element(left as *const Object, right as *const Object, position),
                     6 => record_field(left as *const usize, right as *const usize, position),
+                    13 => {
+                        let (a, left) = super::annotations::member(left);
+                        let (b, right) = super::annotations::member(right);
+                        if a != b {
+                            Comparison::Done(false)
+                        } else {
+                            Comparison::Child {
+                                left,
+                                right,
+                                kind: a,
+                                resume: None,
+                            }
+                        }
+                    }
                     9 => {
                         let (left, left_kind) = super::unions::member(left);
                         let (right, right_kind) = super::unions::member(right);
@@ -451,6 +465,14 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                             None
                         }
                         Storage::Exception(_) => Some(ReprTask::Exception(owner)),
+                        Storage::SourceModule { name, filename } => {
+                            output.push_str("<module ");
+                            super::exceptions::push_string_repr(name, output);
+                            output.push_str(" from ");
+                            super::exceptions::push_string_repr(filename, output);
+                            output.push('>');
+                            None
+                        }
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
@@ -692,6 +714,10 @@ unsafe fn write_scalar(
             0 => output.push_str("None"),
             10 => super::string_enums::write_repr(output, word),
             12 => super::annotations::write_repr(output, word),
+            13 => {
+                let (member, value) = super::annotations::member(word);
+                write_repr(output, value, member);
+            }
             11 => write!(output, "<class '{}'>", *(word as *const Str)).unwrap(),
             1 => {
                 let value = if raw & NULLABLE != 0 { word - 1 } else { word };

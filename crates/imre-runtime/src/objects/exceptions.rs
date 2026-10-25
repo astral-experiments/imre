@@ -89,6 +89,7 @@ pub(crate) enum Kind {
     // Warning exception identities use a separate block from module errors and filter categories.
     Warning = 80,
     RuntimeWarning = 81,
+    DeprecationWarning = 82,
 }
 
 impl Kind {
@@ -148,6 +149,7 @@ impl Kind {
             43 => Self::RecursionError,
             80 => Self::Warning,
             81 => Self::RuntimeWarning,
+            82 => Self::DeprecationWarning,
             _ => return None,
         })
     }
@@ -204,13 +206,17 @@ impl Kind {
             Self::RecursionError => "RecursionError",
             Self::Warning => "Warning",
             Self::RuntimeWarning => "RuntimeWarning",
+            Self::DeprecationWarning => "DeprecationWarning",
         }
     }
 
     fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
-            Self::Warning => matches!(self, Self::Warning | Self::RuntimeWarning),
+            Self::Warning => matches!(
+                self,
+                Self::Warning | Self::RuntimeWarning | Self::DeprecationWarning
+            ),
             Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::Exception => !matches!(
                 self,

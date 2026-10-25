@@ -151,6 +151,12 @@ impl Checker<'_> {
         }
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        if left.ty == Type::SourceModule && right.ty == Type::SourceModule {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         let operands = [&left, &right];
         let tuple = |e: &Expr| {
             matches!(e.ty, Type::Tuple(_))
@@ -278,6 +284,37 @@ impl Checker<'_> {
                 node,
                 "imre.struct values have no observable identity; compare them with ==",
             ));
+        }
+        if let Some(&ty) = types.iter().find(|t| matches!(t, Type::AnnotationValue(_)))
+            && types.iter().all(|t| {
+                matches!(
+                    t,
+                    Type::AnnotationValue(_)
+                        | Type::ForwardRef(_)
+                        | Type::BuiltinClass
+                        | Type::None
+                        | Type::Str
+                )
+            })
+        {
+            let expr = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::AnnotationIs,
+                    vec![
+                        self.box_annotation(left, ty),
+                        self.box_annotation(right, ty),
+                    ],
+                ),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(expr)),
+                }
+            } else {
+                expr
+            });
         }
         let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
             && [&left, &right].iter().any(|value| {
@@ -421,6 +458,7 @@ impl Checker<'_> {
             || types == [Type::ClockTime; 2]
             || types == [Type::PathInfo; 2]
             || types == [Type::JsonDecoder; 2]
+            || types == [Type::Poll; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(

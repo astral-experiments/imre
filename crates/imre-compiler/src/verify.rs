@@ -618,6 +618,7 @@ mod tests {
 
     fn empty() -> Module {
         Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
             class_metadata: Vec::new(),
