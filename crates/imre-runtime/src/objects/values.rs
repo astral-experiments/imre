@@ -366,6 +366,10 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::IteratorAdapter(adapter) => {
+                            adapter.write_repr(output, owner);
+                            None
+                        }
                         Storage::Repeat(repeat) => {
                             if position == 0 {
                                 output.push_str("repeat(");
