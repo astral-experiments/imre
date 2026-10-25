@@ -42,6 +42,7 @@ pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod shutil;
+pub(crate) mod stdio;
 mod stdlib;
 mod string_enums;
 mod tempdirs;

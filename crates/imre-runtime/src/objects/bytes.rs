@@ -234,7 +234,7 @@ pub unsafe extern "C" fn imre_bytes_str(value: *const Bytes) -> *const Str {
 pub unsafe extern "C" fn imre_print_bytes(value: *const Bytes) {
     // SAFETY: the rooted input is immutable and repr retains no borrowed data.
     let text = repr(unsafe { &*value });
-    crate::output_bytes(text.as_bytes());
+    crate::print_text(&text);
 }
 
 /// # Safety
