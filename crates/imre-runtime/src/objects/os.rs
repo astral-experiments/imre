@@ -60,7 +60,7 @@ pub unsafe extern "C" fn imre_os_open(
                 }
                 let error = io::Error::last_os_error();
                 if error.kind() != io::ErrorKind::Interrupted {
-                    return Err(super::files::errno_with_path(error, |message| {
+                    return Err(super::files::errno_with_paths(error, |message| {
                         message.push_str(": ");
                         if bytes == 0 {
                             super::exceptions::push_string_repr(
