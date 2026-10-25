@@ -16,6 +16,8 @@ pub(crate) enum Type {
     StrEnum(usize),
     /// An ordinary Enum with a closed set of string-valued members.
     Enum(usize),
+    /// The namespace of exactly one source module in this closed program.
+    Module(usize),
     Bytes,
     ListInt,
     /// Native storage for a private append-only integer list consumed by bytes().
@@ -142,6 +144,7 @@ impl std::fmt::Display for Type {
             Self::StrLiteral(id) => return write!(f, "string-literal#{id}"),
             Self::StrEnum(id) => return write!(f, "string-enum#{id}"),
             Self::Enum(id) => return write!(f, "enum#{id}"),
+            Self::Module(id) => return write!(f, "module#{id}"),
             Self::Cursor(id) => return write!(f, "iterator#{id}"),
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
@@ -205,6 +208,7 @@ impl std::fmt::Display for Type {
             Self::StrLiteral(_)
             | Self::StrEnum(_)
             | Self::Enum(_)
+            | Self::Module(_)
             | Self::Class(_)
             | Self::Cursor(_)
             | Self::List(_)
@@ -490,6 +494,11 @@ pub(crate) enum ArgparseOutput {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    /// Import evaluation already initialized this module. Its nonzero tag is
+    /// stable across imports and aliases for the lifetime of the program.
+    ModuleValue(usize),
+    /// Enter or leave the bounded native call to a discovered test method.
+    UnittestDepth(bool),
     Repeat,
     CursorLengthHint,
     Progression {

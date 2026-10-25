@@ -97,6 +97,7 @@ impl Types {
             Type::AsyncProcess(bits) => bits <= 3,
             Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
             Type::Int
+            | Type::Module(_)
             | Type::Float
             | Type::BuiltinClass
             | Type::Bool
@@ -453,6 +454,7 @@ impl Types {
             Type::Tuple(_) => Some(!self.fields(ty).unwrap().is_empty()),
             Type::Class(id) if self.0.borrow().custom_truth.contains(&id) => None,
             Type::Class(_)
+            | Type::Module(_)
             | Type::Callable(_)
             | Type::Enum(_)
             | Type::Iterator

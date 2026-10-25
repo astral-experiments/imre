@@ -913,18 +913,32 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
+        // A suite invokes case.run(result) for its effects. Overrides may have
+        // different return types or reject the argument at the Python boundary.
+        let suite_forward = attribute.attr.as_str() == "run"
+            && self.graph.modules[self.module].bundled
+            && self.graph.modules[self.module].name == "unittest"
+            && self.unittest_case(class)
+            && call.arguments.args.len() == 1
+            && call.arguments.keywords.is_empty();
+        let direct = |checker: &mut Self, id: usize, receiver: Option<Expr>| {
+            if suite_forward && let Some(object) = receiver {
+                return checker.suite_run_branch(call, attribute, id, object);
+            }
+            checker.direct_method_call(call, attribute, id, receiver)
+        };
         if self.classes.has_concrete_subclasses(class)
             && let Some(receiver) = receiver
         {
             self.dispatch_record(class, receiver, call, |checker, class, receiver| {
-                checker.direct_method_call(call, attribute, class, Some(receiver))
+                direct(checker, class, Some(receiver))
             })
         } else {
-            self.direct_method_call(call, attribute, class, receiver)
+            direct(self, class, receiver)
         }
     }
 
-    fn direct_method_call(
+    pub(super) fn direct_method_call(
         &mut self,
         call: &ast::ExprCall,
         attribute: &ast::ExprAttribute,
@@ -982,6 +996,33 @@ impl Checker<'_> {
             && let Some(context) = self.unittest_assert_raises(call, class, receiver)?
         {
             return Ok(context);
+        }
+        if attribute.attr.as_str() == "run"
+            && self.suite_class(class, "TestSuite")
+            && call.arguments.args.len() == usize::from(receiver.is_none())
+            && call.arguments.keywords.is_empty()
+        {
+            let missing = self.classes.methods[class]["_missing_result"].clone();
+            return self.source_call(
+                call,
+                &missing,
+                receiver.clone(),
+                usize::from(receiver.is_some()),
+            );
+        }
+        if let Some(object) = &receiver {
+            if attribute.attr.as_str() == "loadTestsFromModule"
+                && self.suite_class(class, "TestLoader")
+            {
+                return self.discover_module(call, object.clone());
+            }
+            if attribute.attr.as_str() == "_invoke_test"
+                && self.unittest_case(class)
+                && self.graph.modules[self.module].bundled
+                && self.graph.modules[self.module].name == "unittest"
+            {
+                return self.invoke_test(call, class, object.clone());
+            }
         }
         if self.native_mock(class)
             && let Some(object) = &receiver

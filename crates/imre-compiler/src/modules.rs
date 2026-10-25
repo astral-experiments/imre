@@ -809,6 +809,18 @@ impl SourceGraph {
             .push(CheckedDiagnostic::MissingArgument(call));
     }
 
+    /// An explicit suite checks this override's concrete signature at its
+    /// invocation. Do not suppress other diagnostics in the method body.
+    pub(crate) fn checked_suite_run_override(
+        &self,
+        module: ModuleId,
+        method: &ast::StmtFunctionDef,
+    ) {
+        let header = TextRange::new(method.start(), method.body[0].start());
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::SuiteRunOverride(header));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,

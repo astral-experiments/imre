@@ -14,7 +14,6 @@ impl Checker<'_> {
         supplied: usize,
         keywords: &[ast::Keyword],
     ) -> Option<String> {
-        use crate::classes::MethodKind;
         let classes = &self.classes.declarations;
         let record = &classes.definitions[class];
         let index = record
@@ -32,13 +31,28 @@ impl Checker<'_> {
         {
             return None;
         }
+        self.concrete_method_arity(class, index, bound, supplied, keywords)
+    }
+
+    /// Binding after receiver dispatch uses the signature of that exact class.
+    pub(super) fn concrete_method_arity(
+        &self,
+        class: usize,
+        index: usize,
+        bound: bool,
+        supplied: usize,
+        keywords: &[ast::Keyword],
+    ) -> Option<String> {
+        use crate::classes::MethodKind;
+        let classes = &self.classes.declarations;
+        let record = &classes.definitions[class];
         let extra = match record.method_kinds[index] {
             MethodKind::Instance => usize::from(bound),
             MethodKind::Class => 1,
             MethodKind::Static => 0,
             MethodKind::Property => return None,
         };
-        let owner = &classes.definitions[*classes.ids.get(&origin)?].name;
+        let owner = &classes.definitions[*classes.ids.get(&record.method_origins[index])?].name;
         arity_error(
             &record.methods[index],
             Some(owner),

@@ -171,6 +171,9 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        if let Some(matches) = self.unittest_failure_type(call, &value, classes)? {
+            return Ok(matches);
+        }
         if matches!(value.ty, Type::Document(_)) {
             let op = match self.instance_types(classes)?.as_slice() {
                 [InstanceType::Dict] => ir::DocumentOp::IsMap,

@@ -375,6 +375,8 @@ impl Builtin {
             | Self::StringListNonempty
             | Self::Str
             | Self::NominalIdentity
+            | Self::ModuleValue(_)
+            | Self::UnittestDepth(_)
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
             | Self::ClassNameView

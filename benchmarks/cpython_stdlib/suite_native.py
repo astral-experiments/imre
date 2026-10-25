@@ -6,6 +6,7 @@ import dataclasses
 from functools import wraps
 import hashlib
 from pathlib import Path
+import secrets
 import subprocess
 import sys
 import unittest
@@ -30,6 +31,7 @@ class Toolchain:
     runtime: Path
     clang: Path
     level: int
+    reachable_only: bool = False
 
     def build(self, source, directory):
         entry = directory / "case.py"
@@ -38,6 +40,8 @@ class Toolchain:
         command = [self.imre.resolve(), "build", entry, "-o", binary, "--no-cache",
                    "--opt-level", str(self.level), "--runtime", self.runtime.resolve(),
                    "--clang", self.clang.resolve()]
+        if self.reachable_only:
+            command.append("--reachable-only")
         try:
             result = subprocess.run(command, cwd=directory, capture_output=True, text=True, timeout=180)
         except subprocess.TimeoutExpired as exc:
@@ -233,7 +237,8 @@ def run_in_fixtures(suite, executions):
     return evidence, failures, [(case.id(), reason) for case, reason in result.skipped]
 
 
-def run_evidence(suite, executions, reference, level, *, preflight=None, exceptions=None, fixture_variant=None):
+def run_evidence(suite, executions, reference, level, *, preflight=None, exceptions=None, fixture_variant=None,
+                 native_fixtures=None):
     """Collect v1 evidence for the full denominator, preserving fixture and subtest outcomes.
 
     IDs select all occurrences; (ID, 1-based occurrence) selects a single one.
@@ -242,8 +247,17 @@ def run_evidence(suite, executions, reference, level, *, preflight=None, excepti
     """
     if reference["platform"] != sys.platform or type(level) is not int or level not in (0, 3):
         raise ValueError("fixture platform and O0/O3 must match the native evidence run")
-    discovered, result = _run_selected(suite, executions, fixture_variant, reference)
     observations = dict(preflight or {})
+    if native_fixtures:
+        actual = list(_fixture_cases(suite))
+        instances = dict(zip(occurrence_keys(case.id() for case in actual), actual, strict=True))
+        if instances.keys() != reference_cases(reference).keys():
+            raise ValueError("discovery and reference occurrences differ")
+        for key, program in native_fixtures.items():
+            if key not in instances or key in observations or key in executions or key[0] in executions:
+                raise ValueError(f"unknown or overlapping native fixture selection: {key}")
+            observations[key] = program.observe(instances[key], level)
+    discovered, result = _run_selected(suite, executions, fixture_variant, reference)
     for key, _, _ in result.selected:
         if key in observations:
             raise ValueError(f"both a preflight decision and an execution for {key}")
@@ -312,3 +326,122 @@ def native_method(toolchain, directory, path, owner, case_id, fixture=None, *, o
                                                   "method_sha256": record["method_sha256"]}}
         return record
     return execute
+
+
+@dataclasses.dataclass(frozen=True)
+class NativeFixtureMethod:
+    binary: Path
+    case_id: str
+    method_sha256: str
+    level: int
+    operation: str
+    marker: str
+
+    def observe(self, case, level):
+        if case.id() != self.case_id or level != self.level:
+            raise ValueError("native fixture binary does not match the occurrence and optimization level")
+        cls = type(case)
+        method = getattr(case, case._testMethodName)
+        hooks = _host_hooks(case)
+        for name in ("__init__", "__call__", "run", "_callSetUp", "_callTestMethod", "_callTearDown",
+                     "doCleanups", "_callCleanup"):
+            if getattr(cls, name) is not getattr(unittest.TestCase, name):
+                hooks.append(name)
+        if (getattr(cls, "__unittest_skip__", False) or getattr(method, "__unittest_skip__", False)
+                or getattr(cls, "__unittest_expecting_failure__", False)
+                or getattr(method, "__unittest_expecting_failure__", False)):
+            hooks.append("skip or expected-failure marker")
+        if hooks:
+            raise ValueError(f"{self.case_id}: native fixture cannot omit original hooks: {hooks}")
+        completed = subprocess.run([self.binary], capture_output=True, timeout=60)
+        record = {"roles": roles(body="imre", assertions="imre", operation="imre", fixture="imre"),
+                  "evidence": {"operation": self.operation, "opt_level": level,
+                               "method_sha256": self.method_sha256,
+                               "fixture": "native TestLoader, TestSuite, TestCase lifecycle and TestResult; host launched binary",
+                               "selected_module": "isolated pinned method under its original module name"}}
+        output, frame, trailer = completed.stdout.rpartition(("\n" + self.marker + "\n").encode())
+        if completed.returncode or not frame:
+            record.update(outcome="error", reason=f"native exit {completed.returncode}: {completed.stdout!r} {completed.stderr!r}",
+                          roles=roles(body="unknown", assertions="unknown", operation="unknown", fixture="imre"))
+            return record
+        for name, data in (("stdout", output), ("stderr", completed.stderr)):
+            if data:
+                record["evidence"][name] = data.decode("utf-8", errors="backslashreplace")
+        # The reason length counts Unicode code points. Embedded newlines, empty
+        # reasons, and a second event from teardown must survive the transport.
+        result = trailer.decode("utf-8")
+        events = []
+        while result != "done\n":
+            status, _, result = result.partition("\n")
+            length, _, result = result.partition("\n")
+            if status not in {"error", "failure", "skip"} or not length.isascii() or not length.isdecimal():
+                raise ValueError(f"{self.case_id}: invalid native event header")
+            size = int(length)
+            if result[size:size + 1] != "\n":
+                raise ValueError(f"{self.case_id}: incomplete native event")
+            events.append({"outcome": status, "reason": result[:size]})
+            result = result[size + 1:]
+        if events:
+            record["evidence"]["events"] = events
+            record.update(min(events, key=lambda e: ("error", "failure", "skip").index(e["outcome"])))
+        else:
+            record["outcome"] = "pass"
+        return record
+
+
+def native_fixture_method(toolchain, directory, path, owner, case_id, *, operation, imports=""):
+    """Build a pinned method with the default TestCase lifecycle entirely in Imre.
+
+    Supply only the original imports the method uses. The native loader discovers
+    one method and runs its setup, body and teardown; observe() refuses custom
+    upstream hooks. Use native_method() when CPython supplies a fixture.
+    """
+    module, discovered_owner, method = case_id.rsplit(".", 2)
+    if discovered_owner != owner or not all(part.isidentifier() for part in case_id.split(".")):
+        raise ValueError(f"native fixture requires an importable, top-level upstream ID: {case_id}")
+    body = method_bytes(path, owner, method)
+    parts = module.split(".")
+    package = directory
+    # These namespaces locate the extracted class; package initialization is
+    # exercised separately by the whole-module driver. No product imports are supplied.
+    for part in parts[:-1]:
+        package = package / part
+        package.mkdir(exist_ok=True)
+        (package / "__init__.py").touch()
+    subject = (package / parts[-1]).with_suffix(".py")
+    subject.write_bytes((imports + "\nimport unittest\n\nclass " + owner + "(unittest.TestCase):\n").encode() + body)
+    marker = "imre-unittest-result-" + secrets.token_hex(16)
+    source = f"""import {module} as subject
+import unittest
+class Observed(unittest.TestResult):
+    seen: list[str]
+    def __init__(self) -> None:
+        super().__init__()
+        self.seen = []
+    def startTest(self, test: unittest.TestCase) -> None:
+        unittest.TestResult.startTest(self, test)
+        self.seen.append(test.id())
+suite = unittest.defaultTestLoader.loadTestsFromModule(subject)
+result = Observed()
+suite.run(result)
+if suite.countTestCases() != 1 or result.testsRun != 1 or len(result.seen) != 1 or result.seen[0] != {case_id!r}:
+    raise RuntimeError("expected the original case ID to be discovered and executed once")
+if not result.wasSuccessful() and not len(result.errors) and not len(result.failures):
+    raise RuntimeError("unreported unsuccessful native result")
+print({(chr(10) + marker)!r})
+for entry in result.errors:
+    print("error")
+    print(len(entry[1]))
+    print(entry[1])
+for entry in result.failures:
+    print("failure")
+    print(len(entry[1]))
+    print(entry[1])
+for entry in result.skipped:
+    print("skip")
+    print(len(entry[1]))
+    print(entry[1])
+print("done")
+"""
+    binary = toolchain.build(source.encode(), directory)
+    return NativeFixtureMethod(binary, case_id, hashlib.sha256(body).hexdigest(), toolchain.level, operation, marker)

@@ -74,6 +74,7 @@ mod unbound_locals;
 mod unions;
 mod unittest;
 mod unittest_bound;
+mod unittest_discovery;
 mod unittest_equality;
 mod unittest_main;
 mod unittest_mock;
@@ -4575,6 +4576,12 @@ impl<'a> Checker<'a> {
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(Binding::Module(id)) = self.resolve(expression) {
+            return Ok(Expr {
+                ty: Type::Module(id),
+                kind: ExprKind::Builtin(Builtin::ModuleValue(id), Vec::new()),
+            });
+        }
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
                 self.resolve(&attr.value)
@@ -5048,6 +5055,11 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
+                    && values.iter().all(|v| matches!(v.ty, Type::Module(_)))
+                {
+                    return Ok(Self::identity_result(values, *op == ast::CmpOp::NotEq));
+                }
                 if compare
                     .ops
                     .iter()
@@ -5432,6 +5444,18 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Type::Module(id) = receiver.ty
+                    && attribute.attr.as_str() == "__name__"
+                {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Scope {
+                            body: vec![Statement::Expr(receiver)],
+                            value: Box::new(unpacking::string(&self.graph.modules[id].name)),
+                            clear: vec![],
+                        },
+                    });
+                }
                 if receiver.ty == Type::BuiltinClass {
                     match attribute.attr.as_str() {
                         "__name__" | "__qualname__" => return Ok(annotations::type_name(receiver)),
