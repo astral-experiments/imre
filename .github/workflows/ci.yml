@@ -32,6 +32,7 @@ jobs:
           fetch-depth: ${{ inputs.audit == 'decoder-current-main' && '0' || '1' }}
           persist-credentials: false
       - name: Identify the exact source and tree
+        id: source
         shell: bash
         run: |
           set -euo pipefail
@@ -40,7 +41,7 @@ jobs:
           results="$RUNNER_TEMP/json-results"
           mkdir -p "$results"
           if [[ "$JSON_AUDIT" == decoder-current-main ]]; then
-            git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+            # checkout fetched all branches, including main, and discarded its read credential.
             base=$(git rev-parse refs/remotes/origin/main)
             tree=$(git merge-tree --write-tree "$base" "$EXPECTED_SOURCE")
             export GIT_AUTHOR_DATE GIT_COMMITTER_DATE
@@ -85,7 +86,7 @@ jobs:
           fi
       - name: Build the prospective compiler and runtime
         id: build
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -148,7 +149,7 @@ jobs:
           report = json.load(open(sys.argv[1]))
           assert set(report["levels"]) == {"0", "3"}
           for level, data in report["levels"].items():
-              attempt = data["native-body-attempts"]["typed-key-assertions"]
+              attempt = data["native-body-attempts"]["native-key-assertions"]
               ids = {f"test.test_json.test_decode.Test{backend}Decode.test_keys_reuse" for backend in ["C", "Py"]}
               assert set(attempt.get("passed", [])) == ids and not attempt["failed"] and not attempt["skipped"], (level, attempt)
               for case in ids:
