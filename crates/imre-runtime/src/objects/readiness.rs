@@ -4,7 +4,6 @@ use super::records::{RecordDescriptor, allocate_record};
 use super::{Int, List, Object, Storage, StorageCell, Words, c_int, errno_error, object};
 use std::{
     io, ptr,
-    rc::Rc,
     time::{Duration, Instant},
 };
 
@@ -27,9 +26,9 @@ impl Poll {
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_poll_new() -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Poll(
-        Box::default(),
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::Poll(Box::default()),
+    ))))
 }
 
 /// Change the interest mask without taking ownership of the fd.
@@ -253,7 +252,7 @@ pub unsafe extern "C" fn imre_poll_wait(
                     }
                 }
             }
-            Ok(Rc::into_raw(out.into_object()))
+            Ok(crate::ObjectOwner::into_raw(out.into_object()))
         })
     };
     finish(result, ptr::null())

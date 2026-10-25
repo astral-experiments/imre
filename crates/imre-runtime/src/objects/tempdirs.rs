@@ -14,7 +14,6 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use rustix::fs::{self as rfs, AtFlags, Dir, FileType, Mode, OFlags};
 use rustix::io::Errno;
@@ -521,9 +520,9 @@ pub unsafe extern "C" fn imre_directory_context_new(
         temporary,
         armed: std::cell::Cell::new(temporary),
     };
-    Rc::into_raw(Rc::new(super::Object(super::StorageCell::new(
-        super::Storage::DirectoryContext(manager),
-    ))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(super::Object(
+        super::StorageCell::new(super::Storage::DirectoryContext(manager)),
+    )))
 }
 
 /// # Safety

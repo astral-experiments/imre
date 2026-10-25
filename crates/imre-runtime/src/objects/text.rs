@@ -9,7 +9,6 @@ pub(super) use lowercase::{lowercase, lowercase_chars};
 use num_traits::{Signed, ToPrimitive};
 use std::fmt::Write;
 use std::mem::ManuallyDrop;
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
@@ -467,7 +466,7 @@ pub unsafe extern "C" fn imre_str_split(
             &maxsplit,
             reverse != 0,
         )
-        .map(|parts| Rc::into_raw(parts.into_object())),
+        .map(|parts| crate::ObjectOwner::into_raw(parts.into_object())),
         std::ptr::null(),
     )
 }
@@ -570,7 +569,7 @@ pub unsafe extern "C" fn imre_shlex_split_options(
         .ok_or_else(|| Error::new(Kind::ValueError, "s argument must not be None"))
         .and_then(|source| shell_words(source, comments != 0, posix != 0));
     finish(
-        parts.map(|parts| Rc::into_raw(parts.into_object())),
+        parts.map(|parts| crate::ObjectOwner::into_raw(parts.into_object())),
         std::ptr::null(),
     )
 }
@@ -936,9 +935,13 @@ mod tests {
         // SAFETY: raising creates one pending owner; the message getter returns
         // a second independent owner, both consumed by their Rc wrappers.
         unsafe {
-            let error = Rc::from_raw(imre_error_take());
-            assert_eq!(imre_exception_matches(Rc::as_ptr(&error), kind as u32), 1);
-            let actual = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+            let error = crate::ObjectOwner::from_raw(imre_error_take());
+            assert_eq!(
+                imre_exception_matches(crate::ObjectOwner::as_ptr(&error), kind as u32),
+                1
+            );
+            let actual =
+                StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(actual.as_str(), message);
         }
     }
@@ -996,7 +999,7 @@ mod tests {
         let separator = StrOwner::new(Str::new("::"));
         // SAFETY: inputs remain rooted; both native getters transfer owned handles.
         unsafe {
-            let parts = Rc::from_raw(imre_str_split(
+            let parts = crate::ObjectOwner::from_raw(imre_str_split(
                 StrOwner::as_ptr(&source),
                 StrOwner::as_ptr(&separator),
                 Int::small(-1).unwrap().0,
@@ -1004,7 +1007,7 @@ mod tests {
             ));
             assert_eq!(StrOwner::strong_count(&source), 2);
             let selected = StrOwner::from_raw(super::super::imre_seq_get_index(
-                Rc::as_ptr(&parts),
+                crate::ObjectOwner::as_ptr(&parts),
                 0,
             ) as *const Str);
             assert!(StrOwner::ptr_eq(&source, &selected));
@@ -1044,12 +1047,13 @@ mod tests {
             );
             let error = imre_error_take();
             assert!(!error.is_null());
-            let error = Rc::from_raw(error);
+            let error = crate::ObjectOwner::from_raw(error);
             assert_eq!(
-                imre_exception_matches(Rc::as_ptr(&error), Kind::ValueError as u32),
+                imre_exception_matches(crate::ObjectOwner::as_ptr(&error), Kind::ValueError as u32),
                 1,
             );
-            let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+            let message =
+                StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(message.as_str(), "empty separator");
         }
     }

@@ -14,7 +14,7 @@ use super::records::imre_record_retain;
 use super::words::WordKind;
 use super::*;
 
-type Signal = Option<Rc<Object>>;
+type Signal = Option<crate::ObjectOwner>;
 type Fiber = Coroutine<Signal, (), Signal>;
 type Callback = unsafe extern "C" fn(*const usize) -> usize;
 
@@ -106,7 +106,7 @@ pub unsafe extern "C" fn imre_context_new(
         closing: Cell::new(false),
         item: RefCell::default(),
     });
-    Rc::into_raw(Rc::new(Object(StorageCell::new(
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
         Storage::GeneratorContext(manager),
     ))))
 }
@@ -175,7 +175,7 @@ pub unsafe extern "C" fn imre_context_exit(handle: *const Object) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_context_throw(handle: *const Object, error: *const Object) -> u32 {
     // SAFETY: acquire the injected exception independently of the caller's handler.
-    let error = unsafe { acquire_rc(error as usize) };
+    let error = unsafe { crate::ObjectOwner::acquire_word(error as usize) };
     // SAFETY: the caller roots the exact manager handle through this operation.
     let manager = unsafe { manager(handle) };
     u32::from(exit(&manager, Some(error)))

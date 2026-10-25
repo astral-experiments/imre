@@ -3,7 +3,7 @@ use super::*;
 /// Counter.elements takes the items iterator immediately, then starts each
 /// repetition only when it reaches that entry.
 pub(in crate::objects) struct Elements {
-    items: Option<Rc<Object>>,
+    items: Option<crate::ObjectOwner>,
     repeat: Option<Repeat>,
 }
 
@@ -43,8 +43,8 @@ impl Elements {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_counter_elements(value: *const Object) -> *const Object {
     // SAFETY: mode one creates and transfers an owned dictionary items cursor.
-    let items = unsafe { Rc::from_raw(mappings::imre_dict_iter(value, 1)) };
-    Rc::into_raw(adapter(Adapter::CounterElements(RefCell::new(Elements {
+    let items = unsafe { crate::ObjectOwner::from_raw(mappings::imre_dict_iter(value, 1)) };
+    crate::ObjectOwner::into_raw(adapter(Adapter::CounterElements(RefCell::new(Elements {
         items: Some(items),
         repeat: None,
     }))))

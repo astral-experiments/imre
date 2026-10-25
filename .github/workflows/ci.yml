@@ -43,6 +43,7 @@ jobs:
     outputs:
       release_artifacts: ${{ steps.scope.outputs.release_artifacts }}
       full_asan: ${{ steps.scope.outputs.full_asan }}
+      thinlto: ${{ steps.scope.outputs.thinlto }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -607,7 +608,8 @@ jobs:
           python3 benchmarks/memory_validate.py --python python3 --binary /tmp/memory-report --compute-binary /tmp/memory-report-compute --rust /tmp/imre-memory-reference/memory-report-reference
 
   thinlto:
-    if: ${{ !inputs.sys_source && !inputs.unittest_source }}
+    needs: scope
+    if: needs.scope.outputs.thinlto == 'true'
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 120
     steps:

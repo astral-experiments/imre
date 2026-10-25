@@ -7,7 +7,6 @@ use crate::StrOwner;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Write};
-use std::rc::Rc;
 
 #[derive(Clone, Copy)]
 struct Control {
@@ -211,10 +210,11 @@ fn level(value: &Value) -> Result<Int> {
 fn logger_level(name: &str, level: Option<Int>) {
     let key = Str::from(name);
     // SAFETY: the string is live through lookup and each result transfers an owner.
-    let logger = unsafe { Rc::from_raw(super::imre_log_get(&key as *const Str as usize)) };
+    let logger =
+        unsafe { crate::ObjectOwner::from_raw(super::imre_log_get(&key as *const Str as usize)) };
     if let Some(level) = level {
         // SAFETY: both owners remain in this scope until after the level write.
-        unsafe { super::imre_log_set_level(Rc::as_ptr(&logger), level.0) };
+        unsafe { super::imre_log_set_level(crate::ObjectOwner::as_ptr(&logger), level.0) };
     }
 }
 
