@@ -1,0 +1,32 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "modules": [
+    "test.test_collections",
+    "test.test_defaultdict",
+    "test.test_deque",
+    "test.test_ordered_dict",
+    "test.test_userdict",
+    "test.test_userlist",
+    "test.test_userstring",
+    "test.test_free_threading.test_collections"
+  ],
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/collections/__init__.py": "803de0c6792d64365e7c6f6209a5a794b04a122e",
+    "Lib/test/list_tests.py": "e76f79c274e744a990e14721443a431ab1c131a3",
+    "Lib/test/mapping_tests.py": "20306e1526d7b84819a6dbf2f224f6da1a0e45fd",
+    "Lib/test/seq_tests.py": "b7875fe8f2f75df9a351b4a5a872b1152c4bbdd1",
+    "Lib/test/string_tests.py": "f66051531faaa163fda901e148bd3bea063011e7",
+    "Lib/test/test_collections.py": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+    "Lib/test/test_defaultdict.py": "a193eb10f16d1784c33dfc0e7e4e01ee1b61c52f",
+    "Lib/test/test_deque.py": "4e1a489205a6855e6a3f065d756ca8085d4b1043",
+    "Lib/test/test_free_threading/__init__.py": "34e1ad30e11097e409d58e677b37c5965ad4313c",
+    "Lib/test/test_free_threading/test_collections.py": "3a413ccf396d4ba3b1a3345dccbba2e38f14bad6",
+    "Lib/test/test_ordered_dict.py": "4204a6a47d2a8163e046799f7e8f857f9805e367",
+    "Lib/test/test_userdict.py": "13285c9b2a3b7fe5acd6be1c71e4949496166890",
+    "Lib/test/test_userlist.py": "3e5c5ff19458eb15e0ceb82909d7884849adaeda",
+    "Lib/test/test_userstring.py": "cc85c06bf93363334d9eb57a63c79dee2ab3d1e5"
+  }
+}

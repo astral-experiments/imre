@@ -80,21 +80,27 @@ pub(super) fn compare(
         error(
             source,
             node,
-            "readonly JSON comparisons require == or != with a literal string",
+            "JSON comparisons require == or != with another parsed value or a literal string",
         )
     };
     let [left, right]: [Expr; 2] = values.try_into().map_err(|_| invalid())?;
     let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = ops else {
         return Err(invalid());
     };
-    let (value, literal) = if matches!(left.kind, ExprKind::Str(_)) {
-        (right, left)
+    let result = if matches!(left.kind, ExprKind::Str(_)) {
+        select(right, Type::Bool, None, Some(left))
     } else if matches!(right.kind, ExprKind::Str(_)) {
-        (left, right)
+        select(left, Type::Bool, None, Some(right))
     } else {
-        return Err(invalid());
+        let parsed = |ty| matches!(ty, Type::JsonRoot | Type::JsonObject | Type::JsonValue);
+        if !parsed(left.ty) || !parsed(right.ty) {
+            return Err(invalid());
+        }
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::JsonEqual, vec![left, right]),
+        }
     };
-    let result = select(value, Type::Bool, None, Some(literal));
     Ok(if *op == ast::CmpOp::Eq {
         result
     } else {
@@ -106,6 +112,110 @@ pub(super) fn compare(
 }
 
 impl Checker<'_> {
+    /// A checked object yields its actual string keys; arrays and untyped
+    /// roots expose JSON values until an element is projected to a Python type.
+    pub(super) fn json_iteration(&self, value: Expr) -> Expr {
+        let element = match value.ty {
+            Type::JsonObject => Type::Str,
+            Type::JsonRoot | Type::JsonValue => Type::JsonValue,
+            _ => return value,
+        };
+        Expr {
+            ty: self.types.list(element),
+            kind: ExprKind::Builtin(Builtin::JsonIter, vec![value]),
+        }
+    }
+
+    /// Expose loads or a saved decoder's decode method through the ordinary
+    /// callable ABI, with the same input and result checks as a direct call.
+    pub(super) fn json_load_callable(
+        &mut self,
+        receiver: Option<Expr>,
+        expected: Option<Type>,
+        site: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let (params, returns) = expected
+            .and_then(|ty| self.types.signature(ty))
+            .unwrap_or_else(|| (vec![Type::Str], Type::JsonRoot));
+        let [input] = params.as_slice() else {
+            return Err(error(
+                self.source,
+                site,
+                "a JSON decoder callable requires one positional input",
+            ));
+        };
+        if *input != Type::Str && (receiver.is_some() || *input != Type::Bytes) {
+            return Err(error(
+                self.source,
+                site,
+                "a JSON decoder callable needs a supported text input",
+            ));
+        }
+        // A callable owns a compiler record as its context. The tuple holds
+        // the decoder using its own runtime object's retain/release ABI.
+        let context = receiver.map(|value| Expr {
+            ty: self.types.tuple(vec![Type::JsonDecoder]),
+            kind: ExprKind::Tuple(vec![value]),
+        });
+        let mut locals = Vec::new();
+        let mut operands = Vec::new();
+        let builtin = if let Some(context) = &context {
+            locals.push(context.ty);
+            operands.push(Expr {
+                ty: Type::JsonDecoder,
+                kind: ExprKind::Field(
+                    Box::new(Expr {
+                        ty: context.ty,
+                        kind: ExprKind::Local(0),
+                    }),
+                    0,
+                ),
+            });
+            Builtin::JsonDecoderDecode
+        } else {
+            Builtin::JsonLoads
+        };
+        operands.push(Expr {
+            ty: *input,
+            kind: ExprKind::Local(locals.len()),
+        });
+        locals.push(*input);
+        let value = self.coerce(
+            Expr {
+                ty: Type::JsonRoot,
+                kind: ExprKind::Builtin(builtin, operands),
+            },
+            returns,
+            site,
+        )?;
+        let id = self.helpers.reserve();
+        self.helpers.finish(
+            id,
+            comprehensions::Helper {
+                module: self.module,
+                calls: HashSet::new(),
+                class_reads: HashSet::new(),
+                recursion_error: self.graph.modules[self.module].error(
+                    site,
+                    "recursive calls through a JSON decoder are unsupported",
+                ),
+                function: ir::Function {
+                    params: (0..locals.len()).collect(),
+                    locals,
+                    returns,
+                    body: vec![Statement::Return(value)],
+                },
+            },
+        );
+        Ok(Expr {
+            ty: self.types.callable(params, returns),
+            kind: ExprKind::Callable {
+                function: id,
+                receiver: context.map(Box::new),
+            },
+        })
+    }
+
     /// Nested array projections may be shared by independent document views.
     /// Only the original root list exposes the existing mutable Python list.
     pub(super) fn json_mutation_receiver(
@@ -209,20 +319,28 @@ impl Checker<'_> {
                 self.source,
                 call,
                 if file {
-                    "json.load requires one open text stream"
+                    "json.load requires one open stream"
                 } else {
-                    "json.loads requires one UTF-8 string"
+                    "json.loads requires one str or bytes argument"
                 },
             ));
         };
-        let text = if file {
-            let stream = self.expr_expected(text, Type::TextIO)?;
+        let value = self.expr(text)?;
+        let text = if file && value.ty == Type::BinaryIO {
+            Expr {
+                ty: Type::Bytes,
+                kind: ExprKind::Builtin(Builtin::BinaryRead, vec![value]),
+            }
+        } else if file {
+            let stream = self.coerce(value, Type::TextIO, text)?;
             Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::TextRead, vec![stream]),
             }
+        } else if value.ty == Type::Bytes {
+            value
         } else {
-            self.expr_expected(text, Type::Str)?
+            self.coerce(value, Type::Str, text)?
         };
         Ok(Expr {
             ty: Type::JsonRoot,
@@ -403,7 +521,7 @@ impl Checker<'_> {
         for keyword in &call.arguments.keywords {
             let name = keyword.arg.as_ref().map(|name| name.as_str());
             if !(matches!(name, Some("indent" | "ensure_ascii"))
-                || standard && name == Some("allow_nan"))
+                || standard && matches!(name, Some("allow_nan" | "sort_keys" | "separators")))
                 || !names.insert(name)
             {
                 return Err(error(
@@ -414,6 +532,9 @@ impl Checker<'_> {
             }
         }
         let source = match source {
+            display if standard && documents::constant(display) && needs_document(display) => {
+                self.expr_expected(display, documents::ANY)?
+            }
             ast::Expr::List(items) if standard && items.elts.is_empty() => {
                 self.expr_expected(source, Type::ListInt)?
             }
@@ -454,9 +575,44 @@ impl Checker<'_> {
             kind: ExprKind::Bool(true),
         };
         let mut allow_nan = ensure_ascii.clone();
+        let mut sort_keys = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Bool(false),
+        };
+        let mut separators = Expr {
+            ty: Type::None,
+            kind: ExprKind::None,
+        };
         for keyword in &call.arguments.keywords {
             let name = keyword.arg.as_ref().unwrap().as_str();
-            let value = if name == "indent" && standard {
+            let value = if name == "separators" {
+                let value = match &keyword.value {
+                    // The encoder only unpacks this fresh display; its members can
+                    // have different types, and each must be evaluated in order.
+                    ast::Expr::List(items)
+                        if !items.elts.iter().any(ast::Expr::is_starred_expr) =>
+                    {
+                        let values = items
+                            .elts
+                            .iter()
+                            .map(|item| self.expr(item))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        Expr {
+                            ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
+                            kind: ExprKind::Tuple(values),
+                        }
+                    }
+                    ast::Expr::Dict(items) if items.items.is_empty() => {
+                        self.expr_expected(&keyword.value, self.types.dict(Type::Str, Type::Int))?
+                    }
+                    _ => self.expr(&keyword.value)?,
+                };
+                check_standard_encoding(value.ty, self.types)
+                    .map_err(|message| error(self.source, keyword, message))?;
+                value
+            } else if name == "sort_keys" {
+                self.condition(&keyword.value)?
+            } else if name == "indent" && standard {
                 let value = self.expr(&keyword.value)?;
                 match self.types.payload(value.ty).unwrap_or(value.ty) {
                     Type::Str | Type::StrLiteral(_) => Self::string_value(value),
@@ -482,12 +638,14 @@ impl Checker<'_> {
             match name {
                 "indent" => indent = self.local(slot),
                 "ensure_ascii" => ensure_ascii = self.local(slot),
-                _ => allow_nan = self.local(slot),
+                "allow_nan" => allow_nan = self.local(slot),
+                "sort_keys" => sort_keys = self.local(slot),
+                _ => separators = self.local(slot),
             }
         }
         let mut args = vec![self.local(slot), indent, ensure_ascii];
         if standard {
-            args.push(allow_nan);
+            args.extend([allow_nan, sort_keys, separators]);
         }
         let (builtin, ty) = if let Some(stream) = file {
             args.push(stream);
@@ -508,6 +666,34 @@ impl Checker<'_> {
                 clear,
             },
         })
+    }
+}
+
+/// A homogeneous scalar display already has ordinary typed storage. A fresh
+/// mixed or nested JSON display can use the existing native document containers.
+fn needs_document(display: &ast::Expr) -> bool {
+    fn mixed<'a>(mut values: impl Iterator<Item = &'a ast::Expr>) -> bool {
+        let Some(first) = values.next() else {
+            return false;
+        };
+        let kind = |x: &ast::Expr| match x {
+            ast::Expr::StringLiteral(_) => 1,
+            ast::Expr::BooleanLiteral(_) => 2,
+            ast::Expr::NoneLiteral(_) => 3,
+            ast::Expr::NumberLiteral(n) => match n.value {
+                ast::Number::Int(_) => 4,
+                ast::Number::Float(_) => 5,
+                _ => 6,
+            },
+            _ => 0,
+        };
+        let first = kind(first);
+        first == 0 || values.any(|v| kind(v) != first)
+    }
+    match display {
+        ast::Expr::List(l) => mixed(l.elts.iter()),
+        ast::Expr::Dict(d) => mixed(d.items.iter().map(|i| &i.value)),
+        _ => false,
     }
 }
 
@@ -534,6 +720,7 @@ fn check_standard_encoding(ty: Type, types: &Types) -> Result<(), &'static str> 
         | Type::Float
         | Type::Str
         | Type::StrLiteral(_)
+        | Type::Document(_)
         | Type::JsonRoot
         | Type::JsonValue
         | Type::JsonObject

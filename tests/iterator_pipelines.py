@@ -9,6 +9,8 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterator_pipelines"
 
 REJECTED = {
+    "producer_escape": "from collections.abc import Iterator\ndef values() -> Iterator[int]:\n    for i in range(2):\n        yield i\nsaved = values()\n",
+    "producer_handler": "from collections.abc import Iterator\ndef values() -> Iterator[int]:\n    for i in range(2):\n        try:\n            yield i\n        finally:\n            print(i)\nfor x in values():\n    print(x)\n",
     "sentinel_escaped": "saved = iter(lambda: 'x', 'x')\n",
     "sentinel_types": "for x in iter(lambda: b'x', 'x'):\n    print(x)\n",
     "sentinel_defaults": "for x in iter(lambda v=b'': v, b''):\n    print(x)\n",

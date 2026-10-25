@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/astral-sh/uv",
+  "revision": "93a96e916298e7fba21e6212b29a3474e0e268c5",
+  "source": "scripts/check_uv_wheel_contents.py",
+  "files": {
+    "check_uv_wheel_contents.py": "1eb799bd7466193ce1ce80e1e45a666dc399d568c08523d90c65c2068d8aebcc",
+    "LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "LICENSE-MIT": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c"
+  }
+}

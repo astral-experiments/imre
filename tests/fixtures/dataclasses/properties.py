@@ -24,6 +24,19 @@ class Counter:
         return self.count
 
 
+@dataclass
+class Item:
+    value: int
+
+    @property
+    def double(self) -> int:
+        return self.value * 2
+
+    @double.setter
+    def double(self, value: int) -> None:
+        self.value = value // 2
+
+
 counter = Counter()
 print(f"{counter.next_value} {counter.next_value} {counter.reads}")
 counter.values.append(9)
@@ -35,3 +48,9 @@ try:
 except ValueError as error:
     print(str(error))
 print(counter.reads)
+
+item = Item(1)
+item.double = 9
+print(f"{item.value} {item.double}")
+item.double += 7
+print(f"{item.value} {item.double}")
