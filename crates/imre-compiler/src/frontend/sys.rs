@@ -89,6 +89,11 @@ impl Checker<'_> {
             ("intern", Type::Str, Builtin::SysIntern)
         };
         let count = call.arguments.args.len();
+        if !query && (count != 1 || !call.arguments.keywords.is_empty()) {
+            // Typeshed overloads intern() for LiteralString. This binder
+            // raises the real argument-count or keyword error at runtime.
+            self.graph.checked_overload(self.module, call.range());
+        }
         if count == 0 {
             self.graph
                 .checked_missing_argument(self.module, call.range());
@@ -120,6 +125,9 @@ impl Checker<'_> {
                 ty: result,
                 kind: ExprKind::Builtin(op, vec![value]),
             });
+        }
+        if !query {
+            self.graph.checked_overload(self.module, call.range());
         }
         if let Type::StrEnum(class) = value.ty {
             if query {
