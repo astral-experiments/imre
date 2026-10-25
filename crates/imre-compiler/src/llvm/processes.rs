@@ -503,7 +503,7 @@ impl Emitter<'_, '_> {
                     _ => (fd.value.operand.as_str(), 1),
                 };
                 let ignore = self.instruction(format!("zext i1 {} to i32", ignore.value.operand));
-                self.checked_line(format!("call void @imre_shutil_rmtree(ptr {ptr}, i32 {tag}, i32 {ignore}, i64 {fd}, i32 {fd_kind})"));
+                self.checked_line(format!("call void @imre_shutil_rmtree(ptr {ptr}, i32 {tag}, i32 {ignore}, i64 {fd}, i32 {fd_kind}, ptr null, ptr null, ptr null, ptr null)"));
                 none()
             }
             ProcessOperation::Copy(op) => {

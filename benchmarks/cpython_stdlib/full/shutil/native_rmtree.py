@@ -15,6 +15,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from copyfile import STDLIB, build
+import rmtree_handlers
+from suite_evidence import roles
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_native import run_in_fixtures
 
@@ -24,17 +26,19 @@ CASES = {
     "test_rmtree_on_symlink": 3, "test_rmtree_on_named_pipe": 2,
     "test_rmtree_above_recursion_limit": 1,
 }
+CALLBACKS = {
+    "test_both_onerror_and_onexc": 1,
+    "test_on_error": 1,
+    "test_on_exc": 1,
+    "test_rmtree_deleted_race_condition": 1,
+    "test_rmtree_errors_onerror": 1,
+    "test_rmtree_errors_onexc": 1,
+    "test_rmtree_fails_on_symlink_onerror": 2,
+    "test_rmtree_fails_on_symlink_onexc": 2,
+}
 BLOCKERS = {
-    "test_both_onerror_and_onexc": "onexc must win over onerror and return after a filesystem failure",
-    "test_on_error": "onerror receives an OS function, a path and an exception-info triple",
-    "test_on_exc": "onexc receives and inspects the failing OS function and exception",
-    "test_rmtree_deleted_race_condition": "onexc restores permissions and removes siblings during traversal",
     "test_rmtree_does_not_choke_on_failing_lstat": "replaces os.lstat during traversal",
-    "test_rmtree_errors_onerror": "onerror inspects the failing scandir and rmdir functions and exception-info triples",
-    "test_rmtree_errors_onexc": "onexc inspects the failing scandir and rmdir functions and their exceptions",
     "test_rmtree_fails_on_close": "patches os.close and requires the operation to observe the injected close error",
-    "test_rmtree_fails_on_symlink_onerror": "onerror captures os.path.islink and an exception-info triple",
-    "test_rmtree_fails_on_symlink_onexc": "onexc captures os.path.islink and the exception",
     "test_rmtree_uses_safe_fd_version_if_available": "replaces os.open with a custom exception-raising function",
 }
 ERRORS = ("FileNotFoundError", "PermissionError", "NotADirectoryError", "TypeError",
@@ -68,27 +72,16 @@ else:
 
 
 def exception(lines):
-    cls = getattr(builtins, lines[0])
-    message = ast.literal_eval(lines[1])
-    # OSError repr exposes its original arguments, including the one-argument
-    # symlink error, whose str changes when rmtree attaches its filename.
-    ctor = ast.parse(lines[2], mode="eval").body
-    assert isinstance(ctor, ast.Call) and isinstance(ctor.func, ast.Name)
-    assert ctor.func.id == cls.__name__ and not ctor.keywords
-    exc = cls(*(ast.literal_eval(arg) for arg in ctor.args))
-    if isinstance(exc, OSError):
-        errno, strerror, first, second = map(ast.literal_eval, lines[3:])
-        if first is not None:
-            exc.filename = first
-        if second is not None:
-            exc.filename2 = second
-        assert (exc.errno, exc.strerror, exc.filename, exc.filename2) == (errno, strerror, first, second)
-    assert (str(exc), repr(exc)) == (message, lines[2])
+    exc = rmtree_handlers.native_error(lines[2], ast.literal_eval(lines[1]),
+                                       [ast.literal_eval(val) for val in lines[3:]])
+    assert type(exc).__name__ == lines[0]
     return exc
 
 
-def execute(args, suite, folder, level):
+def executors(args, suite, folder, level, *, with_roles=False):
     exe = build(args, folder, "remove", driver(), level)
+    callback = rmtree_handlers.build_driver(args, folder, driver(), level) if sys.platform == "linux" else None
+    events = []
     def call(*args, pass_fds=()):
         result = subprocess.run([exe, *args], pass_fds=pass_fds, check=True, capture_output=True,
                                 text=True, timeout=30)
@@ -97,8 +90,6 @@ def execute(args, suite, folder, level):
         return result.stdout.splitlines()
     def remove(path, ignore_errors=False, onerror=None, *, onexc=None, dir_fd=None):
         nonlocal calls
-        if onerror is not None or onexc is not None:
-            raise AssertionError("callbacks require their own native binding")
         mode = "text"
         fds = ()
         if isinstance(path, bytes):
@@ -112,8 +103,13 @@ def execute(args, suite, folder, level):
             mode, fds = "fd", (dir_fd,)
         elif dir_fd is not None:
             mode = "bad-fd"
-        lines = call(mode, path, str(int(ignore_errors)), str(dir_fd), pass_fds=fds)
+        argv = (mode, path, str(int(ignore_errors)), str(dir_fd))
         calls += 1
+        if onerror is not None or onexc is not None:
+            assert callback is not None
+            lines = rmtree_handlers.run(callback, argv, fds, onerror, onexc, events)
+        else:
+            lines = call(*argv, pass_fds=fds)
         if lines != ["ok"]:
             raise exception(lines)
 
@@ -124,19 +120,26 @@ def execute(args, suite, folder, level):
         name = case._testMethodName
         if name in BLOCKERS:
             return {"status": "blocked", "reason": BLOCKERS[name]}
+        if name in CALLBACKS and callback is None:
+            return {"status": "blocked", "reason": "the original host callback bridge requires a Linux linker with --wrap"}
+        events.clear()
         calls = 0
         with patch.object(suite, "shutil", SimpleNamespace(rmtree=remove)):
             original()
-        assert calls == CASES[name], (case.id(), calls)
-        return {"status": "host_driven_native", "native_calls": calls}
+        if name in CALLBACKS:
+            assert calls == CALLBACKS[name] and events, (case.id(), calls, events)
+            row = {"status": "mixed", "native_calls": calls, "callbacks": list(events),
+                   "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"}
+        else:
+            assert calls == CASES[name], (case.id(), calls)
+            row = {"status": "host_driven_native", "native_calls": calls}
+        if with_roles:
+            return {"roles": roles(body="cpython", assertions="cpython", fixture="cpython",
+                                   operation="mixed" if events else "imre"),
+                    "evidence": dict(row, operation="shutil.rmtree", opt_level=level,
+                                     fixture="CPython TestRmTree creates the original files, permissions and assertions; handler and OS function objects remain in the host when present")}
+        return row
 
-    executions = {suite.TestRmTree(name).id(): adapter
-                  for name in unittest.defaultTestLoader.getTestCaseNames(suite.TestRmTree)}
-    evidence, failures, skips = run_in_fixtures(load_suite("test.test_shutil"), executions)
-    rows = {name: value[0] for name, value in evidence.items() if value}
-    rows.update({name: {"status": "reference_skip", "reason": reason} for name, reason in skips})
-    rows.update({name: {"status": "failed", "diagnostics": reason} for name, reason in failures})
-    assert rows.keys() == executions.keys()
     # A readable directory need not be searchable. Its open scan descriptor
     # suffices to list it, and removal requires write permission on the parent.
     restricted = folder / "readable-empty-directory"
@@ -144,6 +147,32 @@ def execute(args, suite, folder, level):
     calls = 0
     remove(str(restricted))
     assert calls == 1 and not restricted.exists()
+    if callback is not None:
+        def reject(*args):
+            raise AssertionError("ignore_errors invoked a callback")
+        remove(str(folder / "missing"), True, reject, onexc=reject)
+        def reraises(op, path, error):
+            assert op is os.lstat and error is sys.exception() and error.filename == path
+            raise
+        try:
+            remove(str(folder / "missing"), onexc=reraises)
+        except FileNotFoundError as exc:
+            assert exc.filename == str(folder / "missing")
+        else:
+            raise AssertionError("the exception raised by the callback was lost")
+
+    return {suite.TestRmTree(name).id(): adapter
+            for name in unittest.defaultTestLoader.getTestCaseNames(suite.TestRmTree)
+            if not with_roles or name not in BLOCKERS}
+
+
+def execute(args, suite, folder, level):
+    executions = executors(args, suite, folder, level)
+    evidence, failures, skips = run_in_fixtures(load_suite("test.test_shutil"), executions)
+    rows = {name: value[0] for name, value in evidence.items() if value}
+    rows.update({name: {"status": "reference_skip", "reason": reason} for name, reason in skips})
+    rows.update({name: {"status": "failed", "diagnostics": reason} for name, reason in failures})
+    assert rows.keys() == executions.keys()
     return rows
 
 

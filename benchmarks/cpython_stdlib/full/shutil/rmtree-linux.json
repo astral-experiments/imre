@@ -3,24 +3,76 @@
   "optimization_levels": {
     "0": {
       "test.test_shutil.TestRmTree.test_both_onerror_and_onexc": {
-        "status": "blocked",
-        "reason": "onexc must win over onerror and return after a filesystem failure"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onexc",
+            "unlink"
+          ],
+          [
+            "onexc",
+            "rmdir"
+          ],
+          [
+            "onexc",
+            "rmdir"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_on_error": {
-        "status": "blocked",
-        "reason": "onerror receives an OS function, a path and an exception-info triple"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onerror",
+            "unlink"
+          ],
+          [
+            "onerror",
+            "rmdir"
+          ],
+          [
+            "onerror",
+            "rmdir"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_on_exc": {
-        "status": "blocked",
-        "reason": "onexc receives and inspects the failing OS function and exception"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onexc",
+            "unlink"
+          ],
+          [
+            "onexc",
+            "rmdir"
+          ],
+          [
+            "onexc",
+            "rmdir"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_above_recursion_limit": {
         "status": "host_driven_native",
         "native_calls": 1
       },
       "test.test_shutil.TestRmTree.test_rmtree_deleted_race_condition": {
-        "status": "blocked",
-        "reason": "onexc restores permissions and removes siblings during traversal"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onexc",
+            "unlink"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_does_not_choke_on_failing_lstat": {
         "status": "blocked",
@@ -35,24 +87,60 @@
         "native_calls": 8
       },
       "test.test_shutil.TestRmTree.test_rmtree_errors_onerror": {
-        "status": "blocked",
-        "reason": "onerror inspects the failing scandir and rmdir functions and exception-info triples"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onerror",
+            "scandir"
+          ],
+          [
+            "onerror",
+            "rmdir"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_errors_onexc": {
-        "status": "blocked",
-        "reason": "onexc inspects the failing scandir and rmdir functions and their exceptions"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onexc",
+            "scandir"
+          ],
+          [
+            "onexc",
+            "rmdir"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_fails_on_close": {
         "status": "blocked",
         "reason": "patches os.close and requires the operation to observe the injected close error"
       },
       "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onerror": {
-        "status": "blocked",
-        "reason": "onerror captures os.path.islink and an exception-info triple"
+        "status": "mixed",
+        "native_calls": 2,
+        "callbacks": [
+          [
+            "onerror",
+            "islink"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onexc": {
-        "status": "blocked",
-        "reason": "onexc captures os.path.islink and the exception"
+        "status": "mixed",
+        "native_calls": 2,
+        "callbacks": [
+          [
+            "onexc",
+            "islink"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_on_named_pipe": {
         "status": "host_driven_native",
@@ -101,24 +189,76 @@
     },
     "3": {
       "test.test_shutil.TestRmTree.test_both_onerror_and_onexc": {
-        "status": "blocked",
-        "reason": "onexc must win over onerror and return after a filesystem failure"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onexc",
+            "unlink"
+          ],
+          [
+            "onexc",
+            "rmdir"
+          ],
+          [
+            "onexc",
+            "rmdir"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_on_error": {
-        "status": "blocked",
-        "reason": "onerror receives an OS function, a path and an exception-info triple"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onerror",
+            "unlink"
+          ],
+          [
+            "onerror",
+            "rmdir"
+          ],
+          [
+            "onerror",
+            "rmdir"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_on_exc": {
-        "status": "blocked",
-        "reason": "onexc receives and inspects the failing OS function and exception"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onexc",
+            "unlink"
+          ],
+          [
+            "onexc",
+            "rmdir"
+          ],
+          [
+            "onexc",
+            "rmdir"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_above_recursion_limit": {
         "status": "host_driven_native",
         "native_calls": 1
       },
       "test.test_shutil.TestRmTree.test_rmtree_deleted_race_condition": {
-        "status": "blocked",
-        "reason": "onexc restores permissions and removes siblings during traversal"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onexc",
+            "unlink"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_does_not_choke_on_failing_lstat": {
         "status": "blocked",
@@ -133,24 +273,60 @@
         "native_calls": 8
       },
       "test.test_shutil.TestRmTree.test_rmtree_errors_onerror": {
-        "status": "blocked",
-        "reason": "onerror inspects the failing scandir and rmdir functions and exception-info triples"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onerror",
+            "scandir"
+          ],
+          [
+            "onerror",
+            "rmdir"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_errors_onexc": {
-        "status": "blocked",
-        "reason": "onexc inspects the failing scandir and rmdir functions and their exceptions"
+        "status": "mixed",
+        "native_calls": 1,
+        "callbacks": [
+          [
+            "onexc",
+            "scandir"
+          ],
+          [
+            "onexc",
+            "rmdir"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_fails_on_close": {
         "status": "blocked",
         "reason": "patches os.close and requires the operation to observe the injected close error"
       },
       "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onerror": {
-        "status": "blocked",
-        "reason": "onerror captures os.path.islink and an exception-info triple"
+        "status": "mixed",
+        "native_calls": 2,
+        "callbacks": [
+          [
+            "onerror",
+            "islink"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onexc": {
-        "status": "blocked",
-        "reason": "onexc captures os.path.islink and the exception"
+        "status": "mixed",
+        "native_calls": 2,
+        "callbacks": [
+          [
+            "onexc",
+            "islink"
+          ]
+        ],
+        "detail": "native traversal, handler selection and errors; CPython callback and OS function objects; onerror traceback from host bridge"
       },
       "test.test_shutil.TestRmTree.test_rmtree_on_named_pipe": {
         "status": "host_driven_native",

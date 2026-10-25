@@ -12,6 +12,7 @@ STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import copyfile
 import native_copy
+import native_rmtree
 import which_cases
 from suite_evidence import roles, write_reports
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
@@ -74,6 +75,7 @@ def run_level(args, module, reference, level, directory):
     executions, calls = which_cases.executors(tools, directory, SOURCE, module)
     executions.update(copyfile.executors(args, module, directory, level, with_roles=True))
     executions.update(native_copy.executors(args, module, directory, level, with_roles=True))
+    executions.update(native_rmtree.executors(args, module, directory, level, with_roles=True))
     preflight = {}
     for name, reason in native_copy.MOCK_CASES.items():
         test_id = module.TestCopy(name).id()
@@ -82,6 +84,13 @@ def run_level(args, module, reference, level, directory):
                                      "roles": roles(body="unobserved", assertions="unobserved",
                                                     operation="unobserved", fixture="unobserved"),
                                      "evidence": {"operation": "shutil metadata", "fixture": reason}}
+    for name, reason in native_rmtree.BLOCKERS.items():
+        test_id = module.TestRmTree(name).id()
+        if reference["reference"][test_id] == "pass":
+            preflight[test_id, 1] = {"outcome": "blocked", "reason": reason,
+                                     "roles": roles(body="unobserved", assertions="unobserved",
+                                                    operation="unobserved", fixture="unobserved"),
+                                     "evidence": {"operation": "shutil.rmtree", "fixture": reason}}
     suite = load_suite(reference["module"])
     report = run_evidence(suite, executions, reference, level, preflight=preflight,
                           exceptions=reference_skips(suite, reference, level))
