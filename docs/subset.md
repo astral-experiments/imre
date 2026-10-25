@@ -561,6 +561,12 @@ Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins
 
 ## F-strings and repr
 
+The string `%` operator accepts an exact integer or string operand. A text
+operand supports `%s`, `%r`, `%a`, and a single Unicode character for `%c`.
+Literal widths and precisions count Unicode characters. Escaped percent signs
+do not consume an operand. A missing argument or a conversion which requires a
+number raises a Python exception.
+
 F-strings interpolate exact `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed builtin exception values, fixed records, and lists of values with a supported representation. Ordinary, raw, triple-quoted, and adjacent literals are supported, including escaped braces, Unicode, and escaped NULs. Each field expression and its conversion complete before the next field evaluates. Nested f-strings may appear inside field expressions. Optional values require the same local narrowing as other scalar operations.
 
 ```python

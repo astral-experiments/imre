@@ -4429,10 +4429,13 @@ impl<'a> Checker<'a> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        if op == ast::Operator::Mod && left.ty == Type::Str && right.ty == Type::Int {
+        if op == ast::Operator::Mod
+            && left.ty == Type::Str
+            && matches!(right.ty, Type::Int | Type::Str)
+        {
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::PercentInteger, vec![left, right]),
+                kind: ExprKind::Builtin(Builtin::PercentScalar, vec![left, right]),
             });
         }
         if op == ast::Operator::Pow {

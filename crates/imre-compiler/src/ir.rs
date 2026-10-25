@@ -549,7 +549,7 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     TimeSleep,
-    PercentInteger,
+    PercentScalar,
     Logging(LogOperation),
     Timed(TimedOperation),
     LogRecord(LogRecordOperation),
