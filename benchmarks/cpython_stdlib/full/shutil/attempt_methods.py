@@ -17,6 +17,7 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import copyfile
+import move_ops
 import native_copy
 import which_cases
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
@@ -73,6 +74,8 @@ def fixture(case, suite, node):
             return native_copy.native_path_fixture(case, 1 if node.name == "test_copyfile_same_file" else 2)
     if isinstance(case, suite.TestCopyTree) and node.name in {"test_copytree_return_value", "test_copytree_subdirectory"}:
         return native_copy.native_path_fixture(case, 1)
+    if isinstance(case, suite.TestMove) and node.name in move_ops.NATIVE_METHODS:
+        return move_ops.native_fixture(case, SOURCE, move_ops.NATIVE_METHODS[node.name])[0]
     helpers, globals_, values = {}, {}, {}
     needs_mock = False
     seen = set()
@@ -228,6 +231,8 @@ def main(stack):
     for key in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + key, type=lambda p: Path(p).resolve(), required=True)
     parser.add_argument("--only", action="append")
+    parser.add_argument("--reference", type=Path, default=HERE / "reference-linux.json",
+                        help="pinned suite_inventory output for the platform running the fixtures")
     parser.add_argument("--fixture-root", type=Path, default=HERE.parent / "shared/upstream")
     parser.add_argument("--fixture-manifest", type=Path, default=HERE.parent / "shared/UPSTREAM.json")
     parser.add_argument("--compiler-tree", required=True)
@@ -235,7 +240,11 @@ def main(stack):
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5):
         parser.error("requires test-enabled CPython 3.14.5")
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
-    reference = json.loads((HERE / "reference-linux.json").read_text())["reference"]
+    oracle = json.loads(args.reference.read_text())
+    reference = oracle["reference"]
+    if (oracle["module"] != manifest["module"] or oracle["cpython_commit"] != manifest["commit"]
+            or oracle["platform"] != sys.platform or oracle["denominator"] != len(reference)):
+        raise ValueError("reference does not describe this platform's pinned shutil suite")
     verify_files(STDLIB / "upstream", manifest["files"])
     verify_interpreter_tests(manifest)
     shared = json.loads(args.fixture_manifest.read_text())
@@ -260,7 +269,7 @@ def main(stack):
     test.__path__.insert(0, str(SOURCE.parent))
     report = {"cpython_commit": manifest["commit"], "compiler_sha256": digest(imre),
               "compiler_tree": args.compiler_tree, "runtime_sha256": digest(runtime),
-              "fixture_manifest_sha256": digest(args.fixture_manifest),
+              "fixture_manifest_sha256": digest(args.fixture_manifest), "reference_sha256": digest(args.reference),
               "optimization_levels": {}}
     for level in (0, 3):
         tools = Toolchain(imre, runtime, args.clang, level)
@@ -280,8 +289,9 @@ def main(stack):
                 return row
             selected = {}
             for name in ids:
-                if reference[name] != "pass":
-                    rows[name] = {"status": "reference-skip", "reason": reference[name]["skipped"]}
+                outcome = reference[name]
+                if isinstance(outcome, dict) and "skipped" in outcome:
+                    rows[name] = {"status": "reference-skip", "reason": outcome["skipped"]}
                 elif args.only and name not in args.only:
                     rows[name] = {"status": "not-selected"}
                 else:

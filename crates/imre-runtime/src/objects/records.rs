@@ -7,6 +7,7 @@ use std::rc::Rc;
 use super::{Object, fail, words::WordKind};
 
 pub(super) mod strings;
+pub(super) mod weak;
 
 enum Release {
     Fields(*const usize, usize),
@@ -47,6 +48,35 @@ pub struct RecordSemantics {
 }
 
 impl RecordDescriptor {
+    /// Class and tuple records share storage but have distinct Python protocols.
+    pub(super) fn class_semantics(&self) -> Option<&RecordSemantics> {
+        // SAFETY: generated semantics are immutable and outlive the descriptor.
+        unsafe { self.semantics.as_ref() }.filter(|s| s.kind == 0)
+    }
+
+    /// Codegen units may own different descriptors for one Python class.
+    pub(super) fn same_class(&self, other: &Self) -> bool {
+        let Some((left, right)) = self.class_semantics().zip(other.class_semantics()) else {
+            return false;
+        };
+        if std::ptr::eq(self, other) {
+            return true;
+        }
+        if left.qualified_name_len == 0 || left.qualified_name_len != right.qualified_name_len {
+            return false;
+        }
+        // SAFETY: generated class descriptors root nonempty immutable UTF-8 identifiers.
+        unsafe {
+            std::slice::from_raw_parts(left.qualified_name, left.qualified_name_len)
+                == std::slice::from_raw_parts(right.qualified_name, right.qualified_name_len)
+        }
+    }
+
+    pub(super) fn is_value_struct(&self) -> bool {
+        // SAFETY: the compiler emits immutable metadata for the lifetime of the program.
+        unsafe { self.semantics.as_ref().is_some_and(|s| s.flags & 8 != 0) }
+    }
+
     /// Only records with a pure TOML hash reserve an extra untraced cache word.
     pub(super) fn has_toml_hash(&self) -> bool {
         // SAFETY: every descriptor used by the runtime owns static metadata or null.
@@ -54,8 +84,16 @@ impl RecordDescriptor {
     }
 
     fn allocated_words(&self) -> usize {
+        // These struct-sequence attributes contain only raw numbers. They are
+        // neither Python tuple elements nor owners to be visited during release.
+        // SAFETY: a non-null semantics pointer refers to the descriptor's permanent metadata.
+        let stat_words = if unsafe { self.semantics.as_ref() }.is_some_and(|s| s.flags & 8 != 0) {
+            super::os::stat_result::EXTRA_WORDS
+        } else {
+            0
+        };
         self.length
-            .checked_add(usize::from(self.has_toml_hash()))
+            .checked_add(usize::from(self.has_toml_hash()) + stat_words)
             .unwrap_or_else(|| fail("MemoryError", "record allocation is too large"))
     }
 }
@@ -71,8 +109,8 @@ pub struct RecordField {
 #[repr(C)]
 struct Header {
     references: Cell<usize>,
-    /// An aligned descriptor, or a pointer to a shared block with bit zero set.
-    descriptor: *const RecordDescriptor,
+    /// The descriptor, a shared block tagged with bit zero, or a weak anchor tagged with bit one.
+    descriptor: Cell<*const RecordDescriptor>,
 }
 
 const _: () = assert!(size_of::<Header>() == 16 && align_of::<Header>() == 8);
@@ -147,19 +185,8 @@ pub unsafe extern "C" fn imre_record_has_type(
     payload: *const usize,
     expected: *const RecordDescriptor,
 ) -> u32 {
-    // SAFETY: class descriptors and their qualified names outlive the program.
-    unsafe {
-        let actual = descriptor(payload);
-        if std::ptr::eq(actual, expected) {
-            return 1;
-        }
-        let left = &*actual.semantics;
-        let right = &*(*expected).semantics;
-        u32::from(
-            std::slice::from_raw_parts(left.qualified_name, left.qualified_name_len)
-                == std::slice::from_raw_parts(right.qualified_name, right.qualified_name_len),
-        )
-    }
+    // SAFETY: the caller supplies a rooted class and an immutable class descriptor.
+    unsafe { u32::from(descriptor(payload).same_class(&*expected)) }
 }
 
 /// Initializes caller-owned scratch for a tuple used only by a read-only lookup.
@@ -178,7 +205,7 @@ pub unsafe extern "C" fn imre_tuple_probe(
         let header = scratch.cast::<Header>();
         header.write(Header {
             references: Cell::new(0),
-            descriptor,
+            descriptor: Cell::new(descriptor),
         });
         header.add(1).cast()
     }
@@ -186,19 +213,24 @@ pub unsafe extern "C" fn imre_tuple_probe(
 
 impl Header {
     fn block(&self) -> Option<*const Block> {
-        if self.descriptor.addr() & 1 == 0 {
+        let layout = self.layout_pointer();
+        if layout.addr() & 1 == 0 {
             return None;
         }
         // Each tagged pointer owns a live block. Removing its tag
         // recovers the original aligned pointer and its allocation provenance.
-        Some(self.descriptor.map_addr(|addr| addr - 1).cast::<Block>())
+        Some(layout.map_addr(|addr| addr - 1).cast::<Block>())
     }
 
     fn descriptor(&self) -> &RecordDescriptor {
         // SAFETY: a tagged header owns its Rc until its last record owner drops.
-        let descriptor = self
-            .block()
-            .map_or(self.descriptor, |block| unsafe { (*block).descriptor });
+        let layout = self.layout_pointer();
+        let descriptor = if layout.addr() & 1 == 0 {
+            layout
+        } else {
+            // SAFETY: the untagged block is rooted for this record's lifetime.
+            unsafe { (*layout.map_addr(|addr| addr - 1).cast::<Block>()).descriptor }
+        };
         // SAFETY: both forms carry the original immutable compiler metadata.
         unsafe { &*descriptor }
     }
@@ -271,7 +303,7 @@ impl<'a> RecordBatch<'a> {
             self.next += self.words;
             slot.write(Header {
                 references: Cell::new(1),
-                descriptor: block.cast::<RecordDescriptor>().map_addr(|addr| addr | 1),
+                descriptor: Cell::new(block.cast::<RecordDescriptor>().map_addr(|addr| addr | 1)),
             });
             slot.add(1).cast()
         }
@@ -360,7 +392,7 @@ pub(super) unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mu
     unsafe {
         allocation.cast::<Header>().write(Header {
             references: Cell::new(1),
-            descriptor,
+            descriptor: Cell::new(descriptor),
         });
         // Only the payload needs zeroing for partial-field cleanup. The ordinary
         // allocation can reuse a freed small record without clearing its header.
@@ -420,7 +452,7 @@ unsafe fn cached_result(
 ) -> *mut usize {
     // SAFETY: the caller roots this cache and its immutable descriptor.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
-    if header.references.get() == 1 {
+    if header.references.get() == 1 && !header.has_weak_anchor() {
         header.references.set(2);
         payload.cast_mut()
     } else {
@@ -483,7 +515,7 @@ fn release(owner: Release) {
                 Release::Fields(record, next) => unsafe {
                     release_standalone_fields(record, descriptor(record), next, &pending);
                 },
-                Release::Object(object) => drop(object),
+                Release::Object(object) => super::release_object_owner(object),
                 Release::Table(mut table, mut next) => {
                     if table.release_next(&mut next) {
                         pending.borrow_mut().push(Release::Table(table, next));
@@ -524,6 +556,7 @@ unsafe fn release_record_owner(payload: *const usize, pending: &RefCell<Vec<Rele
     if count != 1 {
         return;
     }
+    header.drop_weak_anchor();
     // SAFETY: metadata remains immutable and live even while payloads are released.
     let descriptor = header.descriptor();
     if let Some(block) = header.block() {

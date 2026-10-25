@@ -1,0 +1,20 @@
+{
+  "containers/counter_elements.py": {
+    "O0-reachable-0": {
+      "lines": 31,
+      "stdout_sha256": "200b7619979995ab3adbebef3d821e7646ed6fa717c0be7294341d7f15feff70"
+    },
+    "O0-reachable-1": {
+      "lines": 31,
+      "stdout_sha256": "200b7619979995ab3adbebef3d821e7646ed6fa717c0be7294341d7f15feff70"
+    },
+    "O3-reachable-0": {
+      "lines": 31,
+      "stdout_sha256": "200b7619979995ab3adbebef3d821e7646ed6fa717c0be7294341d7f15feff70"
+    },
+    "O3-reachable-1": {
+      "lines": 31,
+      "stdout_sha256": "200b7619979995ab3adbebef3d821e7646ed6fa717c0be7294341d7f15feff70"
+    }
+  }
+}

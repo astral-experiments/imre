@@ -39,18 +39,19 @@ argparse companion test module. The earlier [generated parse](NATIVE.md) and
 | Unchanged routines on Linux | -O0 | -O3 |
 | --- | ---: | ---: |
 | Fully native, including fixtures | 0 | 0 |
-| Native body and operation with host fixtures | 4 | 4 |
-| Host body and assertions with native operations | 888 | 888 |
+| Native body and operation with host fixtures | 5 | 5 |
+| Host body and assertions with native operations | 925 | 925 |
 | Completed with no parser operation (empty input table) | 12 | 12 |
-| Blocked | 989 | 989 |
+| Blocked | 951 | 951 |
 | Mixed, reference-only, failed, skipped or excluded | 0 | 0 |
 | **Total** | **1,893** | **1,893** |
 
 The compiler and runtime come from merged main at
-`ffaeacce37443598a47cfae27815f277f509776b`. Each report accounts for all
+`8c29f1ac2d63f4040bd7cca2ab92d7d03337f08a`. Each report accounts for all
 417 source-defined methods and all 1,476 generated methods (1,236 parsing and
-240 formatting). The four native bodies each call `parse_args` unconditionally
-and have no explicit assertion; CPython runs their fixtures.
+240 formatting). Four native bodies each call `parse_args` and have no explicit assertion.
+The fifth, `TestBooleanOptionalAction.test_invalid_name`, checks the exception
+type and message natively. All five use CPython fixtures.
 
 | Native operations driven by complete CPython routines | Routines per level | Calls per level |
 | --- | ---: | ---: |
@@ -60,21 +61,27 @@ and have no explicit assertion; CPython runs their fixtures.
 | [Optional subparsers and aliases](https://github.com/astral-sh/imre/pull/756) | 788 | 3,024 |
 | [Known arguments and ordered extras](https://github.com/astral-sh/imre/pull/818) | 789 | 3,025 |
 | [Flag constants and counts](https://github.com/astral-sh/imre/pull/873) | 888 | 3,605 |
+| [Builtin classes as constants and defaults](https://github.com/astral-sh/imre/pull/895) | 900 | 3,623 |
+| [Boolean optional actions](https://github.com/astral-sh/imre/pull/926) | 924 | 3,683 |
+| [Argument registration errors](https://github.com/astral-sh/imre/pull/968) | 925 | 3,684 |
 
-The [run on merged #873](https://github.com/astral-sh/imre/actions/runs/40180770414)
-adds 99 complete host-driven routines to the [#818 results](https://github.com/astral-sh/imre/actions/runs/40177794356).
-They cover count and false-valued flags, clustered short options, alternate
-prefixes, and calls to subparsers and `parse_known_args`. The four native bodies
-still use their original CPython fixtures. No other ID changed classification.
+The [run on merged #968](https://github.com/astral-sh/imre/actions/runs/40213144597)
+adds two previously blocked routines from `TestBooleanOptionalAction`.
+The complete original `test_invalid_name` runs under Imre, including its
+assertion. In `test_const`, CPython runs the original body and assertion;
+Imre runs the failing `add_argument` operation. The
+[PR-head run](https://github.com/astral-sh/imre/actions/runs/40196262224) has the
+same classifications and call counts. Two blocked `TestExitOnError` methods
+have different compiler diagnostics on merged main.
 
-Of the 3,605 host-driven native calls at each level, 3,544 call
-`parse_args`, 16 call `parse_known_args`, 14 call `format_help`, 11 call
-`format_usage`, and 10 each call `print_help` and `print_usage`.
-The process comparison checks exit status, stdout, and stderr;
-the original assertions receive the native result. Each host-driven source
-method retains the diagnostic from attempting its whole body. A partial run
-does not earn a pass. [Whole-file startup](METHODS.md#whole-file-startup)
-and per-method execution have separate results.
+Of the 3,684 host-driven native calls at each level, 3,622 call `parse_args`,
+16 call `parse_known_args`, 14 call `format_help`, 11 call `format_usage`,
+10 each call `print_help` and `print_usage`, and one calls `add_argument`.
+The process comparison checks exit status, stdout and stderr; the original
+assertions receive the native result. Each host-driven source method retains
+the diagnostic from attempting its whole body. A partial run does not earn
+a pass. [Whole-file startup](METHODS.md#whole-file-startup) still stops at
+the original `dataclasses.Field` import before it can execute a test.
 
 Run the following with the test-enabled release interpreter, the recorded
 compiler, and its matching runtime library. Validate the output against the
@@ -83,7 +90,7 @@ unchanged CPython reference before combining it with other suites.
 ```sh
 python3.14 -B benchmarks/cpython_stdlib/full/argparse/evidence.py \
   --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang clang-18 \
-  --imre-revision ffaeacce37443598a47cfae27815f277f509776b --result /tmp/argparse-evidence.json
+  --imre-revision 8c29f1ac2d63f4040bd7cca2ab92d7d03337f08a --result /tmp/argparse-evidence.json
 python3 benchmarks/cpython_stdlib/suite_evidence.py \
   benchmarks/cpython_stdlib/full/argparse/reference-linux.json /tmp/argparse-evidence.json
 ```

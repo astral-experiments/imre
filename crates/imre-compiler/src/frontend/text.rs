@@ -78,7 +78,12 @@ impl Checker<'_> {
             let value = self.expr(source)?;
             self.shlex_quote_value(value, call)
         } else {
-            self.join_parts(unpacking::string(" "), source, call, true)
+            self.join_parts(
+                unpacking::string(" "),
+                source,
+                call,
+                stdlib::JoinStyle::Shell,
+            )
         }
     }
 
@@ -165,9 +170,9 @@ impl Checker<'_> {
         })
     }
 
-    /// Bind splitlines/isspace after evaluating the receiver; an explicit
+    /// Bind splitlines and no-argument text predicates after evaluating the receiver; an explicit
     /// keepends uses Python truth, including its fallible source-class protocol.
-    pub(super) fn line_method(
+    pub(super) fn splitlines_or_predicate(
         &mut self,
         receiver: Expr,
         name: &str,
@@ -193,7 +198,16 @@ impl Checker<'_> {
                     _ => ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
                 }
             } else {
-                ExprKind::Builtin(Builtin::Text(TextOperation::IsSpace), vec![receiver])
+                let predicate = match name {
+                    "isalnum" => ir::TextPredicate::Alnum,
+                    "isspace" => ir::TextPredicate::Space,
+                    "isupper" => ir::TextPredicate::Upper,
+                    _ => unreachable!("resolved text predicate"),
+                };
+                ExprKind::Builtin(
+                    Builtin::Text(TextOperation::Predicate(predicate)),
+                    vec![receiver],
+                )
             };
             return Ok(Expr { ty: returns, kind });
         }
@@ -236,9 +250,9 @@ impl Checker<'_> {
             values.push(self.expr(&kw.value)?);
         }
         let message = if !split && !args.keywords.is_empty() {
-            "str.isspace() takes no keyword arguments".to_owned()
+            format!("str.{name}() takes no keyword arguments")
         } else if !split {
-            format!("str.isspace() takes no arguments ({count} given)")
+            format!("str.{name}() takes no arguments ({count} given)")
         } else if count > 1 {
             let qualifier = if args.args.is_empty() { "keyword " } else { "" };
             format!("splitlines() takes at most 1 {qualifier}argument ({count} given)")
@@ -248,17 +262,7 @@ impl Checker<'_> {
                 args.keywords[0].arg.as_deref().unwrap()
             )
         };
-        values.push(Expr {
-            ty: Type::Exception,
-            kind: ExprKind::Exception {
-                kind: exception_kind("TypeError").unwrap(),
-                message: Some(Box::new(unpacking::string(message))),
-            },
-        });
-        Ok(Expr {
-            ty: returns,
-            kind: ExprKind::Builtin(Builtin::RaiseException, values),
-        })
+        Ok(calls::type_error(returns, values, message))
     }
 
     fn translation_argument(&mut self, argument: &ast::Expr) -> Result<Expr, String> {
@@ -499,6 +503,7 @@ impl Checker<'_> {
         let optional_string = self.types.optional(Type::Str);
         let (operation, returns, parameters) = match name {
             "lower" => (TextOperation::Lower, Type::Str, vec![]),
+            "upper" => (TextOperation::Upper, Type::Str, vec![]),
             "capitalize" => (TextOperation::Capitalize, Type::Str, vec![]),
             "split" | "rsplit" => (
                 TextOperation::Split(name == "rsplit"),

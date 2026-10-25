@@ -517,14 +517,31 @@ pub unsafe extern "C" fn imre_str_encode(value: *const Str) -> *const Bytes {
     unsafe { imre_bytes_literal(value.as_ptr(), value.len()) }
 }
 
+/// A borrowed file buffer must become the immutable input in a codec exception.
+pub(super) fn owned_input(value: &[u8]) -> Result<Rc<Bytes>> {
+    let mut bytes = allocate(value.len())?;
+    bytes.extend_from_slice(value);
+    Ok(Rc::new(bytes))
+}
+
 /// A borrowed slice must become the immutable byte object in the exception arguments.
 pub(super) fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
-    let mut bytes = match allocate(value.len()) {
-        Ok(bytes) => bytes,
-        Err(error) => return error,
-    };
-    bytes.extend_from_slice(value);
-    decode_owned_error(Rc::new(bytes), error)
+    match owned_input(value) {
+        Ok(bytes) => decode_owned_error(bytes, error),
+        Err(error) => error,
+    }
+}
+
+pub(super) fn ascii_decode_error(bytes: Rc<Bytes>, index: usize) -> Error {
+    let byte = bytes[index];
+    let reason = "ordinal not in range(128)";
+    Error::unicode_decode(
+        "ascii",
+        bytes,
+        index..index + 1,
+        reason,
+        format!("'ascii' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"),
+    )
 }
 
 /// Most decoders already own the immutable input. Retain it only on the failing path.
@@ -548,8 +565,7 @@ pub(super) fn decode_owned_error(value: Rc<Bytes>, error: std::str::Utf8Error) -
     Error::unicode_decode(
         "utf-8",
         value,
-        start,
-        end,
+        start..end,
         reason,
         format!("'utf-8' codec can't decode {location}: {reason}"),
     )
@@ -576,12 +592,11 @@ pub unsafe extern "C" fn imre_bytes_decode(value: *const Bytes) -> *const Str {
 pub unsafe extern "C" fn imre_bytes_decode_ascii(value: *const Bytes) -> *const Str {
     // SAFETY: the exact bytes remain owned by the caller.
     let data = unsafe { &*value };
-    let result = if let Some((i, byte)) = data.iter().enumerate().find(|(_, b)| !b.is_ascii()) {
-        Err(Error::new(
-            Kind::UnicodeDecodeError,
-            format!(
-                "'ascii' codec can't decode byte 0x{byte:02x} in position {i}: ordinal not in range(128)"
-            ),
+    let result = if let Some(index) = data.iter().position(|b| !b.is_ascii()) {
+        // SAFETY: the original immutable bytes are still owned by this caller.
+        Err(ascii_decode_error(
+            unsafe { acquire_rc(value as usize) },
+            index,
         ))
     } else {
         let text = std::str::from_utf8(data).expect("ASCII is valid UTF-8");

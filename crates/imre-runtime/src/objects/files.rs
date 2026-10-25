@@ -49,8 +49,7 @@ enum Stream {
 }
 
 impl Stream {
-    /// Closes exactly once even when flushing fails. `into_parts` prevents a
-    /// second implicit flush; a close error takes precedence over a flush error.
+    /// Closes exactly once even when flushing fails. A close error takes precedence.
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
@@ -297,10 +296,8 @@ pub(super) fn decode_utf8_text(bytes: Vec<u8>) -> Result<Str> {
 
 fn decode_text(bytes: Vec<u8>, preserve_newlines: bool) -> Result<Str> {
     let text = String::from_utf8(bytes).map_err(|error| {
-        Error::new(
-            Kind::UnicodeDecodeError,
-            format!("invalid UTF-8 at byte {}", error.utf8_error().valid_up_to()),
-        )
+        let bounds = error.utf8_error();
+        super::bytes::decode_owned_error(Rc::new(error.into_bytes()), bounds)
     })?;
     if preserve_newlines || !text.contains('\r') {
         return Ok(Str::from(text));
@@ -365,7 +362,7 @@ pub(crate) fn errno_error(error: io::Error) -> Error {
     errno_with_filename(error, None)
 }
 
-fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+pub(super) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     errno_with_filenames(
         error,
         path.map(|s| super::exceptions::Filename::Str(Rc::new(Str::from(s)))),
@@ -449,7 +446,7 @@ pub(super) fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*c
 fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
     let (file, metadata) = open_file(path, mode)?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+    let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
     let fd = file.as_raw_fd();
     let stream = match mode {
         0 | 4 => {

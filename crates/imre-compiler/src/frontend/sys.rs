@@ -1,15 +1,33 @@
 //! Sealed bindings for the process's standard streams and exit exception.
 use super::*;
 
+pub(super) fn displayable(ty: Type) -> bool {
+    matches!(
+        ty,
+        Type::None
+            | Type::Bool
+            | Type::Int
+            | Type::Str
+            | Type::StrLiteral(_)
+            | Type::Bytes
+            | Type::ListInt
+            | Type::ObjectValue
+    )
+}
 impl Checker<'_> {
     /// Read scalar fields of the immutable startup settings selected for a command.
     pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
-        let Some((flags, _)) = &self.graph.command_startup else {
-            return Ok(None);
-        };
         if self.resolve(&attr.value) != Some(Binding::Intrinsic(Intrinsic::SysFlags)) {
             return Ok(None);
         }
+        if attr.attr.as_str() == "optimize" {
+            return Ok(Some(pipelines::integer(i64::from(
+                self.graph.python_optimization(),
+            ))));
+        }
+        let Some((flags, _)) = &self.graph.command_startup else {
+            return Ok(None);
+        };
         if attr.attr.as_str() == "safe_path" {
             return Ok(Some(Expr {
                 ty: Type::Bool,
@@ -78,7 +96,57 @@ impl Checker<'_> {
     }
 
     pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "hasattr" && !self.names.contains_key("hasattr"))
+            && self.resolve(&call.func).is_none()
+            && call.arguments.keywords.is_empty()
+            && let [module, ast::Expr::StringLiteral(name)] = call.arguments.args.as_slice()
+            && self.resolve(module)
+                == Some(Binding::IntrinsicModule(
+                    crate::modules::IntrinsicModule::Builtins,
+                ))
+            && name.value.to_str() == "_"
+        {
+            return Ok(Some(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::BuiltinsHasLast, vec![]),
+            }));
+        }
         match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::SysDisplayHook)) => {
+                if !call.arguments.keywords.is_empty() {
+                    return self
+                        .sys_type_error(
+                            call,
+                            Type::None,
+                            "sys.displayhook() takes no keyword arguments".to_owned(),
+                        )
+                        .map(Some);
+                }
+                let [value] = call.arguments.args.as_slice() else {
+                    return self
+                        .sys_type_error(
+                            call,
+                            Type::None,
+                            format!(
+                                "sys.displayhook() takes exactly one argument ({} given)",
+                                call.arguments.args.len()
+                            ),
+                        )
+                        .map(Some);
+                };
+                let value = self.expr(value)?;
+                if !displayable(value.ty) {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "sys.displayhook requires a supported native representation",
+                    ));
+                }
+                return Ok(Some(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::SysDisplayHook, vec![value]),
+                }));
+            }
             Some(Binding::Intrinsic(Intrinsic::SysExit)) => {
                 return self.system_exit(call, true).map(Some);
             }
@@ -171,7 +239,8 @@ impl Checker<'_> {
         // SystemExit(a, b) stores the tuple of constructor arguments. sys.exit
         // passes a tuple as the argument vector to SystemExit, so only the
         // latter unwraps a singleton or omits an empty tuple.
-        if args.len() > 1 {
+        let mut from_tuple = args.len() > 1;
+        if from_tuple {
             args = vec![Expr {
                 ty: self.types.tuple(args.iter().map(|arg| arg.ty).collect()),
                 kind: ExprKind::Tuple(args),
@@ -194,12 +263,19 @@ impl Checker<'_> {
                     });
                     omit_none = false;
                 }
-                _ => {}
+                _ => from_tuple = true,
             }
         }
         let mut exception = Expr {
             ty: Type::Exception,
-            kind: ExprKind::Builtin(Builtin::SystemExitNew { omit_none }, args),
+            kind: ExprKind::Builtin(
+                if from_tuple {
+                    Builtin::SystemExitFromTuple
+                } else {
+                    Builtin::SystemExitNew { omit_none }
+                },
+                args,
+            ),
         };
         if !evaluate.is_empty() {
             exception = Expr {
@@ -232,5 +308,18 @@ pub(super) fn exit_payload_supported(ty: Type, types: &Types) -> bool {
             .iter()
             .all(|&field| exit_payload_supported(field, types)),
         _ => false,
+    }
+}
+
+impl Checker<'_> {
+    pub(super) fn sys_version_info(&self, implementation: bool) -> Expr {
+        Expr {
+            ty: self.types.struct_sequence(
+                "sys.version_info",
+                crate::version::FIELDS,
+                vec![Type::Int, Type::Int, Type::Int, Type::Str, Type::Int],
+            ),
+            kind: ExprKind::Builtin(Builtin::SysVersionInfo { implementation }, vec![]),
+        }
     }
 }

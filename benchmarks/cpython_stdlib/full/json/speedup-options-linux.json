@@ -1,0 +1,263 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "source_blob": "4c0aa5f993b30fd4c29daf3052d7cf6914fdc31f",
+  "suite_occurrences": 216,
+  "distinct_ids": 212,
+  "stock_ids": [
+    "test.test_json.test_speedups.TestDecode.test_bad_bool_args",
+    "test.test_json.test_speedups.TestEncode.test_bad_bool_args",
+    "test.test_json.test_speedups.TestEncode.test_unsortable_keys"
+  ],
+  "stock_variants": {
+    "accelerated": {
+      "scanner_module": "_json",
+      "decoder_strict": {
+        "\"\"": {
+          "phase": "constructor",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        },
+        "{}": {
+          "phase": "constructor",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        },
+        "1": {
+          "phase": "constructor",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        },
+        "\"x\u0001y\"": {
+          "phase": "constructor",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        }
+      },
+      "encoder_truth": {
+        "skipkeys": {
+          "phase": "operation",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        },
+        "ensure_ascii": {
+          "phase": "operation",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        },
+        "check_circular": {
+          "phase": "operation",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        },
+        "allow_nan": {
+          "phase": "operation",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        },
+        "sort_keys": {
+          "phase": "operation",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        }
+      },
+      "unsortable_keys": {
+        "phase": "operation",
+        "error": "TypeError",
+        "message": "'<' not supported between instances of 'int' and 'str'"
+      }
+    },
+    "pure": {
+      "scanner_module": "json.scanner",
+      "decoder_strict": {
+        "\"\"": {
+          "result": ""
+        },
+        "{}": {
+          "result": {}
+        },
+        "1": {
+          "result": 1
+        },
+        "\"x\u0001y\"": {
+          "phase": "operation",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        }
+      },
+      "encoder_truth": {
+        "skipkeys": {
+          "result": "{\"a\": 1}"
+        },
+        "ensure_ascii": {
+          "phase": "operation",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        },
+        "check_circular": {
+          "phase": "operation",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        },
+        "allow_nan": {
+          "result": "{\"a\": 1}"
+        },
+        "sort_keys": {
+          "phase": "operation",
+          "error": "ZeroDivisionError",
+          "message": "division by zero"
+        }
+      },
+      "unsortable_keys": {
+        "phase": "operation",
+        "error": "TypeError",
+        "message": "'<' not supported between instances of 'int' and 'str'"
+      }
+    }
+  },
+  "imre_revision": "f259c3d26d7ab15f75a1e4db07620305f5099a45",
+  "imre_sha256": "303417bb3a320f7d8b878d0b0879c0d8a9f5991ffb2aa71d99185928af8fa34c",
+  "runtime_sha256": "940384a7050e97e4c6923ffe1fd5f1c23ff182da2a7a842a8049850d824efee2",
+  "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+  "levels": {
+    "0": {
+      "original_methods": {
+        "test.test_json.test_speedups.TestDecode.test_bad_bool_args": {
+          "body_sha256": "0889398ecafc328ecb53009e24a5261cc883c939381e77208d1c9afba77209b4",
+          "fixture_sha256": "b427cc5207cadf164c48546cbf1c165e014e72fb6a87c00471730fcbf92a0842",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:12:9: Imre: local functions require annotated parameters and return types"
+        },
+        "test.test_json.test_speedups.TestEncode.test_bad_bool_args": {
+          "body_sha256": "9b008d1db594dba5fe83ae9306843187d88a585281d02a16bfa7e0580696be6d",
+          "fixture_sha256": "b427cc5207cadf164c48546cbf1c165e014e72fb6a87c00471730fcbf92a0842",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:12:9: Imre: local functions require annotated parameters and return types"
+        },
+        "test.test_json.test_speedups.TestEncode.test_unsortable_keys": {
+          "body_sha256": "9e94c06faeb43fa174db493cb5ecfa97ebcf348ffc75cb36747da654f3e2e5c3",
+          "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:9:13: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+        }
+      },
+      "controls": {
+        "default_loads": {
+          "stock_stdout": "{}\n",
+          "outcome": "matched",
+          "exit": 0,
+          "stdout": "{}\n",
+          "stderr": "",
+          "source_sha256": "bf55379c70c9f8fb1790a85cdfaea8bf29b24d09a479d820bd27fe879ba4ed7b"
+        },
+        "original_bool": {
+          "stock_stdout": "division by zero\n",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:1:1: Imre: __bool__ must return bool",
+          "source_sha256": "6473d815e8378b470f049791f6be5e340a842616925c04a57088f735abc3b434"
+        },
+        "default_decoder": {
+          "stock_stdout": "{}\n",
+          "outcome": "matched",
+          "exit": 0,
+          "stdout": "{}\n",
+          "stderr": "",
+          "source_sha256": "9cfbaa20977323412a084be9e89173002c549763df87bd1913bb12aae56d8743"
+        },
+        "strict_false": {
+          "stock_stdout": "\"a\\u0001b\"\n",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:2:18: Imre: keyword arguments are unsupported for this builtin",
+          "source_sha256": "d47d92f75d26e9238c0da7c07247ca86fa9ea87dc1ec93b7100b18d5f2cd63f5"
+        },
+        "decoder_bool": {
+          "stock_stdout": "division by zero\n",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:2:1: Imre: __bool__ must return bool",
+          "source_sha256": "f4e0d893a882312143f9eb1feab10defe09f263f0252ae2dfedac282825856b1"
+        },
+        "encoder_bool": {
+          "stock_stdout": "constructed\ndivision by zero\n",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:2:1: Imre: __bool__ must return bool",
+          "source_sha256": "9528a3bfa6a1110135ca8257859708250b2ca466e60a048d9109a7213a217cb1"
+        },
+        "mixed_keys": {
+          "stock_stdout": "'<' not supported between instances of 'int' and 'str'\n",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:3:11: Imre: name is not a local value; globals and first-class functions are unsupported",
+          "source_sha256": "70b312f5e631cfa2d2442cb8580ca335336ab4ee1e06274dad86f380ad653fbb"
+        }
+      }
+    },
+    "3": {
+      "original_methods": {
+        "test.test_json.test_speedups.TestDecode.test_bad_bool_args": {
+          "body_sha256": "0889398ecafc328ecb53009e24a5261cc883c939381e77208d1c9afba77209b4",
+          "fixture_sha256": "b427cc5207cadf164c48546cbf1c165e014e72fb6a87c00471730fcbf92a0842",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:12:9: Imre: local functions require annotated parameters and return types"
+        },
+        "test.test_json.test_speedups.TestEncode.test_bad_bool_args": {
+          "body_sha256": "9b008d1db594dba5fe83ae9306843187d88a585281d02a16bfa7e0580696be6d",
+          "fixture_sha256": "b427cc5207cadf164c48546cbf1c165e014e72fb6a87c00471730fcbf92a0842",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:12:9: Imre: local functions require annotated parameters and return types"
+        },
+        "test.test_json.test_speedups.TestEncode.test_unsortable_keys": {
+          "body_sha256": "9e94c06faeb43fa174db493cb5ecfa97ebcf348ffc75cb36747da654f3e2e5c3",
+          "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:9:13: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+        }
+      },
+      "controls": {
+        "default_loads": {
+          "stock_stdout": "{}\n",
+          "outcome": "matched",
+          "exit": 0,
+          "stdout": "{}\n",
+          "stderr": "",
+          "source_sha256": "bf55379c70c9f8fb1790a85cdfaea8bf29b24d09a479d820bd27fe879ba4ed7b"
+        },
+        "original_bool": {
+          "stock_stdout": "division by zero\n",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:1:1: Imre: __bool__ must return bool",
+          "source_sha256": "6473d815e8378b470f049791f6be5e340a842616925c04a57088f735abc3b434"
+        },
+        "default_decoder": {
+          "stock_stdout": "{}\n",
+          "outcome": "matched",
+          "exit": 0,
+          "stdout": "{}\n",
+          "stderr": "",
+          "source_sha256": "9cfbaa20977323412a084be9e89173002c549763df87bd1913bb12aae56d8743"
+        },
+        "strict_false": {
+          "stock_stdout": "\"a\\u0001b\"\n",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:2:18: Imre: keyword arguments are unsupported for this builtin",
+          "source_sha256": "d47d92f75d26e9238c0da7c07247ca86fa9ea87dc1ec93b7100b18d5f2cd63f5"
+        },
+        "decoder_bool": {
+          "stock_stdout": "division by zero\n",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:2:1: Imre: __bool__ must return bool",
+          "source_sha256": "f4e0d893a882312143f9eb1feab10defe09f263f0252ae2dfedac282825856b1"
+        },
+        "encoder_bool": {
+          "stock_stdout": "constructed\ndivision by zero\n",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:2:1: Imre: __bool__ must return bool",
+          "source_sha256": "9528a3bfa6a1110135ca8257859708250b2ca466e60a048d9109a7213a217cb1"
+        },
+        "mixed_keys": {
+          "stock_stdout": "'<' not supported between instances of 'int' and 'str'\n",
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:3:11: Imre: name is not a local value; globals and first-class functions are unsupported",
+          "source_sha256": "70b312f5e631cfa2d2442cb8580ca335336ab4ee1e06274dad86f380ad653fbb"
+        }
+      }
+    }
+  }
+}
