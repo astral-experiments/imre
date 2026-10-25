@@ -596,6 +596,12 @@ The receiver of an instance call evaluates first. Supplied arguments then evalua
 
 Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins and methods accept specific keywords. `open` accepts `encoding="utf-8"`, `sum` accepts `start`, `zip` accepts `strict`, and both `sorted` and `list.sort` accept `key` and `reverse`.
 
+## String percent formatting
+
+String `%` formatting accepts an exact integer, a string, or a fixed tuple of
+integers and strings as positional operands. The entire tuple is evaluated before
+formatting begins. Width and precision arguments (`*`) consume tuple items in order.
+
 ## F-strings and repr
 
 The string `%` operator accepts an exact integer or string operand. A text

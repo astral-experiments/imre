@@ -646,6 +646,13 @@ impl Types {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
     }
 
+    /// The percent formatter reads positional operands from an exact tuple's descriptor.
+    pub(crate) fn percent_tuple(&self, ty: Type) -> bool {
+        let Type::Tuple(id) = ty else { return false };
+        matches!(&self.0.borrow().shapes[id], Shape::Tuple(fields)
+            if fields.iter().all(|ty| matches!(ty, Type::Int | Type::Str | Type::StrLiteral(_))))
+    }
+
     /// Stat results use ten visible integer slots and a separate tail for named attributes.
     pub(crate) fn stat_result(&self) -> Type {
         self.struct_sequence(
