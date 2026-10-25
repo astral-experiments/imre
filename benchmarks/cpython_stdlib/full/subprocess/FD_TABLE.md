@@ -55,7 +55,7 @@ identities, reaps, child programs and negative control agree.
 
 ### Shared warning hierarchy replay
 
-The [current four-method run](fd-table-shared-warning-linux.json) uses
+The [first run with the shared helper](fd-table-shared-warning-linux.json) uses
 [#1000](https://github.com/astral-sh/imre/pull/1000) at `d330a2b`
 (tree `50a62b358800449aac1a8e0dde3b03b451d87c7e`), including the standalone
 [Warning and RuntimeWarning base](https://github.com/astral-sh/imre/pull/1036)
@@ -67,3 +67,15 @@ launches. Each keeps its host body, assertions, and fixture classification.
 The four hierarchy catch controls are recorded separately from the method
 results. Rebuild the pair with `fd_table_evidence.py --previous <#778-report>
 --fd-table fd-table-shared-warning-linux.json --result evidence-linux.json`.
+
+After #1036 landed, all four original methods ran again on #1000 at
+`5c269657cb89d306682ee757041e7ea4ba0ebfd7` (tree
+`69eedc91cff10c16d41b986ceb14c70d2cb7564f`), which includes the main
+squash `de3c15d7838814b5982db9971bb3419f7316ca3a`. The
+[new receipts](fd-table-merged-warning-linux.json) record 25 native launches
+and reaps and ten warnings before child creation at **each** level.
+Withholding the warning again produced the original assertion failure.
+Bodies, assertions, and fixtures ran on CPython. The child programs were
+the pinned CPython interpreter running `fd_status.py` and the original
+zero-return executable. To reproduce the current pair, use
+`fd-table-merged-warning-linux.json` in the command above.
