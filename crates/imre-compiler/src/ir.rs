@@ -660,6 +660,7 @@ pub(crate) enum Builtin {
     /// Projects a member proved by local control flow, acquiring its own owner.
     UnionProject,
     IsInstance(Vec<InstanceType>),
+    IsBuiltinSubclass,
     Split,
     SplitLines,
     DecodeSplitLines,

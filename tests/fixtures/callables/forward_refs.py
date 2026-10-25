@@ -18,6 +18,17 @@ def main() -> None:
     print(f.__owner__ is None)
     print(isinstance(f, ForwardRef))
     print(isinstance("T", ForwardRef))
+    for kind in [bool, int, str]:
+        print(issubclass(kind, int))
+        print(issubclass(kind, object))
+    try:
+        isinstance(42, f)
+    except TypeError as exc:
+        print(str(exc))
+    try:
+        issubclass(int, f)
+    except TypeError as exc:
+        print(str(exc))
     print(f == ForwardRef("T", is_argument=False))
     print(f != named)
     print(ForwardRef("T", owner=int).__owner__ is int)
