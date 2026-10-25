@@ -56,8 +56,8 @@ jobs:
           ref: 5607950ef232dad16d75c0cf53101d9649d89115
           path: .cpython-wheel-reference
           sparse-checkout: Lib/ensurepip/_bundled
-      - name: Check pinned PyPA RECORD fixtures with reference CPython
-        run: python3 tests/wheel_record.py --reference-only
+      - name: Compare PyPA's RECORD validator with CPython
+        run: python3 tests/wheel_record.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
       - name: Compare uv's upstream wheel checker with CPython
         run: python3 tests/uv_wheel_check.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
       - name: Compare Ruff’s reporters with CPython
@@ -83,6 +83,8 @@ jobs:
   check:
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 120
+    env:
+      IMRE_REAL_WHEEL: .cpython-stdlib-reference/Lib/ensurepip/_bundled/pip-26.1.1-py3-none-any.whl
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -117,6 +119,7 @@ jobs:
           path: .cpython-stdlib-reference
           sparse-checkout: |
             Lib/test
+            Lib/ensurepip/_bundled
             Modules
           persist-credentials: false
       - name: Run pinned unittest methods against native Imre
@@ -147,10 +150,17 @@ jobs:
             diff -u reference native
           done
       - name: Check sys streams and exits with vendored CPython methods
+        env:
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+          LC_CTYPE: C.UTF-8
         run: |
+          unset PYTHONUTF8 PYTHONIOENCODING
+          sys_runner=(benchmarks/cpython_stdlib/full/sys/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference)
           python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
           for opt in 0 3; do
-            python3 -X utf8 benchmarks/cpython_stdlib/full/sys/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/test-sys-O$opt.json" --evidence "$RUNNER_TEMP/sys-evidence-O$opt.json"
+            python3 -B "${sys_runner[@]}" --opt-level "$opt" --result "$RUNNER_TEMP/test-sys-O$opt.json" --evidence "$RUNNER_TEMP/sys-evidence-O$opt.json"
+            python3 -B -X utf8 "${sys_runner[@]}" --opt-level "$opt" --locale-audit "$RUNNER_TEMP/sys-locale-utf8-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/sys/argv_boundary.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt"
           done
           jq -s . "$RUNNER_TEMP/sys-evidence-O0.json" "$RUNNER_TEMP/sys-evidence-O3.json" > "$RUNNER_TEMP/sys-evidence.json"
@@ -217,7 +227,7 @@ jobs:
           for suite in build_cache module_objects link_cache build_output; do
             env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/imre
           done
-      - name: Run complete upstream shallow-copy methods in native Imre
+      - name: Run complete upstream copy methods in native Imre
         run: |
           python3 benchmarks/cpython_stdlib/full/copy/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/copy-native.json"
           cmp benchmarks/cpython_stdlib/full/copy/native-linux.json "$RUNNER_TEMP/copy-native.json"
@@ -240,6 +250,8 @@ jobs:
         run: python3 benchmarks/cpython_stdlib/full/doctest/native.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/doctest-execution.json"
       - name: Compare uv's upstream wheel checker with CPython
         run: python3 tests/uv_wheel_check.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+      - name: Compare PyPA's RECORD validator with CPython
+        run: python3 tests/wheel_record.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Compare Ruff’s reporters with CPython
         run: |
           target/release/imre build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
@@ -291,6 +303,7 @@ jobs:
         run: |
           imre_target="$(rustc -vV | sed -n 's/^host: //p')"
           python3 tests/extension_wheel.py --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize
+          python3 tests/wheel_record.py --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 0
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-asan-o1 --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 1
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-asan-o0 --suites containers tuple_keys fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files paths processes argparse_cli \

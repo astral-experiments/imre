@@ -42,10 +42,11 @@ JSONEncoder`), and the batched case on its module export. Direct suite
 controls do not exercise the original package or unittest fixtures.
 The [whole-suite probe](../check_suite_startup.py) checks those separately.
 
-With the native `ImportError` implementation on repaired main `fce4734`, all eight
-[untouched import and runner probes](startup-linux.json) reach
-`Lib/test/support/__init__.py:6` and stop on its `annotationlib` import.
-Those probes execute zero test cases.
+With `annotationlib` from #586, all eight [untouched import and runner
+probes](startup-linux.json) advance to `Lib/test/support/__init__.py:9` and
+stop at `import inspect`. Staging the original files from the pinned CPython
+Git checkout or the repository’s offline fixtures gives identical diagnostics.
+Neither run executes a test case.
 
 ```sh
 dir=benchmarks/cpython_stdlib/full/doctest

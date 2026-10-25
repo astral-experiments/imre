@@ -1,5 +1,6 @@
 """Evidence for unsuccessful and platform-specific test_sys occurrences."""
 import ast
+import hashlib
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
@@ -25,7 +26,7 @@ SKIPS = {
     "test_sys_getwindowsversion_no_instantiation": (881, 'not hasattr(sys, "getwindowsversion")',
                                                      "Linux, no Windows version API"),
     "test_ioencoding_nonascii": (937, "sys.getfilesystemencoding() != locale.getpreferredencoding(False)",
-                                 "reference Linux locale; the native gate runs the host with -X utf8"),
+                                 "CPython 3.14.5, LC_CTYPE=C.UTF-8, UTF-8 mode 0; filesystem utf-8, preferred UTF-8"),
     "test_pystats": (1325, 'not hasattr(sys, "_stats_on")', "release build without Py_STATS"),
 }
 
@@ -43,7 +44,7 @@ def reference_skips(reference, level):
     return result
 
 
-def argv_invocation(module, toolchain):
+def argv_invocation(module, toolchain, folder):
     """Run the full original method and record the actual native command-line failure."""
     test_id = MODULE + ".SysModuleTest.test_orig_argv"
 
@@ -53,7 +54,7 @@ def argv_invocation(module, toolchain):
                 original()
             except subprocess.CalledProcessError as exc:
                 error = exc.stderr.splitlines()[0] if exc.stderr else "no diagnostic"
-                return {"result": exc.returncode, "diagnostic": error, "arguments": exc.cmd[1:]}
+                return {"result": exc.returncode, "stdout": exc.stdout, "diagnostic": error, "arguments": exc.cmd[1:]}
         return {"result": 0}
 
     data, failures, skips = run_in_fixtures(load_suite(MODULE), {test_id: execute})
@@ -62,10 +63,54 @@ def argv_invocation(module, toolchain):
     observation, = data[test_id]
     if not observation["result"]:
         raise AssertionError("native Python command invocation now succeeds; register its complete passing adapter")
+    args = observation["arguments"]
+    if args[:4] != ["-I", "-X", "utf8", "-c"] or observation["stdout"] or not observation["diagnostic"].startswith("Usage: imre "):
+        raise AssertionError(("the launch failure changed; check which operations actually ran", observation))
+    def reference_control(case, original):
+        calls = []
+        def capture(command, **kwargs):
+            result = subprocess.run(command, **kwargs)
+            calls.append((command, result))
+            return result
+        with patch.object(module, "subprocess", SimpleNamespace(run=capture)):
+            original()
+        (command, result), = calls
+        argv, original_argv = map(ast.literal_eval, result.stdout.splitlines())
+        if command[1:] != args or original_argv != command or result.stderr:
+            raise AssertionError((command, result))
+        return {"returncode": result.returncode, "argv": argv, "orig_argv": ["<cpython>", *original_argv[1:]]}
+
+    checked, errors, skipped = run_in_fixtures(load_suite(MODULE), {test_id: reference_control})
+    if errors or skipped:
+        raise AssertionError((errors, skipped))
+    reference, = checked[test_id]
+    child_source = args[4].encode()
+    folder.mkdir()
+    binary = toolchain.build(child_source, folder)
+    entry = str(folder / "case.py")
+    compiler = str(toolchain.imre.resolve())
+    runtime, clang = str(toolchain.runtime.resolve()), str(toolchain.clang.resolve())
+    paths = {str(binary): "<native-child>", entry: "<child-source>", compiler: "<imre>",
+             runtime: "<runtime>", clang: "<clang>"}
+    flags = ["--runtime", runtime, "--clang", clang, "--opt-level", str(toolchain.level), "--quiet", "--no-cache"]
+    controls = {}
+    for mode, invocation, argv0 in (
+        ("executable", [str(binary), *args[5:]], str(binary)),
+        ("imre run", [compiler, "run", entry, *flags, "--", *args[5:]], entry),
+    ):
+        run = subprocess.run(invocation, capture_output=True, text=True, check=True, timeout=45)
+        argv, orig_argv = map(ast.literal_eval, run.stdout.splitlines())
+        if run.stderr or argv != [argv0, *args[5:]] or orig_argv != invocation:
+            raise AssertionError((mode, argv, orig_argv, run.stderr))
+        controls[mode] = {"returncode": run.returncode, "argv": [paths.get(x, x) for x in argv],
+                          "orig_argv": [paths.get(x, x) for x in orig_argv]}
     return {"outcome": "error",
             "roles": roles(body="cpython", assertions="unobserved", operation="unobserved", fixture="cpython"),
             "reason": f"Imre exited {observation['result']} before executing the -c child: {observation['diagnostic']}",
-            "evidence": {"stage": "native program invocation", "arguments": observation["arguments"],
+            "evidence": {"stage": "CLI option dispatch, before the child source or its two sys reads",
+                         "arguments": args, "stdout": observation["stdout"], "diagnostic": observation["diagnostic"],
+                         "child_sha256": hashlib.sha256(child_source).hexdigest(), "native_calls": 0,
+                         "stock_cpython_control": reference, "independent_launch_controls": controls,
                          "returncode": observation["result"], "opt_level": toolchain.level,
                          "fixture": "upstream CPython SysModuleTest lifecycle and subprocess.run(check=True)"}}
 
@@ -97,7 +142,7 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
         key = (name, 1)
         state, reason = notes[name]
         if state == "failed" and name.endswith(".test_orig_argv"):
-            results[key] = argv_invocation(module, toolchain)
+            results[key] = argv_invocation(module, toolchain, root / "argv-child")
             continue
         cls, method = name.split(".")[-2:]
         node = methods[cls, method]
