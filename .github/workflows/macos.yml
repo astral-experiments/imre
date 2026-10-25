@@ -1,19 +1,70 @@
-name: macOS socket fixture trace
+name: macOS socket descriptors
 on: workflow_dispatch
 permissions:
   contents: read
 jobs:
-  stock-python:
+  socket:
     runs-on: macos-15
-    timeout-minutes: 5
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 04a82c96423c424aa6fba360a221661801ae5882
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
-      - name: Trace the unmodified CPython fixture on timeout
+      - name: Confirm the actual product and select the CPython SDK
         run: |
-          python3 -E -c "import faulthandler, runpy; faulthandler.dump_traceback_later(15, exit=True); runpy.run_path('tests/fixtures/socket/operations.py', run_name='__main__'); faulthandler.cancel_dump_traceback_later()"
-      - name: Probe TCP refusal and the rest of the fixture independently
-        if: always()
-        run: python3 -E .github/scripts/socket-oracle-darwin.py
+          test "$(git rev-parse HEAD)" = 04a82c96423c424aa6fba360a221661801ae5882
+          git rev-parse HEAD
+          uname -ms
+          bash .github/scripts/select-macos-sdk.sh
+      - run: cargo build --release --locked -p imre-compiler -p imre-runtime
+      - name: Compare native loopback and descriptors to Darwin CPython at O0 and O3
+        run: python3 tests/socket_tcp.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang --opt-levels 0 3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-socket-reference
+          sparse-checkout: Lib/test
+          persist-credentials: false
+      - name: Run the original inheritance methods and wrong-CLOEXEC control on Darwin
+        env:
+          PYTHONPATH: .cpython-socket-reference/Lib
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, sys, tempfile, unittest
+          from pathlib import Path
+          sys.path.insert(0, str(Path("benchmarks/cpython_stdlib/full/socket").resolve()))
+          import run as probe
+          from test import test_socket
+          manifest = json.loads((probe.HERE / "UPSTREAM.json").read_text())
+          probe.verify_files(probe.HERE / "upstream", manifest["files"])
+          probe.verify_interpreter_tests(manifest)
+          source, _ = probe.source()
+          native = source.replace(b"# NATIVE_BYTES_EQUALITY", probe.NATIVE_BYTES_EQUALITY).replace(b"# NATIVE_BOOL_EQUALITY", probe.NATIVE_BOOL_EQUALITY)
+          def check(command):
+              for method in probe.DESCRIPTORS:
+                  case = test_socket.InheritanceTest(method)
+                  def body(method=method):
+                      p = subprocess.run([*command, "descriptors", method], capture_output=True, timeout=15)
+                      assert (p.returncode, p.stdout, p.stderr) == (0, b"", b""), p
+                  setattr(case, method, body)
+                  result = unittest.TestResult()
+                  unittest.TestSuite([case]).run(result)
+                  assert result.testsRun == 1 and result.wasSuccessful() and not result.skipped, vars(result)
+              p = subprocess.run([*command, "wrong-cloexec"], capture_output=True, timeout=15)
+              assert p.returncode != 0 and b"AssertionError" in p.stderr, p
+          with tempfile.TemporaryDirectory() as tmp:
+              work = Path(tmp)
+              script = work / "oracle.py"
+              script.write_bytes(source.replace(b"# NATIVE_BYTES_EQUALITY", b"").replace(b"# NATIVE_BOOL_EQUALITY", b""))
+              check([sys.executable, "-E", script])
+              print("Darwin CPython: three original descriptor bodies passed; wrong CLOEXEC rejected", flush=True)
+              for level in (0, 3):
+                  binary = probe.Toolchain(Path("target/release/imre").resolve(), Path("target/release/libimre_runtime.a").resolve(), Path("/usr/bin/clang"), level).build(native, work)
+                  check([binary])
+                  print(f"Darwin O{level}: three original descriptor bodies passed; wrong CLOEXEC rejected", flush=True)
+          PY
