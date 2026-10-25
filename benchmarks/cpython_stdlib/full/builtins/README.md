@@ -10,3 +10,5 @@ The native fixture in `tests/fixtures/fstrings/ascii_repr.py` covers plain and i
 python3.14 -I benchmarks/cpython_stdlib/suite_inventory.py benchmarks/cpython_stdlib/full/builtins/UPSTREAM.json --result /tmp/builtins-reference.json
 python3.14 -I benchmarks/cpython_stdlib/full/builtins/ascii_case.py --compiler /path/to/imre --runtime /path/to/libimre_runtime.a --sanitize --result /tmp/ascii-result.json
 ```
+
+The separately verified [interactive result binding](../sys/BUILTINS.md) covers reading, assigning and deleting `builtins._`.
