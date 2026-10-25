@@ -141,11 +141,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("captures", "python", "imre", "codon", "rust", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument(
+        "--previous-imre", type=Path, help="time the previous replay binary in the same rounds"
+    )
     parser.add_argument("--cpu", type=int, required=True)
-    parser.add_argument("--rounds", type=int, default=8)
+    parser.add_argument("--rounds", type=int)
     args = parser.parse_args()
-    if platform.system() != "Linux" or args.rounds < 4 or args.rounds % 4:
-        parser.error("need Linux and a multiple of four measured rounds")
+    cycle = 10 if args.previous_imre else 4
+    if args.rounds is None:
+        args.rounds = 10 if args.previous_imre else 8
+    if platform.system() != "Linux" or args.rounds < cycle or args.rounds % cycle:
+        parser.error(f"need Linux and a multiple of {cycle} measured rounds")
     with tempfile.TemporaryDirectory(prefix="ruff-format-") as tmp:
         measure(args, Path(tmp))
 
@@ -178,6 +184,8 @@ def measure(args, tmp):
             for name in ("imre", "codon", "rust")
         },
     }
+    if args.previous_imre:
+        engines["previous_imre"] = [str(args.previous_imre.resolve())]
     schedule = orders(list(engines))
     evidence = {
         "platform": platform.platform(),

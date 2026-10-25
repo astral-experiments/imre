@@ -527,6 +527,7 @@ impl Checker<'_> {
         receiver: Expr,
         source: &ast::Expr,
         node: &impl Ranged,
+        append: Builtin,
     ) -> Result<Expr, String> {
         let element = self.types.element(receiver.ty).unwrap();
         let destination = self.hidden(receiver.ty);
@@ -548,6 +549,7 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
         });
         let before = match &input {
+            _ if !matches!(append, Builtin::Append) => Vec::new(),
             Iteration::Prepared(prepared) if let Some(list) = prepared.eager_list_at(source) => {
                 let mut eager = Vec::new();
                 if self.locals[list.value] == self.locals[destination] {
@@ -583,7 +585,7 @@ impl Checker<'_> {
                 Ok(vec![Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(
-                        Builtin::Append,
+                        append.clone(),
                         vec![
                             checker.local(destination),
                             checker.coerce(value, element, node)?,

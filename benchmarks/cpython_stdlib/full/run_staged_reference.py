@@ -45,10 +45,13 @@ def run_group(mod, primary, pin, out):
         else:
             suites.append(suite.removeprefix("test."))
     xml = out / f"{mod}.xml"
-    options = ["-X", "warn_default_encoding"] if mod == "pathlib" else []
+    # The upstream importlib suite checks how loaders create and validate .pyc files.
+    options = [] if mod == "importlib" else ["-B"]
+    if mod == "pathlib":
+        options += ["-X", "warn_default_encoding"]
     resources = ["-u", RESOURCES[mod]] if mod in RESOURCES else []
     with tempfile.TemporaryDirectory() as work, (out / f"{mod}.log").open("w") as log:
-        command = [sys.executable, "-B", *options, "-m", "test", "--single-process",
+        command = [sys.executable, *options, "-m", "test", "--single-process",
                    "--tempdir", work, "--randseed", "1", *resources, "--junit-xml", str(xml), *suites]
         # Popen's original executable tests deliberately pass a fictitious argv[0].
         # Tell their relocated Python where its standard library is, even then.

@@ -57,7 +57,7 @@ impl Builtin {
         match self {
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
             Self::FunctionWrappedGet => Contract::new(true, PreservesLists),
-            Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
+            Self::Repr => Contract::new(true, Unknown),
             Self::Str
                 if args.first().is_some_and(|e| {
                     matches!(
@@ -71,6 +71,7 @@ impl Builtin {
             Self::Str if args.first().is_some_and(|e| e.ty == Type::Int) => {
                 Contract::new(true, PreservesOwners)
             }
+            Self::Str => Contract::new(true, PreservesLists),
             Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
             Self::Calendar(op) => Contract::new(
                 matches!(
@@ -112,6 +113,7 @@ impl Builtin {
             | Self::NamedException { .. } => Contract::new(false, PreservesLists),
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
+            Self::SequenceTakeInBounds => Contract::new(false, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
                     TextOperation::SplitLineEnds
@@ -426,6 +428,8 @@ impl Builtin {
             | Self::UnittestCompilePattern
             | Self::StringIterationList
             | Self::StringJoin
+            | Self::JoinBufferFinish
+            | Self::JoinBufferNew
             | Self::StringReplace
             | Self::StringGet
             | Self::StringIntList
@@ -491,7 +495,6 @@ impl Builtin {
             | Self::SequenceGetInBounds
             | Self::Split
             | Self::StringListNonempty
-            | Self::Str
             | Self::SourceModule
             | Self::SourceModuleAttribute { .. }
             | Self::NominalIdentity
@@ -510,11 +513,14 @@ impl Builtin {
             | Self::IntListContains
             | Self::StringListContains
             | Self::StructListContains
+            | Self::DequeContains
             | Self::StringContains
             | Self::BytesContains
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
-            Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
+            Self::Append | Self::JoinBufferAppend | Self::SortByKeys => {
+                Contract::new(true, PreservesOwners)
+            }
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)
@@ -568,6 +574,9 @@ impl Builtin {
             | Self::ArgparseText { .. }
             | Self::DequeAppend { .. }
             | Self::DequePop { .. }
+            | Self::DequeGet
+            | Self::DequeSet
+            | Self::DequeDelete
             | Self::Pop
             | Self::Print
             | Self::SortRestore
@@ -681,6 +690,19 @@ impl Builtin {
             Self::TupleGet => {
                 matches!(args, [tuple, index] if index.ty == Type::Int && types.homogeneous_tuple_element(tuple.ty) == Some(result))
             }
+            Self::JoinBufferNew => {
+                types.element(result) == Some(Type::Str)
+                    && matches!(args, [separator] if separator.ty == Type::Str)
+            }
+            Self::JoinBufferAppend => {
+                result == Type::None
+                    && matches!(args, [buffer, piece]
+                    if types.element(buffer.ty) == Some(Type::Str) && piece.ty == Type::Str)
+            }
+            Self::JoinBufferFinish => {
+                result == Type::Str
+                    && matches!(args, [buffer] if types.element(buffer.ty) == Some(Type::Str))
+            }
             Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
@@ -688,11 +710,13 @@ impl Builtin {
                     && (!matches!(self, Self::ListGetBoundedInBounds { .. })
                         || (matches!(args[0].kind, ExprKind::Local(_)) && index(&args[1])))
             }
-            Self::SequenceGetInBounds => matches!(args, [source, cursor]
+            Self::SequenceGetInBounds | Self::SequenceTakeInBounds => {
+                matches!(args, [source, cursor]
                 if matches!(source.ty, Type::List(_))
                     && types.element(source.ty) == Some(result)
                     && matches!(source.kind, ExprKind::Local(_))
-                    && cursor.ty == Type::Int && index(cursor)),
+                    && cursor.ty == Type::Int && index(cursor))
+            }
             Self::IntBounded { min, max } => {
                 signature(&[Type::Int], Type::Int)
                     && bounds(*min, *max)
@@ -976,6 +1000,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_unquote"
                 | "imre_string_iterable_list"
                 | "imre_str_join"
+                | "imre_join_buffer_new"
+                | "imre_join_buffer_finish"
                 | "imre_str_replace"
                 | "imre_print_str"
                 | "imre_print_bytes"

@@ -368,6 +368,7 @@ impl std::fmt::Display for Type {
             Self::JsonValue => "JSON value",
             Self::JsonObject => "dict[str, Any]",
             Self::Document(DocumentShape::Any) => "TOML or JSON value",
+            Self::Document(DocumentShape::Scalar) => "None, bool, int or str",
             Self::Document(DocumentShape::Map) => "mutable dict[str, Any]",
             Self::Document(DocumentShape::List) => "mutable list[Any]",
             Self::StrLiteral(_)
@@ -956,6 +957,9 @@ pub(crate) enum Builtin {
     SortDetach,
     SortRestore,
     StringJoin,
+    JoinBufferNew,
+    JoinBufferAppend,
+    JoinBufferFinish,
     StringFormat,
     StringReplace,
     Text(TextOperation),
@@ -975,6 +979,8 @@ pub(crate) enum Builtin {
     /// bounds, with no intervening mutation or user code. Returns an owned
     /// element of a generic typed list; the index is canonical and nonnegative.
     SequenceGetInBounds,
+    /// Transfers the next slot of a fresh append-only list to its sole consumer.
+    SequenceTakeInBounds,
     /// Reduces an exact integer list after evaluating its source and start.
     /// Integer addition cannot invoke callbacks or raise a recoverable error.
     ListSum,
@@ -1247,6 +1253,10 @@ pub(crate) enum Builtin {
     },
     DequeClear,
     DequeReverse,
+    DequeGet,
+    DequeSet,
+    DequeDelete,
+    DequeContains,
     DequeMaxlen,
     DequeIter {
         reverse: bool,
@@ -1372,6 +1382,8 @@ pub(crate) enum StringIoOperation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum DocumentShape {
     Any,
+    /// A tagged Python scalar whose container equality does not depend on object identity.
+    Scalar,
     Map,
     List,
 }
