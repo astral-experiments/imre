@@ -1,5 +1,6 @@
 """Constructor, source acquisition, and error timing; compare stdout with CPython."""
 
+import csv
 from itertools import batched, chain, islice
 
 items = [1, 2]
@@ -88,3 +89,21 @@ print(list(chain([0], *outer_lists, [3])))
 # The original batched test expands a list of tuples whose lengths differ.
 batches = list(batched('ABCDEFG', 3))
 print(''.join(chain(*batches)))
+
+# An inner error leaves its cursor usable; an outer error ends the whole chain.
+rows = csv.reader(['"bad"x', 'ok'], strict=True)
+row_chain = chain(rows, [['tail']])
+try:
+    next(row_chain)
+except csv.Error as error:
+    print(str(error))
+print(list(row_chain))
+print(list(rows))
+outer_rows = csv.reader(['"bad"x', 'ok'], strict=True)
+fields = chain.from_iterable(outer_rows)
+try:
+    next(fields)
+except csv.Error as error:
+    print(str(error))
+print(list(fields))
+print(list(outer_rows))

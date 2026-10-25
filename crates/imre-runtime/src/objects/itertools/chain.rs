@@ -111,3 +111,92 @@ pub unsafe extern "C" fn imre_chain_from(outer: u32, source: usize, inner: u32) 
         Err(error) => error.returning(std::ptr::null()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repeat(value: i64, times: i64) -> Rc<Object> {
+        // SAFETY: small integers are immediate and the constructor returns an owner.
+        unsafe {
+            Rc::from_raw(imre_repeat(
+                2,
+                Int::small(value).unwrap().0,
+                Int::small(times).unwrap().0,
+            ))
+        }
+    }
+
+    fn cursor_word(cursor: Rc<Object>) -> OwnedWord {
+        // SAFETY: object words own exactly one Rc reference.
+        unsafe { OwnedWord::from_owned(Rc::into_raw(cursor) as usize, WordKind::new(5)) }
+    }
+
+    fn positional(cursor: Rc<Object>) -> Rc<Object> {
+        static MODES: [u8; 1] = [0];
+        let mut args = records::tuples::TupleBuilder::new(1).ok().unwrap();
+        args.push(cursor_word(cursor));
+        let args = args.finish().ok().unwrap();
+        // SAFETY: the single tuple field is a rooted iterator and its mode is static.
+        unsafe { Rc::from_raw(imre_chain(args.word, MODES.as_ptr(), MODES.len())) }
+    }
+
+    #[test]
+    fn a_reentrant_outer_pull_installs_its_own_inner_cursor() {
+        let outer = repeat(0, 0);
+        let first = repeat(11, 1);
+        let second = repeat(22, 1);
+        let chain = Chain {
+            outer: RefCell::new(Some(outer)),
+            active: RefCell::new(None),
+            modes: Modes::Uniform(0),
+        };
+        let mut suspended = PullFrame::Empty;
+        let mut reentrant = PullFrame::Empty;
+        assert!(matches!(
+            chain.advance(&mut suspended, None),
+            Advance::Pull(_)
+        ));
+        assert!(matches!(
+            chain.advance(&mut reentrant, None),
+            Advance::Pull(_)
+        ));
+        for (frame, source, expected) in [(&mut reentrant, second, 22), (&mut suspended, first, 11)]
+        {
+            let Advance::Pull(active) =
+                chain.advance(frame, Some(Ok(Some(cursor_word(Rc::clone(&source))))))
+            else {
+                panic!("expected an inner cursor");
+            };
+            assert!(Rc::ptr_eq(&active, &source));
+            assert!(
+                matches!(chain.advance(frame, Some(next_item(&active))), Advance::Return(Ok(Some(value))) if value.word == Int::small(expected).unwrap().0)
+            );
+        }
+    }
+
+    #[test]
+    fn deep_chains_release_both_owners_and_preserve_a_shared_leaf() {
+        std::thread::Builder::new().stack_size(256 * 1024).spawn(|| {
+            let leaf = repeat(11, 2);
+            for started in [false, true] {
+                let mut cursor = Rc::clone(&leaf);
+                for _ in 0..16_384 { cursor = positional(cursor); }
+                if started {
+                    assert!(matches!(next_item(&cursor), Ok(Some(item)) if item.word == Int::small(11).unwrap().0));
+                }
+                drop(cursor);
+                assert_eq!(Rc::strong_count(&leaf), 1);
+            }
+            assert!(matches!(next_item(&leaf), Ok(Some(item)) if item.word == Int::small(11).unwrap().0));
+            assert!(matches!(next_item(&leaf), Ok(None)));
+            let mut outer = repeat(0, 0);
+            for _ in 0..16_384 {
+                // SAFETY: mode zero denotes the live outer cursor.
+                outer = unsafe { Rc::from_raw(imre_chain_from(0, Rc::as_ptr(&outer) as usize, 0)) };
+            }
+            assert!(matches!(next_item(&outer), Ok(None)));
+            assert!(matches!(next_item(&outer), Ok(None)));
+        }).unwrap().join().unwrap();
+    }
+}

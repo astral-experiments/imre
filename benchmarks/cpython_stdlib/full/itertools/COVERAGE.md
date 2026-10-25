@@ -9,8 +9,8 @@ These are separate upstream suites, for **138 occurrences** in total. The JSON
 doctests are part of JSON's denominator. Imre's LLVM optimization level does
 not change CPython's discovery or remove docstrings.
 
-At O0 and O3, eleven complete primary methods and the batched doctest pass
-under their original host fixtures. The 105 blocked occurrences, four reference skips and sixteen
+At O0 and O3, twelve complete primary methods and the batched doctest pass
+under their original host fixtures. The 104 blocked occurrences, four reference skips and sixteen
 reviewed exclusions remain in the primary report. The companion is blocked
 at both levels.
 
@@ -23,7 +23,7 @@ these bodies as `native-body-host-fixture`: CPython dispatches the original
 fixtures, and an Imre subprocess constructs its native instance. Filter and
 zip are builtin-only examples inside the upstream denominator.
 
-Ten of the eleven passing unittest bodies use the bundled `unittest.TestCase`
+Eleven of the twelve passing unittest bodies use the bundled `unittest.TestCase`
 assertions. The `zip` example still uses the native fixture for lists of tuples.
 The first assertion in `TestBasicOps.test_batched` compares a list of
 variable-length native tuples with a list of fixed tuples. The bundled list
@@ -32,7 +32,8 @@ assertion cannot compare those elements yet; that complete body remains blocked.
 On the reference build, four huge allocations skip under the upstream
 address-space rule. The default resource configuration also skips the long-chain
 regression. That unchanged method passes with `-u cpu`; the native attempt
-runs with CPU enabled and records its own blocker. The original default
+runs with CPU enabled and stops at its generator expression: the outer cursor
+cannot yet retain it after `chain.from_iterable` returns. The original default
 reference outcome is retained. Each of six CPython tuple-reuse checks, six
 CPython tuple-GC-tracking checks and four exact C object-size checks has its
 own source, fixture, reason and revisit condition. All 24 ordinary TestGC

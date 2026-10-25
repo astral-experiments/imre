@@ -75,5 +75,9 @@ first native tuple allocation and compares it with a test-enabled pinned
 CPython using `_testcapi.set_nomemory`. Both keep the source at its first item
 and allow a later pull on the same batch cursor. Neither control adds a test ID.
 
-[chain.py](chain.py) exercises a live outer list, delayed acquisition of a
-dictionary, errors on active and outer iterators, and a shared inner cursor.
+[chain.py](chain.py) compares a live outer list with starred arguments captured
+at construction. Both see later changes to an inner list. It also covers a
+shared inner cursor, delayed dictionary acquisition, and CSV parse errors:
+an inner reader can resume at its next row; an outer reader stops the chain
+and leaves that row for its other consumer. The separate native stack test
+advances and releases 16,384 nested chains while preserving an aliased leaf.
