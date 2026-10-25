@@ -15,15 +15,8 @@ class Task:
 
 def task_json(task: Task, ident: int) -> str:
     done = "true" if task.done else "false"
-    return (
-        '{"id":'
-        + str(ident)
-        + ',"title":'
-        + json.dumps(task.title, ensure_ascii=False)
-        + ',"done":'
-        + done
-        + "}"
-    )
+    title = json.dumps(task.title, ensure_ascii=False)
+    return f'{{"id":{ident},"title":{title},"done":{done}}}'
 
 
 class Board:
