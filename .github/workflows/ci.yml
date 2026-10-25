@@ -26,6 +26,8 @@ jobs:
         with:
           python-version: '3.14.5'
       - run: cargo build --workspace --release --locked
+      - name: Verify the standard library reference ledgers
+        run: python3 benchmarks/cpython_stdlib/full/reference_report.py
       - run: cargo test --workspace --release --locked
       - name: Build and install a Imre extension wheel
         run: |
