@@ -117,6 +117,17 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // typeshed omits inspect's private default; preserve all its public signatures.
+        let inspect = vendored
+            .read_to_string("stdlib/inspect.pyi")
+            .map_err(|e| e.to_string())?;
+        system
+            .fs()
+            .write_file_all(
+                SystemPathBuf::from(root).join("inspect.pyi"),
+                format!("{inspect}\n_sentinel: object\n"),
+            )
+            .map_err(|e| e.to_string())?;
         // Popen tests and programs pass shell=0/1. Preserve all of typeshed's
         // overloads while admitting the integer truth values CPython accepts.
         let subprocess = vendored
@@ -502,6 +513,7 @@ pub(crate) enum CheckedDiagnostic {
     Keyword(TextRange),
     TupleListRead(TextRange),
     MissingArgument(TextRange),
+    BuiltinImport(TextRange),
     ExcessArgument(TextRange),
 }
 
@@ -513,7 +525,8 @@ impl CheckedDiagnostic {
             Self::Keyword(range) => (range, 2),
             Self::TupleListRead(range) => (range, 3),
             Self::MissingArgument(range) => (range, 4),
-            Self::ExcessArgument(range) => (range, 5),
+            Self::BuiltinImport(range) => (range, 5),
+            Self::ExcessArgument(range) => (range, 6),
         };
         (range.start(), range.end(), kind)
     }
@@ -527,6 +540,7 @@ impl CheckedDiagnostic {
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
+            Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
             Self::ExcessArgument(arg) => {
                 diagnostic == "too-many-positional-arguments" && arg == range
             }

@@ -18,6 +18,7 @@ from upstream import verify_upstream
 import native_lexical
 from native_traversal import traversal_adapters
 from native_components import component_adapters
+from native_walk import walk_adapters
 
 
 def skip_source(case_id, reason):
@@ -115,7 +116,7 @@ def file_adapters(tools, work):
 
 def main():
     cohorts = {'lexical': lexical_adapters, 'files': file_adapters, 'traversal': traversal_adapters,
-               'components': component_adapters}
+               'components': component_adapters, 'walk': walk_adapters}
     parser = argparse.ArgumentParser(description=__doc__)
     for option in ('imre', 'runtime', 'clang', 'result'):
         parser.add_argument('--' + option, required=True, type=Path)
