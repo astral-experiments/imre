@@ -6,9 +6,7 @@ from pathlib import Path
 from typing import TextIO
 
 
-def _can_seek(stream: TextIO | None) -> bool:
-    if stream is None:
-        return False
+def _can_seek(stream: TextIO) -> bool:
     try:
         os.lseek(stream.fileno(), 0, os.SEEK_CUR)
     except OSError:
@@ -32,7 +30,6 @@ class BaseRotatingHandler(FileHandler):
 class RotatingFileHandler(BaseRotatingHandler):
     maxBytes: int
     backupCount: int
-    _can_seek: bool
 
     def __init__(self, filename: str | Path, mode: str = "a", maxBytes: int = 0,
                  backupCount: int = 0, encoding: str | None = None, delay: bool = False,
@@ -40,15 +37,13 @@ class RotatingFileHandler(BaseRotatingHandler):
         super().__init__(filename, "a" if maxBytes > 0 else mode, encoding, delay, errors)
         self.maxBytes = maxBytes
         self.backupCount = backupCount
-        self._can_seek = _can_seek(self.stream)
 
     def shouldRollover(self, record: LogRecord | None) -> bool:
         stream = self.stream
         if stream is None:
             stream = self._open()
             self.stream = stream
-            self._can_seek = _can_seek(stream)
-        if self.maxBytes <= 0 or not self._can_seek:
+        if self.maxBytes <= 0 or not _can_seek(stream):
             return False
         stream.flush()
         pos = os.lseek(stream.fileno(), 0, os.SEEK_CUR)
@@ -80,9 +75,11 @@ class RotatingFileHandler(BaseRotatingHandler):
             self.rotate(self.baseFilename, dest)
         if not self.delay:
             self.stream = self._open()
-            self._can_seek = _can_seek(self.stream)
 
     def emit(self, record: LogRecord) -> None:
-        if self.shouldRollover(record):
-            self.doRollover()
-        FileHandler.emit(self, record)
+        try:
+            if self.shouldRollover(record):
+                self.doRollover()
+            FileHandler.emit(self, record)
+        except Exception:
+            self.handleError(record)

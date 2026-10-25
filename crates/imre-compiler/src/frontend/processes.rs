@@ -721,6 +721,110 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Which), returns, args))
     }
 
+    /// Consume the original iterable and quote each fsdecoded path as a Windows argument.
+    pub(super) fn subprocess_list2cmdline(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = call.arguments.args.as_ref();
+        let keywords = call.arguments.keywords.as_ref();
+        let source = match (args, keywords) {
+            ([arg], []) => arg,
+            ([], [kw]) if kw.arg.as_deref() == Some("seq") => &kw.value,
+            _ => {
+                self.graph.checked_keywords(
+                    self.module,
+                    keywords
+                        .iter()
+                        .filter(|kw| kw.arg.as_deref() != Some("seq"))
+                        .map(Ranged::range),
+                );
+                if args.is_empty() && !keywords.iter().any(|kw| kw.arg.as_deref() == Some("seq")) {
+                    self.graph
+                        .checked_missing_argument(self.module, call.range());
+                }
+                if !args.is_empty() {
+                    for kw in keywords
+                        .iter()
+                        .filter(|kw| kw.arg.as_deref() == Some("seq"))
+                    {
+                        self.graph.checked_repeated_keyword(self.module, kw.range());
+                    }
+                }
+                for extra in args.iter().skip(1) {
+                    self.graph
+                        .checked_excess_argument(self.module, extra.range());
+                }
+                let message = if let Some(name) = keywords
+                    .iter()
+                    .filter_map(|kw| kw.arg.as_deref())
+                    .find(|name| *name != "seq" || !args.is_empty())
+                {
+                    if name == "seq" {
+                        "list2cmdline() got multiple values for argument 'seq'".to_owned()
+                    } else {
+                        format!("list2cmdline() got an unexpected keyword argument '{name}'")
+                    }
+                } else if args.is_empty() {
+                    "list2cmdline() missing 1 required positional argument: 'seq'".to_owned()
+                } else {
+                    format!(
+                        "list2cmdline() takes 1 positional argument but {} were given",
+                        args.len()
+                    )
+                };
+                return self.sys_type_error(call, Type::Str, message);
+            }
+        };
+        self.join_parts(
+            unpacking::string(" "),
+            source,
+            call,
+            stdlib::JoinStyle::WindowsCommand,
+        )
+    }
+
+    /// Evaluate a fresh command list in source order, including mixed path representations.
+    pub(super) fn process_argument_list(
+        &mut self,
+        display: &ast::ExprList,
+    ) -> Result<Expr, String> {
+        let items = display
+            .elts
+            .iter()
+            .map(|item| self.expr(item))
+            .collect::<Result<Vec<_>, _>>()?;
+        let kinds = items
+            .iter()
+            .map(|e| {
+                if matches!(e.ty, Type::StrLiteral(_)) {
+                    Type::Str
+                } else {
+                    e.ty
+                }
+            })
+            .collect::<Vec<_>>();
+        let ty = if kinds.is_empty() {
+            Some(Type::Str)
+        } else {
+            self.types.union(&kinds)
+        }
+        .ok_or_else(|| {
+            error(
+                self.source,
+                display,
+                "command list elements need a representable union",
+            )
+        })?;
+        let items = items
+            .into_iter()
+            .zip(&display.elts)
+            .map(|(value, source)| self.coerce(value, ty, source))
+            .collect::<Result<_, _>>()?;
+        Ok(Expr {
+            ty: self.types.list(ty),
+            kind: ExprKind::List(items),
+        })
+    }
+
     /// Keep the caller's argument object; only the OS launch converts each entry to bytes.
     fn command_argument(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
         let scalar = |ty| {
@@ -735,42 +839,7 @@ impl Checker<'_> {
                 .iter()
                 .any(|item| matches!(item, ast::Expr::Starred(_)))
         {
-            let items = display
-                .elts
-                .iter()
-                .map(|item| self.expr(item))
-                .collect::<Result<Vec<_>, _>>()?;
-            let kinds = items
-                .iter()
-                .map(|e| {
-                    if matches!(e.ty, Type::StrLiteral(_)) {
-                        Type::Str
-                    } else {
-                        e.ty
-                    }
-                })
-                .collect::<Vec<_>>();
-            let ty = if kinds.is_empty() {
-                Some(Type::Str)
-            } else {
-                self.types.union(&kinds)
-            }
-            .ok_or_else(|| {
-                error(
-                    self.source,
-                    arg,
-                    "command list elements need a representable str, bytes or Path union",
-                )
-            })?;
-            let items = items
-                .into_iter()
-                .zip(&display.elts)
-                .map(|(value, source)| self.coerce(value, ty, source))
-                .collect::<Result<_, _>>()?;
-            Expr {
-                ty: self.types.list(ty),
-                kind: ExprKind::List(items),
-            }
+            self.process_argument_list(display)?
         } else {
             self.expr(arg)?
         };
@@ -1073,6 +1142,23 @@ impl Checker<'_> {
         receiver: Expr,
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
+        if receiver.ty == Type::ActivePopen {
+            let (op, ty) = match attr.attr.as_str() {
+                "pid" => (ProcessOperation::PopenPid, Type::Int),
+                "returncode" => (
+                    ProcessOperation::PopenStatus { poll: false },
+                    self.types.optional(Type::Int),
+                ),
+                _ => {
+                    return Err(error(
+                        self.source,
+                        attr,
+                        "this Popen has unknown stream and argument types",
+                    ));
+                }
+            };
+            return Ok(operation(op, ty, vec![receiver]));
+        }
         let Type::Popen(capture, stdin, cmd) = receiver.ty else {
             unreachable!()
         };
@@ -1119,7 +1205,11 @@ impl Checker<'_> {
             ),
             "communicate" => {
                 let Type::Popen(capture, ..) = args[0].ty else {
-                    unreachable!()
+                    return Err(error(
+                        self.source,
+                        call,
+                        "cannot infer capture modes for an active child",
+                    ));
                 };
                 let input = self
                     .types

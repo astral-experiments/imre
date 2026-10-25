@@ -57,6 +57,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "dup" => Intrinsic::Fd(FdOperation::Dup),
         "dup2" => Intrinsic::Fd(FdOperation::Dup2),
         "pipe" => Intrinsic::Fd(FdOperation::Pipe),
+        "pipe2" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::Pipe2),
         "isatty" => Intrinsic::Fd(FdOperation::Isatty),
         "get_blocking" => Intrinsic::Fd(FdOperation::GetBlocking),
         "set_blocking" => Intrinsic::Fd(FdOperation::SetBlocking),
