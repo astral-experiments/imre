@@ -6,6 +6,7 @@ def replace_in_context(handler: logging.Handler) -> int:
     old = handler.lock
     if old is None:
         return -1
+    print(old is handler.lock)
     with old as acquired:
         print(acquired)
         with old:
