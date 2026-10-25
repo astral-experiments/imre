@@ -82,6 +82,7 @@ mod unions;
 mod unittest;
 mod unittest_equality;
 mod unittest_main;
+mod unittest_setup;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -108,6 +109,7 @@ struct ClassInfo {
     keyword_copies: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
+    setup_fields: unittest_setup::Slots,
     generators: HashSet<usize>,
     producer_items: HashMap<usize, Type>,
     contexts: HashSet<usize>,
@@ -218,6 +220,7 @@ impl ClassInfo {
             }
         }
         let cached_properties = cached_properties::slots(graph, types, &declarations, &mut fields)?;
+        let setup_fields = unittest_setup::slots(graph, types, &declarations, &mut fields);
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
         if let Some(id) = Self::cyclic_field_root(&fields, types) {
@@ -299,6 +302,7 @@ impl ClassInfo {
             keyword_copies: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
+            setup_fields,
             generators: HashSet::new(),
             producer_items: HashMap::new(),
             contexts: HashSet::new(),
@@ -5808,6 +5812,9 @@ impl<'a> Checker<'a> {
                         ))
                 {
                     return self.class_attribute(attribute, class, Some(receiver), None);
+                }
+                if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
+                    return Ok(self.read_setup_field(receiver, attribute.attr.as_str(), field));
                 }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 if let Some(name) = attribute.value.as_name_expr()
