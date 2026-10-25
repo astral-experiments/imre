@@ -229,7 +229,10 @@ Its `decode(s)` method accepts Unicode text; `memo` returns the same dictionary
 on each read from that instance. Keys repeated within one document share the
 same string object. Separate decodes have independent key namespaces. Like
 CPython's default decoder, scanning does not consult or clear entries that a
-caller inserts into the public `memo` dictionary.
+caller inserts into the public `memo` dictionary. A saved `json.loads` function or bound
+`decoder.decode` method can be passed as a callable. Iterating a decoded value
+checked as `dict[str, Any]` yields its actual string keys in insertion order;
+sorting those keys preserves their owners.
 
 `json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
 a text stream. Both accept scalar values, typed lists, tuples, dictionaries
@@ -345,6 +348,19 @@ A fixed-layout class can inherit from `collections.abc.Mapping[K, V]` or `typing
 `str.startswith(prefix)` and `str.endswith(suffix)` accept one positional string, without tuple alternatives or bounds. `str.find(sub[, start])` accepts a positional substring and an optional integer or `None` start, returning a Unicode scalar index or `-1`; an end bound and `rfind` are not yet supported. `str.partition(sep)` requires a nonempty positional string and returns a fixed `(before, separator, after)` tuple; a missing separator returns `(original, "", "")`. `str.isspace()` is false for an empty string and otherwise checks every character against Python's whitespace definition. These operations use native UTF-8 storage and do not import or call Python methods.
 
 `urllib.parse.unquote(string)` is a sealed native import for one positional or named string argument. It decodes percent escapes with the default UTF-8 replacement behavior. Byte inputs, configurable `encoding`/`errors`, and other URL parsing APIs remain unsupported.
+
+## Datetime and fixed UTC offsets
+
+`datetime.datetime`, `timedelta`, `timezone` and the `UTC` singleton have native immutable
+values. A datetime can be naive or use a fixed offset. `datetime.now(tz)` reads the system
+clock and requires a native `timezone`; there is no local or DST lookup. Civil construction,
+field reads, default ISO formatting, datetime comparisons, shifting a datetime by a
+timedelta, and fixed-zone names and offsets are supported. Timedelta construction accepts
+int, bool, and float units, normalizes negative durations, and checks overflow.
+
+The [datetime test inventory](../benchmarks/cpython_stdlib/full/datetime/README.md)
+lists the operations and original CPython cases checked. This does not change the typed
+TOML date boundary.
 
 ## CSV reader
 

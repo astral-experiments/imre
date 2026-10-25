@@ -373,6 +373,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                 (Storage::Deque(left), Storage::Deque(right)) => {
                     left.compare_entry(right, position)
                 }
+                (Storage::Calendar(left), Storage::Calendar(right)) => {
+                    Comparison::Done(super::calendar::equal(left, right))
+                }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Document(left), Storage::Document(right)) => {
@@ -456,6 +459,10 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                         | Storage::TokenMissing => Some(ReprTask::Context(
                             super::contextvars::repr_view(owner, storage),
                         )),
+                        Storage::Calendar(value) => {
+                            super::calendar::write_repr(value, output);
+                            None
+                        }
                         Storage::ModuleMember(member) => {
                             let text = member.text(1);
                             if !text.is_null() {
