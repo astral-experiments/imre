@@ -1,14 +1,20 @@
 """Regressions for per-occurrence attribution and rollup credit."""
 from copy import deepcopy
+from dataclasses import replace
+import hashlib
+import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 from types import ModuleType
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from suite_evidence import ROLES, build_report, roles, validate_pair, validate_report
-from suite_native import run_evidence, run_in_fixtures
+from suite_native import NativeDefaultMethod, Toolchain, run_evidence, run_in_fixtures
 
 
 def reference(*ids):
@@ -184,6 +190,84 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(evidence[case.id()][0], {"execution": "native-body"})
         with self.assertRaisesRegex(ValueError, "legacy labels"):
             run_evidence(unittest.TestSuite([case]), call, reference(case.id()), 0)
+
+
+class DefaultFixtureTests(unittest.TestCase):
+    def fixture(self, body="", module_setup=""):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        source = root / "fixture.py"
+        source.write_text("import unittest\n" + module_setup + "\nclass Example(unittest.TestCase):\n"
+                          + body + "    def test_value(self):\n        self.assertEqual(1, 1)\n")
+        spec = importlib.util.spec_from_file_location("_native_default_fixture_control", source)
+        module = importlib.util.module_from_spec(spec)
+        self.enterContext(patch.dict(sys.modules, {spec.name: module}))
+        spec.loader.exec_module(module)
+        data = source.read_bytes()
+        blob = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+        return module.Example("test_value"), NativeDefaultMethod(
+            Toolchain(root, root, root, 0), root, source, blob, ("imre", "unittest.TestCase.assertEqual"))
+
+    def test_custom_fixtures_and_instance_state_are_never_promoted(self):
+        for body, module in (
+            ("    def setUp(self):\n        self.fail('failed setup')\n", ""),
+            ("    def setUp(self):\n        self.skipTest('skipped setup')\n", ""),
+            ("", "def tearDownModule():\n    raise ValueError('failed teardown')\n"),
+            ("    longMessage = False\n", ""),
+        ):
+            with self.subTest(body=body, module=module):
+                case, entry = self.fixture(body, module)
+                record = entry.run(case)
+                self.assertEqual(record["outcome"], "blocked")
+                self.assertEqual(set(record["roles"].values()), {"unobserved"})
+        case, entry = self.fixture()
+        case.configured = True
+        self.assertIn("configured", entry.run(case)["reason"])
+
+
+    def test_delegated_operations_keep_their_actual_location(self):
+        case, entry = self.fixture()
+        stderr = ("test_value (__main__.Example.test_value) ... ok\n\n" + "-" * 70
+                  + "\nRan 1 test in 0.001s\n\nOK\n")
+        result = subprocess.CompletedProcess([], 0, "", stderr)
+        with (patch.object(Toolchain, "build", return_value=Path("case")),
+              patch("suite_native.subprocess.run", return_value=result)):
+            delegated = replace(entry, operation=("cpython", "operation in CPython child"))
+            report = run_evidence(unittest.TestSuite([case]), {}, reference(case.id()), 0,
+                                  native_defaults={(case.id(), 1): delegated})
+        row, = report["records"]
+        self.assertEqual(row["roles"]["fixture"], "imre")
+        self.assertEqual(row["classification"], "host-operation")
+
+    def test_wrong_source_and_substituted_body_fail_integrity_checks(self):
+        case, entry = self.fixture()
+        with patch.object(type(case), "test_value", lambda self: None):
+            self.assertEqual(entry.run(case)["outcome"], "blocked")
+        entry.source.write_bytes(entry.source.read_bytes() + b"\n")
+        with self.assertRaisesRegex(ValueError, "blob mismatch"):
+            entry.run(case)
+
+    def test_wrong_id_zero_tests_failure_and_skip_never_earn_credit(self):
+        case, entry = self.fixture()
+        for status, stderr in (
+            (0, "Ran 0 tests in 0.000s\n\nOK\n"),
+            (0, "test_other (__main__.Example.test_other) ... ok\n"),
+            (1, "test_value (__main__.Example.test_value) ... FAIL\nAssertionError: wrong value\n"),
+            (0, "test_value (__main__.Example.test_value) ... skipped 'fixture'\n"),
+        ):
+            result = subprocess.CompletedProcess([], status, "", stderr)
+            with (self.subTest(stderr=stderr), patch.object(Toolchain, "build", return_value=Path("case")),
+                  patch("suite_native.subprocess.run", return_value=result)):
+                report = run_evidence(unittest.TestSuite([case]), {}, reference(case.id()), 0,
+                                      native_defaults={(case.id(), 1): entry})
+                record, = report["records"]
+                self.assertEqual(record["classification"], "failed")
+                self.assertEqual(record["roles"]["operation"], "unobserved")
+                self.assertEqual(record["evidence"]["stderr"], stderr)
+        with self.assertRaisesRegex(ValueError, "unknown or duplicate"):
+            run_evidence(unittest.TestSuite([case]), {case.id(): strict}, reference(case.id()), 0,
+                         native_defaults={(case.id(), 1): entry})
 
 
 if __name__ == "__main__":

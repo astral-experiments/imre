@@ -108,7 +108,7 @@ fn summaries(
 }
 
 /// Visits statement nodes once, including statements nested inside expressions.
-fn statements(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
+pub(crate) fn statements(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
     fn block(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
         for statement in body {
             visit(statement);
@@ -281,7 +281,9 @@ pub(crate) fn projection_root(
         ExprKind::Local(slot) => Some(*slot),
         ExprKind::Call(..) => Some(getters::selected(expression, functions)?.root),
         ExprKind::Field(receiver, _) => projection_root(receiver, types, functions),
-        ExprKind::Builtin(Builtin::SequenceGetInBounds, args) => {
+        ExprKind::Builtin(Builtin::SequenceGetInBounds, args)
+            if !types.is_value_struct(expression.ty) =>
+        {
             projection_root(&args[0], types, functions)
         }
         ExprKind::Present(value) if value.ty != Type::Float => {

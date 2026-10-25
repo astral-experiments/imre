@@ -1,0 +1,22 @@
+{
+  "before": "4375dae659c1d6e00f3ee8c452b7d33e1f21fca1",
+  "after": "bed5112283fa03c3b21e759c9a28d18d4ec8fe08",
+  "denominator": 1369,
+  "reference_passes": 978,
+  "reference_skips": 391,
+  "counts": {
+    "O0": {
+      "compile blocker": 818,
+      "native candidate": 121,
+      "original fixture wrapper": 39
+    },
+    "O3": {
+      "compile blocker": 818,
+      "native candidate": 121,
+      "original fixture wrapper": 39
+    }
+  },
+  "changes": {},
+  "before_sha256": "571ae42574027fdb6e507efbb2842ce77151c43a3742861a645f16a5311c4dd9",
+  "after_sha256": "2f732ba51f5b83e8f19a988e2679ba2157f5424e058637696baa47c64f96bc0d"
+}
