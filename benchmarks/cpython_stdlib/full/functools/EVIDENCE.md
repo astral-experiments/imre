@@ -26,6 +26,32 @@ the GIL disabled. The four native attempts stopped at the original `random`
 import before any worker ran. Neither suite has a fully native fixture, a
 reference-only occurrence, a skip, or an exclusion in this run.
 
+## Single dispatch development branch at `392c8a5`
+
+The [Linux suite run](https://github.com/astral-sh/imre/actions/runs/40183958493/job/121140692421)
+built [#919's compiler](https://github.com/astral-sh/imre/commit/392c8a54e4b1626a890557dfd67e0fb8241986a8),
+tree `1409babace258d586ed6cb1cadb2d3b2e0c42249`, and reproduced both Linux
+references byte for byte. Both optimization levels produced the same counts:
+
+| Original Linux suite | Reference passes | Native bodies with host fixtures | Host-driven native operations | Mixed | Failed | Blocked |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| [test.test_functools](observations/392c8a5/evidence-linux.json) | 325 | 5 | 15 | 13 | 0 | 292 |
+| [test.test_free_threading.test_functools](observations/392c8a5/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
+
+`TestSingleDispatch.test_simple_overloads` registers an integer implementation
+and calls the dispatcher with a string, an integer, and a list. Imre executed
+the entire unchanged method and all three string assertions. CPython ran the
+unittest hooks. The other four native bodies are the C and Python variants
+of `test_get_annotations` and `test_with_bound_and_unbound_methods`.
+
+Of 320 bodies that did not compile, 174 stopped in fixture code, 125 in the
+method, and 21 at a method decorator. For example, `test_register_decorator`
+reads its unannotated integer argument; `test_wrapping_attributes` reaches a
+missing function attribute; and `test_mro` stops on a local class declaration.
+The four companion cases still stop on `import random` before any worker starts.
+The older cache branch below and this dispatch branch contain different changes;
+their counts describe separate compilers.
+
 ## Development branch at `4735cac`
 
 The [tested compiler and drivers](https://github.com/astral-sh/imre/commit/4735cacfa95c66d17b8942d4882b291f7088861d)

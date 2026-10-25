@@ -85,6 +85,7 @@ impl Session {
                 "tomli",
                 "from tomllib import load as load, loads as loads\n",
             ),
+            ("unittest/mock", include_str!("../stdlib/unittest/mock.pyi")),
             (
                 "unidiff",
                 "class PatchSet:\n    def __init__(self, patch: str) -> None: ...\n",
@@ -512,25 +513,53 @@ struct CheckedFile<'db> {
 /// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
+    AbstractClassCall(TextRange),
     Decorator(TextRange),
-    Exact(&'static str, TextRange),
+    Call(TextRange),
+    DictDeletion(TextRange),
+    Keyword(TextRange),
+    TupleListRead(TextRange),
+    MissingArgument(TextRange),
+    BuiltinImport(TextRange),
+    ExcessArgument(TextRange),
+    PositionalKeyword(TextRange),
 }
 
 impl CheckedDiagnostic {
-    pub(crate) fn sort_key(self) -> (TextSize, TextSize, &'static str) {
+    pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
         let (range, kind) = match self {
-            Self::Decorator(range) => (range, ""),
-            Self::Exact(kind, range) => (range, kind),
+            Self::AbstractClassCall(range) => (range, 9),
+            Self::Decorator(range) => (range, 0),
+            Self::Call(range) => (range, 1),
+            Self::Keyword(range) => (range, 2),
+            Self::TupleListRead(range) => (range, 3),
+            Self::DictDeletion(range) => (range, 8),
+            Self::MissingArgument(range) => (range, 4),
+            Self::BuiltinImport(range) => (range, 5),
+            Self::ExcessArgument(range) => (range, 6),
+            Self::PositionalKeyword(range) => (range, 7),
         };
         (range.start(), range.end(), kind)
     }
 
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
+            Self::AbstractClassCall(call) => diagnostic == "call-non-callable" && call == range,
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
-            Self::Exact(id, checked) => diagnostic == id && range == checked,
+            Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
+            Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
+            Self::PositionalKeyword(keyword) => {
+                diagnostic == "positional-only-parameter-as-kwarg" && keyword == range
+            }
+            Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
+            Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
+            Self::ExcessArgument(arg) => {
+                diagnostic == "too-many-positional-arguments" && arg == range
+            }
         }
     }
 }
@@ -1078,6 +1107,41 @@ impl Db for Database {
 #[cfg(test)]
 mod diagnostic_mode_tests {
     use super::*;
+
+    #[test]
+    fn a_proved_builtin_import_keeps_the_adjacent_ty_error() {
+        let root = Path::new("/project");
+        let mut session = Session::new(root, &[]).unwrap();
+        session
+            .add(
+                &root.join("main.py"),
+                "import _opcode, missing_peer\n",
+                crate::SourceKind::File,
+            )
+            .unwrap();
+        let builtin = TextRange::new(7.into(), 14.into());
+        let peer = TextRange::new(16.into(), 28.into());
+        let proof = CheckedDiagnostic::BuiltinImport;
+        let without_proofs = session.check_scopes(None, &[]).unwrap_err();
+        let adjacent = session
+            .check_scopes(None, &[vec![proof(builtin)]])
+            .unwrap_err();
+        let builtin_only = session
+            .check_scopes(None, &[vec![proof(peer)]])
+            .unwrap_err();
+        assert_ne!(adjacent, builtin_only);
+        assert_ne!(without_proofs, adjacent);
+        session
+            .check_scopes(None, &[vec![proof(builtin), proof(peer)]])
+            .unwrap();
+        // Even a range enclosing both aliases cannot justify either import.
+        assert_eq!(
+            session
+                .check_scopes(None, &[vec![proof(builtin.cover(peer))]])
+                .unwrap_err(),
+            without_proofs,
+        );
+    }
 
     #[test]
     fn enabling_diagnostics_invalidates_quiet_checks() {
