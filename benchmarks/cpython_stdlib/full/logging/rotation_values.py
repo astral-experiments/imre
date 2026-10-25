@@ -44,3 +44,13 @@ unlimited = logging.handlers.RotatingFileHandler("unlimited.log", maxBytes=0,
 unlimited.emit(large)
 print(unlimited.shouldRollover(None))
 unlimited.close()
+
+# The first size decision on an existing append stream uses its end position.
+Path("existing.log").write_bytes(b"old\n")
+existing = RotatingFileHandler("existing.log", maxBytes=6, backupCount=1,
+                               encoding="utf-8")
+print(existing.shouldRollover(small))
+existing.emit(small)
+existing.close()
+print(Path("existing.log").read_bytes())
+print(Path("existing.log.1").read_bytes())

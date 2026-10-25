@@ -23,9 +23,8 @@ from suite_native import Toolchain, method_bytes, native_method, run_in_fixtures
 SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 OWNER = "RotatingFileHandlerTest"
 PREFIX = "test.test_logging." + OWNER + "."
-NATIVE = ("test_should_not_rollover", "test_should_rollover")
+NATIVE = ("test_file_created", "test_should_not_rollover", "test_should_rollover")
 HOST = {
-    "test_file_created": {"open": 1, "create": 1, "emit": 1, "close": 1},
     "test_should_not_rollover_non_file": {"open": 1, "create": 1, "should": 1, "close": 1},
     "test_should_not_rollover_named_pipe": {"open": 1, "create": 1, "should": 1, "emit": 1,
                                             "close": 1, "message": 1},
@@ -47,10 +46,6 @@ class NativeCase(unittest.TestCase):
         self.fn = FILENAME
         self.message_num = MESSAGE_NUM
         self.rmfiles = []
-
-    def assertIs(self, actual: bool, expected: bool) -> None:
-        if actual != expected:
-            raise AssertionError(f"{actual!r} is not {expected!r}")
 """
 
 
@@ -178,9 +173,12 @@ def main():
         parser.add_argument("--" + arg, type=Path, required=True)
     parser.add_argument("--opt-level", type=int, choices=(0, 3), required=True)
     parser.add_argument("--case", action="append", dest="methods")
+    parser.add_argument("--cpython-source", type=Path)
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5) or not __debug__:
         parser.error("use a test-enabled CPython 3.14.5 with assertions enabled")
+    if args.cpython_source:
+        sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     import test
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
     verify_files(STDLIB / "upstream", manifest["files"])
