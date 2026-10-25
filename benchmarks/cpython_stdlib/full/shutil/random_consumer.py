@@ -22,9 +22,12 @@ def programs():
     fn, = (n for n in ast.parse(text).body if isinstance(n, ast.FunctionDef) and n.name == "write_test_file")
     draw, = (n for n in ast.walk(fn) if isinstance(n, ast.Call) and ast.unparse(n.func) == "random.choice")
     expression = ast.get_source_segment(text, draw)
-    pre = "import random\nimport string\nrandom.seed(8675309)\n"
-    yield "shutil-expression", pre + f"for i in range(10000):\n    print({expression})\n"
-    yield "shutil-write-test-file", "import os\n" + pre + ast.get_source_segment(text, fn) + '\nwrite_test_file("fixture.bin", 4096)\n'
+    imports = "import random\nimport string\n"
+    seed = "random.seed(8675309)\n"
+    yield "shutil-expression", imports + seed + f"for i in range(10000):\n    print({expression})\n"
+    # Keep the original definition before executable module statements.
+    yield "shutil-write-test-file", ("import os\n" + imports + ast.get_source_segment(text, fn)
+                                    + "\n" + seed + 'write_test_file("fixture.bin", 4096)\n')
     yield "bits-and-floats", """import random
 random.seed(-1267650600228229401496703205393)
 for i in range(1300):
@@ -52,8 +55,27 @@ for i in range(80):
 random.seed(b"abc")
 print(random.getrandbits(128))
 """
+    yield "single-evaluation", """from random import choice, seed
+
+def items(calls: list[int]) -> list[str]:
+    calls.append(1)
+    return ["one", "two", "three"]
+
+seed(123)
+calls: list[int] = []
+print(choice(items(calls)))
+print(len(calls))
+for i in range(10):
+    print(choice([50]))
+    print(choice([25, 75]))
+"""
     yield "error-state", """import random
 random.seed(125)
+empty: list[int] = []
+try:
+    random.choice(empty)
+except IndexError as error:
+    print(str(error))
 try:
     random.choice("")
 except IndexError as error:
@@ -116,12 +138,13 @@ def main():
                 try:
                     exe=Toolchain(args.imre,args.runtime,args.clang,level).build(source.encode(),build)
                 except NativeCompileError as exc:
-                    result={"status":"compile-blocked","diagnostic":str(exc)}
+                    result={"status":"compile-blocked","diagnostic":str(exc).replace(str(build) + "/", "")}
                 else:
                     actual=observe([str(exe)],root/f"{name}-run-{level}")
                     result={"status":"pass" if actual==expected else "failed","observed":actual}
                 row["levels"][str(level)]=result
-                failed |= result["status"] != "pass" and name != "shutil-write-test-file"
+                failed |= (result["status"] == "failed" or
+                           (result["status"] == "compile-blocked" and name != "shutil-write-test-file"))
                 print(f"{name} O{level}: {result['status']}",flush=True)
     args.result.write_text(json.dumps(report,indent=2)+"\n")
     return int(failed)

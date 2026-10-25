@@ -1,5 +1,6 @@
 //! Module-level random draws share one MT19937 state, as in CPython 3.14.
-//! See licenses/MT19937.txt for the original generator's redistribution notice.
+//! The original generator and Python semantics are distributed under the notices
+//! in licenses/MT19937.txt and licenses/CPython.txt.
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
