@@ -183,6 +183,25 @@ unsafe fn string_option<'a>(word: usize) -> Option<&'a str> {
     unsafe { (word as *const Str).as_ref() }.map(Str::as_str)
 }
 
+pub(super) fn read(
+    path: &str,
+    encoding: Option<&str>,
+    errors: Option<&str>,
+    newline: Option<&str>,
+) -> Result<Str> {
+    with_path_file(path, 0, true, |file| {
+        let codec = options(encoding, newline)?;
+        let data = file.input()?.read_bytes(None)?;
+        let text = codec.decode(&data, errors)?;
+        let text = if newline.is_none() && text.contains('\r') {
+            text.replace("\r\n", "\n").replace('\r', "\n")
+        } else {
+            text
+        };
+        Ok(Str::from(text))
+    })
+}
+
 /// # Safety
 /// Root the path and each nonzero optional string through the read and close.
 #[unsafe(no_mangle)]
@@ -203,21 +222,13 @@ pub unsafe extern "C" fn imre_path_read_text_options(
     };
     // SAFETY: no language callback can mutate the rooted path during file I/O.
     let result = unsafe {
-        path.0.with(|storage| {
-            with_path_file(storage.path(), 0, true, |file| {
-                let codec = options(encoding, newline)?;
-                let data = file.input()?.read_bytes(None)?;
-                let text = codec.decode(&data, errors)?;
-                let text = if newline.is_none() && text.contains('\r') {
-                    text.replace("\r\n", "\n").replace('\r', "\n")
-                } else {
-                    text
-                };
-                Ok(Rc::into_raw(Rc::new(Str::from(text))))
-            })
-        })
+        path.0
+            .with(|storage| read(storage.path(), encoding, errors, newline))
     };
-    finish(result, std::ptr::null())
+    finish(
+        result.map(|text| Rc::into_raw(Rc::new(text))),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety

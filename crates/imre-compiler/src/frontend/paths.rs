@@ -362,6 +362,16 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
+        if name == "read_text"
+            && call.arguments.args.is_empty()
+            && call.arguments.keywords.is_empty()
+        {
+            return Ok(operation(
+                PathOperation::ReadText,
+                Type::Str,
+                vec![receiver],
+            ));
+        }
         let write = name != "read_text";
         let binary = name == "write_bytes";
         let expected = if binary { Type::Bytes } else { Type::Str };
