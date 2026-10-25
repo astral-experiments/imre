@@ -23,7 +23,7 @@ Use CPython 3.14.5 and its original source checkout. From the repository root, a
 ```sh
 suite=benchmarks/cpython_stdlib/full/datetime
 python3 -m test test_datetime
-python3 -c 'import runpy; from test import support; support.use_resources=[]; runpy.run_path("benchmarks/cpython_stdlib/suite_inventory.py", run_name="__main__")' "$suite/UPSTREAM.json" --result /tmp/datetime-reference.json
+python3 benchmarks/cpython_stdlib/suite_inventory.py "$suite/UPSTREAM.json" --result /tmp/datetime-reference.json
 cmp "$suite/reference-linux.json" /tmp/datetime-reference.json
 python3 "$suite/focused.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
 python3 "$suite/run.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result /tmp/datetime-native.json

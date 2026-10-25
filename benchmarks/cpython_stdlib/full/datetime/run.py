@@ -11,7 +11,12 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_evidence import roles, write_reports
-from suite_inventory import load_suite, verify_files, verify_interpreter_tests
+from suite_inventory import (
+    discovery_resources,
+    load_suite,
+    verify_files,
+    verify_interpreter_tests,
+)
 from suite_native import NativeCompileError, Toolchain, method_bytes, run_evidence
 
 CANDIDATES = {
@@ -152,40 +157,37 @@ def main():
         parser.error("the pinned CPython 3.14.5 interpreter is required")
     if args.cpython_source:
         sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
-    from test import support
-
-    # Bare unittest enables local tzdata. Match the recorded default regrtest JUnit IDs.
-    support.use_resources = []
     spec = json.loads((HERE / "UPSTREAM.json").read_text())
     ref = json.loads((HERE / "reference-linux.json").read_text())
     verify_files(HERE / "upstream", spec["files"])
     verify_interpreter_tests(spec)
     reports = []
-    for level in (0, 3):
-        tools = Toolchain(args.imre, args.runtime, args.clang, level)
-        with tempfile.TemporaryDirectory() as tmp:
-            executions, preflight = {}, {}
-            for owner, methods in CANDIDATES.items():
-                for name in methods:
-                    work = Path(tmp) / (owner + "." + name)
-                    work.mkdir()
-                    execute, blocker = prepare(tools, work, owner, name)
-                    for variant in ("Pure", "Fast"):
-                        key = f"test.datetimetester.{owner}_{variant}.{name}"
-                        if blocker is None:
-                            executions[key] = execute
-                        else:
-                            preflight[(key, 1)] = blocker
-            report = run_evidence(
-                load_suite(spec["module"]),
-                executions,
-                ref,
-                level,
-                preflight=preflight,
-                exceptions=upstream_skips(ref, level),
-            )
-            reports.append(report)
-            print(f"O{level}: {report['counts']}", flush=True)
+    with discovery_resources(spec):
+        for level in (0, 3):
+            tools = Toolchain(args.imre, args.runtime, args.clang, level)
+            with tempfile.TemporaryDirectory() as tmp:
+                executions, preflight = {}, {}
+                for owner, methods in CANDIDATES.items():
+                    for name in methods:
+                        work = Path(tmp) / (owner + "." + name)
+                        work.mkdir()
+                        execute, blocker = prepare(tools, work, owner, name)
+                        for variant in ("Pure", "Fast"):
+                            key = f"test.datetimetester.{owner}_{variant}.{name}"
+                            if blocker is None:
+                                executions[key] = execute
+                            else:
+                                preflight[(key, 1)] = blocker
+                report = run_evidence(
+                    load_suite(spec["module"]),
+                    executions,
+                    ref,
+                    level,
+                    preflight=preflight,
+                    exceptions=upstream_skips(ref, level),
+                )
+                reports.append(report)
+                print(f"O{level}: {report['counts']}", flush=True)
     write_reports(args.result, reports, ref)
     if any(
         r["counts"].get("native-body-host-fixture", 0) < 4 or r["counts"].get("failed")

@@ -2,6 +2,7 @@
 
 import argparse
 from collections import Counter
+from contextlib import nullcontext
 import hashlib
 import importlib
 import json
@@ -18,6 +19,16 @@ def verify_files(root, files):
         data = (root / name).read_bytes()
         if hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest() != expected:
             raise ValueError(f"upstream blob mismatch: {root / name}")
+
+
+def discovery_resources(manifest):
+    """Use the same resource set as the reference job for package discovery hooks."""
+    if not manifest.get("regrtest_discovery", False):
+        return nullcontext()
+    from test import support
+    from unittest.mock import patch
+    # Bare unittest's None enables optional resources; default regrtest uses [].
+    return patch.object(support, "use_resources", [])
 
 
 def load_suite(module_name):
@@ -91,7 +102,8 @@ def main():
     # regrtest and its child processes import the interpreter's own Lib/test.
     # Verify those test bytes too. Do not replace package discovery with a glob.
     verify_interpreter_tests(manifest)
-    ids = id_counts(case.id() for case in cases(load_suite(module)))
+    with discovery_resources(manifest):
+        ids = id_counts(case.id() for case in cases(load_suite(module)))
     with tempfile.TemporaryDirectory() as work:
         xml = Path(work) / "reference.xml"
         run = subprocess.run([sys.executable, "-B", "-m", "test", "--single-process",
