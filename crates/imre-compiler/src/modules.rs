@@ -821,7 +821,7 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
-    /// Mark the precise call where lowering raises Python's missing-argument TypeError.
+    /// Record a call whose argument binding was handled by native lowering.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::MissingArgument(call));

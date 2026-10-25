@@ -110,7 +110,16 @@ impl Checker<'_> {
             }
         };
         let wrapper = self.expr(node)?;
-        Ok(scope.finish(self.attach_wrapped(wrapper, wrapped, call)?))
+        let result = self.attach_wrapped(wrapper, wrapped, call)?;
+        if let [keyword] = call.arguments.keywords.as_ref() {
+            // The stub calls this parameter `f`; the actual partial calls
+            // update_wrapper, whose first parameter is named `wrapper`.
+            self.graph
+                .checked_missing_argument(self.module, call.range());
+            self.graph
+                .checked_keywords(self.module, std::iter::once(keyword.range()));
+        }
+        Ok(scope.finish(result))
     }
 
     /// Evaluate the callable, iterable and optional seed before acquiring the iterator.
