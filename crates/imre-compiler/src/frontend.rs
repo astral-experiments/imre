@@ -30,6 +30,7 @@ mod doctest;
 mod documents;
 mod enums;
 mod errno;
+mod expandtabs;
 mod expansions;
 mod fixed_tuples;
 mod fnmatch;
@@ -6754,6 +6755,11 @@ impl<'a> Checker<'a> {
                     attribute.attr.as_str(),
                     call,
                 );
+            }
+            if attribute.attr.as_str() == "expandtabs"
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.expandtabs(Self::string_value(receiver), call);
             }
             if matches!(attribute.attr.as_str(), "lower" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
