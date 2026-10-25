@@ -521,7 +521,10 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
     let source = match encoding.as_str() {
         "utf-8" | "utf8" | "utf_8" => String::from_utf8(bytes).map_err(|err| {
             let reason = err.utf8_error();
-            super::super::bytes::decode_owned_error(Rc::new(err.into_bytes()), reason)
+            super::super::bytes::decode_owned_error(
+                crate::BytesOwner::new(err.into_bytes()),
+                reason,
+            )
         })?,
         "latin-1" | "latin1" | "iso-8859-1" => {
             let capacity = bytes.len() + bytes.iter().filter(|b| !b.is_ascii()).count();

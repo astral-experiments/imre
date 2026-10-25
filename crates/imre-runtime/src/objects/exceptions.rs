@@ -296,6 +296,7 @@ impl Kind {
                 Self::OSError
                     | Self::UnsupportedOperation
                     | Self::FileNotFoundError
+                    | Self::BlockingIOError
                     | Self::PermissionError
                     | Self::IsADirectoryError
                     | Self::NotADirectoryError
@@ -565,7 +566,19 @@ impl Error {
             paths.append_message(&mut message);
             paths
         });
-        Self::errno_arguments(kind, errno, description, message, os_paths)
+        Self::errno_arguments(kind, errno, description, message, os_paths, None)
+    }
+
+    pub(super) fn blocked_write(errno: i32, accepted: usize) -> Self {
+        let description = crate::BlockedWrite::DESCRIPTION;
+        Self::errno_arguments(
+            Kind::BlockingIOError,
+            errno,
+            description,
+            format!("[Errno {errno}] {description}"),
+            None,
+            Some(accepted),
+        )
     }
 
     fn errno_arguments(
@@ -574,16 +587,20 @@ impl Error {
         description: &str,
         message: String,
         os_paths: Option<Box<os::Filenames>>,
+        accepted: Option<usize>,
     ) -> Self {
-        let args = [
+        let mut args = smallvec::smallvec![
             Self::int_arg(crate::Int::small(i64::from(errno)).unwrap()),
             Self::string_arg(description),
         ];
+        if let Some(count) = accepted {
+            args.push(Self::int_arg(crate::Int::from_usize(count)));
+        }
         Self {
             kind,
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
                 message: StrOwner::new(message.into()),
-                args: args.into_iter().collect(),
+                args,
                 os_paths,
             }))),
             cause: None,
@@ -619,14 +636,18 @@ impl Error {
 
     pub(super) fn unicode_decode(
         codec: &str,
-        bytes: Rc<super::Bytes>,
+        bytes: crate::BytesOwner,
         bounds: std::ops::Range<usize>,
         reason: &str,
         message: String,
     ) -> Self {
         // SAFETY: kind 8 owns the immutable input of the failed decode.
-        let object =
-            unsafe { OwnedWord::from_owned(Rc::into_raw(bytes) as usize, WordKind::new(8)) };
+        let object = unsafe {
+            OwnedWord::from_owned(
+                crate::BytesOwner::into_raw(bytes) as usize,
+                WordKind::new(8),
+            )
+        };
         Self::unicode_codec(
             Kind::UnicodeDecodeError,
             codec,
@@ -690,7 +711,7 @@ impl Error {
     }
 
     /// Use Python's argument-free MemoryError when an operation exhausts memory.
-    pub(super) fn memory_error() -> Self {
+    pub(crate) fn memory_error() -> Self {
         Self {
             kind: Kind::MemoryError,
             payload: Some(Payload::Empty),

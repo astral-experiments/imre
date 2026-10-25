@@ -2,6 +2,7 @@
 use super::{
     Error, Kind, Object, Payload, Result, Str, Unicode16Repr, finish, object, push_string_repr,
 };
+#[cfg(test)]
 use crate::Bytes;
 use crate::StrOwner;
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
@@ -13,17 +14,17 @@ use std::rc::Rc;
 #[derive(Clone)]
 pub(in crate::objects) enum Filename {
     Str(StrOwner),
-    Bytes(Rc<Bytes>),
+    Bytes(crate::BytesOwner),
     Path(Rc<Object>),
     /// A POSIX name decoded with surrogateescape, outside Imre's scalar str domain.
-    SurrogateEscaped(Rc<Bytes>),
+    SurrogateEscaped(crate::BytesOwner),
 }
 
 impl Filename {
     pub(in crate::objects) fn from_fs_text(path: OsString) -> Self {
         match path.into_string() {
             Ok(s) => Self::Str(StrOwner::new(Str::from(s))),
-            Err(raw) => Self::SurrogateEscaped(Rc::new(raw.into_vec())),
+            Err(raw) => Self::SurrogateEscaped(crate::BytesOwner::new(raw.into_vec())),
         }
     }
 
@@ -48,7 +49,7 @@ impl Filename {
     fn union_word(&self) -> Result<usize> {
         Ok(match self {
             Self::Str(s) => StrOwner::into_raw(StrOwner::clone(s)) as usize,
-            Self::Bytes(b) => Rc::into_raw(Rc::clone(b)) as usize | 1,
+            Self::Bytes(b) => crate::BytesOwner::into_raw(crate::BytesOwner::clone(b)) as usize | 1,
             Self::Path(p) => Rc::into_raw(Rc::clone(p)) as usize | 6,
             Self::SurrogateEscaped(_) => {
                 return Err(Error::new(
@@ -142,20 +143,35 @@ pub unsafe extern "C" fn imre_os_error_field(value: *const Object, field: u32) -
     let result = unsafe {
         object(value).0.with(|storage| {
             let exception = storage.exception();
-            if !exception.kind.matches(Kind::OSError) {
-                let name = ["errno", "strerror", "filename", "filename2"][field as usize];
+            if !exception.kind.matches(Kind::OSError)
+                || field == 4 && exception.kind != Kind::BlockingIOError
+            {
+                let name = [
+                    "errno",
+                    "strerror",
+                    "filename",
+                    "filename2",
+                    "characters_written",
+                ][field as usize];
                 return Err(Error::new(
                     Kind::AttributeError,
                     format!("'{}' object has no attribute '{name}'", exception.name()),
                 ));
             }
             let Payload::Arguments(arguments) = &exception.payload else {
-                return Ok(0);
+                return if field == 4 {
+                    Err(Error::new(Kind::AttributeError, "characters_written"))
+                } else {
+                    Ok(0)
+                };
             };
-            // errno and strerror are exactly the two arguments used for repr.
+            // Buffered write errors retain a third repr argument: the accepted byte count.
             // A filename is a separate original path owner, never a parsed message.
             Ok(match field {
-                0 | 1 if arguments.args.len() == 2 => {
+                0 | 1
+                    if arguments.args.len() == 2
+                        || exception.kind == Kind::BlockingIOError && arguments.args.len() == 3 =>
+                {
                     arguments.args[field as usize].clone().into_word()
                 }
                 0 | 1 => 0,
@@ -168,6 +184,10 @@ pub unsafe extern "C" fn imre_os_error_field(value: *const Object, field: u32) -
                     .as_ref()
                     .and_then(|p| p.second.as_ref())
                     .map_or(Ok(0), Filename::union_word)?,
+                4 => match arguments.args.get(2) {
+                    Some(word) if word.kind.raw() == 2 => word.clone().into_word(),
+                    _ => return Err(Error::new(Kind::AttributeError, "characters_written")),
+                },
                 _ => unreachable!(),
             })
         })
@@ -185,13 +205,13 @@ mod tests {
     #[test]
     fn projected_paths_keep_the_original_owners_after_the_exception_drops() {
         let a = StrOwner::new(Str::from("before"));
-        let b = Rc::new(vec![0xff]);
+        let b = crate::BytesOwner::new(vec![0xff]);
         Error::from_errno(
             Kind::FileNotFoundError,
             libc::ENOENT,
             "missing",
             Some(Filename::Str(StrOwner::clone(&a))),
-            Some(Filename::Bytes(Rc::clone(&b))),
+            Some(Filename::Bytes(crate::BytesOwner::clone(&b))),
         )
         .raise();
         // SAFETY: take transfers the pending exception; each field returns an
@@ -210,10 +230,10 @@ mod tests {
                 StrOwner::from_raw(imre_os_error_field(Rc::as_ptr(&error), 2) as *const Str);
             let second = imre_os_error_field(Rc::as_ptr(&error), 3);
             assert_eq!(second & 7, 1);
-            let second = Rc::from_raw((second & !7) as *const Bytes);
+            let second = crate::BytesOwner::from_raw((second & !7) as *const Bytes);
             drop(error);
             assert!(StrOwner::ptr_eq(&a, &first));
-            assert!(Rc::ptr_eq(&b, &second));
+            assert!(crate::BytesOwner::ptr_eq(&b, &second));
         }
     }
 }
