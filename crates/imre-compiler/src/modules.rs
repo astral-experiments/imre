@@ -168,6 +168,7 @@ pub(crate) enum Intrinsic {
     TypeChecking,
     GetLogger,
     GetLevelName,
+    LoggingDisable,
     AddLevelName,
     LevelNamesMapping,
     HandlerRename,
@@ -206,6 +207,8 @@ pub(crate) enum Intrinsic {
     CacheInfo,
     LruCache,
     SingleDispatch,
+    UpdateWrapper,
+    Wraps,
     CachedProperty,
     NewType,
     Partial,
@@ -229,6 +232,9 @@ pub(crate) enum Intrinsic {
     WarningReset,
     WarningDisplay { show: bool },
     PatchSet,
+    PatchedFile,
+    Hunk,
+    UnidiffParseError,
     Awaitable,
     TypeVar,
     Stderr,
@@ -320,6 +326,7 @@ pub(crate) enum Intrinsic {
     EnumAuto,
     DefaultDict,
     ChainMap,
+    OrderedDict,
     NamedTuple,
     Counter,
     Deque,
@@ -559,6 +566,7 @@ impl IntrinsicModule {
             (Self::Logging, "raiseExceptions") => Intrinsic::LogRecordFlag(16),
             (Self::Logging, "makeLogRecord") => Intrinsic::MakeLogRecord,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
+            (Self::Logging, "disable") => Intrinsic::LoggingDisable,
             (Self::Logging, "getLevelName") => Intrinsic::GetLevelName,
             (Self::Logging, "addLevelName") => Intrinsic::AddLevelName,
             (Self::Logging, "getLevelNamesMapping") => Intrinsic::LevelNamesMapping,
@@ -613,6 +621,9 @@ impl IntrinsicModule {
                 Intrinsic::IntConstant(0)
             }
             (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
+            (Self::Unidiff, "PatchedFile") => Intrinsic::PatchedFile,
+            (Self::Unidiff, "Hunk") => Intrinsic::Hunk,
+            (Self::Unidiff, "UnidiffParseError") => Intrinsic::UnidiffParseError,
             (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
             (Self::Typing, "overload") => Intrinsic::Overload,
             (Self::Typing, "get_overloads") => Intrinsic::GetOverloads,
@@ -631,6 +642,8 @@ impl IntrinsicModule {
             }
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Functools, "singledispatch") => Intrinsic::SingleDispatch,
+            (Self::Functools, "update_wrapper") => Intrinsic::UpdateWrapper,
+            (Self::Functools, "wraps") => Intrinsic::Wraps,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
                     normcase: name == "fnmatch",
@@ -774,6 +787,9 @@ impl IntrinsicModule {
                 "SO_RCVBUF" => "so_rcvbuf",
                 "SO_LINGER" => "so_linger",
                 "MSG_PEEK" => "msg_peek",
+                "SHUT_RD" => "shut_rd",
+                "SHUT_WR" => "shut_wr",
+                "SHUT_RDWR" => "shut_rdwr",
 
                 _ => return None,
             }),
@@ -809,6 +825,7 @@ impl IntrinsicModule {
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Collections, "ChainMap") => Intrinsic::ChainMap,
             (Self::Collections, "deque") => Intrinsic::Deque,
+            (Self::Collections, "OrderedDict") => Intrinsic::OrderedDict,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
@@ -2315,6 +2332,7 @@ impl<'a> Loader<'a> {
                 Some(("selectors.py", include_str!("../stdlib/selectors.py")))
             }
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
+            "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
             "string" => Some((
                 "string/__init__.py",
                 include_str!("../stdlib/string/__init__.py"),

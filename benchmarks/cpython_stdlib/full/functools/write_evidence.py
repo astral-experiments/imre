@@ -21,6 +21,10 @@ def observe(name, level, body, body_rev, probes):
         elif name.endswith(".test_get_annotations"):
             operation = ("Imre creates an lru_cache wrapper, reads the original and wrapper annotations, "
                          "and compares both dictionaries with the expected builtin class objects.")
+        elif name.endswith(".test_lru_cache_parameters"):
+            operation = ("Imre executes both local lru_cache decorators and reads a fresh parameter "
+                         "dictionary from each wrapper. The native assertion fixture compares both "
+                         "dictionaries with the original expected values.")
         else:
             operation = f"Imre executed the product operations of the complete unchanged {name} method."
         proof.update(operation=operation,
