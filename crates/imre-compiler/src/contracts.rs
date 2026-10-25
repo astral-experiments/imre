@@ -383,6 +383,7 @@ impl Builtin {
             | Self::EnumString
             | Self::StringListContains
             | Self::StringContains
+            | Self::BytesContains
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
@@ -394,6 +395,7 @@ impl Builtin {
             | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
+            | Self::BytesContainsInt
             | Self::DictDelete
             | Self::DictPop
             | Self::DictTryPop(_)
@@ -736,6 +738,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bytes"
                 | "imre_bytes_count"
                 | "imre_bytes_list"
+                | "imre_bytes_contains_int"
                 | "imre_byte_output_finish"
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"
