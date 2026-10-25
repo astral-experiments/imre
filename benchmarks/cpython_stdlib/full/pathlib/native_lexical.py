@@ -48,8 +48,10 @@ def groups():
     return result
 
 
-def native_source():
+def native_source(*, dispatch=False):
     source = bytearray(b'from pathlib import Path, PosixPath, PurePath, PurePosixPath, PureWindowsPath\n')
+    if dispatch:
+        source.extend(b'import sys\n')
     runs, rows = [], {}
     for (module, owner, fixture, ctor, expected), names in groups().items():
         data = (PACKAGE / (module + '.py')).read_bytes()
@@ -93,7 +95,10 @@ class {name}:
             source.extend(b'\n' + body)
             cid = f'test.test_pathlib.{module}.{fixture}.{method}'
             rows[cid] = {'method_sha256': hashlib.sha256(body).hexdigest()}
-            runs.append(f'c_{name} = {name}()\nc_{name}.{method}()\nprint(f"{cid} {{c_{name}.checks}}")\n')
+            run = f'c_{name} = {name}()\nc_{name}.{method}()\nprint(f"{cid} {{c_{name}.checks}}")\n'
+            if dispatch:
+                run = f'if sys.argv[1] == {cid!r}:\n' + ''.join('    ' + line for line in run.splitlines(True))
+            runs.append(run)
     source.extend('\n'.join(runs).encode())
     return source, rows
 

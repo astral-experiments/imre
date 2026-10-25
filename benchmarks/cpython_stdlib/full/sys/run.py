@@ -24,32 +24,39 @@ def build(args, source, binary):
                     "--quiet", "-o", binary], check=True, timeout=120)
 
 
-def stream_case(args, work, source):
-    method = "test_43581"
+def native_method(args, work, source, cls_name, method, assertions):
     data = source.read_bytes()
     cls = next(n for n in ast.parse(data).body if isinstance(n, ast.ClassDef)
-               and n.name == "SysModuleTest")
+               and n.name == cls_name)
     node = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == method)
     if node.decorator_list:
         raise ValueError("unhandled upstream decorator")
     body = b"".join(data.splitlines(keepends=True)[node.lineno - 1:node.end_lineno])
-    script = work / "streams.py"
-    script.write_bytes(b"""import sys
-
-class Case:
-    def assertEqual(self, actual: str, expected: str) -> None:
-        if actual != expected:
-            raise ValueError("assertEqual")
-        print("assertEqual")
-
-""" + body + b"\nCase().test_43581()\n")
-    binary = work / "streams"
+    script = work / f"{method}.py"
+    script.write_bytes(b"import sys\n\nclass Case:\n" + assertions.encode() + body
+                       + f"\nCase().{method}()\n".encode())
+    binary = work / method
     build(args, script, binary)
     result = subprocess.run([binary], capture_output=True, check=True, timeout=15)
     if (result.stdout, result.stderr) != (b"assertEqual\n", b""):
         raise AssertionError(result)
     return {"execution": "native-body", "status": "pass", "assertions": 1,
             "method_sha256": hashlib.sha256(body).hexdigest()}
+
+
+STRING_EQUAL = """    def assertEqual(self, actual: str, expected: str) -> None:
+        if actual != expected:
+            raise ValueError("assertEqual")
+        print("assertEqual")
+
+"""
+
+EXCEPTION_EQUAL = """    def assertEqual(self, actual: BaseException | None, expected: None) -> None:
+        if actual is not expected:
+            raise AssertionError("assertEqual")
+        print("assertEqual")
+
+"""
 
 
 def main():
@@ -78,7 +85,22 @@ def main():
     with tempfile.TemporaryDirectory(prefix="imre-test-sys-") as tmp:
         work = Path(tmp)
         prefix = "test.test_sys.SysModuleTest."
-        cases[prefix + "test_43581"] = stream_case(args, work, source)
+        cases[prefix + "test_43581"] = native_method(
+            args, work, source, "SysModuleTest", "test_43581", STRING_EQUAL)
+        case_id = "test.test_sys.ActiveExceptionTests.test_sys_exception_no_exception"
+        cases[case_id] = native_method(
+            args, work, source, "ActiveExceptionTests", "test_sys_exception_no_exception",
+            EXCEPTION_EQUAL)
+
+        # Independent operational checks; these do not add to the upstream count.
+        exercise = HERE / "active_exception.py"
+        program = work / "active-exception"
+        build(args, exercise, program)
+        reference_result = subprocess.run([sys.executable, exercise], capture_output=True,
+                                          check=True, timeout=15)
+        native_result = subprocess.run([program], capture_output=True, check=True, timeout=15)
+        if (native_result.stdout, native_result.stderr) != (reference_result.stdout, reference_result.stderr):
+            raise AssertionError(("active exception context", native_result, reference_result))
         binary = work / "encoding"
         build(args, HERE / "encoding_driver.py", binary)
         calls = []

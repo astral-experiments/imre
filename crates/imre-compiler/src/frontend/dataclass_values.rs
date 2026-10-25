@@ -33,8 +33,12 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::GeneratorContext
         | Type::DirectoryContext(_)
         | Type::Semaphore
+        | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::LogRecord
         | Type::Logger
+        | Type::TimedFileHandler
+        | Type::ClockTime
         | Type::Sha256
         | Type::RegexPattern
         | Type::RegexMatch
@@ -125,7 +129,14 @@ pub(super) fn validate(
 fn contains_opaque(ty: Type, types: &Types) -> bool {
     matches!(
         ty,
-        Type::Logger | Type::Sha256 | Type::RegexPattern | Type::RegexMatch | Type::StringKeys
+        Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
+            | Type::LogRecord
+            | Type::Sha256
+            | Type::RegexPattern
+            | Type::RegexMatch
+            | Type::StringKeys
     ) || types
         .children(ty)
         .into_iter()

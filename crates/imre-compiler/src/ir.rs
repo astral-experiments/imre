@@ -30,8 +30,12 @@ pub(crate) enum Type {
     Optional(usize),
     /// A closed str/bytes union with one owned tagged-pointer word.
     Union(usize),
+    /// An owned tagged reference to a string list or a fixed tuple of strings.
+    StringIterable,
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
+    /// A first-class cursor whose next operation transfers one exact element type.
+    Cursor(usize),
     /// A sealed builtin exception with an immutable category and owned payload.
     Exception,
     /// An exception object known to own the given fixed payload layout.
@@ -49,6 +53,8 @@ pub(crate) enum Type {
     PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
+    /// A synchronous child with statically known captured stream types.
+    Popen(ProcessCapture, bool),
     /// Async process handle, with bits for the captured stdout and stderr slots.
     AsyncProcess(u8),
     Coroutine(usize),
@@ -61,7 +67,10 @@ pub(crate) enum Type {
     Semaphore,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
+    LogRecord,
     Logger,
+    TimedFileHandler,
+    ClockTime,
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -127,6 +136,7 @@ impl std::fmt::Display for Type {
             Self::StrLiteral(id) => return write!(f, "string-literal#{id}"),
             Self::StrEnum(id) => return write!(f, "string-enum#{id}"),
             Self::Enum(id) => return write!(f, "enum#{id}"),
+            Self::Cursor(id) => return write!(f, "iterator#{id}"),
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
@@ -150,6 +160,7 @@ impl std::fmt::Display for Type {
             Self::Exception | Self::NamedException(_) => "Exception",
             Self::ExitCode => "SystemExit.code",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
+            Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
@@ -157,6 +168,7 @@ impl std::fmt::Display for Type {
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
             Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
+            Self::Popen(..) => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
             Self::EventLoop => "asyncio.AbstractEventLoop",
@@ -166,7 +178,10 @@ impl std::fmt::Display for Type {
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
+            Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
+            Self::ClockTime => "datetime.time",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -181,6 +196,7 @@ impl std::fmt::Display for Type {
             | Self::StrEnum(_)
             | Self::Enum(_)
             | Self::Class(_)
+            | Self::Cursor(_)
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
@@ -440,6 +456,14 @@ pub(crate) enum ZipField {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    Repeat,
+    CursorLengthHint,
+    Progression {
+        bounded: bool,
+    },
+    Islice,
+    Tee,
+    Cycle,
     DirectoryContextView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
@@ -476,6 +500,7 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    OsName,
     SystemExitNew {
         omit_none: bool,
     },
@@ -487,7 +512,10 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     Logging(LogOperation),
+    Timed(TimedOperation),
+    LogRecord(LogRecordOperation),
     Input,
+    Chr,
     Int,
     Float,
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
@@ -520,6 +548,11 @@ pub(crate) enum Builtin {
     StringFormat,
     StringReplace,
     Text(TextOperation),
+    HexFormat {
+        width: u32,
+        zero: bool,
+        upper: bool,
+    },
     FloatFormat {
         precision: u32,
         percent: bool,
@@ -583,6 +616,8 @@ pub(crate) enum Builtin {
     BytesIter,
     Encode,
     Decode,
+    DecodeAscii,
+    UrlsafeB64encode,
     Sha256Hex,
     Sha256New,
     HashNew,
@@ -617,6 +652,8 @@ pub(crate) enum Builtin {
     IsNone,
     /// Promotes an exact str/bytes owner without allocating or changing identity.
     UnionInject,
+    /// An owned list for a readonly iteration: borrows existing list storage or copies tuple words.
+    StringIterationList,
     /// Projects a member proved by local control flow, acquiring its own owner.
     UnionProject,
     IsInstance(Vec<InstanceType>),
@@ -701,6 +738,7 @@ pub(crate) enum Builtin {
     TextFlush,
     TextClose,
     TextClosed,
+    FileFileno,
     DictGet,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
@@ -731,6 +769,10 @@ pub(crate) enum Builtin {
     /// The stored value type determines optional promotion on successful lookup.
     /// A third argument, when present, already has the flattened result type.
     DictTryGet(Type),
+    /// Removes a key or raises KeyError; an optional third operand is an exact default.
+    DictPop,
+    /// Transfers the removed value into an optional result, or returns the supplied default.
+    DictTryPop(Type),
     /// Arguments are key then dictionary, matching membership evaluation order.
     DictContains,
     DictDelete,
@@ -742,9 +784,11 @@ pub(crate) enum Builtin {
     SetDiscard,
     SetIter,
     ExceptionMessage,
+    JsonErrorField(u32),
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
     ExceptionWithCause,
     ExceptionCause,
+    ActiveException,
     ExceptionSuppressContext,
 }
 
@@ -815,6 +859,7 @@ pub(crate) enum RegexCapture {
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
+    Lower,
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -860,6 +905,10 @@ pub(crate) enum PathOperation {
     ReadBytes,
     WriteText,
     WriteBytes,
+    WriteTypeError,
+    WriteUnion {
+        binary: bool,
+    },
     Mkdir,
     Unlink,
     Rmdir,
@@ -889,6 +938,44 @@ pub(crate) enum PosixPathOperation {
     Splitext,
     Normpath,
     Abspath,
+}
+
+/// Operations on a timed file handler and its immutable wall-clock time.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TimedOperation {
+    New,
+    Clock,
+    ClockPart,
+    Close,
+    Flush,
+    Stream,
+    Filename,
+    Interval,
+    RolloverAt,
+    When,
+    Suffix,
+    BackupCount,
+    Utc,
+    Delay,
+    AtTime,
+    ComputeInt,
+    ComputeFloat,
+    FilesToDelete,
+    ShouldRollover,
+    DoRollover,
+}
+
+/// Operations on a record with individually owned, named Python fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LogRecordOperation {
+    New,
+    Put,
+    Update,
+    Read,
+    Message,
+    Repr,
+    Flag,
+    SetFlag,
 }
 
 /// Operations on the native logging registry and its named loggers.
@@ -923,6 +1010,25 @@ pub(crate) enum ProcessOperation {
     Run {
         streams: u32,
     },
+    Popen {
+        streams: u32,
+    },
+    Call {
+        streams: u32,
+        check: bool,
+    },
+    PopenPid,
+    PopenArgs,
+    PopenPipe(u8),
+    PopenStatus {
+        poll: bool,
+    },
+    PopenWait,
+    PopenCommunicate {
+        text: bool,
+    },
+    PopenExit,
+    PopenSignal,
     AsyncSpawn {
         stdout: u8,
         stderr: u8,
@@ -940,6 +1046,9 @@ pub(crate) enum ProcessOperation {
     },
     ContextEnter,
     ContextYield,
+    GeneratorNext,
+    GeneratorTake,
+    GeneratorYield,
     ContextExit,
     ContextThrow,
     IndirectCoroutine {
@@ -974,6 +1083,7 @@ pub(crate) enum ProcessOperation {
     EnvironGet,
     GetCwd,
     Which,
+    CopyFile,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

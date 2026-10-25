@@ -28,6 +28,7 @@ CELL = """class Cell:
 
 
 REJECTED = {
+    "overridden_static_binding": "import hashlib\nclass Base:\n    make = staticmethod(hashlib.sha256)\nclass Child(Base):\n    def make(self, x: int) -> int:\n        return x\n",
     "literal_unknown_value": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> str:\n    return s\nf("c")\n',
     "literal_unproven_string": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    return s\n',
     "literal_wider_domain": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> Literal["a"]:\n    return s\n',
@@ -35,6 +36,11 @@ REJECTED = {
     "literal_mutable_alias": 'from typing import Literal\na: list[Literal["a"]] = ["a"]\nb: list[str] = a\nb.append("b")\n',
     "literal_non_string": 'from typing import Literal\nx: Literal["a", 7] = "a"\n',
     "literal_invalidated_guard": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    if s == "a":\n        s = input()\n        return s\n    return "a"\n',
+    "root_super_wrong_arity": CELL.replace("self.value = value", "super().__init__(value)\n        self.value = value"),
+    "init_alias_partial_self": CELL.replace("self.value = value", "alias = self\n        self.value = value"),
+    "init_rebind_self": CELL.replace("self.value = value", "self = self\n        self.value = value"),
+    "init_assert_unset_field": CELL.replace("self.value = value", "assert self.value\n        self.value = value"),
+    "init_eager_message_escape": CELL.replace("self.value = value", "assert value, self\n        self.value = value"),
     "wrong_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"\n',
     "wrong_alias_type": CELL + "value = Cell(1)\nalias = value\nalias.value = True\n",
     "ignored_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"  # type: ignore\n',
@@ -71,7 +77,6 @@ REJECTED = {
         + "def escape(value: Cell) -> int:\n    return 0\n",
     "constructor_control_flow": CELL.replace("self.value = value", "if value > 0:\n            self.value = value\n        else:\n            self.value = 0"),
     "constructor_side_effect": CELL.replace("self.value = value", "print(value)\n        self.value = value"),
-    "constructor_local": CELL.replace("self.value = value", "temporary = value\n        self.value = temporary"),
     "constructor_return": CELL.replace("self.value = value", "self.value = value\n        return"),
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
     "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),

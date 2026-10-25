@@ -1,6 +1,8 @@
 //! Process-local logging state for the native single-threaded runtime.
 mod levels;
+pub(super) mod timed;
 
+pub(super) mod record;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;

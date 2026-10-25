@@ -8,7 +8,7 @@ fn tag(ty: Type) -> u8 {
         Type::Bytes => 1,
         Type::List(_) => 2,
         Type::Exception => 3,
-        Type::Class(_) => 4,
+        Type::Class(_) | Type::Tuple(_) => 4,
         Type::Enum(_) => 5,
         Type::Path => 6,
         Type::Int => 7,
@@ -87,11 +87,17 @@ impl Emitter<'_, '_> {
         if value.ty == Type::ExitCode {
             // The view retains its heterogeneous payload. None is not a class
             // accepted by this subset, and bool is also an instance of int.
-            let mask = [Type::None, Type::Bool, Type::Int, Type::Str]
+            let mut mask = [Type::None, Type::Bool, Type::Int, Type::Str]
                 .iter()
                 .enumerate()
                 .filter(|(_, ty)| classes.iter().any(|class| class.accepts(**ty)))
                 .fold(0, |mask, (kind, _)| mask | 1 << kind);
+            if classes
+                .iter()
+                .any(|class| matches!(class, InstanceType::Tuple))
+            {
+                mask |= 1 << 6;
+            }
             let kind = self.instruction(format!(
                 "call i32 @imre_system_exit_code_kind(ptr {})",
                 value.operand
@@ -102,7 +108,20 @@ impl Emitter<'_, '_> {
         }
         let mut result = "false".to_owned();
         for &class in classes {
-            let current = if let Some(members) = self.module.types.members(value.ty) {
+            let current = if value.ty == Type::StringIterable {
+                match class {
+                    InstanceType::Tuple | InstanceType::List => {
+                        let tag = if matches!(class, InstanceType::List) {
+                            2
+                        } else {
+                            4
+                        };
+                        let bits = self.instruction(format!("and i64 {}, 7", value.operand));
+                        self.instruction(format!("icmp eq i64 {bits}, {tag}"))
+                    }
+                    _ => "false".into(),
+                }
+            } else if let Some(members) = self.module.types.members(value.ty) {
                 match (class.accepts(members[0]), class.accepts(members[1])) {
                     (true, true) => "true".to_owned(),
                     (false, false) => "false".to_owned(),
