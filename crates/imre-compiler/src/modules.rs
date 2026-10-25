@@ -1046,16 +1046,21 @@ impl<'a> Loader<'a> {
                 }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => {
                     if executable || !self.modules[id].entry_globals.is_empty() {
-                        // Fixed literal exports can precede a package re-export.
-                        // Emit the prefix now: even a list literal can fail to
-                        // allocate before the next module's initializer runs.
+                        // Emit accepted prefixes before the dependency starts:
+                        // a literal can fail to allocate, and a guard can raise.
                         if id == 0
-                            || !self.modules[id].is_package
-                            || !self.modules[id].executable.iter().all(|&at| {
-                                let stmt = &parsed.syntax().body[at];
-                                value_name(stmt).is_some()
-                                    && module_value(stmt).is_some_and(literal_export)
-                            })
+                            || !self.modules[id]
+                                .executable
+                                .iter()
+                                .rev()
+                                .take_while(|&&at| at >= segment)
+                                .all(|&at| {
+                                    let stmt = &parsed.syntax().body[at];
+                                    module_name_guard(stmt)
+                                        || (self.modules[id].is_package
+                                            && value_name(stmt).is_some()
+                                            && module_value(stmt).is_some_and(literal_export))
+                                })
                         {
                             return Err(self.modules[id].error(
                                 statement,
@@ -1460,6 +1465,47 @@ impl<'a> Loader<'a> {
         }
         Ok(id)
     }
+}
+
+/// Allow an identity check with a closed builtin raise before importing a dependency.
+/// Keep it in the initializer so even a failing guard runs in source order.
+fn module_name_guard(statement: &ast::Stmt) -> bool {
+    let ast::Stmt::If(guard) = statement else {
+        return false;
+    };
+    let ast::Expr::Compare(test) = &*guard.test else {
+        return false;
+    };
+    let [ast::Stmt::Raise(raise)] = guard.body.as_slice() else {
+        return false;
+    };
+    if !guard.elif_else_clauses.is_empty()
+        || !matches!(test.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+        || !matches!(test.operands.as_ref(),
+            [ast::Expr::Name(n), ast::Expr::StringLiteral(_)] |
+            [ast::Expr::StringLiteral(_), ast::Expr::Name(n)] if n.id == "__name__")
+        || raise.cause.is_some()
+    {
+        return false;
+    }
+    let exception = match raise.exc.as_deref() {
+        Some(ast::Expr::Name(name)) => name,
+        Some(ast::Expr::Call(call))
+            if call.arguments.keywords.is_empty()
+                && call
+                    .arguments
+                    .args
+                    .iter()
+                    .all(|a| matches!(a, ast::Expr::StringLiteral(_))) =>
+        {
+            let ast::Expr::Name(name) = &*call.func else {
+                return false;
+            };
+            name
+        }
+        _ => return false,
+    };
+    crate::frontend::exception_kind(exception.id.as_str()).is_some()
 }
 
 /// A closed literal tree cannot read a name introduced by a later import.
