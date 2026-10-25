@@ -50,7 +50,16 @@ pub unsafe extern "C" fn imre_os_open(
             let dir_fd = if dir_fd == 0 {
                 libc::AT_FDCWD
             } else {
-                c_int(dir_fd)?
+                c_int_value(dir_fd).ok_or_else(|| {
+                    // SAFETY: a present dir_fd is a rooted canonical integer.
+                    let fd = unsafe { Int::borrow(dir_fd) };
+                    let message = if fd.big().sign() == num_bigint::Sign::Minus {
+                        "fd is less than minimum"
+                    } else {
+                        "fd is greater than maximum"
+                    };
+                    Error::new(Kind::OverflowError, message)
+                })?
             };
             loop {
                 // SAFETY: the path is terminated and the variadic mode is promoted to int.
@@ -78,17 +87,20 @@ pub unsafe extern "C" fn imre_os_open(
     )
 }
 
-// All C ints fit in the immediate representation. Heap integers cannot fit.
-fn c_int(word: usize) -> Result<libc::c_int> {
+/// All C ints fit in the immediate representation. Heap integers cannot fit.
+fn c_int_value(word: usize) -> Option<libc::c_int> {
     (word & 1 != 0)
         .then_some((word as i64) >> 1)
         .and_then(|n| libc::c_int::try_from(n).ok())
-        .ok_or_else(|| {
-            Error::new(
-                Kind::OverflowError,
-                "Python int too large to convert to C int",
-            )
-        })
+}
+
+fn c_int(word: usize) -> Result<libc::c_int> {
+    c_int_value(word).ok_or_else(|| {
+        Error::new(
+            Kind::OverflowError,
+            "Python int too large to convert to C int",
+        )
+    })
 }
 
 fn checked(ret: libc::c_int) -> Result<libc::c_int> {

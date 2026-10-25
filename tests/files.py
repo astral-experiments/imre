@@ -16,6 +16,19 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "os_open_dir_fd_range": r"""
+import os
+
+limit = 1 << 31
+for directory in [-(1 << 80), -limit - 1, -limit, limit - 1, limit, 1 << 80]:
+    try:
+        fd = os.open("/dev/null", os.O_RDONLY, dir_fd=directory)
+    except OverflowError as error:
+        print(str(error))
+    else:
+        os.close(fd)
+        print("opened")
+""",
     "concat_write_order": r"""
 from typing import TextIO
 
