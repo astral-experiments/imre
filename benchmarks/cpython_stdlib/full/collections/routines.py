@@ -49,11 +49,11 @@ class NativeCase:
 
 # The C OrderedDict fixture supplies its concrete constructor as a callable.
 # It never asks for the class identity or subclasses; those variants are separate.
-ORDERED_SETITEM = """from collections import OrderedDict
+ORDERED_SETITEM = """from collections import OrderedDict as ConcreteOrderedDict
 
 class NativeCase:
-    def OrderedDict(self, pairs: list[tuple[str, int]]) -> OrderedDict[str, int]:
-        return OrderedDict(pairs)
+    def OrderedDict(self, pairs: list[tuple[str, int]]) -> ConcreteOrderedDict[str, int]:
+        return ConcreteOrderedDict(pairs)
 
     def assertEqual(self, left: list[tuple[str, int]], right: list[tuple[str, int]]) -> None:
         if left != right:
