@@ -89,10 +89,12 @@ impl Builtin {
                     | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
+                    | TextOperation::Translate
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit
                     | TextOperation::ShlexQuote => true,
                     TextOperation::IsSpace
+                    | TextOperation::IsUpper
                     | TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -123,6 +125,8 @@ impl Builtin {
                     | PathOperation::AsPosix
                     | PathOperation::ReadText
                     | PathOperation::ReadBytes
+                    | PathOperation::Readlink
+                    | PathOperation::Link(_)
                     | PathOperation::Absolute
                     | PathOperation::WithName
                     | PathOperation::WithStem
@@ -181,9 +185,10 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::TimeSleep | Self::PercentFormat | Self::WarningFilter(_) => {
-                Contract::new(true, PreservesLists)
-            }
+            Self::TimeSleep
+            | Self::PercentFormat
+            | Self::WarningFilter { .. }
+            | Self::WarningReset => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
@@ -294,6 +299,7 @@ impl Builtin {
             | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
+            | Self::FreezeStrings
             | Self::SetAdd
             | Self::CounterUpdate
             | Self::KeySet
@@ -301,11 +307,13 @@ impl Builtin {
             | Self::KeyIntersection
             | Self::KeyDifference
             | Self::RegexGroupDict
+            | Self::Errno(_)
             | Self::DictGet
             | Self::NamespaceWrap
             | Self::NamespaceDict
             | Self::NamespaceGet
             | Self::DictCopy
+            | Self::DictFromKeysTarget
             | Self::DeepCopy
             | Self::RecordCopy
             | Self::JsonDecode(_)
@@ -313,6 +321,7 @@ impl Builtin {
             | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
+            | Self::JsonDecoderDecode
             | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
@@ -355,6 +364,8 @@ impl Builtin {
             | Self::StrDescriptor(_)
             | Self::NewPlainObject
             | Self::InspectSentinel
+            | Self::JsonDecoderNew
+            | Self::JsonDecoderMemo
             | Self::HashAvailable
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
@@ -369,6 +380,7 @@ impl Builtin {
             | Self::IntBounded { .. }
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
+            | Self::IsBuiltinSubclass
             | Self::IsNone
             | Self::JsonIsInt
             | Self::Len
@@ -400,6 +412,8 @@ impl Builtin {
             | Self::NominalIdentity
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
+            | Self::ForwardRefField(_)
+            | Self::NewForwardRef
             | Self::ClassNameView
             | Self::StrEnumName
             | Self::StrEnumValue
@@ -420,6 +434,9 @@ impl Builtin {
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
+            | Self::DequeNew
+            | Self::DequeCopy
+            | Self::DequeExtendSource
             | Self::NamespaceDelete
             | Self::DictDelete
             | Self::DictPop
@@ -447,6 +464,8 @@ impl Builtin {
             | Self::Input
             | Self::ParseArgs { .. }
             | Self::ArgparseText { .. }
+            | Self::DequeAppend { .. }
+            | Self::DequePop { .. }
             | Self::Pop
             | Self::Print
             | Self::SortRestore
@@ -480,6 +499,8 @@ impl Builtin {
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::DequeMaxlen
+            | Self::DequeIter { .. }
             | Self::CounterNew
             | Self::CounterTotal
             | Self::DictAsBase
@@ -493,6 +514,7 @@ impl Builtin {
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
+            | Self::DequeClear
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
@@ -748,6 +770,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"
                 | "imre_json_index"
+                | "imre_json_decoder_decode"
                 | "imre_exception_message"
                 | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
@@ -819,6 +842,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
                 | "imre_str_splitlines_options"
+                | "imre_str_translate"
                 | "imre_exception_field_index"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
@@ -856,6 +880,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_mkdir"
                 | "imre_path_unlink"
                 | "imre_path_rmdir"
+                | "imre_path_readlink"
+                | "imre_path_link"
                 | "imre_path_replace"
                 | "imre_path_absolute"
                 | "imre_path_with_name"
@@ -875,6 +901,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_close"
                 | "imre_bytes_io"
                 | "imre_string_io"
+                | "imre_string_io_newlines"
+                | "imre_string_io_capable"
+                | "imre_string_io_readlines"
                 | "imre_string_io_value"
                 | "imre_string_io_read"
                 | "imre_string_io_seek"
@@ -912,6 +941,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_set"
                 | "imre_seq_get_index"
                 | "imre_seq_set_index"
+                | "imre_deque_new"
+                | "imre_deque_append"
+                | "imre_deque_copy"
+                | "imre_deque_extend_source"
+                | "imre_deque_pop"
                 | "imre_seq_pop"
                 | "imre_seq_repeat"
                 | "imre_str_repeat"
@@ -919,6 +953,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_list_copy"
                 | "imre_record_shallow_copy"
                 | "imre_dict_copy"
+                | "imre_dict_fromkeys_target"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
