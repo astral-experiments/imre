@@ -250,6 +250,9 @@ impl Builtin {
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
                 | ProcessOperation::RmTree
+                | ProcessOperation::CopyTree(_)
+                | ProcessOperation::IgnorePatterns
+                | ProcessOperation::TreeErrorArgs
                 | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView

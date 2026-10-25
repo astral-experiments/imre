@@ -1321,6 +1321,9 @@ pub(crate) enum ProcessOperation {
     Which,
     RmTree,
     Copy(CopyOperation),
+    CopyTree(Type),
+    IgnorePatterns,
+    TreeErrorArgs,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

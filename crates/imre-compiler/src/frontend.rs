@@ -5552,6 +5552,23 @@ impl<'a> Checker<'a> {
                     receiver.ty,
                     Type::Exception | Type::ImportException | Type::TimeoutExpired
                 ) {
+                    if attribute.attr.as_str() == "args"
+                        && let ExprKind::Local(slot) = receiver.kind
+                        && let Some(issue) = self
+                            .captured_process_errors
+                            .iter()
+                            .rev()
+                            .find(|capture| capture.slot == slot)
+                            .and_then(|capture| capture.tree_issue)
+                    {
+                        return Ok(Expr {
+                            ty: self.types.tuple(vec![self.types.list(issue)]),
+                            kind: ExprKind::Builtin(
+                                Builtin::Process(ir::ProcessOperation::TreeErrorArgs),
+                                vec![receiver],
+                            ),
+                        });
+                    }
                     let field = if receiver.ty == Type::TimeoutExpired {
                         self.timeout_error_attribute(&receiver, attribute)?
                     } else {
@@ -6123,6 +6140,10 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
+            Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
+            Some(Binding::Intrinsic(Intrinsic::IgnorePatterns)) => {
+                return self.shutil_ignore_patterns(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Copy(op))) => return self.shutil_copy(op, call),
             Some(Binding::Intrinsic(symbol @ (Intrinsic::FsPath | Intrinsic::PosixNormcase))) => {
                 return self.public_fspath(call, symbol == Intrinsic::PosixNormcase);
