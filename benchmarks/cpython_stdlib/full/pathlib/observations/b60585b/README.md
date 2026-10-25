@@ -26,3 +26,5 @@ dir=benchmarks/cpython_stdlib/full/pathlib
 ```
 
 The first command optionally takes `--candidate-manifest` to check the coordinator's selection. The last command exits nonzero when suite startup is blocked.
+
+The [recheck on the inherited-exception compiler](../d7fc14f/README.md) uses these same probes and a verified hosted Linux archive.
