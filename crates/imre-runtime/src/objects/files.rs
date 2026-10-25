@@ -490,7 +490,13 @@ pub(super) fn open(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Resu
 }
 
 fn open_state(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
-    let (file, metadata) = open_file(path, mode)?;
+    let (file, metadata) = open_file_with(path, mode, |error| {
+        errno_with_filenames(
+            error,
+            Some(super::exceptions::Filename::Str(path.clone())),
+            None,
+        )
+    })?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
     let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
     let fd = file.as_raw_fd();
@@ -520,36 +526,32 @@ fn open_state(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<Fi
 }
 
 /// Open a raw descriptor with the same pathname and directory errors as Python open().
-pub(super) fn open_file(path: &StrOwner, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
+pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
+    open_file_with(path, mode, |error| errno_with_filename(error, Some(path)))
+}
+
+/// Use the caller's filename when opening the path or rejecting a directory.
+fn open_file_with(
+    path: &str,
+    mode: u32,
+    path_error: impl Fn(io::Error) -> Error,
+) -> Result<(std::fs::File, std::fs::Metadata)> {
     super::super::initialize_io();
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
     }
-    let path_error = |error| {
-        errno_with_filenames(
-            error,
-            Some(super::exceptions::Filename::Str(path.clone())),
-            None,
-        )
-    };
     let mut file = match mode {
-        0 | 4 => OpenOptions::new().read(true).open(path.as_str()),
+        0 | 4 => OpenOptions::new().read(true).open(path),
         1 => OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
-            .open(path.as_str()),
-        2 => OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(path.as_str()),
-        3 => OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path.as_str()),
+            .open(path),
+        2 => OpenOptions::new().append(true).create(true).open(path),
+        3 => OpenOptions::new().write(true).create_new(true).open(path),
         _ => fail("SystemError", "invalid file mode"),
     }
-    .map_err(path_error)?;
+    .map_err(&path_error)?;
     let metadata = file.metadata().map_err(errno_error)?;
     if metadata.is_dir() {
         return Err(path_error(io::Error::from_raw_os_error(libc::EISDIR)));

@@ -223,6 +223,7 @@ pub(crate) enum SocketOp {
     Listen,
     Accept,
     Connect,
+    Shutdown,
     SockName,
     Recv,
     Send,
@@ -802,6 +803,8 @@ pub(crate) enum Builtin {
     AnnotationRef,
     AnnotationIs,
     StaticFunction(usize),
+    FunctionWrappedSet,
+    FunctionWrappedGet,
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
@@ -1210,6 +1213,7 @@ pub(crate) enum Builtin {
     ModuleParentPrefix,
     ModuleCacheFromOrigin,
     CachePath(CachePathOperation),
+    OrderedDict,
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,
@@ -1249,6 +1253,7 @@ pub(crate) enum Builtin {
     ChainMapContains,
     /// The stored type may be promoted to an optional result on a hit.
     ChainMapGet(Type),
+    CounterElements,
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,
@@ -1802,6 +1807,7 @@ pub(crate) enum ProcessOperation {
     PopenStatus {
         poll: bool,
     },
+    PopenSetStatus,
     PopenWait,
     PopenCommunicate {
         text: bool,

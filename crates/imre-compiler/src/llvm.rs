@@ -345,12 +345,36 @@ fn emit_program(
     let effects = effects::analyze(module, &callable_targets);
     let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut extension_modules = std::collections::BTreeSet::new();
+    let mut function_link_types = HashSet::new();
+    let mut declared_caches = HashSet::new();
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |expr| {
             if let ExprKind::Builtin(Builtin::ExtensionImport(name), _) = &expr.kind {
                 extension_modules.insert(name.clone());
             }
+            if let ExprKind::Builtin(
+                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet,
+                args,
+            ) = &expr.kind
+            {
+                function_link_types.insert(args[0].ty);
+            }
+            if let ExprKind::Builtin(Builtin::ModuleCache(id), _) = &expr.kind {
+                declared_caches.insert(*id);
+            }
         });
+    }
+    if function_link_types.iter().any(|&ty| {
+        let targets = callable_targets.get(ty);
+        module.types.dispatcher(ty).is_some()
+            || targets.is_empty()
+            || targets.iter().any(|target| {
+                target.bound
+                    || declared_caches.contains(&target.function)
+                    || module.types.cache_adapter(target.function).is_some()
+            })
+    }) {
+        return Err("Imre: wrapper links require a callable signature with only known, unbound native functions".to_owned());
     }
     let (uses_sys_argv, uses_orig_argv, uses_linecache, uses_cache_paths) = module.startup_usage();
     let mut emitter = Emitter {
@@ -363,6 +387,7 @@ fn emit_program(
         uses_string_interning: false,
         tuple_literals: BTreeMap::new(),
         static_functions: BTreeSet::new(),
+        function_link_types,
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
@@ -485,7 +510,13 @@ fn emit_program(
     }
     record_layouts(module, emitter.output);
     json::schemas(module, emitter.output);
-    callables::adapters(module, sanitize, &emitter.resource_types, emitter.output);
+    callables::adapters(
+        module,
+        sanitize,
+        &emitter.resource_types,
+        !emitter.function_link_types.is_empty(),
+        emitter.output,
+    );
     asyncio::adapters(module, sanitize, &emitter.resource_types, emitter.output);
     emitter.output.common().push_str(&integer_helpers());
     emitter
@@ -561,6 +592,7 @@ struct Emitter<'a, 'module> {
     uses_string_interning: bool,
     tuple_literals: BTreeMap<usize, Vec<String>>,
     static_functions: BTreeSet<String>,
+    function_link_types: HashSet<Type>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
@@ -5379,6 +5411,14 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
+            Builtin::FunctionWrappedSet => self.call(
+                "imre_function_set_wrapped",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::FunctionWrappedGet => {
+                self.call("imre_function_get_wrapped", returns, &[&args[0].value])
+            }
             Builtin::WrapperAttributes(fields) => {
                 let names = fields
                     .names()
@@ -6365,6 +6405,7 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::OrderedDict => self.call("imre_ordered_dict", returns, &[&args[0].value]),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::ChainMapNew => self.call("imre_chainmap_new", returns, &[&args[0].value]),
             Builtin::ChainMapMaps => self.call("imre_chainmap_maps", returns, &[&args[0].value]),
@@ -6465,6 +6506,9 @@ impl Emitter<'_, '_> {
                     )),
                     small_integer: false,
                 }
+            }
+            Builtin::CounterElements => {
+                self.call("imre_counter_elements", returns, &[&args[0].value])
             }
             Builtin::CounterTotal => self.call("imre_counter_total", returns, &[&args[0].value]),
             Builtin::CounterMostCommon => {
@@ -8212,6 +8256,7 @@ declare i64 @imre_popen_identity(ptr)
 declare ptr @imre_popen_args(ptr)
 declare ptr @imre_popen_control(ptr)
 declare i64 @imre_child_status(ptr, i1 zeroext)
+declare void @imre_child_set_status(ptr, i64)
 declare ptr @imre_popen_communicate(ptr, ptr, i1 zeroext, i32, i64, ptr)
 declare i64 @imre_child_wait(ptr, i32, i64, ptr)
 declare void @imre_popen_exit(ptr)
@@ -8439,10 +8484,14 @@ declare ptr @imre_inspect_str_descriptor(i32)
 @imre_socket_so_rcvbuf = external constant i64
 @imre_socket_so_linger = external constant i64
 @imre_socket_msg_peek = external constant i64
+@imre_socket_shut_rd = external constant i64
+@imre_socket_shut_wr = external constant i64
+@imre_socket_shut_rdwr = external constant i64
 @imre_socket_default_backlog = external constant i64
 declare ptr @imre_socket_new(i64, i64, i64)
 declare void @imre_socket_bind(ptr, ptr)
 declare void @imre_socket_listen(ptr, i64)
+declare void @imre_socket_shutdown(ptr, i64)
 declare ptr @imre_socket_accept(ptr, ptr, ptr)
 declare void @imre_socket_connect(ptr, ptr)
 declare ptr @imre_socket_sockname(ptr, ptr)
@@ -8569,6 +8618,7 @@ declare void @imre_record_error_init()
 declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)
 declare ptr @imre_record_try_new(ptr)
+declare ptr @imre_record_class_factory(ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
@@ -8597,6 +8647,8 @@ declare ptr @imre_json_dumps(i64, ptr, i64, i32, i32, i32, i32, i64, ptr)
 declare i32 @imre_json_dump(i64, ptr, i64, i32, i32, i32, i32, i64, ptr, ptr)
 declare ptr @imre_record_try_cached_result(ptr)
 declare void @imre_record_retain(ptr)
+declare ptr @imre_function_set_wrapped(ptr, ptr)
+declare ptr @imre_function_get_wrapped(ptr)
 declare void @imre_record_release(ptr)
 declare i32 @imre_record_equal(ptr, ptr) nounwind
 declare i32 @imre_forward_ref_equal(ptr, ptr) nounwind
@@ -8717,6 +8769,7 @@ declare i64 @imre_namespace_get(ptr, ptr)
 declare void @imre_namespace_delete(ptr, ptr)
 declare ptr @imre_dict_copy(ptr)
 declare ptr @imre_dict_fromkeys_target(ptr, ptr)
+declare ptr @imre_ordered_dict(ptr)
 declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
@@ -8745,6 +8798,7 @@ declare void @imre_dict_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
+declare ptr @imre_counter_elements(ptr)
 declare ptr @imre_counter_most_common(ptr, i64, ptr)
 declare i32 @imre_counter_subset(ptr, ptr, i32)
 declare ptr @imre_key_union(ptr, ptr)

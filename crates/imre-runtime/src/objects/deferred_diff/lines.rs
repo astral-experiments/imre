@@ -320,7 +320,8 @@ mod tests {
         for ending in ["\n", "\r\n", "\u{2029}"] {
             let text = StrOwner::new(Str::from(format!("one\n\n🦀{ending}")));
             let pointer = StrOwner::as_ptr(&text);
-            let lines = TextLines::new(text).unwrap();
+            let lines = TextLines::new(text)
+                .unwrap_or_else(|_| panic!("small line fixture should fit in memory"));
             let joined = join(&lines, "\n");
             assert_eq!(StrOwner::as_ptr(&joined), pointer);
             assert_eq!(joined.as_str(), "one\n\n🦀");
@@ -331,8 +332,11 @@ mod tests {
     #[test]
     fn full_join_keeps_string_aliases_and_preexisting_filtered_ranges_valid() {
         let text = StrOwner::new(Str::from("+one\n-two\n+three\n"));
-        let lines = TextLines::new(text.clone()).unwrap();
-        let selected = lines.filter("+", None, None, 1).unwrap();
+        let lines = TextLines::new(text.clone())
+            .unwrap_or_else(|_| panic!("small line fixture should fit in memory"));
+        let selected = lines
+            .filter("+", None, None, 1)
+            .unwrap_or_else(|_| panic!("small line fixture should fit in memory"));
         let selected = selected.plan().expect("deferred selection");
         let View::Lines(selected) = &selected.0 else {
             unreachable!()
@@ -352,7 +356,8 @@ mod tests {
             ("\n\n🦀", vec![0..0, 1..1, 2..6]),
             ("🦀\n\n", vec![0..4, 5..5]),
         ] {
-            let lines = TextLines::new(StrOwner::new(Str::new(source))).unwrap();
+            let lines = TextLines::new(StrOwner::new(Str::new(source)))
+                .unwrap_or_else(|_| panic!("small line fixture should fit in memory"));
             assert!(matches!(lines.rows, LineRanges::Lf(_)));
             assert_eq!(lines.rows.iter().collect::<Vec<_>>(), expected);
         }

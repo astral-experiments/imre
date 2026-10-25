@@ -1077,6 +1077,8 @@ pub(crate) fn lower_with_caller_cache(
         .class_data
         .borrow_mut()
         .extend_layouts(&mut classes.fields);
+    let mut globals = globals.into_types();
+    types.reserve_constructor_globals(&mut globals, &functions, &entry);
     if let Some(cache) = cache {
         cache.finish(&types);
     }
@@ -1091,7 +1093,7 @@ pub(crate) fn lower_with_caller_cache(
             list_builds,
             class_fields: classes.fields,
             json_records,
-            globals: globals.into_types(),
+            globals,
             functions,
             entry,
         },
@@ -1774,6 +1776,58 @@ fn annotation_with_aliases(
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
+        ast::Expr::Subscript(value)
+            if matches!(&*value.value, ast::Expr::Name(name) if name.id.as_str() == "type")
+                && graph.resolve_type(module, &value.value).is_none() =>
+        {
+            let Type::Class(base) = nested(&value.slice)? else {
+                return Err(error(
+                    source,
+                    expression,
+                    "type[T] requires a fixed record class",
+                ));
+            };
+            let class = &classes.definitions[base];
+            let index = class.initializer.ok_or_else(|| {
+                error(
+                    source,
+                    expression,
+                    "type[T] requires a declared initializer",
+                )
+            })?;
+            let params = &class.methods[index].parameters;
+            if params.vararg.is_some() || params.kwarg.is_some() || !params.kwonlyargs.is_empty() {
+                return Err(error(
+                    source,
+                    expression,
+                    "class factories require positional parameters",
+                ));
+            }
+            let origin = class.method_origins[index].module;
+            let args = params
+                .iter_non_variadic_params()
+                .skip(1)
+                .map(|p| {
+                    let annotation = p.annotation().ok_or_else(|| {
+                        error(
+                            source,
+                            expression,
+                            "class factory parameters require exact annotations",
+                        )
+                    })?;
+                    annotation_with_aliases(
+                        annotation,
+                        graph,
+                        (origin, &graph.modules[origin].source),
+                        classes,
+                        types,
+                        Some(base),
+                        alias_depth + 1,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(types.record_constructor(base, args))
+        }
         ast::Expr::Subscript(subscript)
             if matches!(
                 graph.resolve_type(module, &subscript.value),
@@ -1974,7 +2028,7 @@ fn annotation_with_aliases(
                     || matches!(
                         graph.resolve_type(module, receiver),
                         Some(Binding::Intrinsic(
-                            Intrinsic::DefaultDict | Intrinsic::ChainMap
+                            Intrinsic::DefaultDict | Intrinsic::ChainMap | Intrinsic::OrderedDict
                         ))
                     ) =>
             {
@@ -2027,6 +2081,10 @@ fn annotation_with_aliases(
                         ));
                     }
                     Ok(types.default_list_dict(key_type, value_type))
+                } else if graph.resolve_type(module, receiver)
+                    == Some(Binding::Intrinsic(Intrinsic::OrderedDict))
+                {
+                    Ok(types.ordered_dict(key_type, value_type))
                 } else {
                     Ok(types.dict(key_type, value_type))
                 }
@@ -2538,9 +2596,12 @@ impl<'a> Checker<'a> {
         {
             return Ok(json::select(value, expected, None, None));
         }
-        if (self.types.is_default_list_dict(value.ty) || self.types.is_counter(value.ty))
+        if (self.types.is_default_list_dict(value.ty)
+            || self.types.is_counter(value.ty)
+            || self.types.is_ordered_dict(value.ty))
             && !self.types.is_default_list_dict(expected)
             && !self.types.is_counter(expected)
+            && !self.types.is_ordered_dict(expected)
             && self.types.mapping(value.ty) == self.types.mapping(expected)
         {
             return Ok(Expr {
@@ -2721,6 +2782,21 @@ impl<'a> Checker<'a> {
             }
         }
         if matches!(concrete, Type::Callable(_)) {
+            if let Some(base) = self.types.constructor_base(concrete) {
+                let value = if let Some(class) = self.class_reference(expression) {
+                    self.record_constructor_value(class, base, concrete, expression)?
+                } else {
+                    self.expr(expression)?
+                };
+                if value.ty != concrete {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "expected a compatible record class constructor",
+                    ));
+                }
+                return self.coerce(value, expected, expression);
+            }
             if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::JsonLoads)) {
                 let value = self.json_load_callable(None, Some(concrete), expression)?;
                 return self.coerce(value, expected, expression);
@@ -2858,6 +2934,11 @@ impl<'a> Checker<'a> {
                     && self.types.mapping(concrete).is_some() =>
             {
                 self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
+            }
+            ast::Expr::Call(call)
+                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) =>
+            {
+                self.ordered_dict_constructor(call, self.types.mapping(concrete))?
             }
             ast::Expr::Call(call) if self.is_defaultdict_constructor(&call.func) => {
                 let (key, value) = self.types.mapping(concrete).ok_or_else(|| {
@@ -4574,6 +4655,10 @@ impl<'a> Checker<'a> {
         let archive = manager.ty == Type::ZipFile;
         let token = matches!(manager.ty, Type::ContextToken(_));
         let socket = manager.ty == Type::Socket;
+        let server = match manager.ty {
+            Type::Class(class) if self.is_tcpserver(class) => Some(class),
+            _ => None,
+        };
         let popen = matches!(manager.ty, Type::Popen(..));
         let selector_close = if let Type::Class(class) = manager.ty {
             let owner = &self.classes.declarations.definitions[class];
@@ -4588,6 +4673,7 @@ impl<'a> Checker<'a> {
             && !archive
             && !token
             && !socket
+            && server.is_none()
             && !popen
             && selector_close.is_none()
             && !matches!(manager.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
@@ -4627,6 +4713,7 @@ impl<'a> Checker<'a> {
             && !archive
             && !token
             && !socket
+            && server.is_none()
             && !popen
             && selector_close.is_none()
         {
@@ -4650,20 +4737,25 @@ impl<'a> Checker<'a> {
         } else {
             Builtin::TextClose
         };
-        let cleanup = if let Some(id) = selector_close {
-            self.calls.insert(id);
-            ExprKind::Call(id, ir::CallArgs::positional(vec![self.local(captured)]))
+        let cleanup = if let Some(class) = server {
+            self.tcpserver_context_exit(class, self.local(captured), &item.context_expr)?
         } else {
-            ExprKind::Builtin(cleanup, vec![self.local(captured)])
+            let kind = if let Some(id) = selector_close {
+                self.calls.insert(id);
+                ExprKind::Call(id, ir::CallArgs::positional(vec![self.local(captured)]))
+            } else {
+                ExprKind::Builtin(cleanup, vec![self.local(captured)])
+            };
+            Expr {
+                ty: Type::None,
+                kind,
+            }
         };
         statements.push(Statement::Try {
             body: protected,
             handlers: Vec::new(),
             orelse: Vec::new(),
-            finalbody: vec![Statement::Expr(Expr {
-                ty: Type::None,
-                kind: cleanup,
-            })],
+            finalbody: vec![Statement::Expr(cleanup)],
         });
         Ok((
             vec![Statement::Scope {
@@ -6213,6 +6305,17 @@ impl<'a> Checker<'a> {
                         ops.push(order);
                         continue;
                     }
+                    if (self.types.is_ordered_dict(ty) || self.types.is_ordered_dict(right))
+                        && self.types.mapping(ty) == self.types.mapping(right)
+                        && matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                    {
+                        ops.push(if op == ast::CmpOp::Eq {
+                            Compare::Equal
+                        } else {
+                            Compare::NotEqual
+                        });
+                        continue;
+                    }
                     let numeric = matches!(ty, Type::Int | Type::Float)
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
@@ -7133,6 +7236,12 @@ impl<'a> Checker<'a> {
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
         if receiver.is_none()
+            && let ast::Expr::Call(config) = &*call.func
+            && self.resolve(&config.func) == Some(Binding::Intrinsic(Intrinsic::Wraps))
+        {
+            return self.apply_wraps(config, call);
+        }
+        if receiver.is_none()
             && let Some(raised) = self.defaultdict_factory_error(call, Type::None)?
         {
             return Ok(raised);
@@ -7215,6 +7324,9 @@ impl<'a> Checker<'a> {
         }
         if let Some(expanded) = self.expand_closed_call(call) {
             return self.call_on(&expanded, receiver);
+        }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) {
+            return self.ordered_dict_constructor(call, None);
         }
         if let Some(Binding::Intrinsic(
             kind @ (Intrinsic::TomliLoads
@@ -7347,6 +7459,12 @@ impl<'a> Checker<'a> {
             return self.counter_unbound_update(call, op, method.attr.as_str());
         }
         if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "elements"
+            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+        {
+            return self.counter_elements(call, None);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "reverse"
         {
             if self.unshadowed_builtin(&method.value, "list") {
@@ -7364,7 +7482,7 @@ impl<'a> Checker<'a> {
                 || matches!(
                     self.resolve(&method.value),
                     Some(Binding::Intrinsic(
-                        Intrinsic::Counter | Intrinsic::DefaultDict
+                        Intrinsic::Counter | Intrinsic::DefaultDict | Intrinsic::OrderedDict
                     ))
                 ))
         {
@@ -7469,37 +7587,7 @@ impl<'a> Checker<'a> {
             && call.arguments.args.is_empty()
             && !call.arguments.keywords.is_empty()
         {
-            let mut entries = Vec::with_capacity(call.arguments.keywords.len());
-            for keyword in &call.arguments.keywords {
-                let name = keyword.arg.as_ref().expect("unpacking excluded");
-                let value = self.expr(&keyword.value)?;
-                entries.push((
-                    Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str(name.to_string()),
-                    },
-                    value,
-                ));
-            }
-            let first = entries[0].1.ty;
-            let value = if entries.iter().all(|(_, v)| v.ty == first) {
-                first
-            } else {
-                Type::ObjectValue
-            };
-            let entries = entries
-                .into_iter()
-                .zip(&*call.arguments.keywords)
-                .map(|((key, v), kw)| Ok((key, self.coerce(v, value, &kw.value)?)))
-                .collect::<Result<Vec<_>, String>>()?;
-            return Ok(Expr {
-                ty: self.types.dict(Type::Str, value),
-                kind: ExprKind::Dict {
-                    key: Type::Str,
-                    value,
-                    entries,
-                },
-            });
+            return self.dict_constructor(call, None);
         }
         if self.unshadowed_builtin(&call.func, "set")
             && let [input] = call.arguments.args.as_ref()
@@ -7528,6 +7616,9 @@ impl<'a> Checker<'a> {
                 ty: self.types.set(key),
                 kind: ExprKind::Builtin(Builtin::KeySet, vec![source]),
             });
+        }
+        if let Some(cached) = self.local_cached_value(&call.func) {
+            return self.invoke(call, cached);
         }
         if let Some(binding) = self.local_function_binding(&call.func) {
             if binding.overload_stub {
@@ -7653,6 +7744,7 @@ impl<'a> Checker<'a> {
                 return self.single_dispatch(call);
             }
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
+            Some(Binding::Intrinsic(Intrinsic::UpdateWrapper)) => return self.update_wrapper(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
                 let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
@@ -8133,6 +8225,9 @@ impl<'a> Checker<'a> {
             if let Some(layout) = self.types.dispatcher(receiver.ty) {
                 return self.single_dispatch_method(call, attribute, receiver, layout);
             }
+            if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
+                return self.invoke(call, wrapped);
+            }
             if receiver.ty == Type::ModuleNamespace
                 && attribute.attr.as_str() == "keys"
                 && call.arguments.is_empty()
@@ -8324,6 +8419,7 @@ impl<'a> Checker<'a> {
             }
             if self.types.is_counter(receiver.ty) {
                 match attribute.attr.as_str() {
+                    "elements" => return self.counter_elements(call, Some(receiver)),
                     "most_common" => return self.counter_most_common(call, Some(receiver)),
                     "update" => return self.counter(call, Some(receiver), None),
                     "subtract" => {

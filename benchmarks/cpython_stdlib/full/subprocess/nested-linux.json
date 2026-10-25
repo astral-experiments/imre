@@ -1,0 +1,555 @@
+{
+  "schema": "imre.subprocess.nested-parents/v1",
+  "platform": "linux",
+  "subprocess_revision": "1012f2f189784d935cde3a7f4190ea559726b432",
+  "reports": [
+    {
+      "opt_level": 0,
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_stdout_none": {
+          "method_sha256": "9d9f8df503e01b5975621c644aed97516ece1debd4a456d1dfdf688fa93e1301",
+          "body_diagnostic": "<case>/case.py:24:9: Imre: unknown class method",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "664616b05065526f636721457e06c7196b958da06e9c8f7e5608dfa865b91f6f",
+              "engine": "imre",
+              "binary_sha256": "8222968185729257ca7f8940a0e00f796f8fb914be8e48595d86b29e811edcb6",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "d0bfc4cc4bfc45fdb359cdbc027951efb7f1a605a1b759eda0f0bf7bb30887d9",
+              "engine": "imre",
+              "binary_sha256": "286d5b90174e1bee6648f72a0203cd5f0f12b5c2ca9fc3ea2e8ba47d1460d442",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "def1a2f5337ddc4f35fd0f5a07257740446350391b079acf2b75a4aff7d7cb54",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 2
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode",
+            "stderr.close",
+            "stdout.close"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "pass",
+          "reason": null
+        },
+        "test.test_subprocess.ProcessTestCase.test_stderr_redirect_with_no_stdout_redirect": {
+          "method_sha256": "c6561906867a69fdd0fa0db7f6155daf8985293a6adc9218b0158ba7e5ab8905",
+          "body_diagnostic": "<case>/case.py:24:26: Imre: expected int, got bytes; annotations are enforced contracts",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "c7e06afda0fc0511cdb2e4d4519d26fede9795fd199dcebcf27d2d2d2f2fba80",
+              "engine": "imre",
+              "binary_sha256": "aa534160e981fcecbfb8ecf68527eebaabc4f7987c4f6bd02506fa01d88f394a",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "7b27e5abd588f3456596d5b27278ae5a533920f1ffa2be49cf249afec2d276ef",
+              "engine": "imre",
+              "binary_sha256": "35c01e111890ba5041a980a5a4d85a440e05acfb2b5ba189a29df934936aa124",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "01b4d0930a816de862f22a06875525fc7584ae7e7b18c1bfe372026cbe17bc86",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 2
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "pass",
+          "reason": null
+        },
+        "test.test_subprocess.ProcessTestCase.test_stdout_filedes_of_stdout": {
+          "method_sha256": "bd00b5c58eae10caa13bf33d93d3d1a82b6e4b1e7efee321c6662304b8ca86d1",
+          "body_diagnostic": "<case>/case.py:20:9: Imre: unknown class method",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "824ff56df225078475323e8519eb4d49602ab69a554e4da1985c89cba30c68be",
+              "engine": "imre",
+              "binary_sha256": "deab7e5f717dbb05d600d867580876a05803cc5a43e11272108b014d4a2f8ca2",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "8aa125f6b6eba6a4a4b59e6f4d3227d26025913a9ef652dedd789e76e85b0219",
+              "engine": "cpython",
+              "compile_diagnostic": "<case>/case.py:1:26: Imre: name is not a local value; globals and first-class functions are unsupported",
+              "binary_sha256": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "7d142901606a276fa3b6f59f04a138c1fb9b084fa2ca1a7f957841503ff35fff",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 2
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode",
+            "stderr.close",
+            "stdout.close"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "pass",
+          "reason": null
+        },
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_none": {
+          "method_sha256": "9d9f8df503e01b5975621c644aed97516ece1debd4a456d1dfdf688fa93e1301",
+          "body_diagnostic": "<case>/case.py:24:9: Imre: unknown class method",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "664616b05065526f636721457e06c7196b958da06e9c8f7e5608dfa865b91f6f",
+              "engine": "imre",
+              "binary_sha256": "94d8f5e4d2af4503712d83049ad288507c593c3ccdfdd6aa46b7b0b558891af7",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "d0bfc4cc4bfc45fdb359cdbc027951efb7f1a605a1b759eda0f0bf7bb30887d9",
+              "engine": "imre",
+              "binary_sha256": "4b71383d438a3747c114e2781b25a3b6f5bf6f9cf7e67f7046a5dca90a4dab9d",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "ae2fa305e8573633a35d4ff980833f27de1ee4b2c394ac71e1bdebfb7bebbc53",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 2
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode",
+            "stderr.close",
+            "stdout.close"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "blocked",
+          "reason": "host fixture selected SelectSelector but the native outer parent used poll"
+        },
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_redirect_with_no_stdout_redirect": {
+          "method_sha256": "c6561906867a69fdd0fa0db7f6155daf8985293a6adc9218b0158ba7e5ab8905",
+          "body_diagnostic": "<case>/case.py:24:26: Imre: expected int, got bytes; annotations are enforced contracts",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "c7e06afda0fc0511cdb2e4d4519d26fede9795fd199dcebcf27d2d2d2f2fba80",
+              "engine": "imre",
+              "binary_sha256": "a89f04056f6913955bd9938a5f0f0e341f271e9d75515fd3d3d0bdc462465ba1",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "7b27e5abd588f3456596d5b27278ae5a533920f1ffa2be49cf249afec2d276ef",
+              "engine": "imre",
+              "binary_sha256": "1cdbc21cc797f2942407c37cd0d7f46b5202fa8dcd6e36fe2b3eac4d95d9146b",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "4db34d7ee86565ea084b58b34b3af0d8aaf416fa569cf19b58dad749a2335972",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 3
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "blocked",
+          "reason": "host fixture selected SelectSelector but the native outer parent used poll"
+        },
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_filedes_of_stdout": {
+          "method_sha256": "bd00b5c58eae10caa13bf33d93d3d1a82b6e4b1e7efee321c6662304b8ca86d1",
+          "body_diagnostic": "<case>/case.py:20:9: Imre: unknown class method",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "824ff56df225078475323e8519eb4d49602ab69a554e4da1985c89cba30c68be",
+              "engine": "imre",
+              "binary_sha256": "de242746676194da9f5f155d9b1265cf50b44e440c09b9fe834b360ad357582d",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "8aa125f6b6eba6a4a4b59e6f4d3227d26025913a9ef652dedd789e76e85b0219",
+              "engine": "cpython",
+              "compile_diagnostic": "<case>/case.py:1:26: Imre: name is not a local value; globals and first-class functions are unsupported",
+              "binary_sha256": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "2a50f486f54941180a667c0d6394524fec0151b2845e3d656940c190c4195584",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 3
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode",
+            "stderr.close",
+            "stdout.close"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "blocked",
+          "reason": "host fixture selected SelectSelector but the native outer parent used poll"
+        }
+      }
+    },
+    {
+      "opt_level": 3,
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_stdout_none": {
+          "method_sha256": "9d9f8df503e01b5975621c644aed97516ece1debd4a456d1dfdf688fa93e1301",
+          "body_diagnostic": "<case>/case.py:24:9: Imre: unknown class method",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "664616b05065526f636721457e06c7196b958da06e9c8f7e5608dfa865b91f6f",
+              "engine": "imre",
+              "binary_sha256": "dfbd256a9e9855f55e605e53e7bafab838b3248e9178e2630bcd2ad63b08291a",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "d0bfc4cc4bfc45fdb359cdbc027951efb7f1a605a1b759eda0f0bf7bb30887d9",
+              "engine": "imre",
+              "binary_sha256": "8a338647d19ae475a80728bfb9beb2829ef6e283361c6368ba8d7541417bab95",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "da3d9d43d0e1478ef64d7927382e17df1bc7cbd27d53a60f4bd997b7dd5e9084",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 2
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode",
+            "stderr.close",
+            "stdout.close"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "pass",
+          "reason": null
+        },
+        "test.test_subprocess.ProcessTestCase.test_stderr_redirect_with_no_stdout_redirect": {
+          "method_sha256": "c6561906867a69fdd0fa0db7f6155daf8985293a6adc9218b0158ba7e5ab8905",
+          "body_diagnostic": "<case>/case.py:24:26: Imre: expected int, got bytes; annotations are enforced contracts",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "c7e06afda0fc0511cdb2e4d4519d26fede9795fd199dcebcf27d2d2d2f2fba80",
+              "engine": "imre",
+              "binary_sha256": "95e88ff28e6faa486c199bb85c7f8008799c69f9bf5de736e89e2cf383ebfc70",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "7b27e5abd588f3456596d5b27278ae5a533920f1ffa2be49cf249afec2d276ef",
+              "engine": "imre",
+              "binary_sha256": "4b66945de0428bfbd5ea4c2aafa4ede82501b395c8fd3f8d47dc795f966cde6b",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "de2110b086c230e5494e6425388f88e56f3113cdb1ce2e6c4337dff5e8c65f71",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 2
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "pass",
+          "reason": null
+        },
+        "test.test_subprocess.ProcessTestCase.test_stdout_filedes_of_stdout": {
+          "method_sha256": "bd00b5c58eae10caa13bf33d93d3d1a82b6e4b1e7efee321c6662304b8ca86d1",
+          "body_diagnostic": "<case>/case.py:20:9: Imre: unknown class method",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "824ff56df225078475323e8519eb4d49602ab69a554e4da1985c89cba30c68be",
+              "engine": "imre",
+              "binary_sha256": "46465b2c5f739b8c1a79a232a6d86c445cd7c30d69928144e167b93ba2499bcf",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "8aa125f6b6eba6a4a4b59e6f4d3227d26025913a9ef652dedd789e76e85b0219",
+              "engine": "cpython",
+              "compile_diagnostic": "<case>/case.py:1:26: Imre: name is not a local value; globals and first-class functions are unsupported",
+              "binary_sha256": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "5195871e66bd69f4790f75775539f081845c4cefe819bf5be6e85a07f323157b",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 2
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode",
+            "stderr.close",
+            "stdout.close"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "pass",
+          "reason": null
+        },
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_none": {
+          "method_sha256": "9d9f8df503e01b5975621c644aed97516ece1debd4a456d1dfdf688fa93e1301",
+          "body_diagnostic": "<case>/case.py:24:9: Imre: unknown class method",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "664616b05065526f636721457e06c7196b958da06e9c8f7e5608dfa865b91f6f",
+              "engine": "imre",
+              "binary_sha256": "6fa86af033bf5cb5cd2ea5ed4fb834b7c2a13fe32744b9d4d5f2321231d6b6b8",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "d0bfc4cc4bfc45fdb359cdbc027951efb7f1a605a1b759eda0f0bf7bb30887d9",
+              "engine": "imre",
+              "binary_sha256": "4d12973a64b019765ca1a00477491de4ff41c81b069b021261ffcd0a2f8ec641",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "828f68b8d52ac890087d61c7b1669b88ed299564cea4700e8a4e548d5cc8a3e1",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 2
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode",
+            "stderr.close",
+            "stdout.close"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "blocked",
+          "reason": "host fixture selected SelectSelector but the native outer parent used poll"
+        },
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_redirect_with_no_stdout_redirect": {
+          "method_sha256": "c6561906867a69fdd0fa0db7f6155daf8985293a6adc9218b0158ba7e5ab8905",
+          "body_diagnostic": "<case>/case.py:24:26: Imre: expected int, got bytes; annotations are enforced contracts",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "c7e06afda0fc0511cdb2e4d4519d26fede9795fd199dcebcf27d2d2d2f2fba80",
+              "engine": "imre",
+              "binary_sha256": "7e79245d47403b02df5817387a725caa75b4b6d74619c665bdc87e4bda80aeb8",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "7b27e5abd588f3456596d5b27278ae5a533920f1ffa2be49cf249afec2d276ef",
+              "engine": "imre",
+              "binary_sha256": "ef592b958caeae876c1f64e12d997df63a18244ca766a4c13aa599296dd55e4c",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "36b7e8875af542f146a5473299b5e960156ab6d5648a13d66ea6e377094aff82",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 2
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "blocked",
+          "reason": "host fixture selected SelectSelector but the native outer parent used poll"
+        },
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_filedes_of_stdout": {
+          "method_sha256": "bd00b5c58eae10caa13bf33d93d3d1a82b6e4b1e7efee321c6662304b8ca86d1",
+          "body_diagnostic": "<case>/case.py:20:9: Imre: unknown class method",
+          "original_output_assertions_passed": true,
+          "processes": {
+            "middle": {
+              "source_sha256": "824ff56df225078475323e8519eb4d49602ab69a554e4da1985c89cba30c68be",
+              "engine": "imre",
+              "binary_sha256": "fcdfc3770e42f32a58c9073402e03f65c38eabba3e8a0446830ff9155a1c9939",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "data_child": {
+              "source_sha256": "8aa125f6b6eba6a4a4b59e6f4d3227d26025913a9ef652dedd789e76e85b0219",
+              "engine": "cpython",
+              "compile_diagnostic": "<case>/case.py:1:26: Imre: name is not a local value; globals and first-class functions are unsupported",
+              "binary_sha256": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+              "observed_execve": true,
+              "selector_syscalls": {}
+            },
+            "outer": {
+              "engine": "imre",
+              "binary_sha256": "a2998b968d88fc6bf93195e8353d6eff6e59222c227b8d5887a9eabcea0b8107",
+              "observed_execve": true,
+              "selector_syscalls": {
+                "poll": 2
+              }
+            }
+          },
+          "host_requested_native_calls": [
+            "Popen",
+            "streams",
+            "communicate",
+            "returncode",
+            "stderr.close",
+            "stdout.close"
+          ],
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "fixture": "cpython",
+            "operation": "imre"
+          },
+          "outcome": "blocked",
+          "reason": "host fixture selected SelectSelector but the native outer parent used poll"
+        }
+      }
+    }
+  ]
+}
