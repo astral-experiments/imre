@@ -1,0 +1,32 @@
+{
+  "fixture_sha256": "1972c4d6bc7a60d6589308bbdbb915aeee0683ec51cc17817c3d7623201f26a5",
+  "imre_sha256": "857c31d7bd087a058dc8e2aab01390c31e8ba0be0f73475f530d3d66373789e1",
+  "runtime_sha256": "af7c0ab84df16587f586518e43e402636f498246be0736f680c925cce7973075",
+  "reference": "True\nTrue\nFalse\nTrue\nTrue\nFalse\n1\ngreen\nTrue\nTrue\ngreen\ncustom\nfallback\nTrue\nhelp\neager default\ngreen\nfirst\nhelp\ngreen\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\ngreen\n__len__() should return >= 0\ncannot fit 'int' into an index-sized integer\nCan't instantiate abstract class Missing without an implementation for abstract methods '__getitem__', '__iter__'\nhelp\nbroken lookup\n",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\nFalse\nTrue\nTrue\nFalse\n1\ngreen\nTrue\nTrue\ngreen\ncustom\nfallback\nTrue\nhelp\neager default\ngreen\nfirst\nhelp\ngreen\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\ngreen\n__len__() should return >= 0\ncannot fit 'int' into an index-sized integer\nCan't instantiate abstract class Missing without an implementation for abstract methods '__getitem__', '__iter__'\nhelp\nbroken lookup\n",
+      "stderr": ""
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\nFalse\nTrue\nTrue\nFalse\n1\ngreen\nTrue\nTrue\ngreen\ncustom\nfallback\nTrue\nhelp\neager default\ngreen\nfirst\nhelp\ngreen\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\ngreen\n__len__() should return >= 0\ncannot fit 'int' into an index-sized integer\nCan't instantiate abstract class Missing without an implementation for abstract methods '__getitem__', '__iter__'\nhelp\nbroken lookup\n",
+      "stderr": ""
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\nFalse\nTrue\nTrue\nFalse\n1\ngreen\nTrue\nTrue\ngreen\ncustom\nfallback\nTrue\nhelp\neager default\ngreen\nfirst\nhelp\ngreen\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\ngreen\n__len__() should return >= 0\ncannot fit 'int' into an index-sized integer\nCan't instantiate abstract class Missing without an implementation for abstract methods '__getitem__', '__iter__'\nhelp\nbroken lookup\n",
+      "stderr": ""
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\nFalse\nTrue\nTrue\nFalse\n1\ngreen\nTrue\nTrue\ngreen\ncustom\nfallback\nTrue\nhelp\neager default\ngreen\nfirst\nhelp\ngreen\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\ngreen\n__len__() should return >= 0\ncannot fit 'int' into an index-sized integer\nCan't instantiate abstract class Missing without an implementation for abstract methods '__getitem__', '__iter__'\nhelp\nbroken lookup\n",
+      "stderr": ""
+    }
+  }
+}
