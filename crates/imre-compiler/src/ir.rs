@@ -589,6 +589,7 @@ pub(crate) enum Builtin {
     Formatter(FormatterOperation),
     Input,
     Chr,
+    Ord,
     IntegerPower,
     ModularPower,
     NegativeIntegerPower,

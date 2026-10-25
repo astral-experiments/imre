@@ -279,6 +279,7 @@ impl Builtin {
             ),
             Self::BytesGet
             | Self::Chr
+            | Self::Ord
             | Self::IntegerPower
             | Self::ModularPower
             | Self::NegativeIntegerPower

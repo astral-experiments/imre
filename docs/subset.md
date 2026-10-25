@@ -309,6 +309,8 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 
 ## Native text operations
 
+`ord(value)` returns the Unicode code point of one native string character or the unsigned value of a one-byte `bytes` object. Invalid lengths count Unicode scalars for strings and bytes for `bytes`. Direct consumers can also iterate `map(ord, source)`: input evaluation happens at iterator creation and the conversion runs on each pull. A source `StrEnum` contributes its Unicode value. Mutable `bytearray`, native strings containing lone surrogate code points, and storing the builtin as a first-class callback are outside this subset.
+
 `str.lower()` uses Unicode 16 full lowercase mappings, including expanding characters and contextual Greek final sigma. `str.capitalize()` titlecases the first code point and lowercases the remainder in the original string context.
 
 `str.expandtabs(tabsize=8)` counts Unicode code points, resets the column on CR or LF, and removes tabs for zero or negative widths. Converting the width happens before inspecting the text. Integers, booleans, and fixed classes with an integer-returning `__index__` are supported; values outside the platform C `int` range raise `OverflowError`. A string with no tabs retains its identity. A user `__index__` returning a boolean is rejected because Python's configurable deprecation warning is not supported.

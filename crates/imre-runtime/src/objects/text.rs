@@ -35,6 +35,53 @@ pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
     finish(result, std::ptr::null())
 }
 
+/// Returns the scalar value of one character or the unsigned value of one byte.
+///
+/// # Safety
+/// The caller roots a concrete string, bytes, or their checked nullable union.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_ord(mut word: usize, mut kind: u32) -> usize {
+    let result = (|| {
+        if word == 0 {
+            return Err(Error::new(
+                Kind::TypeError,
+                "ord() expected string of length 1, but NoneType found",
+            ));
+        }
+        kind &= !super::words::NULLABLE;
+        if kind == 9 {
+            let (payload, member) = super::unions::member(word);
+            word = payload;
+            kind = member.base();
+        }
+        let length = match kind {
+            3 => {
+                // SAFETY: the representation identifies a rooted UTF-8 string.
+                let mut chars = unsafe { &*(word as *const Str) }.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(ch), None) => return Ok(Int::from_usize(ch as usize).into_raw()),
+                    (None, None) => 0,
+                    _ => 2 + chars.count(),
+                }
+            }
+            8 => {
+                // SAFETY: the representation identifies an immutable rooted bytes value.
+                let bytes = unsafe { &*(word as *const crate::Bytes) };
+                if let [byte] = bytes.as_slice() {
+                    return Ok(Int::from_usize(usize::from(*byte)).into_raw());
+                }
+                bytes.len()
+            }
+            _ => unreachable!("ord's checked character layout"),
+        };
+        Err(Error::new(
+            Kind::TypeError,
+            format!("ord() expected a character, but string of length {length} found"),
+        ))
+    })();
+    finish(result, 0)
+}
+
 /// # Safety
 /// The caller roots the integer and supplies a bounded literal width. BigInt's
 /// formatter pads signed magnitudes, including zeroes after a negative sign.

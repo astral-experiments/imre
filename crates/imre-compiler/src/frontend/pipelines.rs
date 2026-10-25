@@ -352,7 +352,11 @@ impl Checker<'_> {
                         self.callback_input(call, element, false)?,
                     )));
                 };
-                if !matches!(converter.id.as_str(), "int" | "str") {
+                if !matches!(converter.id.as_str(), "int" | "str" | "ord")
+                    || (converter.id == "ord"
+                        && (self.names.contains_key("ord")
+                            || self.resolve(&call.arguments.args[0]).is_some()))
+                {
                     return Ok(Some(Iteration::Prepared(
                         self.callback_input(call, element, false)?,
                     )));
@@ -361,7 +365,9 @@ impl Checker<'_> {
                 let source = self.expansion_input(source, None)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
                 let item = self.local(input.value);
-                let converted = if converter.id == "int" {
+                let converted = if converter.id == "ord" {
+                    self.ordinal(item, call)?
+                } else if converter.id == "int" {
                     self.consumer_value(item, true, call)?
                 } else {
                     match item.ty {
