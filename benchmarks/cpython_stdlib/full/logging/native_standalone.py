@@ -79,8 +79,9 @@ def main():
     from test import test_logging
     if Path(test_logging.__file__).read_bytes() != SOURCE.read_bytes():
         raise ValueError("loaded test_logging differs from the verified source")
-    control = HERE / "standalone_handlers.py"
-    expected = subprocess.run([sys.executable, "-I", "-B", control], capture_output=True, check=True)
+    controls = {name: subprocess.run([sys.executable, "-I", "-B", HERE / name],
+                                     capture_output=True, check=True)
+                for name in ("standalone_handlers.py", "instance_disabled.py")}
     report = {"cpython_commit": manifest["commit"], "denominator": 272, "test_id": CASE, "levels": {}}
     for level in (0, 3):
         tools = Toolchain(args.imre, args.runtime, args.clang, level)
@@ -88,18 +89,23 @@ def main():
         assert len(list(cases(suite))) == report["denominator"]
         with tempfile.TemporaryDirectory() as folder:
             work = Path(folder)
-            actual = subprocess.run([tools.build(control.read_bytes(), work)], capture_output=True,
-                                    timeout=60, check=True)
-            if (actual.stdout, actual.stderr) != (expected.stdout, expected.stderr):
-                raise AssertionError((level, actual, expected))
+            native = {}
+            for name, expected in controls.items():
+                actual = subprocess.run([tools.build((HERE / name).read_bytes(), work)],
+                                        capture_output=True, timeout=60, check=True)
+                if (actual.stdout, actual.stderr) != (expected.stdout, expected.stderr):
+                    raise AssertionError((level, name, actual, expected))
+                native[name] = actual
+                print(f"-O{level} {name}: {hashlib.sha256(actual.stdout).hexdigest()}")
             results, failures, skips = run_in_fixtures(suite, {CASE: handler_case(tools, work)})
             if failures or skips or set(results) != {CASE} or len(results[CASE]) != 1:
                 raise AssertionError((failures, skips, results))
             observed = results[CASE][0]["observation"]
             assert observed["roles"] == dict(body="imre", assertions="imre", operation="imre", fixture="mixed")
+            handlers = native["standalone_handlers.py"]
             report["levels"][str(level)] = {
-                "observed": observed, "control_stdout_sha256": hashlib.sha256(actual.stdout).hexdigest(),
-                "control_stderr_sha256": hashlib.sha256(actual.stderr).hexdigest(),
+                "observed": observed, "control_stdout_sha256": hashlib.sha256(handlers.stdout).hexdigest(),
+                "control_stderr_sha256": hashlib.sha256(handlers.stderr).hexdigest(),
             }
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     print("The original detached logger handler-removal test passed at O0 and O3.")

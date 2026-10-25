@@ -26,7 +26,9 @@ pub(super) struct Logger {
     level: RefCell<Int>,
     enabled: cache::EnabledCache,
     handlers: Rc<Object>,
-    standalone_propagate: Option<Cell<bool>>,
+    standalone: bool,
+    propagate: Cell<bool>,
+    disabled: Cell<bool>,
 }
 
 impl Logger {
@@ -36,7 +38,9 @@ impl Logger {
             level: RefCell::new(level),
             enabled: cache::EnabledCache::new(),
             handlers: super::Words::new(6).into_object(),
-            standalone_propagate: standalone.then(|| Cell::new(true)),
+            standalone,
+            propagate: Cell::new(true),
+            disabled: Cell::new(false),
         })
     }
 
@@ -122,7 +126,7 @@ impl Registry {
     }
 
     fn parent(&self, logger: &Logger) -> Option<&Entry> {
-        if logger.standalone_propagate.is_some() {
+        if logger.standalone {
             return None;
         }
         self.parent_name(&logger.name)
