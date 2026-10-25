@@ -508,6 +508,36 @@ pub(crate) enum ZipField {
     IsDir,
 }
 
+/// The immutable attribute lists exported by functools and used as decorator defaults.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WrapperAttributes {
+    Assigned,
+    Updated,
+}
+
+impl WrapperAttributes {
+    pub(crate) fn names(self) -> &'static [&'static str] {
+        match self {
+            Self::Assigned => &[
+                "__module__",
+                "__name__",
+                "__qualname__",
+                "__doc__",
+                "__annotate__",
+                "__type_params__",
+            ],
+            Self::Updated => &["__dict__"],
+        }
+    }
+
+    pub(crate) fn root(self) -> &'static str {
+        match self {
+            Self::Assigned => "functools_wrapper_assignments",
+            Self::Updated => "functools_wrapper_updates",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub(crate) enum ArgparseOutput {
@@ -520,6 +550,7 @@ pub(crate) enum ArgparseOutput {
 #[derive(Clone)]
 pub(crate) enum Builtin {
     Repeat,
+    WrapperAttributes(WrapperAttributes),
     CursorLengthHint,
     Progression {
         bounded: bool,
