@@ -5,6 +5,7 @@
 //! publishes incomplete values or leaks earlier fields. Unknown fields are
 //! validated and skipped without building an intermediate object tree.
 
+use crate::StrOwner;
 use std::borrow::Cow;
 use std::fmt;
 use std::rc::Rc;
@@ -139,7 +140,7 @@ impl Seen {
     }
 }
 
-type StringSlots = [Option<Rc<Str>>; 64];
+type StringSlots = [Option<StrOwner>; 64];
 
 /// Raw numeric tokens and ignored containers can bypass serde's recursion
 /// budget. Check the full document once before admitting such values.
@@ -268,19 +269,19 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
             if let Some(owner) = slot
                 && owner.as_str() == value
             {
-                Rc::clone(owner)
+                StrOwner::clone(owner)
             } else {
-                let owner = Rc::new(Str::new(value));
-                *slot = Some(Rc::clone(&owner));
+                let owner = StrOwner::new(Str::new(value));
+                *slot = Some(StrOwner::clone(&owner));
                 owner
             }
         } else if value.len() > 32 && self.1.records.is_some() {
             super::records::strings::copy(value)
         } else {
-            Rc::new(Str::new(value))
+            StrOwner::new(Str::new(value))
         };
         // SAFETY: the checked string schema owns this new string handle.
-        Ok(unsafe { OwnedWord::from_owned(Rc::into_raw(owner) as usize, self.0.storage()) })
+        Ok(unsafe { OwnedWord::from_owned(StrOwner::into_raw(owner) as usize, self.0.storage()) })
     }
 
     fn visit_none<E: serde::de::Error>(self) -> Result<OwnedWord, E> {
@@ -349,7 +350,7 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
             let mut mapping = super::mappings::Mapping::new(3, child.word_kind);
             while let Some(key) = map.next_key_seed(Key)? {
                 let value = map.next_value_seed(Seed(child, self.1))?;
-                let pointer = Rc::into_raw(Rc::new(Str::from(key.as_ref()))) as usize;
+                let pointer = StrOwner::into_raw(StrOwner::new(Str::from(key.as_ref()))) as usize;
                 // SAFETY: this temporary transfers one newly allocated string owner.
                 let key = unsafe { OwnedWord::from_owned(pointer, WordKind::new(3)) };
                 if !mapping.insert_unique(key, value) {

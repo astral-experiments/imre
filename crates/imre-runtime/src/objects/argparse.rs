@@ -1,6 +1,7 @@
 //! Native parsing for a fixed declaration of long options. Parsing checks all
 //! input before constructing the compiler-described, owned namespace record.
 
+use crate::StrOwner;
 use std::borrow::Cow;
 use std::io::{self, Write};
 use std::rc::Rc;
@@ -425,11 +426,11 @@ impl Parser {
 }
 
 fn scalar(kind: Kind, text: &str) -> usize {
-    let text = Rc::new(Str::new(text));
+    let text = StrOwner::new(Str::new(text));
     match kind {
-        Kind::Str => Rc::into_raw(text) as usize,
+        Kind::Str => StrOwner::into_raw(text) as usize,
         // SAFETY: the source remains live until Path takes an owner or normalizes it.
-        Kind::Path => unsafe { imre_path_new(Rc::as_ptr(&text)) as usize },
+        Kind::Path => unsafe { imre_path_new(StrOwner::as_ptr(&text)) as usize },
         Kind::Bool => unreachable!(),
     }
 }
@@ -504,7 +505,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
                 .values
                 .iter()
                 .skip(usize::from(process_argv))
-                .map(|&word| super::acquire_rc::<Str>(word))
+                .map(|&word| StrOwner::acquire_word(word))
                 .collect::<Vec<_>>()
         })
     };

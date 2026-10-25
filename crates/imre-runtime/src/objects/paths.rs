@@ -1,12 +1,13 @@
 //! Sealed POSIX paths with lexical normalization and snapshot directory iterators.
 //! Path objects are immutable; directory state owns names, never open descriptors.
 
+use crate::{StrOwner, WeakStr};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
@@ -17,52 +18,52 @@ mod matching;
 
 #[derive(Clone)]
 pub(super) enum PathText {
-    Flat(Rc<Str>),
+    Flat(StrOwner),
     WithParent {
-        text: Rc<Str>,
-        parent: Weak<Str>,
+        text: StrOwner,
+        parent: WeakStr,
     },
     Joined {
         parts: JoinedParts,
-        spelling: std::cell::OnceCell<Rc<Str>>,
+        spelling: std::cell::OnceCell<StrOwner>,
     },
 }
 
 #[derive(Clone)]
 pub(super) struct JoinedParts {
     parent: Prefix,
-    child: Rc<Str>,
+    child: StrOwner,
     absolute: bool,
 }
 
 #[derive(Clone)]
 enum Prefix {
     Empty,
-    Flat(Rc<Str>),
+    Flat(StrOwner),
     Joined(Rc<JoinedParts>),
 }
 
 impl PathText {
-    fn parent(&mut self) -> Rc<Str> {
+    fn parent(&mut self) -> StrOwner {
         if let Self::WithParent { parent, .. } = self
             && let Some(shared) = parent.upgrade()
         {
             return shared;
         }
         let text = self.spelling();
-        let shared = Rc::new(Str::from(parent(text)));
+        let shared = StrOwner::new(Str::from(parent(text)));
         if shared.len() > size_of::<Str>() {
             // Derived paths own the spelling. Discarding the last derived
             // owner frees the string even while the source path stays rooted.
             *self = Self::WithParent {
-                text: Rc::clone(text),
-                parent: Rc::downgrade(&shared),
+                text: StrOwner::clone(text),
+                parent: StrOwner::downgrade(&shared),
             };
         }
         shared
     }
 
-    fn cached(&self) -> Option<&Rc<Str>> {
+    fn cached(&self) -> Option<&StrOwner> {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => Some(text),
             Self::Joined { spelling, .. } => spelling.get(),
@@ -71,9 +72,9 @@ impl PathText {
 
     fn prefix(&self) -> Prefix {
         match self {
-            Self::Flat(text) | Self::WithParent { text, .. } => Prefix::Flat(Rc::clone(text)),
+            Self::Flat(text) | Self::WithParent { text, .. } => Prefix::Flat(StrOwner::clone(text)),
             Self::Joined { parts, spelling } => match spelling.get() {
-                Some(text) => Prefix::Flat(Rc::clone(text)),
+                Some(text) => Prefix::Flat(StrOwner::clone(text)),
                 None => Prefix::Joined(Rc::new(parts.clone())),
             },
         }
@@ -86,7 +87,7 @@ impl PathText {
         }
     }
 
-    fn spelling(&self) -> &Rc<Str> {
+    fn spelling(&self) -> &StrOwner {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => text,
             Self::Joined { parts, spelling } => spelling.get_or_init(|| parts.render()),
@@ -95,16 +96,16 @@ impl PathText {
 }
 
 impl JoinedParts {
-    fn render(&self) -> Rc<Str> {
+    fn render(&self) -> StrOwner {
         match &self.parent {
             Prefix::Empty => {
                 return if is_normalized(&self.child) {
-                    Rc::clone(&self.child)
+                    StrOwner::clone(&self.child)
                 } else {
-                    Rc::new(normalize(&self.child))
+                    StrOwner::new(normalize(&self.child))
                 };
             }
-            Prefix::Flat(base) => return Rc::new(join(base, &self.child)),
+            Prefix::Flat(base) => return StrOwner::new(join(base, &self.child)),
             Prefix::Joined(_) => {}
         }
 
@@ -127,7 +128,7 @@ impl JoinedParts {
         if result.is_empty() {
             result.push('.');
         }
-        Rc::new(result)
+        StrOwner::new(result)
     }
 }
 
@@ -149,7 +150,7 @@ impl Storage {
         self.path_text()
     }
 
-    fn path_name(&self) -> &Rc<Str> {
+    fn path_name(&self) -> &StrOwner {
         let Self::Path { name: cached, .. } = self else {
             fail("SystemError", "expected a path object");
         };
@@ -157,14 +158,14 @@ impl Storage {
             let text = self.path_text();
             let component = name(text);
             if component.len() == text.len() {
-                Rc::clone(text)
+                StrOwner::clone(text)
             } else {
-                Rc::new(Str::from(component))
+                StrOwner::new(Str::from(component))
             }
         })
     }
 
-    fn path_text(&self) -> &Rc<Str> {
+    fn path_text(&self) -> &StrOwner {
         self.path_value().spelling()
     }
 
@@ -241,7 +242,7 @@ fn join(path: &str, child: &str) -> Str {
     }
 }
 
-fn new_path(path: impl Into<Rc<Str>>) -> *const Object {
+fn new_path(path: impl Into<StrOwner>) -> *const Object {
     path_with_text(PathText::Flat(path.into()))
 }
 
@@ -383,7 +384,7 @@ pub extern "C" fn imre_getcwd() -> *const Str {
     let result = std::env::current_dir()
         .map_err(files::errno_error)
         .and_then(|cwd| path_utf8(cwd.into_os_string()))
-        .map(|text| Rc::into_raw(Rc::new(text)));
+        .map(|text| StrOwner::into_raw(StrOwner::new(text)));
     finish(result, std::ptr::null())
 }
 
@@ -396,7 +397,7 @@ fn suffix_start(name: &str) -> Option<usize> {
 }
 
 /// # Safety
-/// `text` is a live `Rc<Str>` handle from the string ABI. The result transfers
+/// `text` is a live `StrOwner` handle from the string ABI. The result transfers
 /// one Path owner and may retain the input's canonical spelling.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_new(text: *const Str) -> *const Object {
@@ -404,7 +405,7 @@ pub unsafe extern "C" fn imre_path_new(text: *const Str) -> *const Object {
     let spelling = unsafe { &*text };
     if is_normalized(spelling) {
         // SAFETY: the rooted input remains alive while its shared owner is acquired.
-        new_path(unsafe { super::acquire_rc::<Str>(text as usize) })
+        new_path(unsafe { StrOwner::acquire_word(text as usize) })
     } else {
         new_path(normalize(spelling))
     }
@@ -420,7 +421,7 @@ pub unsafe extern "C" fn imre_union_path_text(value: usize) -> *const Str {
         if value & 7 == 6 {
             imre_path_text((value & !7) as *const Object)
         } else {
-            Rc::into_raw(super::acquire_rc::<Str>(value))
+            StrOwner::into_raw(StrOwner::acquire_word(value))
         }
     }
 }
@@ -453,7 +454,7 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
                 return new_path(join(base, child_text));
             }
             let child_absolute = child_text.starts_with('/');
-            Rc::increment_strong_count(child);
+            StrOwner::increment_strong_count(child);
             path_with_text(PathText::Joined {
                 parts: JoinedParts {
                     parent: if child_absolute {
@@ -461,7 +462,7 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
                     } else {
                         parent.prefix()
                     },
-                    child: Rc::from_raw(child),
+                    child: StrOwner::from_raw(child),
                     absolute: child_absolute || parent.is_absolute(),
                 },
                 spelling: std::cell::OnceCell::new(),
@@ -526,9 +527,9 @@ pub unsafe extern "C" fn imre_path_text(path: *const Object) -> *const Str {
     let text = unsafe {
         object(path)
             .0
-            .with(|storage| Rc::clone(storage.path_text()))
+            .with(|storage| StrOwner::clone(storage.path_text()))
     };
-    Rc::into_raw(text)
+    StrOwner::into_raw(text)
 }
 
 /// # Safety
@@ -540,9 +541,9 @@ pub unsafe extern "C" fn imre_path_name(path: *const Object) -> *const Str {
     let text = unsafe {
         object(path)
             .0
-            .with(|storage| Rc::clone(storage.path_name()))
+            .with(|storage| StrOwner::clone(storage.path_name()))
     };
-    Rc::into_raw(text)
+    StrOwner::into_raw(text)
 }
 
 /// # Safety
@@ -555,12 +556,12 @@ pub unsafe extern "C" fn imre_path_stem(path: *const Object) -> *const Str {
         object(path).0.with(|storage| {
             let component = name(storage.path());
             match suffix_start(component) {
-                Some(end) => Rc::new(Str::from(&component[..end])),
-                None => Rc::clone(storage.path_name()),
+                Some(end) => StrOwner::new(Str::from(&component[..end])),
+                None => StrOwner::clone(storage.path_name()),
             }
         })
     };
-    Rc::into_raw(stem)
+    StrOwner::into_raw(stem)
 }
 
 /// # Safety
@@ -574,7 +575,7 @@ pub unsafe extern "C" fn imre_path_suffix(path: *const Object) -> *const Str {
             Str::from(&name[suffix_start(name).unwrap_or(name.len())..])
         })
     };
-    Rc::into_raw(Rc::new(text))
+    StrOwner::into_raw(StrOwner::new(text))
 }
 
 /// # Safety
@@ -694,7 +695,7 @@ pub unsafe extern "C" fn imre_path_read_text(path: *const Object) -> *const Str 
             .with(|storage| files::read_path_text(storage.path()))
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(text))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
 }
@@ -1196,9 +1197,9 @@ mod tests {
         }
     }
     fn path(text: &str) -> Rc<Object> {
-        let text = Rc::new(Str::from(text));
+        let text = StrOwner::new(Str::from(text));
         // SAFETY: the input is rooted and the new path transfers one owner.
-        unsafe { Rc::from_raw(imre_path_new(Rc::as_ptr(&text))) }
+        unsafe { Rc::from_raw(imre_path_new(StrOwner::as_ptr(&text))) }
     }
 
     #[test]
@@ -1211,10 +1212,10 @@ mod tests {
             let first = Rc::from_raw(imre_path_parent(Rc::as_ptr(&path)));
             let second = Rc::from_raw(imre_path_parent(Rc::as_ptr(&path)));
             assert!(!Rc::ptr_eq(&first, &second));
-            let first_text = Rc::from_raw(imre_path_text(Rc::as_ptr(&first)));
-            let second_text = Rc::from_raw(imre_path_text(Rc::as_ptr(&second)));
-            assert!(Rc::ptr_eq(&first_text, &second_text));
-            let old = Rc::downgrade(&first_text);
+            let first_text = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&first)));
+            let second_text = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&second)));
+            assert!(StrOwner::ptr_eq(&first_text, &second_text));
+            let old = StrOwner::downgrade(&first_text);
             drop((first_text, second_text, first, second));
             assert!(old.upgrade().is_none());
             let fresh = Rc::from_raw(imre_path_parent(Rc::as_ptr(&path)));
@@ -1224,23 +1225,23 @@ mod tests {
 
     #[test]
     fn shared_spelling_and_basename_survive_other_owners() {
-        let mut source = Rc::new(Str::from(
+        let mut source = StrOwner::new(Str::from(
             "//r/../é\0/this-long-basename-is-stored-in-a-heap-buffer",
         ));
         let original = (*source).clone();
         // SAFETY: every input remains rooted through its call and each native
         // return transfers one owner. Source and results use normal Rc COW.
         unsafe {
-            let path = Rc::from_raw(imre_path_new(Rc::as_ptr(&source)));
-            let first = Rc::from_raw(imre_path_text(Rc::as_ptr(&path)));
-            let component = Rc::from_raw(imre_path_name(Rc::as_ptr(&path)));
-            let stem = Rc::from_raw(imre_path_stem(Rc::as_ptr(&path)));
-            assert!(Rc::ptr_eq(&stem, &component));
-            let mut other = Rc::from_raw(imre_path_name(Rc::as_ptr(&path)));
-            assert!(Rc::ptr_eq(&first, &source));
-            assert!(Rc::ptr_eq(&other, &component));
-            Rc::make_mut(&mut source).push('!');
-            Rc::make_mut(&mut other).push('?');
+            let path = Rc::from_raw(imre_path_new(StrOwner::as_ptr(&source)));
+            let first = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&path)));
+            let component = StrOwner::from_raw(imre_path_name(Rc::as_ptr(&path)));
+            let stem = StrOwner::from_raw(imre_path_stem(Rc::as_ptr(&path)));
+            assert!(StrOwner::ptr_eq(&stem, &component));
+            let mut other = StrOwner::from_raw(imre_path_name(Rc::as_ptr(&path)));
+            assert!(StrOwner::ptr_eq(&first, &source));
+            assert!(StrOwner::ptr_eq(&other, &component));
+            StrOwner::make_mut(&mut source).push('!');
+            StrOwner::make_mut(&mut other).push('?');
             drop(path);
             assert_eq!(*stem, *component);
             assert_eq!(*first, original);
@@ -1288,18 +1289,22 @@ mod tests {
     #[test]
     fn joined_spelling_is_deferred_and_owns_its_operands() {
         let parent = path("/parent");
-        let mut child = Rc::new(Str::from(
+        let mut child = StrOwner::new(Str::from(
             "child/./a-long-component-that-needs-character-storage",
         ));
         // SAFETY: both inputs are rooted through the join, whose result owns
         // its operands. Each later text call transfers one independent owner.
         unsafe {
-            let joined = Rc::from_raw(imre_path_join(Rc::as_ptr(&parent), Rc::as_ptr(&child)));
+            let joined = Rc::from_raw(imre_path_join(
+                Rc::as_ptr(&parent),
+                StrOwner::as_ptr(&child),
+            ));
             drop(parent);
-            Rc::make_mut(&mut child).push('!');
-            let tail = Rc::new(Str::from(".."));
-            let descendant = Rc::from_raw(imre_path_join(Rc::as_ptr(&joined), Rc::as_ptr(&tail)));
-            let rendered = Rc::from_raw(imre_path_text(Rc::as_ptr(&descendant)));
+            StrOwner::make_mut(&mut child).push('!');
+            let tail = StrOwner::new(Str::from(".."));
+            let descendant =
+                Rc::from_raw(imre_path_join(Rc::as_ptr(&joined), StrOwner::as_ptr(&tail)));
+            let rendered = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&descendant)));
             assert_eq!(
                 rendered.as_str(),
                 "/parent/child/a-long-component-that-needs-character-storage/.."
@@ -1311,10 +1316,10 @@ mod tests {
                 };
                 assert!(spelling.get().is_none());
             });
-            let first = Rc::from_raw(imre_path_text(Rc::as_ptr(&joined)));
-            let second = Rc::from_raw(imre_path_text(Rc::as_ptr(&joined)));
+            let first = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&joined)));
+            let second = StrOwner::from_raw(imre_path_text(Rc::as_ptr(&joined)));
             drop(joined);
-            assert!(Rc::ptr_eq(&first, &second));
+            assert!(StrOwner::ptr_eq(&first, &second));
             assert_eq!(
                 first.as_str(),
                 "/parent/child/a-long-component-that-needs-character-storage"
@@ -1344,11 +1349,14 @@ mod tests {
             unsafe {
                 let pointer = Rc::as_ptr(&value);
                 assert_eq!(
-                    Rc::from_raw(imre_path_name(pointer)).as_str(),
+                    StrOwner::from_raw(imre_path_name(pointer)).as_str(),
                     expected_name
                 );
-                assert_eq!(Rc::from_raw(imre_path_stem(pointer)).as_str(), stem);
-                assert_eq!(Rc::from_raw(imre_path_suffix(pointer)).as_str(), suffix);
+                assert_eq!(StrOwner::from_raw(imre_path_stem(pointer)).as_str(), stem);
+                assert_eq!(
+                    StrOwner::from_raw(imre_path_suffix(pointer)).as_str(),
+                    suffix
+                );
                 let parent = Rc::from_raw(imre_path_parent(pointer));
                 assert_eq!(
                     parent.0.with(|storage| storage.path().to_owned()),
@@ -1374,7 +1382,7 @@ mod tests {
                 super::super::words::WordKind::new(5)
             ));
             assert_eq!(
-                Rc::from_raw(values::imre_value_repr(Rc::as_ptr(&left) as usize, 5)).as_str(),
+                StrOwner::from_raw(values::imre_value_repr(Rc::as_ptr(&left) as usize, 5)).as_str(),
                 "PosixPath('a/b')"
             );
         }
@@ -1395,7 +1403,7 @@ mod tests {
             assert_eq!(count.as_small(), Some(5));
             assert_eq!(imre_path_is_file(pointer), 1);
             assert_eq!(
-                Rc::from_raw(imre_path_read_text(pointer)).as_str(),
+                StrOwner::from_raw(imre_path_read_text(pointer)).as_str(),
                 "é\n🦀\n"
             );
             fs::write(&filename, [0xff]).unwrap();

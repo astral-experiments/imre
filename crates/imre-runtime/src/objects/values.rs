@@ -2,9 +2,9 @@
 //! No operation calls user code or mutates a container; acyclic checked types
 //! bound recursion and keep every borrowed child rooted by its original owner.
 
+use crate::StrOwner;
 use std::cmp::Ordering;
 use std::fmt::Write;
-use std::rc::Rc;
 
 use super::records::descriptor;
 use super::words::{NULLABLE, WordKind};
@@ -321,7 +321,7 @@ pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
     let mut output = String::new();
     // SAFETY: the caller supplies the exact checked representation and root.
     unsafe { write_repr(&mut output, word, WordKind::new(kind)) };
-    Rc::into_raw(Rc::new(Str::from(output)))
+    StrOwner::into_raw(StrOwner::new(Str::from(output)))
 }
 
 /// # Safety
@@ -665,7 +665,7 @@ mod tests {
             right.cast::<f64>().write(f64::NAN);
             assert_eq!(imre_record_equal(left, left), 1);
             assert_eq!(imre_record_equal(left, right), 0);
-            let rendered = Rc::from_raw(imre_value_repr(left as usize, 6));
+            let rendered = StrOwner::from_raw(imre_value_repr(left as usize, 6));
             assert_eq!(rendered.as_str(), "Reading(value=nan)");
             left.cast::<f64>().write(-0.0);
             right.cast::<f64>().write(0.0);

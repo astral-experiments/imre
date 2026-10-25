@@ -1,18 +1,19 @@
 use super::*;
+use crate::StrOwner;
 use crate::objects::values::imre_sequence_equal;
 use crate::objects::{
     imre_seq_append, imre_seq_borrow_index_proven, imre_seq_data_readonly, imre_seq_len,
 };
 use std::ptr;
 
-fn string(value: &str) -> Rc<Str> {
-    Rc::new(Str::new(value))
+fn string(value: &str) -> StrOwner {
+    StrOwner::new(Str::new(value))
 }
 
 fn list(values: &[&str]) -> Rc<Object> {
     let mut words = Words::new(3);
     for &s in values {
-        words.values.push(Rc::into_raw(string(s)) as usize);
+        words.values.push(StrOwner::into_raw(string(s)) as usize);
     }
     words.into_object()
 }
@@ -42,9 +43,9 @@ fn filter_rows(
     unsafe {
         Rc::from_raw(imre_str_list_filter(
             Rc::as_ptr(list),
-            Rc::as_ptr(&first),
-            second.as_ref().map_or(ptr::null(), Rc::as_ptr),
-            exclude.as_ref().map_or(ptr::null(), Rc::as_ptr),
+            StrOwner::as_ptr(&first),
+            second.as_ref().map_or(ptr::null(), StrOwner::as_ptr),
+            exclude.as_ref().map_or(ptr::null(), StrOwner::as_ptr),
             strip,
         ))
     }
@@ -168,20 +169,20 @@ fn raw_reads_and_writes_respect_snapshots_and_copy_identity() {
         let alias = Rc::clone(&diff);
         let signed = filter_rows(&diff, "+ ", Some("- "), None, 0);
         assert_eq!(imre_str_list_nonempty(Rc::as_ptr(&signed)), 0);
-        imre_seq_append(Rc::as_ptr(&input), Rc::as_ptr(&extra) as usize, 3);
+        imre_seq_append(Rc::as_ptr(&input), StrOwner::as_ptr(&extra) as usize, 3);
         drop(input);
         assert_eq!(imre_seq_resolve_header(Rc::as_ptr(&diff)), 2);
         assert_eq!(imre_seq_len(Rc::as_ptr(&diff)), 3);
         let word = imre_seq_borrow_index_proven(Rc::as_ptr(&diff), 0);
         assert_eq!(imre_seq_data_readonly(Rc::as_ptr(&diff)).read(), word);
         assert_eq!((&*(word as *const Str)).as_str(), "  same");
-        imre_seq_append(Rc::as_ptr(&alias), Rc::as_ptr(&extra) as usize, 3);
+        imre_seq_append(Rc::as_ptr(&alias), StrOwner::as_ptr(&extra) as usize, 3);
         diff.0
             .with(|s| assert!(s.sequence_storage().plan().is_none()));
         assert_eq!(rows(&alias), ["  same", "later"]);
         assert_eq!(rows(&copy), ["  same"]);
         assert_eq!(imre_sequence_equal(Rc::as_ptr(&diff), Rc::as_ptr(&copy)), 0);
-        imre_seq_append(Rc::as_ptr(&signed), Rc::as_ptr(&extra) as usize, 3);
+        imre_seq_append(Rc::as_ptr(&signed), StrOwner::as_ptr(&extra) as usize, 3);
         assert_eq!(rows(&signed), ["later"]);
         assert_eq!(rows(&copy), ["  same"]);
     }
@@ -270,7 +271,7 @@ fn sorted_rows_reuse_only_live_ordered_sources_and_detach_on_write() {
             });
             Weak::clone(origin)
         });
-        imre_seq_append(Rc::as_ptr(&sorted), Rc::as_ptr(&edit) as usize, 3);
+        imre_seq_append(Rc::as_ptr(&sorted), StrOwner::as_ptr(&edit) as usize, 3);
         assert_eq!(
             rows(&filter_rows(&sorted, "-", None, None, 2)),
             ["c", "c", "edited"]

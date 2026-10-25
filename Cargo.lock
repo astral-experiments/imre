@@ -666,6 +666,7 @@ dependencies = [
 name = "imre-runtime"
 version = "0.1.2"
 dependencies = [
+ "allocator-api2",
  "compact_str",
  "corosensei",
  "flate2",

@@ -1,5 +1,6 @@
 //! Fixed string patterns and immutable snapshots of participating capture spans.
 
+use crate::StrOwner;
 mod captures;
 
 use captures::AnchoredCaptures;
@@ -24,7 +25,7 @@ pub(super) struct Pattern {
     required: Vec<(Finder<'static>, Option<Vec<u8>>)>,
     anchored: Option<AnchoredCaptures>,
     final_newline_slot: Option<usize>,
-    named_groups: Vec<(usize, Rc<Str>)>,
+    named_groups: Vec<(usize, StrOwner)>,
 }
 
 /// Every match must contain this literal; branches and optional repetitions do
@@ -113,7 +114,7 @@ impl Pattern {
             .enumerate()
             .filter_map(|(index, name)| {
                 name.filter(|_| final_newline_slot != Some(index * 2))
-                    .map(|name| (index, Rc::new(Str::new(name))))
+                    .map(|name| (index, StrOwner::new(Str::new(name))))
             })
             .collect();
         Self {
@@ -256,7 +257,7 @@ impl Pattern {
 
 pub(super) struct Match {
     pattern: Rc<Object>,
-    text: Rc<Str>,
+    text: StrOwner,
     spans: Spans,
 }
 
@@ -370,8 +371,8 @@ pub unsafe extern "C" fn imre_regex_sub(
                 unreachable!()
             };
             match compiled.substitute(&*text, template) {
-                Ok(Some(output)) => Rc::into_raw(Rc::new(Str::from(output))),
-                Ok(None) => Rc::into_raw(acquire_rc(text as usize)),
+                Ok(Some(output)) => StrOwner::into_raw(StrOwner::new(Str::from(output))),
+                Ok(None) => StrOwner::into_raw(StrOwner::acquire_word(text as usize)),
                 Err(_) => {
                     super::exceptions::sequence_allocation_failed();
                     ptr::null()
@@ -432,7 +433,7 @@ unsafe fn match_text(pattern: *const Object, text: *const Str, anchored: bool) -
             }
             handle(Storage::RegexMatch(Match {
                 pattern: acquire_rc(pattern as usize),
-                text: acquire_rc(text as usize),
+                text: StrOwner::acquire_word(text as usize),
                 spans: Spans::new(&compiled.slots[..visible], (&*text).len()),
             }))
         })
@@ -443,8 +444,12 @@ impl Match {
     /// Empty captures own an empty string. Only nonparticipating groups return null.
     fn substring(&self, span: Option<(usize, usize)>) -> *const Str {
         match span {
-            Some((0, end)) if end == self.text.len() => Rc::into_raw(Rc::clone(&self.text)),
-            Some((start, end)) => Rc::into_raw(Rc::new(Str::new(&self.text[start..end]))),
+            Some((0, end)) if end == self.text.len() => {
+                StrOwner::into_raw(StrOwner::clone(&self.text))
+            }
+            Some((start, end)) => {
+                StrOwner::into_raw(StrOwner::new(Str::new(&self.text[start..end])))
+            }
             None => ptr::null(),
         }
     }
@@ -536,7 +541,7 @@ pub unsafe extern "C" fn imre_regex_groupdict(value: *const Object) -> *const Ob
                 // Frozen capture names belong to the pattern. Each fresh
                 // dictionary retains those same immutable keys.
                 for (index, name) in &pattern.named_groups {
-                    let key = Rc::into_raw(Rc::clone(name)) as usize;
+                    let key = StrOwner::into_raw(StrOwner::clone(name)) as usize;
                     let capture = matched.substring(matched.spans.get(*index).unwrap()) as usize;
                     entries.insert_unique(
                         OwnedWord::from_owned(key, key_kind),
@@ -610,12 +615,14 @@ mod tests {
         let pattern = "(a)(b)?(c)?(d)?(e)?(?P<last>f)";
         for text in ["af".to_owned(), format!("{}af", "é".repeat(40_000))] {
             let prefix_chars = text.chars().count() - 2;
-            let text = Rc::new(Str::from(text));
+            let text = StrOwner::new(Str::from(text));
             // SAFETY: the helper owns each ABI handle until its last access.
             unsafe {
                 let compiled = Rc::from_raw(imre_regex_compile(pattern.as_ptr(), pattern.len()));
-                let found =
-                    Rc::from_raw(imre_regex_search(Rc::as_ptr(&compiled), Rc::as_ptr(&text)));
+                let found = Rc::from_raw(imre_regex_search(
+                    Rc::as_ptr(&compiled),
+                    StrOwner::as_ptr(&text),
+                ));
                 let m = Rc::as_ptr(&found);
                 let last = Str::new("last");
                 assert_eq!(
@@ -627,7 +634,7 @@ mod tests {
                     Some(prefix_chars as i64 + 2)
                 );
                 assert_eq!(
-                    *Rc::from_raw(imre_regex_group(m, &last as *const Str as usize, 1)),
+                    *StrOwner::from_raw(imre_regex_group(m, &last as *const Str as usize, 1)),
                     "f"
                 );
                 assert_eq!(imre_regex_present(m, 5, 0), 0);
@@ -691,26 +698,29 @@ mod tests {
     #[test]
     fn captures_own_their_input_and_survive_subsequent_searches() {
         let source = "(?P<optional>x)?(?P<empty>y*)Π";
-        let text = Rc::new(Str::new("🌍éΠ"));
-        let input = Rc::downgrade(&text);
+        let text = StrOwner::new(Str::new("🌍éΠ"));
+        let input = StrOwner::downgrade(&text);
         // SAFETY: every call uses the declared owners; returned owners are consumed once.
         unsafe {
             let pattern = Rc::from_raw(imre_regex_compile(source.as_ptr(), source.len()));
-            let matched = Rc::from_raw(imre_regex_search(Rc::as_ptr(&pattern), Rc::as_ptr(&text)));
-            let other = Rc::new(Str::new("xyyΠ"));
+            let matched = Rc::from_raw(imre_regex_search(
+                Rc::as_ptr(&pattern),
+                StrOwner::as_ptr(&text),
+            ));
+            let other = StrOwner::new(Str::new("xyyΠ"));
             drop(Rc::from_raw(imre_regex_search(
                 Rc::as_ptr(&pattern),
-                Rc::as_ptr(&other),
+                StrOwner::as_ptr(&other),
             )));
-            let miss = Rc::new(Str::new("xyz"));
-            assert!(imre_regex_search(Rc::as_ptr(&pattern), Rc::as_ptr(&miss)).is_null());
+            let miss = StrOwner::new(Str::new("xyz"));
+            assert!(imre_regex_search(Rc::as_ptr(&pattern), StrOwner::as_ptr(&miss)).is_null());
             drop((pattern, text));
             let m = Rc::as_ptr(&matched);
-            assert_eq!(*Rc::from_raw(imre_regex_group(m, 1, 0)), "Π");
+            assert_eq!(*StrOwner::from_raw(imre_regex_group(m, 1, 0)), "Π");
             assert!(imre_regex_group(m, 3, 0).is_null());
             let empty = Str::new("empty");
             assert_eq!(
-                *Rc::from_raw(imre_regex_group(m, &empty as *const Str as usize, 1)),
+                *StrOwner::from_raw(imre_regex_group(m, &empty as *const Str as usize, 1)),
                 ""
             );
             assert_eq!(

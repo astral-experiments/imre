@@ -1,8 +1,10 @@
-//! Closed text unions reuse two alignment bits of their exact Rc payload.
+//! Closed text unions reuse two alignment bits of their exact reference-counted payload.
 //! Zero is reserved for absent optionals and partially initialized storage.
 
 use super::words::WordKind;
 use super::{Bytes, Object, Str, object};
+#[cfg(test)]
+use crate::StrOwner;
 
 const _: () = assert!(
     align_of::<Str>() >= 8
@@ -72,9 +74,9 @@ mod tests {
 
     #[test]
     fn tagged_members_keep_exact_owners_and_truth_values() {
-        let text = Rc::new(Str::from("text"));
+        let text = StrOwner::new(Str::from("text"));
         let bytes = Rc::new(Bytes::new());
-        let text_word = Rc::as_ptr(&text) as usize;
+        let text_word = StrOwner::as_ptr(&text) as usize;
         let bytes_word = Rc::as_ptr(&bytes) as usize | 1;
         // SAFETY: both locals root their exact tagged payloads throughout.
         unsafe {
@@ -82,11 +84,11 @@ mod tests {
             assert_eq!(imre_union_truthy(bytes_word), 0);
             let text_owner = WordKind::new(9).acquire(text_word);
             let bytes_owner = WordKind::new(9).acquire(bytes_word);
-            assert_eq!(Rc::strong_count(&text), 2);
+            assert_eq!(StrOwner::strong_count(&text), 2);
             assert_eq!(Rc::strong_count(&bytes), 2);
             drop(text_owner);
             drop(bytes_owner);
-            assert_eq!(Rc::strong_count(&text), 1);
+            assert_eq!(StrOwner::strong_count(&text), 1);
             assert_eq!(Rc::strong_count(&bytes), 1);
             drop(WordKind::new(256 | 9).acquire(0));
         }

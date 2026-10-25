@@ -1,5 +1,6 @@
 //! Immutable byte values with exact ownership, Python repr, and strict UTF-8.
 
+use crate::StrOwner;
 use std::rc::Rc;
 
 use num_traits::ToPrimitive;
@@ -225,7 +226,7 @@ pub unsafe extern "C" fn imre_bytes_release(value: *const Bytes) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_str(value: *const Bytes) -> *const Str {
     // SAFETY: the rooted input is immutable and repr retains no borrowed data.
-    Rc::into_raw(Rc::new(repr(unsafe { &*value })))
+    StrOwner::into_raw(StrOwner::new(repr(unsafe { &*value })))
 }
 
 /// # Safety
@@ -514,7 +515,7 @@ pub unsafe extern "C" fn imre_bytes_decode(value: *const Bytes) -> *const Str {
     // SAFETY: immutable bytes remain rooted throughout decoding and error rendering.
     let value = unsafe { &*value };
     let result = std::str::from_utf8(value)
-        .map(|text| Rc::into_raw(Rc::new(Str::from(text))))
+        .map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text))))
         .map_err(|error| decode_error(value, error));
     finish(result, std::ptr::null())
 }
@@ -599,7 +600,7 @@ mod tests {
                 imre_exception_matches(Rc::as_ptr(&error), Kind::IndexError as u32),
                 1
             );
-            let message = Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+            let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
             assert_eq!(message.as_str(), expected);
         }
         assert_eq!(imre_error_pending(), 0);
@@ -708,14 +709,14 @@ mod tests {
             unsafe {
                 assert!(imre_bytes_decode(Rc::as_ptr(&source)).is_null());
                 let ordinary = Rc::from_raw(imre_error_take());
-                let expected = Rc::from_raw(imre_exception_message(Rc::as_ptr(&ordinary)));
+                let expected = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&ordinary)));
                 assert!(imre_bytes_validate_utf8(Rc::as_ptr(&source)).is_null());
                 let error = Rc::from_raw(imre_error_take());
                 assert_eq!(
                     imre_exception_matches(Rc::as_ptr(&error), Kind::UnicodeDecodeError as u32),
                     1
                 );
-                let message = Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+                let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
                 assert_eq!(message, expected);
                 assert_eq!(Rc::strong_count(&source), 1);
                 assert_eq!(imre_error_pending(), 0);
@@ -807,7 +808,7 @@ mod tests {
                         imre_exception_matches(Rc::as_ptr(&error), Kind::ValueError as u32),
                         1
                     );
-                    let message = Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+                    let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
                     assert_eq!(message.as_str(), "bytes must be in range(0, 256)");
                     source.0.with(|values| {
                         assert_eq!(values.len(), 129);

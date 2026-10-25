@@ -1,5 +1,6 @@
 //! Writes typed storage directly, without constructing a dynamic JSON tree.
 
+use crate::StrOwner;
 use num_traits::ToPrimitive;
 
 use super::*;
@@ -553,7 +554,7 @@ pub unsafe extern "C" fn imre_json_encode(
     // SAFETY: the compiler supplies the exact rooted schema and indentation.
     let result = unsafe { encode(word, schema, indent, false, ensure_ascii, None, None) };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(Str::from(text)))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text)))),
         std::ptr::null(),
     )
 }
@@ -582,7 +583,7 @@ pub unsafe extern "C" fn imre_json_dumps(
         )
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(Str::from(text)))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text)))),
         std::ptr::null(),
     )
 }

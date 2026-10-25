@@ -1,7 +1,6 @@
 //! The process's two UTF-8 text output streams use the same buffering as print.
-use super::{
-    Error, Int, Kind, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initialize_io,
-};
+use super::{Error, Int, Kind, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
+use crate::StrOwner;
 use std::io::{self, Write};
 
 static STDERR: LazyLock<Mutex<Output<io::Stderr>>> = LazyLock::new(|| {
@@ -54,7 +53,7 @@ pub extern "C" fn imre_sys_platform() -> *const Str {
         "windows" => "win32",
         other => other,
     };
-    Rc::into_raw(Rc::new(Str::new(platform)))
+    StrOwner::into_raw(StrOwner::new(Str::new(platform)))
 }
 
 /// Write text without a newline and return the number of Unicode characters.

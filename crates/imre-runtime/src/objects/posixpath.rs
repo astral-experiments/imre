@@ -1,5 +1,6 @@
 //! Raw POSIX spellings. Only ASCII slash and dot are special, including in byte paths.
 
+use crate::StrOwner;
 use std::collections::TryReserveError;
 use std::ffi::OsString;
 use std::ops::Range;
@@ -36,7 +37,7 @@ impl<'a> Spelling<'a> {
     /// All split offsets are adjacent to ASCII delimiters or at an endpoint.
     fn slice(&self, range: Range<usize>) -> *const () {
         match self {
-            Self::Text(s) => Rc::into_raw(Rc::new(Str::from(&s[range]))).cast(),
+            Self::Text(s) => StrOwner::into_raw(StrOwner::new(Str::from(&s[range]))).cast(),
             Self::Bytes(b) => Rc::into_raw(Rc::new(b[range].to_vec())).cast(),
         }
     }
@@ -77,7 +78,7 @@ pub unsafe extern "C" fn imre_posix_join(
     }
     if kind == 0 {
         let text = String::from_utf8(output).expect("ASCII separators preserve UTF-8");
-        Rc::into_raw(Rc::new(Str::from(text))).cast()
+        StrOwner::into_raw(StrOwner::new(Str::from(text))).cast()
     } else {
         Rc::into_raw(Rc::new(output)).cast()
     }
@@ -221,7 +222,7 @@ pub unsafe extern "C" fn imre_posix_commonpath(list: *const super::Object, kind:
             Ok(owner | usize::from(kind == 2))
         } else {
             let value = std::str::from_utf8(&prefix).expect("joined UTF-8 path components");
-            Ok(Rc::into_raw(Rc::new(
+            Ok(StrOwner::into_raw(StrOwner::new(
                 Str::try_new(value).map_err(|_| Error::allocation())?,
             )) as usize)
         }
@@ -307,7 +308,7 @@ pub unsafe extern "C" fn imre_posix_normalize(
     } else {
         // An undecodable cwd component canceled by `..` never reaches the text result.
         match super::paths::path_utf8(OsString::from_vec(output)) {
-            Ok(text) => Rc::into_raw(Rc::new(text)).cast(),
+            Ok(text) => StrOwner::into_raw(StrOwner::new(text)).cast(),
             Err(error) => error.returning(std::ptr::null()),
         }
     }

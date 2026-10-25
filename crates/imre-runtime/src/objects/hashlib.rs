@@ -1,5 +1,6 @@
 //! SHA-256 handles share a mutable hash state; digest reads finalize a snapshot.
 
+use crate::StrOwner;
 use std::rc::Rc;
 
 use sha2::digest::Output;
@@ -21,7 +22,7 @@ fn hex(digest: Output<Sha256>) -> *const Str {
         result.push(char::from(HEX[(byte >> 4) as usize]));
         result.push(char::from(HEX[(byte & 15) as usize]));
     }
-    Rc::into_raw(Rc::new(result))
+    StrOwner::into_raw(StrOwner::new(result))
 }
 
 /// # Safety

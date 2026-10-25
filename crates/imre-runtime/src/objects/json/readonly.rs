@@ -2,6 +2,7 @@
 //! so nested values survive the source array; typed scalar results own only
 //! their native string or integer. No Python object graph or mutable alias is exposed.
 
+use crate::StrOwner;
 mod arrays;
 mod constants;
 pub(in crate::objects) mod document;
@@ -28,7 +29,7 @@ pub(super) enum Node {
     Bool(bool),
     Integer(Int),
     Float(f64),
-    String(Rc<Str>),
+    String(StrOwner),
     Datetime(Str),
     Array(Vec<usize>),
     Deferred(Rc<arrays::Deferred>),
@@ -269,7 +270,7 @@ impl View {
         } else if let (Node::String(a), Node::String(b)) = (left, right) {
             let mut s = a.as_ref().clone();
             s.push_str(b);
-            Node::String(Rc::new(s))
+            Node::String(StrOwner::new(s))
         } else if let (Node::Array(a), Node::Array(b)) = (left, right) {
             let mut nodes = Vec::new();
             let mut items = Vec::with_capacity(a.len() + b.len());
@@ -343,7 +344,7 @@ impl View {
             .into_handle()
                 as usize),
             (0, _) | (1, Node::Object(_)) => Ok(Self::handle(&self.nodes, index) as usize),
-            (2, Node::String(text)) => Ok(Rc::into_raw(Rc::clone(text)) as usize),
+            (2, Node::String(text)) => Ok(StrOwner::into_raw(StrOwner::clone(text)) as usize),
             (3, Node::Integer(integer)) => Ok(integer.clone().into_raw()),
             (4, _) => Ok(usize::from(
                 matches!(node, Node::String(text) if Some(text.as_ref()) == literal),
@@ -410,7 +411,9 @@ fn push_node(
             Some(array) => Node::Deferred(array),
             None => push_array(nodes, raw, source)?,
         },
-        b'"' => Node::String(Rc::new(Str::from(serde_json::from_str::<String>(raw)?))),
+        b'"' => Node::String(StrOwner::new(Str::from(serde_json::from_str::<String>(
+            raw,
+        )?))),
         b't' => Node::Bool(true),
         b'f' => Node::Bool(false),
         b'n' => Node::Null,
@@ -722,8 +725,8 @@ pub unsafe extern "C" fn imre_json_get(
                 2 => Node::Integer((*Int::borrow(word)).clone()),
                 3 => {
                     let text = word as *const Str;
-                    Rc::increment_strong_count(text);
-                    Node::String(Rc::from_raw(text))
+                    StrOwner::increment_strong_count(text);
+                    Node::String(StrOwner::from_raw(text))
                 }
                 4 => Node::Bool(word != 0),
                 5 => Node::Float(f64::from_bits(word as u64)),
@@ -792,11 +795,13 @@ pub unsafe extern "C" fn imre_json_iter(value: *const Object) -> *const Object {
             match &view.nodes[view.index] {
                 Node::Array(children) => return Ok(view.array(children)),
                 Node::Object(fields) => items.values.extend(keys(fields).map(|name| {
-                    View::single(Node::String(Rc::new(name.clone()))).into_handle() as usize
+                    View::single(Node::String(StrOwner::new(name.clone()))).into_handle() as usize
                 })),
                 Node::String(text) => items.values.extend(text.chars().map(|ch| {
-                    View::single(Node::String(Rc::new(Str::new(ch.encode_utf8(&mut [0; 4])))))
-                        .into_handle() as usize
+                    View::single(Node::String(StrOwner::new(Str::new(
+                        ch.encode_utf8(&mut [0; 4]),
+                    ))))
+                    .into_handle() as usize
                 })),
                 node => {
                     return Err(Error::new(
@@ -871,7 +876,7 @@ pub unsafe extern "C" fn imre_json_index(value: *const Object, key: usize) -> *c
                 Node::String(text) => {
                     let index = crate::index(at()?, text.chars().count())
                         .map_err(|_| Error::new(Kind::IndexError, "string index out of range"))?;
-                    Ok(View::single(Node::String(Rc::new(Str::new(
+                    Ok(View::single(Node::String(StrOwner::new(Str::new(
                         text.chars().nth(index).unwrap().encode_utf8(&mut [0; 4]),
                     ))))
                     .into_handle())

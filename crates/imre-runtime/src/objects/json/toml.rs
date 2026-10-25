@@ -4,6 +4,7 @@
 //! Only its temporary syntax tree is dynamic; published values use the same exact
 //! native storage and cleanup rules as typed JSON.
 
+use crate::StrOwner;
 use ::toml::de::{DeTable, DeValue};
 
 use super::*;
@@ -84,7 +85,9 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
                 .ok_or("invalid TOML integer")?;
             integer.into_raw()
         }
-        (STRING, DeValue::String(value)) => Rc::into_raw(Rc::new(Str::new(value))) as usize,
+        (STRING, DeValue::String(value)) => {
+            StrOwner::into_raw(StrOwner::new(Str::new(value))) as usize
+        }
         (BOOLEAN, DeValue::Boolean(value)) => usize::from(*value),
         (FLOAT, DeValue::Float(value)) => value
             .as_str()
@@ -116,7 +119,7 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
             let mut result = super::super::mappings::Mapping::new(3, child.word_kind);
             for (name, value) in values {
                 let value = convert(value.get_ref(), child)?;
-                let word = Rc::into_raw(Rc::new(Str::new(name.get_ref()))) as usize;
+                let word = StrOwner::into_raw(StrOwner::new(Str::new(name.get_ref()))) as usize;
                 // SAFETY: the key transfers one newly allocated string owner.
                 let key = unsafe { OwnedWord::from_owned(word, WordKind::new(3)) };
                 assert!(
@@ -271,9 +274,11 @@ pub unsafe extern "C" fn imre_toml_keys(text: *const Str) -> *const Object {
         };
         let keys = super::super::mappings::imre_set_new(3);
         for (name, _) in table {
-            let string = Rc::new(Str::new(name.get_ref()));
+            let string = StrOwner::new(Str::new(name.get_ref()));
             // SAFETY: the set has string key storage and insertion retains the rooted key.
-            unsafe { super::super::mappings::imre_set_add(keys, Rc::as_ptr(&string) as usize) };
+            unsafe {
+                super::super::mappings::imre_set_add(keys, StrOwner::as_ptr(&string) as usize)
+            };
         }
         Ok(keys)
     })();
