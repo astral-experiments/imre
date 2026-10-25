@@ -17,6 +17,8 @@ from bindings import Boundary, PRIVATE, Probe
 from bodies import compiled
 from deep_decode import DRIVER as DEEP_DRIVER, METHOD as DEEP_METHOD, fixture as deep_fixture
 from key_identity import METHOD as KEY_METHOD, owner_fixture
+
+from formatting import METHODS as FORMATTING, Native as NativeFormatter, formatting_method
 from native import counts
 from reference import BENCH, COMMIT, HERE, routine, verify
 sys.path.insert(0, str(BENCH))
@@ -168,6 +170,23 @@ def run(tools, directory, reference):
         return obs
 
     executions.update(dict.fromkeys(ids[KEY_METHOD], native_keys))
+
+    formatter = NativeFormatter(tools, directory)
+    for short in FORMATTING:
+        source = f"test.test_json.{short}"
+        callback = formatting_method(formatter, short)
+
+        def native_format(case, original, source=source, callback=callback):
+            result = callback(case, original)
+            return {"outcome": "pass", "roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+                    "evidence": {"source": source, "method_sha256": definition(source)[1], "opt_level": tools.level,
+                                 "fixture": "original CPython module, class, instance, method and assertions",
+                                 "operation": "Imre standard JSON formatting operations", "native_calls": result["native_calls"]}}
+
+        for name in ids[source]:
+            if name in executions:
+                raise ValueError(f"duplicate observation for {name}")
+            executions[name] = native_format
     for key, case, (_, variant) in zip(keys, instances, discovered, strict=True):
         if key[0] in executions:
             continue
