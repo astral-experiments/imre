@@ -212,7 +212,7 @@ class Stream:
 class Remote:
     def __init__(self, harness, argv, options):
         self.harness, self.argv = harness, argv
-        names = {"stdout", "stderr", "stdin", "text", "encoding", "close_fds", "cwd", "bufsize", "shell", "executable", "env"}
+        names = {"stdout", "stderr", "stdin", "text", "encoding", "close_fds", "cwd", "bufsize", "pipesize", "shell", "executable", "env"}
         elements = argv if type(argv) in (list, tuple) else (argv,)
         members = tuple("str" if type(v) is str else "bytes" if type(v) is bytes else "path" if isinstance(v, Path) else None for v in elements)
         if None in members:

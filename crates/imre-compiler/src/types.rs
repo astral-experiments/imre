@@ -30,9 +30,14 @@ enum Shape {
     ModuleSpec(Vec<Type>),
     NamedTuple(TupleOrigin, Vec<Type>),
     PartialFrame(Vec<Type>),
+    VarTuple(Type),
+    /// Display segments are fixed fields or repetitions of an item of known type.
+    DisplayTuple(Vec<(Type, bool)>),
     Callable(Vec<Type>, Type),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
+    DispatchCallable(DispatchFunction),
+    DispatchRegistry(Type),
     Awaitable(Type),
     DirectoryContext(Type),
     ProcessArgs(Type),
@@ -47,6 +52,7 @@ pub(crate) struct CachedFunction {
     pub frame: Type,
     pub table: Type,
     pub capacity: i64,
+    pub annotations: Option<AnnotationOrigin>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -54,6 +60,21 @@ pub(crate) struct CachePolicy {
     /// Negative represents an unbounded cache; negative Python sizes normalize to zero.
     pub capacity: i64,
     pub typed: bool,
+}
+
+/// A dispatcher owns its original function and a private mutable registry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct DispatchFunction {
+    pub callable: Type,
+    pub frame: Type,
+    pub registry: Type,
+}
+
+/// A cache delegates annotation evaluation to the captured declaration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum AnnotationOrigin {
+    Module(crate::modules::DefinitionId),
+    Local(usize),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -79,12 +100,20 @@ pub(crate) struct NamedTuple {
     pub(crate) fields: Vec<String>,
 }
 
+pub(crate) struct FunctionSite {
+    pub module: String,
+    pub qualname: String,
+    pub line: u32,
+}
 #[derive(Default)]
 struct Storage {
     shapes: Vec<Shape>,
     has_module_spec: bool,
     named_tuples: HashMap<DefinitionId, Rc<NamedTuple>>,
     cache_adapters: HashMap<usize, CachePolicy>,
+    source_sites: HashMap<(usize, u32), Rc<FunctionSite>>,
+    function_sites: HashMap<usize, Rc<FunctionSite>>,
+    plain_callbacks: HashSet<Type>,
     exceptions: Vec<NamedException>,
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
@@ -121,7 +150,12 @@ impl Types {
             Type::CacheState(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
             Type::Dict(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
+                Some(
+                    Shape::Dict(..)
+                        | Shape::DefaultListDict(..)
+                        | Shape::Counter(_)
+                        | Shape::DispatchRegistry(_)
+                )
             ),
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
             Type::ChainMap(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
@@ -137,9 +171,18 @@ impl Types {
                 matches!(storage.shapes.get(id), Some(Shape::Tuple(fields))
                 if fields.iter().all(|t| matches!(t, Type::BuiltinClass | Type::Str | Type::None | Type::ForwardRef(_))))
             }
+            Type::VarTuple(id) => matches!(
+                storage.shapes.get(id),
+                Some(Shape::VarTuple(_) | Shape::DisplayTuple(_))
+            ),
             Type::Callable(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Callable(..) | Shape::DeclaredCache(..) | Shape::CachedCallable(_))
+                Some(
+                    Shape::Callable(..)
+                        | Shape::DeclaredCache(..)
+                        | Shape::CachedCallable(_)
+                        | Shape::DispatchCallable(_)
+                )
             ),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
@@ -167,6 +210,7 @@ impl Types {
             | Type::StringKeys
             | Type::Iterator
             | Type::ByteOutput
+            | Type::TupleBuffer
             | Type::Exception
             | Type::ObjectValue
             | Type::ReadOnlyObjectMapping
@@ -192,9 +236,12 @@ impl Types {
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::FunctionRef
+            | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
             | Type::Poll
@@ -225,11 +272,14 @@ impl Types {
         for (id, shape) in storage.shapes.iter().enumerate() {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
-                Shape::Cursor(ty)
+                Shape::DisplayTuple(parts) => parts.iter().map(|&(ty, _)| ty).collect(),
+                Shape::VarTuple(ty)
+                | Shape::Cursor(ty)
                 | Shape::List(ty)
                 | Shape::Deque(ty)
                 | Shape::Set(ty)
                 | Shape::Counter(ty)
+                | Shape::DispatchRegistry(ty)
                 | Shape::Awaitable(ty)
                 | Shape::DirectoryContext(ty)
                 | Shape::ProcessArgs(ty)
@@ -242,6 +292,7 @@ impl Types {
                 | Shape::Union(fields) => fields.clone(),
                 Shape::DeclaredCache(callable, _) => vec![*callable],
                 Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
+                Shape::DispatchCallable(d) => vec![d.callable, d.frame, d.registry],
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
                 }
@@ -250,6 +301,7 @@ impl Types {
                 self.verify_type(child, classes)?;
                 if let Type::StrLiteral(child_id)
                 | Type::Cursor(child_id)
+                | Type::VarTuple(child_id)
                 | Type::List(child_id)
                 | Type::CacheState(child_id)
                 | Type::Dict(child_id)
@@ -279,6 +331,30 @@ impl Types {
 }
 
 impl Types {
+    pub(crate) fn allow_plain_callbacks(&self, safe: HashSet<Type>) {
+        self.0.borrow_mut().plain_callbacks = safe;
+    }
+    pub(crate) fn is_plain_callback(&self, ty: Type) -> bool {
+        self.0.borrow().plain_callbacks.contains(&ty)
+    }
+    pub(crate) fn has_reflected_functions(&self) -> bool {
+        !self.0.borrow().function_sites.is_empty()
+    }
+    pub(crate) fn add_function_site(&self, module: usize, offset: u32, site: FunctionSite) {
+        self.0
+            .borrow_mut()
+            .source_sites
+            .insert((module, offset), Rc::new(site));
+    }
+    pub(crate) fn bind_function_site(&self, module: usize, offset: u32, id: usize) {
+        let mut storage = self.0.borrow_mut();
+        if let Some(site) = storage.source_sites.get(&(module, offset)).cloned() {
+            storage.function_sites.insert(id, site);
+        }
+    }
+    pub(crate) fn function_site(&self, id: usize) -> Option<Rc<FunctionSite>> {
+        self.0.borrow().function_sites.get(&id).cloned()
+    }
     pub(crate) fn set_exception_declarations(&self, declarations: Vec<NamedException>) {
         self.0.borrow_mut().exceptions = declarations;
     }
@@ -584,6 +660,7 @@ impl Types {
             | Type::Cursor(_)
             | Type::CacheState(_)
             | Type::ByteOutput
+            | Type::TupleBuffer
             | Type::Exception
             | Type::ImportException
             | Type::TimeoutExpired
@@ -610,9 +687,12 @@ impl Types {
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::FunctionRef
+            | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
             | Type::Poll
@@ -658,6 +738,64 @@ impl Types {
         storage.shapes.push(shape.clone());
         storage.ids.insert(shape, id);
         id
+    }
+
+    pub(crate) fn var_tuple(&self, element: Type) -> Type {
+        Type::VarTuple(self.intern(Shape::VarTuple(element)))
+    }
+
+    pub(crate) fn var_tuple_element(&self, ty: Type) -> Option<Type> {
+        let Type::VarTuple(id) = ty else { return None };
+        match &self.0.borrow().shapes[id] {
+            Shape::VarTuple(element) => Some(*element),
+            Shape::DisplayTuple(_) => None,
+            _ => unreachable!(),
+        }
+    }
+
+    /// Homogeneous displays share the ordinary `tuple[T, ...]` type. Heterogeneous
+    /// ones retain their guaranteed fixed positions on either side of a spread.
+    pub(crate) fn display_tuple(&self, parts: Vec<(Type, bool)>) -> Type {
+        let first = parts.first().map_or(Type::None, |(ty, _)| *ty);
+        if parts.iter().all(|&(ty, _)| ty == first) {
+            self.var_tuple(first)
+        } else {
+            Type::VarTuple(self.intern(Shape::DisplayTuple(parts)))
+        }
+    }
+
+    /// Return the field type only when every possible length agrees at this index.
+    pub(crate) fn display_tuple_index(&self, ty: Type, index: Option<i64>) -> Option<Type> {
+        if let Some(element) = self.var_tuple_element(ty) {
+            return Some(element);
+        }
+        let Type::VarTuple(id) = ty else { return None };
+        let storage = self.0.borrow();
+        let Shape::DisplayTuple(parts) = &storage.shapes[id] else {
+            return None;
+        };
+        let index = index?;
+        let reverse = index < 0;
+        let at = if reverse {
+            index.unsigned_abs() - 1
+        } else {
+            index as u64
+        };
+        let mut minimum = 0;
+        let mut variable = false;
+        let mut result = None;
+        for i in 0..parts.len() {
+            let (field, repeated) = parts[if reverse { parts.len() - i - 1 } else { i }];
+            if at >= minimum && (variable || repeated || at == minimum) {
+                if result.is_some_and(|ty| ty != field) {
+                    return None;
+                }
+                result = Some(field);
+            }
+            variable |= repeated;
+            minimum += u64::from(!repeated);
+        }
+        result
     }
 
     pub(crate) fn cursor(&self, element: Type) -> Type {
@@ -749,7 +887,8 @@ impl Types {
     pub(crate) fn percent_tuple(&self, ty: Type) -> bool {
         let Type::Tuple(id) = ty else { return false };
         matches!(&self.0.borrow().shapes[id], Shape::Tuple(fields)
-            if fields.iter().all(|ty| matches!(ty, Type::Int | Type::Str | Type::StrLiteral(_))))
+            if fields.iter().all(|ty| matches!(ty,
+                Type::None | Type::Bool | Type::Int | Type::Float | Type::Str | Type::StrLiteral(_) | Type::Bytes)))
     }
 
     /// Stat results use ten visible integer slots and a separate tail for named attributes.
@@ -950,12 +1089,36 @@ impl Types {
         }
     }
 
+    /// Only the dispatcher constructs this registry; source dictionaries cannot store callables.
+    pub(crate) fn dispatch_callable(&self, callable: Type) -> Type {
+        let registry = Type::Dict(self.intern(Shape::DispatchRegistry(callable)));
+        let frame = self.partial_frame(vec![callable, registry]);
+        Type::Callable(self.intern(Shape::DispatchCallable(DispatchFunction {
+            callable,
+            frame,
+            registry,
+        })))
+    }
+
+    pub(crate) fn dispatcher(&self, ty: Type) -> Option<DispatchFunction> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes[id] {
+            Shape::DispatchCallable(layout) => Some(layout),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_dispatch_registry(&self, ty: Type) -> bool {
+        matches!(ty, Type::Dict(id) if matches!(self.0.borrow().shapes[id], Shape::DispatchRegistry(_)))
+    }
+
     pub(crate) fn signature(&self, ty: Type) -> Option<(Vec<Type>, Type)> {
         let Type::Callable(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
             Shape::DeclaredCache(callable, _) => self.signature(*callable),
             Shape::CachedCallable(c) => self.signature(c.callable),
+            Shape::DispatchCallable(d) => self.signature(d.callable),
             _ => unreachable!("callable type identity has a callable shape"),
         }
     }
@@ -1116,6 +1279,7 @@ impl Types {
         };
         match self.0.borrow().shapes[id] {
             Shape::Counter(key) => Some((key, Type::Int)),
+            Shape::DispatchRegistry(target) => Some((Type::Str, target)),
             Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => Some((key, value)),
             _ => unreachable!("dictionary type identity has a dictionary shape"),
         }
@@ -1173,6 +1337,11 @@ impl Types {
         if let Type::ModuleSpec(id) = ty {
             return self.module_spec_fields(id);
         }
+        if let Type::VarTuple(id) = ty
+            && let Shape::DisplayTuple(parts) = &self.0.borrow().shapes[id]
+        {
+            return parts.iter().map(|&(field, _)| field).collect();
+        }
         if let Type::ChainMap(id) | Type::SimpleNamespace(id) = ty {
             return vec![Type::Dict(id)];
         }
@@ -1182,6 +1351,7 @@ impl Types {
             .or_else(|| self.set_element(ty))
             .or_else(|| self.deque_element(ty))
             .or_else(|| self.cursor_element(ty))
+            .or_else(|| self.var_tuple_element(ty))
         {
             vec![element]
         } else if let Some((key, value)) = self.mapping(ty) {
@@ -1245,6 +1415,7 @@ impl TypeDescription<'_> {
             Type::StrLiteral(id)
             | Type::List(id)
             | Type::Cursor(id)
+            | Type::VarTuple(id)
             | Type::Tuple(id)
             | Type::Callable(id)
             | Type::Dict(id)
@@ -1272,11 +1443,32 @@ impl TypeDescription<'_> {
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
             Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
             Shape::CachedCallable(c) => return self.write_type(c.callable),
+            Shape::DispatchCallable(d) => return self.write_type(d.callable),
             Shape::Callable(params, returns) => {
                 self.write_str("Callable[[")?;
                 self.write_types(params, ", ")?;
                 self.write_str("], ")?;
                 self.write_type(*returns)?;
+            }
+            Shape::VarTuple(element) => {
+                self.write_str("tuple[")?;
+                self.write_type(*element)?;
+                self.write_str(", ...")?;
+            }
+            Shape::DisplayTuple(parts) => {
+                self.write_str("tuple[")?;
+                for (i, (ty, repeated)) in parts.iter().enumerate() {
+                    if i != 0 {
+                        self.write_str(", ")?;
+                    }
+                    if *repeated {
+                        self.write_str("*tuple[")?;
+                    }
+                    self.write_type(*ty)?;
+                    if *repeated {
+                        self.write_str(", ...]")?;
+                    }
+                }
             }
             Shape::Cursor(element) => {
                 self.write_str("Iterator[")?;
@@ -1301,6 +1493,10 @@ impl TypeDescription<'_> {
             Shape::Counter(key) => {
                 self.write_str("Counter[")?;
                 self.write_type(*key)?;
+            }
+            Shape::DispatchRegistry(target) => {
+                self.write_str("dict[str, ")?;
+                self.write_type(*target)?;
             }
             Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => {
                 self.write_str(if matches!(ty, Type::ChainMap(_)) {

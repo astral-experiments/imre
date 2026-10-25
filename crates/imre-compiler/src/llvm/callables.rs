@@ -147,6 +147,7 @@ impl Emitter<'_, '_> {
         function: usize,
         receiver: Option<&Expr>,
     ) -> Value {
+        let bound = receiver.is_some();
         let receiver = receiver.map(|receiver| self.expr(receiver));
         // The hidden context is one pointer-sized ABI word. A StrEnum stores its
         // nonowning tag in that word; only its adapter converts the bits back.
@@ -196,6 +197,23 @@ impl Emitter<'_, '_> {
             self.forget(&receiver);
         } else {
             self.line(format!("store ptr null, ptr {context}"));
+        }
+        if !bound
+            && policy.is_none()
+            && self.module.types.is_plain_callback(ty)
+            && let Some(site) = self.module.types.function_site(function)
+        {
+            let module = self.pooled_literal(site.module.as_bytes(), Type::Str);
+            let name = self.pooled_literal(site.qualname.as_bytes(), Type::Str);
+            let short_name = self.pooled_literal(
+                site.qualname.rsplit('.').next().unwrap().as_bytes(),
+                Type::Str,
+            );
+            self.line(format!("call void @imre_typing_declare(ptr {}, i32 {function}, ptr {}, ptr {}, ptr {}, i32 {})",
+                result.operand,module.operand,name.operand,short_name.operand,site.line));
+            self.release(&short_name);
+            self.release(&name);
+            self.release(&module);
         }
         result
     }

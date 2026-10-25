@@ -50,18 +50,28 @@ def main():
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
         directory = Path(tmp)
-        binary = directory / "inspect"
-        subprocess.run(
-            [args.compiler.resolve(), "build", SOURCE, "--runtime", args.runtime.resolve(), "-o", binary],
-            check=True,
-        )
+        cases = []
         for name, text in CASES.items():
             sample = directory / f"{name}.patch"
             sample.write_bytes(text.encode())
-            reference = subprocess.check_output([args.python, SOURCE, sample])
-            actual = subprocess.check_output([binary, sample])
-            assert reference == actual, (name, reference, actual)
-    print(f"{len(CASES)} unified diff cases matched unidiff byte-for-byte")
+            cases.append((name, SOURCE, [sample]))
+        cases.append(("exception-identity", SOURCE.with_name("exception_identity.py"), []))
+        for level in ("0", "3"):
+            programs = {}
+            for name, source, argv in cases:
+                if source not in programs:
+                    binary = directory / f"{source.stem}-{level}"
+                    subprocess.run(
+                        [args.compiler.resolve(), "build", source, "--runtime",
+                         args.runtime.resolve(), "--opt-level", level, "-o", binary], check=True,
+                    )
+                    programs[source] = binary
+                reference = subprocess.run([args.python, source, *argv], capture_output=True, check=True)
+                actual = subprocess.run([programs[source], *argv], capture_output=True, check=True)
+                assert (reference.stdout, reference.stderr) == (actual.stdout, actual.stderr), (
+                    name, level, reference, actual,
+                )
+    print(f"{len(CASES)} unified diff cases and distinct exception handlers matched at O0/O3")
 
 
 if __name__ == "__main__":
