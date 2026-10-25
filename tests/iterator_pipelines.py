@@ -9,6 +9,14 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterator_pipelines"
 
 REJECTED = {
+    "producer_escape": "from collections.abc import Iterator\ndef values() -> Iterator[int]:\n    for i in range(2):\n        yield i\nsaved = values()\n",
+    "producer_handler": "from collections.abc import Iterator\ndef values() -> Iterator[int]:\n    for i in range(2):\n        try:\n            yield i\n        finally:\n            print(i)\nfor x in values():\n    print(x)\n",
+    "sentinel_escaped": "saved = iter(lambda: 'x', 'x')\n",
+    "sentinel_types": "for x in iter(lambda: b'x', 'x'):\n    print(x)\n",
+    "sentinel_defaults": "for x in iter(lambda v=b'': v, b''):\n    print(x)\n",
+    "sentinel_optional_capture": "def f(value: str | None) -> None:\n    if value is not None:\n        for x in iter(lambda: value, ''):\n            value = None\n",
+    "sentinel_unbound_iter": "def f() -> None:\n    for x in iter(lambda: '', ''):\n        print(x)\n    iter = 3\nf()\n",
+    "sentinel_deleted_capture": "def f() -> None:\n    error = ValueError('first')\n    for i, word in enumerate(iter(lambda: str(error), 'stop')):\n        print(i, word)\n        try:\n            raise ValueError('second')\n        except ValueError as error:\n            pass\nf()\n",
     "chain_heterogeneous": "from itertools import chain\nitems = list(chain([1], ['s']))\n",
     "chain_escaped": "from itertools import chain\nitems = chain([1], [2])\n",
     "chain_keyword": "from itertools import chain\nitems = list(chain(source=[1]))\n",
