@@ -86,6 +86,16 @@
             ]
           ]
         }
+      },
+      "native-body-attempts": {
+        "general": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:6:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        "unshadowed-module": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:16:34: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+        }
       }
     },
     "3": {
@@ -167,6 +177,16 @@
               1
             ]
           ]
+        }
+      },
+      "native-body-attempts": {
+        "general": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:6:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        "unshadowed-module": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:16:34: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
         }
       }
     }

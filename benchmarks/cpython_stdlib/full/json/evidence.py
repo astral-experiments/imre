@@ -68,7 +68,9 @@ def missing(source, reference, variant, level):
             "revisit": f"Run {source} if Imre exposes the corresponding CPython backend identity or private factory.",
         }
     if source.startswith("json"):
-        why = "DocTestSuite imports CPython json; native example execution requires the shared doctest fixture (DOCTEST.md)"
+        case_blocker = "io.StringIO at example 7" if source == "json" else "json.encoder.JSONEncoder at example 1"
+        why = (f"intact package stops at test.support import inspect; native DocTestSuite is blocked by "
+               f"{case_blocker} (DOCTEST.md)")
     elif ".test_tool." in source:
         why = "original subprocess invokes CPython -m json or json.tool; a native module entry point is required"
     else:
