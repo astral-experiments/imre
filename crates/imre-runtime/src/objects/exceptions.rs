@@ -753,6 +753,11 @@ impl Error {
         self
     }
 
+    pub(crate) fn with_pending_cause(mut self) -> Self {
+        self.cause = take_pending();
+        self
+    }
+
     fn into_object(self) -> crate::ObjectOwner {
         match self.payload {
             Some(Payload::Empty) if self.kind == Kind::MemoryError && self.cause.is_none() => {
