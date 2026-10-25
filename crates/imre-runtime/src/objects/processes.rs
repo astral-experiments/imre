@@ -479,14 +479,6 @@ impl Default for ChildAttributes {
     }
 }
 
-impl ChildAttributes {
-    /// A negative group other than -1 skips setpgid, but still selects CPython's
-    /// fork/exec path and preserves the caller's executable object on failure.
-    fn requires_fork(&self) -> bool {
-        self.new_session || self.group != -1 || self.mask.is_some() || !self.keep.is_empty()
-    }
-}
-
 struct Launch {
     argv: CStrings,
     executable: Option<CString>,
@@ -1262,7 +1254,7 @@ unsafe fn spawn_list(
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
     // SAFETY: the original configuration remains rooted while spawn reports any error.
     unsafe {
-        launch_error::spawn(&cmd, &config, streams, [-1; 3], false, |_| {
+        launch_error::spawn(&cmd, &config, streams, [-1; 3], false, true, |_| {
             Ok(ChildAttributes::default())
         })
     }
