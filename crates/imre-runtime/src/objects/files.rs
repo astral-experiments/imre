@@ -155,6 +155,10 @@ impl FileState {
         self.input()?.read_text()
     }
 
+    pub(super) fn readline(&mut self) -> Result<Str> {
+        self.input()?.text_line()
+    }
+
     fn input(&mut self) -> Result<&mut Input> {
         if self.kind == FileKind::BinaryWrite {
             return Err(Error::new(Kind::UnsupportedOperation, "read"));
@@ -609,7 +613,7 @@ pub unsafe extern "C" fn imre_text_readline(value: *const Object) -> *const Str 
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.file_mut().input()?.text_line())
+            .with_mut(|storage| storage.file_mut().readline())
     };
     finish(
         result.map(|text| Rc::into_raw(Rc::new(text))),
