@@ -132,7 +132,10 @@ pub unsafe extern "C" fn imre_log_routed_emit(
     // SAFETY: the caller holds each owner through this synchronous call.
     let receiver = unsafe { state(logger) };
     let (root, configured) = LOGGERS.with_borrow(|logs| {
-        (receiver.standalone_propagate.is_none() && reaches_root(logs, &receiver.name), logs.format.is_some())
+        (
+            receiver.standalone_propagate.is_none() && reaches_root(logs, &receiver.name),
+            logs.format.is_some(),
+        )
     });
     if found && !(root && configured) {
         return;
