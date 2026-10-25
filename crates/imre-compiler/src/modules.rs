@@ -13,6 +13,7 @@ use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation};
 use crate::watch::FileSystem;
 
 mod declarations;
+pub(crate) mod doctest;
 mod empty_keywords;
 mod entry_profile;
 mod namedtuple_fields;
@@ -67,6 +68,7 @@ pub(crate) enum IntrinsicModule {
     Typing,
     Dataclasses,
     Difflib,
+    DoctestRuntime,
     Logging,
     LoggingConfig,
     LoggingHandlers,
@@ -110,6 +112,8 @@ pub(crate) enum IntrinsicModule {
     Enum,
     Zlib,
     Json,
+    JsonEncoder,
+    JsonDecoder,
     Imre,
     ImreJson,
     ImreToml,
@@ -200,6 +204,11 @@ pub(crate) enum Intrinsic {
     ShlexQuote,
     ShlexJoin,
     Ndiff,
+    DocCaptureStart,
+    DocCaptureTake,
+    DocDisplay,
+    DocAscii,
+    DocExecute,
     Final,
     Argv,
     OrigArgv,
@@ -339,6 +348,7 @@ impl IntrinsicModule {
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
             "difflib" => Some(Self::Difflib),
+            "_imre_doctest" => Some(Self::DoctestRuntime),
             "pathlib" => Some(Self::Pathlib),
             "shlex" => Some(Self::Shlex),
             "tempfile" => Some(Self::Tempfile),
@@ -364,6 +374,8 @@ impl IntrinsicModule {
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
             "json" => Some(Self::Json),
+            "json.encoder" => Some(Self::JsonEncoder),
+            "json.decoder" => Some(Self::JsonDecoder),
             "imre" => Some(Self::Imre),
             "imre.json" => Some(Self::ImreJson),
             "imre.toml" => Some(Self::ImreToml),
@@ -392,6 +404,13 @@ impl IntrinsicModule {
             if let Some(symbol) = os::symbol(name) {
                 return Some(Binding::Intrinsic(symbol));
             }
+        }
+        if self == Self::Json && matches!(name, "encoder" | "decoder") {
+            return Some(Binding::IntrinsicModule(if name == "encoder" {
+                Self::JsonEncoder
+            } else {
+                Self::JsonDecoder
+            }));
         }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
@@ -530,6 +549,11 @@ impl IntrinsicModule {
             (Self::Shlex, "quote") => Intrinsic::ShlexQuote,
             (Self::Shlex, "join") => Intrinsic::ShlexJoin,
             (Self::Difflib, "ndiff") => Intrinsic::Ndiff,
+            (Self::DoctestRuntime, "capture_start") => Intrinsic::DocCaptureStart,
+            (Self::DoctestRuntime, "capture_take") => Intrinsic::DocCaptureTake,
+            (Self::DoctestRuntime, "display") => Intrinsic::DocDisplay,
+            (Self::DoctestRuntime, "ascii_output") => Intrinsic::DocAscii,
+            (Self::DoctestRuntime, "execute") => Intrinsic::DocExecute,
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
@@ -1326,6 +1350,7 @@ impl<'a> Loader<'a> {
                 }
             }
         }
+        self.doctest_program()?;
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         let mut checked_diagnostics = vec![Vec::new(); self.modules.len()];
@@ -1760,15 +1785,29 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
-            "unittest" => Some(include_str!("../stdlib/unittest/__init__.py")),
-            "string" => Some(include_str!("../stdlib/string/__init__.py")),
+            "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
+            "string" => Some((
+                "string/__init__.py",
+                include_str!("../stdlib/string/__init__.py"),
+            )),
+            "unittest" => Some((
+                "unittest/__init__.py",
+                include_str!("../stdlib/unittest/__init__.py"),
+            )),
             _ => None,
         };
-        if let Some(source) = bundled {
+        if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
-            // ty resolves bundled source at its Python import path in the in-memory project.
-            let path = self.root.join(name).join("__init__.py");
-            let id = self.add(path.clone(), path, name.into(), true, source)?;
+            // ty resolves this immutable source at its Python import path in the
+            // in-memory project. It is part of the compiler, not a disk input.
+            let path = self.root.join(filename);
+            let id = self.add(
+                path.clone(),
+                path,
+                name.into(),
+                filename.ends_with("/__init__.py"),
+                source,
+            )?;
             self.modules[id].bundled = true;
             self.scan(id)?;
             return Ok(id);

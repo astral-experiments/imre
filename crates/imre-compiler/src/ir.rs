@@ -571,6 +571,9 @@ pub(crate) enum Builtin {
     },
     SysPlatform,
     OsName,
+    DocCaptureStart,
+    DocCaptureTake,
+    DocAscii,
     SystemExitNew {
         omit_none: bool,
     },
