@@ -4107,6 +4107,18 @@ impl Emitter<'_, '_> {
                 self.retain(&value);
                 self.owned(value)
             }
+            Builtin::CacheParameter(typed) => {
+                let operand = self.instruction(format!(
+                    "call ptr @imre_callable_cache_parameter(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*typed)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             Builtin::CacheTable => self.call("imre_cache_table", returns, &[&args[0].value]),
             Builtin::CacheProbe(capacity) => {
                 let key = self.key_word(&args[1].value);
@@ -4525,16 +4537,23 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::ParseArgs {
+                namespace,
                 children,
                 process_argv,
             } => {
-                let Type::Class(class) = returns else {
-                    unreachable!()
+                let pair_layout = if matches!(returns, Type::Tuple(_)) {
+                    format!(
+                        "@{}",
+                        self.output
+                            .global_ref(format!("layout_{}", record_name(returns)))
+                    )
+                } else {
+                    "null".to_owned()
                 };
                 let [schema, description, argv] = args.as_slice() else {
                     unreachable!()
                 };
-                let layout = self.output.global_ref(format!("layout_class_{class}"));
+                let layout = self.output.global_ref(format!("layout_class_{namespace}"));
                 let child_layouts = if children.is_empty() {
                     "null".to_owned()
                 } else {
@@ -4556,7 +4575,7 @@ impl Emitter<'_, '_> {
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @imre_argparse_parse(ptr @{layout}, ptr {child_layouts}, ptr {}, ptr {}, ptr {}, i1 {process_argv})",
+                        "call ptr @imre_argparse_parse(ptr @{layout}, ptr {child_layouts}, ptr {pair_layout}, ptr {}, ptr {}, ptr {}, i1 {process_argv})",
                         schema.value.operand, description.value.operand, argv.value.operand,
                     )),
                     small_integer: false,
@@ -6879,6 +6898,8 @@ declare ptr @imre_cache_table(ptr)
 declare i1 @imre_cache_probe(ptr, i64, i64)
 declare void @imre_cache_insert(ptr, i64, i64, i64)
 declare i64 @imre_cache_stat(ptr, i32)
+declare void @imre_callable_copy_cache_policy(ptr, ptr, i64, i32) nounwind
+declare ptr @imre_callable_cache_parameter(ptr, i32)
 declare void @imre_cache_clear(ptr, i32, i32)
 declare ptr @imre_module_cache(i64, i32, i32)
 declare i64 @imre_document(i32, i64, i64, i64)
@@ -6936,6 +6957,7 @@ declare ptr @imre_shutil_confstr_cs_path()
 declare ptr @imre_shutil_os_defpath()
 declare void @imre_shutil_rmtree(ptr, i32, i32, i64, i32, ptr, ptr, ptr, ptr)
 declare i64 @imre_shutil_copy(i32, ptr, i32, ptr, i32, i32)
+declare void @imre_os_unlink(ptr, i32, i64, i32)
 declare void @imre_subprocess_check(ptr)
 declare i64 @imre_subprocess_error_field(ptr, i32)
 declare i64 @imre_subprocess_timeout_field(ptr, i32)
@@ -7315,7 +7337,7 @@ declare i32 @imre_text_close(ptr)
 declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
-declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
+declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
