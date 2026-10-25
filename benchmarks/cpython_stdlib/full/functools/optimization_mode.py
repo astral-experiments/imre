@@ -81,6 +81,23 @@ def main():
         if live.returncode == 0 or b"<string>.py:2:" not in live.stderr:
             raise AssertionError(("a diagnostic outside the assertion was lost", live.stderr))
 
+        # The assertion is never evaluated, but its forbidden bindings are syntax errors.
+        for source in (
+            "assert (__debug__ := False)",
+            "assert True, (__debug__ := False)",
+            "assert [0 for __debug__ in ()]",
+            "assert (lambda __debug__: True)",
+            "assert [0 for obj.__debug__ in ()]",
+            "assert (lambda x=(__debug__ := False): x)",
+            "def unused() -> None:\n    assert (lambda: (__debug__ := True))",
+        ):
+            for level in ("-O", "-OO"):
+                for executable in (sys.executable, compiler):
+                    proc = subprocess.run([executable, level, "-c", source + "\nprint('continued')"],
+                                          env=env, cwd=root, capture_output=True, timeout=60)
+                    if not proc.returncode or proc.stdout or b"cannot assign to __debug__" not in proc.stderr:
+                        raise AssertionError((source, level, proc.stdout, proc.stderr))
+
         # A file build chooses LLVM optimization independently of Python debug semantics.
         script = root / "program.py"
         binary = root / "program"
@@ -89,7 +106,7 @@ def main():
         expected = output([sys.executable, "-E", script], env, root)
         if output([binary], dict(env, PYTHONOPTIMIZE="2"), root) != expected:
             raise AssertionError("the native executable changed Python settings at runtime")
-    print(f"{len(cases) + 1} command launches and a file build matched at LLVM -O{args.opt_level}")
+    print(f"{len(cases) + 1} command launches and a file build matched; reserved assertion targets were rejected at LLVM -O{args.opt_level}")
 
 
 if __name__ == "__main__":
