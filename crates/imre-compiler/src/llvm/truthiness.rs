@@ -77,7 +77,7 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
-                Type::ExceptionField => {
+                Type::ValueView => {
                     let bit = self.instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",
                         value.operand

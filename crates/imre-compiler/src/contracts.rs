@@ -433,6 +433,11 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
+            | Self::BuiltinsLast
+            | Self::BuiltinsHasLast
+            | Self::BuiltinsSetLast
+            | Self::BuiltinsDeleteLast
+            | Self::SysDisplayHook
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
             | Self::RaiseException
@@ -805,6 +810,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bool"
                 | "imre_print_none"
                 | "imre_input"
+                | "imre_builtins_last"
+                | "imre_builtins_del_last"
+                | "imre_sys_displayhook"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
                 | "imre_path_read_bytes"
