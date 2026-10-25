@@ -5,8 +5,7 @@ file. All 68 original methods pass on Linux CPython; none is skipped.
 
 | Original cases at O0 and O3 | Count | What ran |
 | --- | ---: | --- |
-| Fully native | 7 | Original dedent bodies, helper, assertions, and native unittest entry point |
-| Native body, adapted fixture | 7 | Original indent bodies and assertions; a native property returns the original CPython class tuple |
+| Fully native | 14 | Original dedent and indent bodies, helper, class tuple declarations, assertions, and native unittest entry point |
 | Host-driven native operations | 5 | Original CPython test bodies and assertions consume the native functions' return values or exceptions |
 | Reference only | 49 | Wrapping, filling, shortening, and other cases without native evidence |
 
