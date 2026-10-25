@@ -152,7 +152,7 @@ impl Emitter<'_, '_> {
         {
             return "true".to_owned();
         }
-        if value.ty == Type::ExceptionField {
+        if value.ty == Type::ObjectValue {
             // The view retains its heterogeneous payload. None is not a class
             // accepted by this subset, and bool is also an instance of int.
             let mask = [
@@ -160,6 +160,7 @@ impl Emitter<'_, '_> {
                 (1, Type::Bool),
                 (2, Type::Int),
                 (3, Type::Str),
+                (5, Type::Dict(0)),
                 (6, Type::Tuple(0)),
                 (8, Type::Bytes),
             ]

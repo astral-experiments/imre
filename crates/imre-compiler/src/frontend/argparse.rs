@@ -192,6 +192,19 @@ impl<'a> Flags<'a> {
     }
 }
 
+/// A class constant must resolve to the builtin in the builder's lexical scope.
+fn builtin_constant<'a>(
+    value: &'a ast::Expr,
+    module: &SourceModule,
+    locals: &HashSet<String>,
+) -> Option<&'a str> {
+    let name = value.as_name_expr()?.id.as_str();
+    (annotations::is_builtin_type(name)
+        && !module.bindings.contains_key(name)
+        && !locals.contains(name))
+    .then_some(name)
+}
+
 fn option(
     call: &ast::ExprCall,
     graph: &SourceGraph,
@@ -199,6 +212,7 @@ fn option(
     types: &Types,
     classes: &Classes,
     flags: &Flags,
+    locals: &HashSet<String>,
 ) -> Result<OptionField, String> {
     let module = &graph.modules[id];
     let Some((flag, rest)) = call.arguments.args.split_first() else {
@@ -315,12 +329,48 @@ fn option(
         };
         required = value.value;
     }
-    let action = kw
-        .get("action")
-        .map(|expr| literal(expr, module))
-        .transpose()?
-        .unwrap_or("store");
-    if action != "store"
+    let is_boolean_action = |expr: &ast::Expr| {
+        let mut root = expr;
+        while let ast::Expr::Attribute(attr) = root {
+            root = &attr.value;
+        }
+        root.as_name_expr()
+            .is_some_and(|name| !locals.contains(name.id.as_str()))
+            && graph.resolve(id, expr) == Some(Binding::Intrinsic(Intrinsic::BooleanOptionalAction))
+    };
+    let action = match kw.get("action").copied() {
+        None => "store",
+        Some(expr) if is_boolean_action(expr) => "boolean_optional",
+        Some(expr) => {
+            let action = literal(expr, module)?;
+            if action == "boolean_optional" {
+                return Err(module.error(expr, "argparse BooleanOptionalAction must be the class"));
+            }
+            action
+        }
+    };
+    // BooleanOptionalAction inserts the negative spelling immediately after
+    // each long option; short aliases keep their original position.
+    let aliases = if action == "boolean_optional" {
+        let mut expanded = Vec::new();
+        for spelling in std::iter::once(flag_name).chain(aliases) {
+            if spelling.starts_with("--no-") {
+                return Err(module.error(
+                    flag,
+                    &format!("invalid argparse option {spelling:?} for BooleanOptionalAction"),
+                ));
+            }
+            expanded.push(spelling.to_owned());
+            if let Some(name) = spelling.strip_prefix("--") {
+                expanded.push(format!("--no-{name}"));
+            }
+        }
+        expanded.into_iter().skip(1).collect()
+    } else {
+        aliases.into_iter().map(str::to_owned).collect::<Vec<_>>()
+    };
+    let zero = action != "store";
+    if zero
         && (positional
             || kw.contains_key("type")
             || kw.contains_key("nargs")
@@ -331,7 +381,7 @@ fn option(
     }
     match action {
         "store" => {}
-        "store_true" | "store_false" => element = Type::Bool,
+        "store_true" | "store_false" | "boolean_optional" => element = Type::Bool,
         "count" => {
             if let Some(value) = kw.get("default")
                 && !matches!(value, ast::Expr::NoneLiteral(_))
@@ -355,6 +405,9 @@ fn option(
                     None | Some(ast::Expr::NoneLiteral(_)) => None,
                     Some(ast::Expr::StringLiteral(_)) => Some(Type::Str),
                     Some(ast::Expr::BooleanLiteral(_)) => Some(Type::Bool),
+                    Some(v) if builtin_constant(v, module, locals).is_some() => {
+                        Some(Type::BuiltinClass)
+                    }
                     Some(v) if numeric_literal(v, Type::Int).is_some() => Some(Type::Int),
                     Some(v) if numeric_literal(v, Type::Float).is_some() => Some(Type::Float),
                     _ => return Err(invalid()),
@@ -395,6 +448,7 @@ fn option(
         None if action == "store_true" => Some("True"),
         None if action == "store_false" => Some("False"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
+        Some(value) if element == Type::BuiltinClass => builtin_constant(value, module, locals),
         Some(ast::Expr::BooleanLiteral(value)) if action == "store_const" => {
             Some(if value.value { "True" } else { "False" })
         }
@@ -485,6 +539,7 @@ fn option(
         None if action == "store_true" => Some("False"),
         None if action == "store_false" => Some("True"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
+        Some(value) if element == Type::BuiltinClass => builtin_constant(value, module, locals),
         Some(expr @ ast::Expr::StringLiteral(_))
             if element == Type::Str
                 || !many && matches!(element, Type::Path | Type::Int | Type::Float) =>
@@ -566,6 +621,7 @@ fn option(
         Type::Float => "float",
         Type::Path => "path",
         Type::Bool => "bool",
+        Type::BuiltinClass => "class",
         _ => unreachable!(),
     };
     let converter = kw
@@ -735,6 +791,7 @@ fn namespace_class(
     let class = classes.definitions.len();
     layouts.push(fields.iter().map(|field| field.ty).collect());
     classes.definitions.push(Class {
+        init_hooks: Default::default(),
         exception_aliases: Default::default(),
         static_bindings: Default::default(),
         name: "Namespace".into(),
@@ -983,6 +1040,13 @@ impl Parsers {
                         };
                     register(name, &builders)?;
                     builders.push(builder.to_owned());
+                    let mut locals = crate::narrowing::assigned_names(&function.body);
+                    locals.extend(
+                        function
+                            .parameters
+                            .iter_non_variadic_params()
+                            .map(|p| p.name().to_string()),
+                    );
                     let read_options =
                         |builder: &str,
                          flags: &Flags,
@@ -1016,15 +1080,17 @@ impl Parsers {
                                     break;
                                 }
                                 let mut field =
-                                    option(add, graph, module_id, types, classes, flags)?;
+                                    option(add, graph, module_id, types, classes, flags, &locals)?;
                                 if let Some(group) = group {
                                     field.option["group"] = json!(group);
                                 }
-                                for value in &add.arguments.args {
-                                    let name = literal(value, module)?;
-                                    if !spellings.insert(name) {
+                                for value in std::iter::once(&field.option["flag"])
+                                    .chain(field.option["aliases"].as_array().unwrap())
+                                {
+                                    let name = value.as_str().unwrap();
+                                    if !spellings.insert(name.to_owned()) {
                                         return Err(module.error(
-                                            value,
+                                            add,
                                             "argparse option spellings must be unique",
                                         ));
                                     }
@@ -1433,21 +1499,26 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn enter_namespace_guards(&mut self, test: &ast::Expr, body: &[ast::Stmt]) {
+    pub(super) fn enter_namespace_guards(
+        &mut self,
+        test: &ast::Expr,
+        truth: bool,
+        body: &[ast::Stmt],
+    ) {
         if let ast::Expr::BoolOp(value) = test
-            && value.op == ast::BoolOp::And
+            && (value.op == ast::BoolOp::And && truth || value.op == ast::BoolOp::Or && !truth)
         {
             // A later operand may rebind the receiver even if the body does not.
             let mut reassigned = false;
             for operand in value.values.iter().rev() {
-                if !reassigned && let Some(guard) = self.namespace_guard(operand, body) {
+                if !reassigned && let Some(guard) = self.namespace_guard(operand, truth, body) {
                     self.namespace_guards.push(guard);
                 }
                 if !matches!(operand, ast::Expr::Attribute(attr) if attr.value.is_name_expr()) {
                     reassigned = true
                 }
             }
-        } else if let Some(guard) = self.namespace_guard(test, body) {
+        } else if let Some(guard) = self.namespace_guard(test, truth, body) {
             self.namespace_guards.push(guard);
         }
     }
@@ -1456,11 +1527,26 @@ impl Checker<'_> {
     /// receiver keeps the same binding, even when another alias survives calls.
     pub(super) fn namespace_guard(
         &self,
-        test: &ast::Expr,
+        mut test: &ast::Expr,
+        mut truth: bool,
         body: &[ast::Stmt],
     ) -> Option<(usize, usize)> {
-        let ast::Expr::Attribute(attr) = test else {
-            return None;
+        while let ast::Expr::UnaryOp(unary) = test
+            && unary.op == ast::UnaryOp::Not
+        {
+            truth = !truth;
+            test = &unary.operand;
+        }
+        let attr = match test {
+            ast::Expr::Attribute(attr) if truth => attr,
+            ast::Expr::Compare(compare) => {
+                let (operand, present) = narrowing::none_identity(compare, truth)?;
+                if !present {
+                    return None;
+                }
+                operand.as_attribute_expr()?
+            }
+            _ => return None,
         };
         let name = attr.value.as_name_expr()?.id.as_str();
         let slot = *self.names.get(name)?;

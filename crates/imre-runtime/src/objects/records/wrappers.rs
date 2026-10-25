@@ -120,6 +120,7 @@ mod tests {
             // witness in the strong context slot before publishing a link.
             unsafe {
                 let records: Vec<_> = (0..size).map(|_| imre_record_new(&function)).collect();
+                let observer = crate::objects::records::weak::WeakRecord::new(records[0]);
                 let witness = imre_record_new(&leaf);
                 witness
                     .cast::<*const Str>()
@@ -136,8 +137,10 @@ mod tests {
                 for record in records {
                     imre_record_release(record);
                 }
+                assert!(observer.is_live());
                 assert_eq!(Rc::strong_count(&text), 2);
                 imre_record_release(alias);
+                assert!(observer.upgrade().is_none());
                 assert_eq!(Rc::strong_count(&text), 1);
             }
         }

@@ -41,6 +41,7 @@ enum Kind {
     Str,
     Path,
     Bool,
+    Class,
 }
 
 #[derive(Deserialize, Copy, Clone, PartialEq)]
@@ -50,6 +51,7 @@ enum Action {
     StoreConst,
     StoreTrue,
     StoreFalse,
+    BooleanOptional,
     Count,
 }
 
@@ -127,7 +129,7 @@ enum Token<'a> {
     Unknown,
     Ambiguous(Vec<&'a str>),
     Help(Option<&'a str>),
-    Option(usize, Option<&'a str>),
+    Option(usize, &'a str, Option<&'a str>),
     Cluster(char, &'a str),
 }
 
@@ -263,12 +265,12 @@ impl Parser {
         let Some(prefix) = chars.next().filter(|&c| self.prefixes.contains(c)) else {
             return Token::Value;
         };
-        let token = |slot, value| match slot {
+        let token = |flag, slot, value| match slot {
             None => Token::Help(value),
-            Some(i) => Token::Option(i, value),
+            Some(i) => Token::Option(i, flag, value),
         };
-        if let Some((_, slot)) = self.flags().find(|(s, _)| *s == arg) {
-            return token(slot, None);
+        if let Some((flag, slot)) = self.flags().find(|(s, _)| *s == arg) {
+            return token(flag, slot, None);
         }
         let Some(second) = chars.next() else {
             return Token::Value;
@@ -277,9 +279,9 @@ impl Parser {
             .split_once('=')
             .map_or((arg, None), |(h, v)| (h, Some(v)));
         if explicit.is_some()
-            && let Some((_, slot)) = self.flags().find(|(s, _)| *s == head)
+            && let Some((flag, slot)) = self.flags().find(|(s, _)| *s == head)
         {
-            return token(slot, explicit);
+            return token(flag, slot, explicit);
         }
         let long = self.prefixes.contains(second);
         let short = &arg[..prefix.len_utf8() + second.len_utf8()];
@@ -288,7 +290,7 @@ impl Parser {
             if !long && flag == short {
                 matches.push((flag, Token::Cluster(prefix, &arg[prefix.len_utf8()..])));
             } else if self.abbrev && flag.starts_with(head) {
-                matches.push((flag, token(slot, explicit)));
+                matches.push((flag, token(flag, slot, explicit)));
             }
         }
         if matches.len() > 1 {
@@ -407,7 +409,7 @@ impl Parser {
             let arg = args[index];
             index += 1;
             let mut clustered_help = false;
-            let (slot, explicit) = match self.token(arg) {
+            let (slot, spelling, explicit) = match self.token(arg) {
                 Token::Help(None) => return Err(Stop::Help(self)),
                 Token::Help(Some(value)) => {
                     return Err(Stop::Error(
@@ -436,22 +438,19 @@ impl Parser {
                         let letter = suffix.chars().next().unwrap();
                         let rest = &suffix[letter.len_utf8()..];
                         let spelling = format!("{prefix}{letter}");
-                        let option = self.options.iter().enumerate().find(|(_, option)| {
-                            !option.positional() && option.flags().any(|s| s == spelling)
-                        });
-                        let help = self
-                            .help_flags
-                            .as_ref()
-                            .is_some_and(|flags| flags[0] == spelling);
-                        if !help && option.is_none() {
+                        let Some((matched, slot)) =
+                            self.flags().find(|(name, _)| *name == spelling)
+                        else {
                             extras.push(Cow::Owned(format!("{prefix}{suffix}")));
                             break;
-                        }
+                        };
+                        let option = slot.map(|slot| (slot, &self.options[slot]));
                         if let Some((slot, option)) = option
                             && option.takes_value()
                         {
                             take = Some((
                                 slot,
+                                matched,
                                 (!rest.is_empty()).then(|| rest.strip_prefix('=').unwrap_or(rest)),
                             ));
                             break;
@@ -479,7 +478,7 @@ impl Parser {
                         if let Some((slot, option)) = option {
                             values[slot] = Some(
                                 option
-                                    .flag_value(values[slot].take())
+                                    .flag_value(values[slot].take(), matched)
                                     .map_err(|e| Stop::Error(self, e))?,
                             );
                         } else {
@@ -495,7 +494,7 @@ impl Parser {
                     };
                     take
                 }
-                Token::Option(slot, value) => (slot, value),
+                Token::Option(slot, spelling, value) => (slot, spelling, value),
             };
             let option = &self.options[slot];
             let taken = if let Some(value) = explicit {
@@ -523,7 +522,7 @@ impl Parser {
             } else if !option.takes_value() {
                 values[slot] = Some(
                     option
-                        .flag_value(values[slot].take())
+                        .flag_value(values[slot].take(), spelling)
                         .map_err(|e| Stop::Error(self, e))?,
                 );
                 continue;

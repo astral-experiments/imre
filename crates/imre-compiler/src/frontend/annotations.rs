@@ -14,7 +14,7 @@ pub(super) fn inert_body(function: &ast::StmtFunctionDef) -> bool {
 }
 
 /// Builtin classes form a closed nominal domain, independent of the values they construct.
-pub(super) fn builtin_type(name: &str) -> Option<Expr> {
+pub(super) fn is_builtin_type(name: &str) -> bool {
     matches!(
         name,
         "bool"
@@ -35,7 +35,10 @@ pub(super) fn builtin_type(name: &str) -> Option<Expr> {
             | "tuple"
             | "type"
     )
-    .then(|| Expr {
+}
+
+pub(super) fn builtin_type(name: &str) -> Option<Expr> {
+    is_builtin_type(name).then(|| Expr {
         ty: Type::BuiltinClass,
         kind: ExprKind::Builtin(Builtin::ClassNameView, vec![unpacking::string(name)]),
     })

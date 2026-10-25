@@ -675,6 +675,7 @@ name = "imre-runtime"
 version = "0.1.2"
 dependencies = [
  "base64",
+ "cc",
  "compact_str",
  "corosensei",
  "flate2",

@@ -352,7 +352,11 @@ impl Checker<'_> {
                         self.callback_input(call, element, false)?,
                     )));
                 };
-                if !matches!(converter.id.as_str(), "int" | "str") {
+                if !matches!(converter.id.as_str(), "int" | "str" | "ord")
+                    || (converter.id == "ord"
+                        && (self.names.contains_key("ord")
+                            || self.resolve(&call.arguments.args[0]).is_some()))
+                {
                     return Ok(Some(Iteration::Prepared(
                         self.callback_input(call, element, false)?,
                     )));
@@ -361,7 +365,9 @@ impl Checker<'_> {
                 let source = self.expansion_input(source, None)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
                 let item = self.local(input.value);
-                let converted = if converter.id == "int" {
+                let converted = if converter.id == "ord" {
+                    self.ordinal(item, call)?
+                } else if converter.id == "int" {
                     self.consumer_value(item, true, call)?
                 } else {
                     match item.ty {
@@ -760,24 +766,23 @@ impl Checker<'_> {
         }
     }
 
-    /// Consume the cursor from its current position. Acquire the operand before
-    /// allocating the result, and release both owners if a later pull fails.
-    pub(super) fn collect_cursor_set(
+    /// Consume one prepared iterator into a fresh set and release the partial
+    /// result if evaluating the source or pulling an element raises.
+    pub(super) fn collect_set(
         &mut self,
-        cursor: Expr,
-        element: Type,
+        source: Prepared,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        let element = self.locals[source.value];
         if !self.types.hashable_key(element) {
             return Err(error(
                 self.source,
                 node,
-                "set() requires hashable cursor elements",
+                "set() requires hashable iterator elements",
             ));
         }
         let ty = self.types.set(element);
         let result = self.hidden(ty);
-        let input = Iteration::Prepared(self.prepare_cursor(cursor, element));
         let empty = Expr {
             ty,
             kind: ExprKind::Set {
@@ -786,7 +791,7 @@ impl Checker<'_> {
             },
         };
         let body = self.expand_items_after(
-            input,
+            Iteration::Prepared(source),
             node,
             vec![Statement::Assign(result, empty)],
             |checker, value| {
@@ -1044,7 +1049,7 @@ impl Checker<'_> {
         if !reverse && iterable.ty == Type::CsvReader {
             return Ok(self.prepare_csv_reader(iterable));
         }
-        if !reverse && matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
+        if !reverse && matches!(iterable.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
             return Ok(self.prepare_file_lines(iterable));
         }
         let mapping = self.types.mapping(iterable.ty);
@@ -1077,6 +1082,7 @@ impl Checker<'_> {
         });
         let element = self.types.element(iterable.ty)
             .or(set_element)
+            .or_else(|| self.types.deque_element(iterable.ty))
             .or((iterable.ty == Type::Str).then_some(Type::Str))
             .or((iterable.ty == Type::Bytes).then_some(Type::Int))
             .or(tuple_element)
@@ -1220,6 +1226,8 @@ impl Checker<'_> {
                 }
             } else if ty == Type::Bytes {
                 Builtin::BytesIter
+            } else if self.types.deque_element(ty).is_some() {
+                Builtin::DequeIter { reverse }
             } else if set_element.is_some() {
                 Builtin::SetIter
             } else {

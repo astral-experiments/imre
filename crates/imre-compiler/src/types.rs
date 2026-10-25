@@ -10,6 +10,12 @@ use std::rc::Rc;
 
 const MAX_DESCRIPTION_BYTES: usize = 1024;
 
+const STAT_RESULT_NAME: &str = "os.stat_result";
+pub(crate) const STAT_SEQUENCE_FIELDS: [&str; 10] = [
+    "st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid", "st_size", "st_atime",
+    "st_mtime", "st_ctime",
+];
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Shape {
     StringLiterals(Vec<String>),
@@ -19,8 +25,9 @@ enum Shape {
     DefaultListDict(Type, Type),
     Counter(Type),
     Set(Type),
+    Deque(Type),
     Tuple(Vec<Type>),
-    NamedTuple(DefinitionId, Vec<Type>),
+    NamedTuple(TupleOrigin, Vec<Type>),
     PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
     DeclaredCache(Type, usize),
@@ -46,6 +53,12 @@ pub(crate) struct CachePolicy {
     /// Negative represents an unbounded cache; negative Python sizes normalize to zero.
     pub capacity: i64,
     pub typed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum TupleOrigin {
+    Declaration(DefinitionId),
+    StructSequence(&'static str, &'static [&'static str]),
 }
 
 #[derive(Clone)]
@@ -101,6 +114,7 @@ impl Types {
                 Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
             ),
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
+            Type::Deque(id) => matches!(storage.shapes.get(id), Some(Shape::Deque(_))),
             Type::Tuple(id) => matches!(
                 storage.shapes.get(id),
                 Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
@@ -143,10 +157,12 @@ impl Types {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
-            | Type::ExceptionField
+            | Type::ObjectValue
+            | Type::ReadOnlyObjectMapping
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
+            | Type::StringIO
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
@@ -156,6 +172,8 @@ impl Types {
             | Type::GeneratorContext
             | Type::Semaphore
             | Type::Document(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -163,7 +181,9 @@ impl Types {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::PathInfo
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -189,6 +209,7 @@ impl Types {
                 Shape::StringLiterals(_) => Vec::new(),
                 Shape::Cursor(ty)
                 | Shape::List(ty)
+                | Shape::Deque(ty)
                 | Shape::Set(ty)
                 | Shape::Counter(ty)
                 | Shape::Awaitable(ty)
@@ -213,6 +234,7 @@ impl Types {
                 | Type::List(child_id)
                 | Type::CacheState(child_id)
                 | Type::Dict(child_id)
+                | Type::Deque(child_id)
                 | Type::Set(child_id)
                 | Type::Tuple(child_id)
                 | Type::Callable(child_id)
@@ -495,6 +517,18 @@ impl Types {
         matches!(&self.0.borrow().shapes[id], Shape::Union(members) if members == &[Type::Bool, Type::Int])
     }
 
+    /// A universal newline decoder reports either one spelling, a tuple of the
+    /// distinct spellings in canonical order, or None before it has seen one.
+    pub(crate) fn text_newlines_result(&self) -> Type {
+        let pair = self.tuple(vec![Type::Str; 2]);
+        let triple = self.tuple(vec![Type::Str; 3]);
+        self.optional(Type::Union(self.intern(Shape::Union(vec![
+            Type::Str,
+            pair,
+            triple,
+        ]))))
+    }
+
     pub(crate) fn members(&self, ty: Type) -> Option<Vec<Type>> {
         let Type::Union(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
@@ -522,6 +556,7 @@ impl Types {
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
+            | Type::StringIO
             | Type::Path
             | Type::PurePath(_)
             | Type::CompletedProcess(..)
@@ -535,6 +570,8 @@ impl Types {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -542,7 +579,9 @@ impl Types {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::PathInfo
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -607,6 +646,20 @@ impl Types {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
     }
 
+    /// Stat results use ten visible integer slots and a separate tail for named attributes.
+    pub(crate) fn stat_result(&self) -> Type {
+        self.struct_sequence(
+            STAT_RESULT_NAME,
+            &STAT_SEQUENCE_FIELDS,
+            vec![Type::Int; STAT_SEQUENCE_FIELDS.len()],
+        )
+    }
+
+    pub(crate) fn is_stat_result(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id],
+            Shape::NamedTuple(TupleOrigin::StructSequence(STAT_RESULT_NAME, _), _)))
+    }
+
     pub(crate) fn declare_namedtuple(&self, definition: DefinitionId, declaration: NamedTuple) {
         self.0
             .borrow_mut()
@@ -619,7 +672,50 @@ impl Types {
     }
 
     pub(crate) fn namedtuple_layout(&self, definition: DefinitionId, fields: Vec<Type>) -> Type {
-        Type::Tuple(self.intern(Shape::NamedTuple(definition, fields)))
+        Type::Tuple(self.intern(Shape::NamedTuple(
+            TupleOrigin::Declaration(definition),
+            fields,
+        )))
+    }
+
+    /// A native struct sequence shares the tuple descriptor but has no Python declaration.
+    pub(crate) fn struct_sequence(
+        &self,
+        name: &'static str,
+        names: &'static [&'static str],
+        fields: Vec<Type>,
+    ) -> Type {
+        assert_eq!(names.len(), fields.len());
+        Type::Tuple(self.intern(Shape::NamedTuple(
+            TupleOrigin::StructSequence(name, names),
+            fields,
+        )))
+    }
+
+    pub(crate) fn tuple_metadata(&self, ty: Type) -> Option<Rc<NamedTuple>> {
+        let Type::Tuple(id) = ty else { return None };
+        let storage = self.0.borrow();
+        match &storage.shapes[id] {
+            Shape::NamedTuple(TupleOrigin::Declaration(id), _) => {
+                storage.named_tuples.get(id).cloned()
+            }
+            Shape::NamedTuple(TupleOrigin::StructSequence(name, fields), _) => {
+                Some(Rc::new(NamedTuple {
+                    name: name.to_string(),
+                    fields: fields.iter().map(|v| v.to_string()).collect(),
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    /// Slicing a struct sequence materializes a plain tuple of its visible fields.
+    pub(crate) fn struct_sequence_fields(&self, ty: Type) -> Option<Vec<Type>> {
+        let Type::Tuple(id) = ty else { return None };
+        match &self.0.borrow().shapes[id] {
+            Shape::NamedTuple(TupleOrigin::StructSequence(..), fields) => Some(fields.clone()),
+            _ => None,
+        }
     }
 
     pub(crate) fn namedtuple_definition(&self, ty: Type) -> Option<DefinitionId> {
@@ -627,7 +723,7 @@ impl Types {
             return None;
         };
         match self.0.borrow().shapes[id] {
-            Shape::NamedTuple(definition, _) => Some(definition),
+            Shape::NamedTuple(TupleOrigin::Declaration(definition), _) => Some(definition),
             _ => None,
         }
     }
@@ -780,6 +876,20 @@ impl Types {
         matches!(ty, Type::Dict(id) if matches!(self.0.borrow().shapes[id], Shape::DefaultListDict(..)))
     }
 
+    pub(crate) fn deque(&self, element: Type) -> Type {
+        Type::Deque(self.intern(Shape::Deque(element)))
+    }
+
+    pub(crate) fn deque_element(&self, ty: Type) -> Option<Type> {
+        let Type::Deque(id) = ty else {
+            return None;
+        };
+        let Shape::Deque(element) = self.0.borrow().shapes[id] else {
+            unreachable!("deque identity has a deque shape")
+        };
+        Some(element)
+    }
+
     pub(crate) fn set(&self, element: Type) -> Type {
         Type::Set(self.intern(Shape::Set(element)))
     }
@@ -889,6 +999,7 @@ impl Types {
             match ty {
                 Type::Cursor(_)
                 | Type::TextIO
+                | Type::StringIO
                 | Type::BinaryIO
                 | Type::CsvReader
                 | Type::ZipFile
@@ -924,6 +1035,7 @@ impl Types {
             .element(ty)
             .or_else(|| self.payload(ty))
             .or_else(|| self.set_element(ty))
+            .or_else(|| self.deque_element(ty))
             .or_else(|| self.cursor_element(ty))
         {
             vec![element]
@@ -991,6 +1103,7 @@ impl TypeDescription<'_> {
             | Type::Tuple(id)
             | Type::Callable(id)
             | Type::Dict(id)
+            | Type::Deque(id)
             | Type::Set(id)
             | Type::Optional(id)
             | Type::Union(id) => id,
@@ -1033,6 +1146,10 @@ impl TypeDescription<'_> {
             Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
                 self.write_str("tuple[")?;
                 self.write_types(fields, ", ")?;
+            }
+            Shape::Deque(element) => {
+                self.write_str("deque[")?;
+                self.write_type(*element)?;
             }
             Shape::Counter(key) => {
                 self.write_str("Counter[")?;

@@ -37,7 +37,8 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
 
 The existing [stream and exit smoke runner](../../native_sys.py) exercises four
-`test_subprocess` IDs and additional native program fixtures. Those are outside this
+`test_subprocess` IDs and additional native program fixtures, including the
+[standard-stream buffering checks](STREAM_BUFFERING.md). Those are outside this
 suite's denominator. A CPython-only result or an operation probe is not a native
 pass for a complete routine.
 
@@ -70,6 +71,12 @@ jq -s . /tmp/sys-evidence-O0.json /tmp/sys-evidence-O3.json > /tmp/sys-evidence.
 python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json /tmp/sys-evidence.json
 ```
 
+
+A manual run of the CI workflow can verify a prospective merge commit on Linux.
+Publish the commit to this repository, then supply its full SHA as the
+`sys_source` input. The job builds that commit and runs the same sys commands
+as pull request CI. Its `sys-evidence-linux` artifact records the tested Git
+commit and tree alongside both reports. Pull request checks run separately.
 
 ## Two process-boundary cases
 
