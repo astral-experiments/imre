@@ -37,6 +37,7 @@ for label, name in (("empty", "test.dis_module"), ("upstream", "bar.test_bar"),
                     ("failure", "observable_case"), ("errno", "test.test_errno")):
     PROBES["collect:" + label] = driver(name, False)
     PROBES["run:" + label] = driver(name, True)
+PROBES["run:upstream"] = Path(__file__).with_name("native_loader_example.py").read_text()
 
 # This control makes a false zero count, a skipped body, or a fabricated
 # result observable. It is not an additional test in any upstream denominator.
@@ -113,6 +114,8 @@ def main():
     for flag in ("cpython-source", "imre", "runtime", "clang", "result"):
         parser.add_argument("--" + flag, type=Path, required=True)
     parser.add_argument("--probe", action="append", choices=PROBES)
+    parser.add_argument("--require-match", action="store_true",
+                        help="exit unsuccessfully if any selected execution differs from CPython")
     args = parser.parse_args()
     if sys.version_info[:3] != (3, 14, 5):
         parser.error("run with the pinned, test-enabled CPython 3.14.5")
@@ -147,27 +150,36 @@ def main():
                     if reachable:
                         command.append("--reachable-only")
                     built = run(command, root)
-                    row = {"capability": name, "reachable_only": reachable, "opt_level": level}
+                    row = {"capability": name, "entry_sha256": hashlib.sha256(entry.read_bytes()).hexdigest(),
+                           "reachable_only": reachable, "opt_level": level}
                     if built.returncode:
                         row.update(outcome="compile-blocked", reason=(built.stderr or built.stdout).replace(str(root), "<root>").strip())
                     else:
                         observed = run([binary], root)
                         # A correct count or return status need not imply the same
                         # traceback or runner rendering. Report both comparisons.
-                        good = observed.returncode == reference.returncode and observed.stdout == reference.stdout
                         diagnostic = runner_text(observed.stderr, root)
-                        row.update(outcome="verified" if good else "runtime-mismatch",
+                        status = observed.returncode == reference.returncode
+                        stdout = observed.stdout == reference.stdout
+                        stderr = diagnostic == reference_outputs[name]["stderr"]
+                        row.update(outcome="verified" if status and stdout and stderr else "runtime-mismatch",
                                    stdout=observed.stdout, stderr=diagnostic,
-                                   matches_reference_stderr=diagnostic == reference_outputs[name]["stderr"],
+                                   matches_reference_status=status, matches_reference_stdout=stdout,
+                                   matches_reference_stderr=stderr,
                                    returncode=observed.returncode)
                     records.append(row)
     with args.imre.open("rb") as compiler:
         digest = hashlib.file_digest(compiler, "sha256").hexdigest()
-    report = {"cpython_commit": PIN, "compiler_sha256": digest, "reference": reference_outputs,
+    with args.runtime.open("rb") as runtime:
+        runtime_digest = hashlib.file_digest(runtime, "sha256").hexdigest()
+    report = {"cpython_commit": PIN, "compiler_sha256": digest, "runtime_sha256": runtime_digest,
+              "reference": reference_outputs,
               "fixtures": {path: sha for path, (_, sha) in FIXTURES.items()}, "records": records}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     for name in names:
         print(name, *(row["outcome"] for row in records if row["capability"] == name))
+    if args.require_match and any(row["outcome"] != "verified" for row in records):
+        raise SystemExit("one or more native observations differed from CPython; see the result file")
 
 if __name__ == "__main__":
     main()

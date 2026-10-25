@@ -1,0 +1,72 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "ec2044b4e1b15674800c1160392e207e82b6435782f47333e8e2318fbf3e4a37",
+  "runtime_sha256": "8efa9ccaa878b5b336c3113b5c554cfbdc8578e22cbeecac519e1a428988d3c2",
+  "reference": {
+    "run:failure": {
+      "stdout": "2\nsetUp\npass body\ntearDown\nsetUp\nfailing body\ntearDown\n2\nFalse\n",
+      "stderr": "test_a_passes (observable_case.Subject.test_a_passes) ... ok\ntest_b_fails (observable_case.Subject.test_b_fails) ... FAIL\n\n======================================================================\nFAIL: test_b_fails (observable_case.Subject.test_b_fails)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"<root>/observable_case.py\", line 12, in test_b_fails\n    self.assertEqual(1, 2)\n    ~~~~~~~~~~~~~~~~^^^^^^\nAssertionError: 1 != 2\n\n----------------------------------------------------------------------\nRan 2 tests in <elapsed>s\n\nFAILED (failures=1)\n"
+    }
+  },
+  "fixtures": {
+    "Lib/test/__init__.py": "b93054b3ecf3a5af96f4772e7208e7a18b5dd4a4",
+    "Lib/test/dis_module.py": "afbf600fdee22bbb87b2b4630c8e2ab2df2761f6",
+    "Lib/test/test_errno.py": "e7f185c6b1a1812cbe3db181c41c5a5d43be6984",
+    "Lib/test/test_unittest/namespace_test_pkg/bar/__init__.py": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "Lib/test/test_unittest/namespace_test_pkg/bar/test_bar.py": "05b184d9eba68596b4c9757a40a2e51fe22c487d"
+  },
+  "records": [
+    {
+      "capability": "run:failure",
+      "entry_sha256": "1f112705c6a28338588be167bf54b40796410a8246b96dadd91b155ea77af318",
+      "reachable_only": false,
+      "opt_level": 0,
+      "outcome": "runtime-mismatch",
+      "stdout": "2\nsetUp\npass body\ntearDown\nsetUp\nfailing body\ntearDown\n2\nFalse\n",
+      "stderr": "test_a_passes (observable_case.Subject.test_a_passes) ... ok\ntest_b_fails (observable_case.Subject.test_b_fails) ... FAIL\n\n======================================================================\nFAIL: test_b_fails (observable_case.Subject.test_b_fails)\n----------------------------------------------------------------------\n1 != 2\n\n----------------------------------------------------------------------\nRan 2 tests in <elapsed>s\n\nFAILED (failures=1)\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": false,
+      "returncode": 0
+    },
+    {
+      "capability": "run:failure",
+      "entry_sha256": "1f112705c6a28338588be167bf54b40796410a8246b96dadd91b155ea77af318",
+      "reachable_only": false,
+      "opt_level": 3,
+      "outcome": "runtime-mismatch",
+      "stdout": "2\nsetUp\npass body\ntearDown\nsetUp\nfailing body\ntearDown\n2\nFalse\n",
+      "stderr": "test_a_passes (observable_case.Subject.test_a_passes) ... ok\ntest_b_fails (observable_case.Subject.test_b_fails) ... FAIL\n\n======================================================================\nFAIL: test_b_fails (observable_case.Subject.test_b_fails)\n----------------------------------------------------------------------\n1 != 2\n\n----------------------------------------------------------------------\nRan 2 tests in <elapsed>s\n\nFAILED (failures=1)\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": false,
+      "returncode": 0
+    },
+    {
+      "capability": "run:failure",
+      "entry_sha256": "1f112705c6a28338588be167bf54b40796410a8246b96dadd91b155ea77af318",
+      "reachable_only": true,
+      "opt_level": 0,
+      "outcome": "runtime-mismatch",
+      "stdout": "2\nsetUp\npass body\ntearDown\nsetUp\nfailing body\ntearDown\n2\nFalse\n",
+      "stderr": "test_a_passes (observable_case.Subject.test_a_passes) ... ok\ntest_b_fails (observable_case.Subject.test_b_fails) ... FAIL\n\n======================================================================\nFAIL: test_b_fails (observable_case.Subject.test_b_fails)\n----------------------------------------------------------------------\n1 != 2\n\n----------------------------------------------------------------------\nRan 2 tests in <elapsed>s\n\nFAILED (failures=1)\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": false,
+      "returncode": 0
+    },
+    {
+      "capability": "run:failure",
+      "entry_sha256": "1f112705c6a28338588be167bf54b40796410a8246b96dadd91b155ea77af318",
+      "reachable_only": true,
+      "opt_level": 3,
+      "outcome": "runtime-mismatch",
+      "stdout": "2\nsetUp\npass body\ntearDown\nsetUp\nfailing body\ntearDown\n2\nFalse\n",
+      "stderr": "test_a_passes (observable_case.Subject.test_a_passes) ... ok\ntest_b_fails (observable_case.Subject.test_b_fails) ... FAIL\n\n======================================================================\nFAIL: test_b_fails (observable_case.Subject.test_b_fails)\n----------------------------------------------------------------------\n1 != 2\n\n----------------------------------------------------------------------\nRan 2 tests in <elapsed>s\n\nFAILED (failures=1)\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": false,
+      "returncode": 0
+    }
+  ]
+}

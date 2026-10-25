@@ -42,16 +42,32 @@ the coordinator's guard/ImportError witness at `03977539` reached
 
 ### The public native loader
 
-```python
-import unittest
-import bar.test_bar as subject  # untouched namespace_test_pkg/bar/test_bar.py
+The [eight-line example](full/unittest/native_loader_example.py) passes an imported
+module to `unittest.defaultTestLoader.loadTestsFromModule`, wraps the discovered
+cases in a `TestSuite` and passes it to `TextTestRunner(verbosity=2).run`.
+It prints the discovered count, the number actually run, and the success flag
+on separate lines: `1`, `1`, `True`. The verbose result names the original
+`bar.test_bar.PassingTest.test_true`; its body calls the native `assertTrue`.
 
-suite = unittest.TestSuite([unittest.defaultTestLoader.loadTestsFromModule(subject)])
-result = unittest.TextTestRunner(verbosity=2).run(suite)
-print(suite.countTestCases(), result.testsRun, result.wasSuccessful())  # 1 1 True
+From the repository root, run that exact file and the unmodified upstream
+fixture in ordinary and reachable mode, each at O0 and O3:
+
+```sh
+"$CPYTHON" -B benchmarks/cpython_stdlib/full/unittest/runner_objects.py \
+    --cpython-source "$CPYTHON_SOURCE" --imre "$IMRE" --runtime "$IMRE_RUNTIME" \
+    --clang "$CLANG" --probe run:upstream --require-match --result /tmp/native-loader-example.json
 ```
 
+The [Linux example receipt](full/unittest/native-loader-example-linux.json)
+includes the source, compiler, and runtime checksums and each output comparison.
 The object probe checks the fixture's upstream Git blob before executing it.
+CPython provides a separate reference run and does not execute setup, the test
+body, its assertion, or teardown for the native executable. This discovery
+control adds no cases to the 1,090-occurrence unittest inventory.
+The [failure receipt](full/unittest/native-loader-failure-linux.json) shows
+that two setup/body/teardown sequences ran and the result was unsuccessful.
+Its status and stdout match; its traceback on stderr does not. The same
+`--require-match` gate exits with status 1 on this control.
 Substitute `test.dis_module` to exercise the zero-test case. The native loader
 accepts a static imported module value and discovers sorted fixed TestCase
 classes and methods. Package `load_tests`, dynamic module namespaces and class
