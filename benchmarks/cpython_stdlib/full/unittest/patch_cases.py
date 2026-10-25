@@ -44,7 +44,7 @@ def known_blockers(reachable, level):
     archive = json.loads(gzip.decompress((HERE / 'patch-dict-default-linux.json.gz').read_bytes()))
     mode = ('reachable' if reachable else 'ordinary') + f'-O{level}'
     records = archive['modes'][mode]['records']
-    for name in ('patch-dict-rechecked-linux.json', 'patch-dict-mixed-values-linux.json'):
+    for name in ('patch-dict-rechecked-linux.json', 'patch-dict-mixed-values-linux.json', 'patch-dict-compiler-blockers-linux.json'):
         records.extend(json.loads((HERE / name).read_bytes())['modes'][mode])
     return {(r['id'], r['occurrence']): r for r in records if r['outcome'] == 'blocked'}
 
