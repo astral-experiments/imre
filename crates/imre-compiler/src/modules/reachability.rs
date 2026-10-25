@@ -107,6 +107,9 @@ impl<'a> Visitor<'a> for References<'_> {
             )
         {
             let name = attr.attr.to_string();
+            if name == "getTestCaseNames" {
+                self.found.attributes.insert("_getTestCaseNames".into());
+            }
             if matches!(
                 name.as_str(),
                 "assertEqual" | "assertListEqual" | "assertRaises"
