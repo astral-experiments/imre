@@ -4383,13 +4383,19 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Int(mode.to_string()),
             });
         }
-        if matches!(
-            self.resolve(expression),
-            Some(Binding::Intrinsic(Intrinsic::Argv))
-        ) {
+        if let Some(Binding::Intrinsic(symbol @ (Intrinsic::Argv | Intrinsic::OrigArgv))) =
+            self.resolve(expression)
+        {
             return Ok(Expr {
                 ty: self.types.list(Type::Str),
-                kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
+                kind: ExprKind::Builtin(
+                    if symbol == Intrinsic::Argv {
+                        Builtin::SysArgv
+                    } else {
+                        Builtin::SysOrigArgv
+                    },
+                    Vec::new(),
+                ),
             });
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
@@ -6461,7 +6467,8 @@ impl<'a> Checker<'a> {
                 && (matches!(
                     args[0].ty,
                     Type::Class(_) | Type::CompletedProcess(_) | Type::StringIterable
-                ) || self.types.is_counter(args[0].ty))
+                ) || self.types.is_counter(args[0].ty)
+                    || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;
                 return Ok(if name.id == "str" {

@@ -268,6 +268,7 @@ fn emit_program(
             }
         });
     }
+    let (uses_sys_argv, uses_orig_argv) = module.sys_argument_usage();
     let mut emitter = Emitter {
         module,
         output,
@@ -309,7 +310,8 @@ fn emit_program(
         inline_dispatch,
         callable_targets,
         integer_regions: integer_regions::analyze(module),
-        uses_sys_argv: module.uses_sys_argv(),
+        uses_sys_argv,
+        uses_orig_argv,
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -494,6 +496,7 @@ struct Emitter<'a, 'module> {
     callable_targets: crate::callables::Targets,
     integer_regions: Vec<Option<integer_regions::Summary>>,
     uses_sys_argv: bool,
+    uses_orig_argv: bool,
     has_extensions: bool,
 }
 
@@ -1681,7 +1684,12 @@ impl Emitter<'_, '_> {
             self.prepare_directory_frame(&value);
         }
         if entry {
-            let layout = self.instruction("call { i64, i64 } @imre_seq_layout()");
+            let startup = if self.uses_orig_argv {
+                "imre_seq_layout_with_orig_argv"
+            } else {
+                "imre_seq_layout"
+            };
+            let layout = self.instruction(format!("call {{ i64, i64 }} @{startup}()"));
             self.line(format!(
                 "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
             ));
@@ -4040,6 +4048,7 @@ impl Emitter<'_, '_> {
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
+            Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::SysStreamWrite { stderr } => Value {
@@ -6535,6 +6544,8 @@ declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
+declare ptr @imre_sys_orig_argv()
+declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_os_name()
 declare i64 @imre_sys_stream_write(i32, ptr)

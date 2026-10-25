@@ -269,14 +269,17 @@ pub(crate) enum JsonDefault {
 impl Module {
     /// Process argument state is required only by an actual argv expression.
     /// Merely importing sys emits no startup allocation or runtime query.
-    pub(crate) fn uses_sys_argv(&self) -> bool {
-        let mut used = false;
+    pub(crate) fn sys_argument_usage(&self) -> (bool, bool) {
+        let mut argv = false;
+        let mut original = false;
         for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |value| {
-                used |= matches!(value.kind, ExprKind::Builtin(Builtin::SysArgv, _));
+            walk_expressions(&function.body, &mut |value| match value.kind {
+                ExprKind::Builtin(Builtin::SysArgv, _) => argv = true,
+                ExprKind::Builtin(Builtin::SysOrigArgv, _) => original = true,
+                _ => {}
             });
         }
-        used
+        (argv || original, original)
     }
 }
 
@@ -670,6 +673,7 @@ pub(crate) enum Builtin {
     StringListNonempty,
     RStrip,
     SysArgv,
+    SysOrigArgv,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
         children: Vec<usize>,
