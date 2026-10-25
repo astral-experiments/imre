@@ -235,31 +235,36 @@ mod tests {
 
     #[test]
     fn discarding_an_unfinished_display_releases_its_captured_values() {
-        let text = Rc::new(crate::Str::from("earlier field"));
+        let text = crate::StrOwner::new(crate::Str::from("earlier field"));
         // SAFETY: the new display owns one reference; text roots the exact
         // input representation until each successful push retains it.
         unsafe {
             let buffer = Rc::from_raw(imre_tuple_buffer_new());
             for _ in 0..3 {
                 assert_eq!(
-                    imre_tuple_buffer_push(Rc::as_ptr(&buffer), 3, Rc::as_ptr(&text) as usize),
+                    imre_tuple_buffer_push(
+                        Rc::as_ptr(&buffer),
+                        3,
+                        crate::StrOwner::as_ptr(&text) as usize
+                    ),
                     1
                 );
             }
-            assert_eq!(Rc::strong_count(&text), 4);
+            assert_eq!(crate::StrOwner::strong_count(&text), 4);
             drop(buffer);
         }
-        assert_eq!(Rc::strong_count(&text), 1);
+        assert_eq!(crate::StrOwner::strong_count(&text), 1);
     }
 
     #[test]
     fn wide_nested_tuple_releases_its_descriptor_after_the_last_field() {
-        let text = Rc::new(crate::Str::from("shared"));
+        let text = crate::StrOwner::new(crate::Str::from("shared"));
         let mut outer = TupleBuilder::new(96).ok().unwrap();
         for _ in 0..96 {
             let mut child = TupleBuilder::new(1).ok().unwrap();
             // SAFETY: the shared string roots this exact representation.
-            child.push(unsafe { WordKind::new(3).acquire(Rc::as_ptr(&text) as usize) });
+            child
+                .push(unsafe { WordKind::new(3).acquire(crate::StrOwner::as_ptr(&text) as usize) });
             outer.push(child.finish());
         }
         let tuple = outer.finish();
@@ -272,9 +277,9 @@ mod tests {
             let owner = Rc::from_raw(layout);
             Rc::downgrade(&owner)
         };
-        assert_eq!(Rc::strong_count(&text), 97);
+        assert_eq!(crate::StrOwner::strong_count(&text), 97);
         drop(tuple);
-        assert_eq!(Rc::strong_count(&text), 1);
+        assert_eq!(crate::StrOwner::strong_count(&text), 1);
         assert!(layout.upgrade().is_none());
     }
 }
