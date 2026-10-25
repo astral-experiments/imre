@@ -59,6 +59,9 @@ pub(super) struct Helper {
 pub(super) struct Helpers {
     first: usize,
     functions: RefCell<Vec<Option<Helper>>>,
+    /// Lifted functions normally leave scope after checking their enclosing body.
+    pub(super) local_annotations:
+        RefCell<HashMap<usize, (ModuleId, std::rc::Rc<ast::StmtFunctionDef>)>>,
 }
 
 impl Helpers {
@@ -66,6 +69,7 @@ impl Helpers {
         Self {
             first,
             functions: RefCell::new(Vec::new()),
+            local_annotations: RefCell::default(),
         }
     }
 

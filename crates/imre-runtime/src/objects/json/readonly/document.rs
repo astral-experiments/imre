@@ -202,8 +202,13 @@ impl Value {
         })
     }
     fn from_toml(node: &DeValue<'_>) -> Result<Self, Error> {
+        fn string(value: &str) -> Result<StrOwner, Error> {
+            let text = Str::try_new(value).map_err(|_| Error::allocation())?;
+            StrOwner::try_new(text).map_err(|_| Error::allocation())
+        }
+
         Ok(match node {
-            DeValue::String(value) => Self::String(StrOwner::new(Str::new(value.as_ref()))),
+            DeValue::String(value) => Self::String(string(value.as_ref())?),
             DeValue::Integer(value) => Self::Integer(Int::new(
                 num_bigint::BigInt::parse_bytes(value.as_str().as_bytes(), value.radix())
                     .ok_or_else(|| Error::new(Kind::TomlDecodeError, "invalid integer"))?,
@@ -246,12 +251,11 @@ impl Value {
                     .iter()
                     .map(|v| Self::from_toml(v.get_ref()).map(Self::object)),
             )?,
-            DeValue::Table(table) => Self::table(table.iter().map(|(k, v)| {
-                Ok((
-                    StrOwner::new(Str::new(k.get_ref())),
-                    Self::from_toml(v.get_ref())?.object(),
-                ))
-            }))?,
+            DeValue::Table(table) => {
+                Self::table(table.iter().map(|(k, v)| {
+                    Ok((string(k.get_ref())?, Self::from_toml(v.get_ref())?.object()))
+                }))?
+            }
         })
     }
     pub(in crate::objects) fn read(obj: &Object) -> Self {

@@ -859,12 +859,17 @@ pub extern "C" fn imre_print_none() {
 pub unsafe extern "C" fn imre_int_str(value: usize) -> *const Str {
     // SAFETY: the caller keeps the integer alive through formatting.
     let value = unsafe { Int::borrow(value) };
-    let text = if let Some(value) = value.as_small() {
-        Str::new(itoa::Buffer::new().format(value))
-    } else {
-        Str::from(value.big().to_string())
-    };
-    StrOwner::into_raw(StrOwner::new(text))
+    match integer_text::decimal_string(&value).and_then(checked_owned_str) {
+        Ok(text) => text,
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
+
+/// Transfer a freshly formatted string to generated code, preserving allocation failure.
+fn checked_owned_str(text: Str) -> Result<*const Str> {
+    StrOwner::try_new(text)
+        .map(StrOwner::into_raw)
+        .map_err(|_| Error::allocation())
 }
 
 /// Returns an owned Python spelling for a compiler-validated boolean.

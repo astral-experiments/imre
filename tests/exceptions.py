@@ -24,6 +24,25 @@ def upstream_support_payloads() -> str:
 
 
 ACCEPTED = {
+    "private_forwarded_exception_fields": """
+class Root(Exception):
+    def __init__(self, value, *rest):
+        self.__value = value
+        super().__init__(value, *rest)
+
+    def __str__(self):
+        return self.__value
+
+class _Leaf(Root):
+    def __init__(self, first, second):
+        super().__init__(first)
+        self.__value = second
+
+error = _Leaf("root", "leaf")
+print(str(error))
+print(repr(error._Root__value))
+print(repr(error._Leaf__value))
+""",
     "upstream_support_payloads": upstream_support_payloads(),
     "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
     "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
@@ -34,6 +53,35 @@ ACCEPTED = {
     },
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
+    "private_forwarding_parameter_names": """
+class Problem(Exception):
+    def __init__(__self, __message, *args, __detail="detail"):
+        __self.value = __message
+        super().__init__(__message, __detail, *args)
+
+class Child(Problem):
+    def __init__(self, value, detail):
+        super().__init__(value, _Problem__detail=detail)
+
+try:
+    print(repr(Problem(_Problem__message="yes", _Problem__detail="extra").args))
+except TypeError as e:
+    print(str(e))
+try:
+    print(repr(Problem(__message="wrong").args))
+except TypeError as e:
+    print(str(e))
+try:
+    Problem("positional", _Problem__self="duplicate")
+except TypeError as e:
+    print(str(e))
+try:
+    Problem()
+except TypeError as e:
+    print(str(e))
+
+print(repr(Child("nested", "forwarded").args))
+""",
     "classvar_exception_constructor": """
 from typing import ClassVar
 
