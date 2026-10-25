@@ -18,10 +18,10 @@ use std::time::{Duration, Instant};
 
 use super::exceptions::{Error, Kind, Result, finish, raise_process, raise_timeout};
 use super::files::{decode_utf8_text, os_error};
-use super::mappings::{StringPairs, imre_dict_contains, imre_dict_new, imre_dict_set};
+use super::mappings::{StringPairs, imre_dict_contains, imre_dict_new};
 use super::records::{RecordDescriptor, imre_record_new};
 use super::words::{OwnedWord, WordKind};
-use super::{Bytes, Int, Object, Storage, Str, fail, object};
+use super::{Bytes, Int, Object, Storage, Str, acquire_rc, fail, object};
 
 mod asynchronous;
 pub(super) use asynchronous::AsyncProcess;
@@ -962,11 +962,11 @@ unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<Ob
             // SAFETY: insertion acquires both rooted strings; no language alias
             // can observe this new acyclic dictionary before it is complete.
             unsafe {
-                imre_dict_set(
+                super::mappings::dict_set(
                     ObjectOwner::as_ptr(&result),
                     StrOwner::as_ptr(&key) as usize,
                     StrOwner::as_ptr(&value) as usize,
-                );
+                )?;
             }
         }
     }
@@ -1492,7 +1492,7 @@ mod tests {
             let value = StrOwner::new(Str::new(value));
             // SAFETY: both strings remain rooted while insertion acquires them.
             unsafe {
-                imre_dict_set(
+                crate::objects::mappings::imre_dict_set(
                     ObjectOwner::as_ptr(&result),
                     StrOwner::as_ptr(&key) as usize,
                     StrOwner::as_ptr(&value) as usize,
@@ -2250,7 +2250,7 @@ mod tests {
         // SAFETY: insertion acquires the two exact rooted strings into the owned
         // dictionary; it has no link back to the process's native environment.
         unsafe {
-            imre_dict_set(
+            crate::objects::mappings::imre_dict_set(
                 ObjectOwner::as_ptr(&copy),
                 StrOwner::as_ptr(&key) as usize,
                 StrOwner::as_ptr(&value) as usize,

@@ -15,6 +15,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use rustix::fs::{self as rfs, AtFlags, Dir, FileType, Mode, OFlags};
 use rustix::io::Errno;

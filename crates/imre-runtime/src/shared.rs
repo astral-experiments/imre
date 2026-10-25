@@ -102,7 +102,6 @@ impl<T> Shared<T> {
         drop(unsafe { Self::from_raw(pointer) });
     }
 
-    #[cfg(test)]
     pub(crate) fn strong_count(this: &Self) -> usize {
         // SAFETY: this strong owner keeps the allocation live.
         unsafe { this.0.as_ref() }.strong.get()

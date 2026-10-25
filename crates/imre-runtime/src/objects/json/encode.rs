@@ -1,6 +1,5 @@
 //! Writes typed storage directly, without constructing a dynamic JSON tree.
 
-#[cfg(test)]
 use crate::ObjectOwner;
 use crate::StrOwner;
 use num_traits::ToPrimitive;
@@ -715,7 +714,7 @@ mod tests {
             let text = format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
             // The internal decoder builds this valid acyclic graph without the
             // public depth check, so encoding must enforce its own boundary.
-            let value = decode(&text, schema).unwrap();
+            let value = decode(&text, schema, &mut None).unwrap();
             let mut output = encoder();
             // SAFETY: the decoder owns every word with the live exact schema.
             let result = unsafe { output.value(value.word, schema, 0) };

@@ -4,6 +4,7 @@ use crate::ObjectOwner;
 use crate::StrOwner;
 use num_traits::{Signed, ToPrimitive};
 use std::mem::ManuallyDrop;
+use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};

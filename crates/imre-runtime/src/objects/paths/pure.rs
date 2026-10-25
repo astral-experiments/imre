@@ -4,6 +4,7 @@
 use crate::ObjectOwner;
 use crate::StrOwner;
 use std::cell::OnceCell;
+use std::rc::Rc;
 
 use super::{Error, Kind, Object, Result, Storage, StorageCell, Str, object};
 use crate::objects::exceptions::string_repr;

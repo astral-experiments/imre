@@ -3,7 +3,6 @@
 use crate::ObjectOwner;
 use crate::StrOwner;
 use num_traits::{Signed, ToPrimitive};
-#[cfg(test)]
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};

@@ -4,6 +4,7 @@ use crate::ObjectOwner;
 use crate::StrOwner;
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_char};
+use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Object, Str, Words, fail};

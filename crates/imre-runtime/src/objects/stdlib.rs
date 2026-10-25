@@ -3,6 +3,7 @@
 use crate::ObjectOwner;
 use crate::StrOwner;
 use std::cmp::Ordering;
+use std::rc::Rc;
 
 use smallvec::SmallVec;
 

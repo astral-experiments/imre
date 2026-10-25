@@ -15,7 +15,7 @@ use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
 use super::words::{OwnedWord, WordKind};
-use super::{Object, Storage, StorageCell, Str, fail, object};
+use super::{Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
 #[repr(C)]
 pub struct NamedDescriptor {
@@ -68,6 +68,8 @@ pub(crate) enum Kind {
     StopIteration = 35,
     BadZipFile = 36,
     NotImplementedError = 37,
+    NameError = 39,
+    UnboundLocalError = 40,
 }
 
 impl Kind {
@@ -111,6 +113,8 @@ impl Kind {
             35 => Self::StopIteration,
             36 => Self::BadZipFile,
             37 => Self::NotImplementedError,
+            39 => Self::NameError,
+            40 => Self::UnboundLocalError,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -155,12 +159,15 @@ impl Kind {
             Self::StopIteration => "StopIteration",
             Self::BadZipFile => "BadZipFile",
             Self::NotImplementedError => "NotImplementedError",
+            Self::NameError => "NameError",
+            Self::UnboundLocalError => "UnboundLocalError",
         }
     }
 
     fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
+            Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::Exception => !matches!(
                 self,
                 Self::BaseException | Self::SystemExit | Self::CancelledError
@@ -247,11 +254,20 @@ impl Drop for DirectoryFrame {
 enum Payload {
     Empty,
     Message(StrOwner),
+    /// Some builtins render a human message that differs from their original arguments.
+    Arguments(Box<BuiltinArguments>),
     Key(OwnedWord),
     Exit(Option<OwnedWord>),
     Process(Box<super::processes::ProcessError>),
     Timeout(Box<super::processes::TimeoutError>),
     Group(Box<[GroupMember]>),
+}
+
+/// Indirect so retaining several arguments does not grow every Object allocation.
+#[derive(Clone)]
+struct BuiltinArguments {
+    message: StrOwner,
+    args: smallvec::SmallVec<[OwnedWord; 5]>,
 }
 
 impl From<StrOwner> for Payload {
@@ -378,6 +394,59 @@ impl Error {
         Self {
             kind,
             payload: Some(Payload::Message(StrOwner::new(message.into()))),
+        }
+    }
+
+    fn string_arg(text: impl Into<Str>) -> OwnedWord {
+        let word = StrOwner::into_raw(StrOwner::new(text.into())) as usize;
+        // SAFETY: kind 3 owns the transferred string allocation.
+        unsafe { OwnedWord::from_owned(word, WordKind::new(3)) }
+    }
+
+    fn int_arg(value: crate::Int) -> OwnedWord {
+        // SAFETY: kind 2 owns an integer word, whether tagged or allocated.
+        unsafe { OwnedWord::from_owned(value.into_raw(), WordKind::new(2)) }
+    }
+
+    /// OSError retains its errno and strerror as args; a filename appears only in its message.
+    pub(super) fn from_errno(kind: Kind, errno: i32, description: &str, message: String) -> Self {
+        let args = [
+            Self::int_arg(crate::Int::small(i64::from(errno)).unwrap()),
+            Self::string_arg(description),
+        ];
+        Self {
+            kind,
+            payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
+                message: StrOwner::new(message.into()),
+                args: args.into_iter().collect(),
+            }))),
+        }
+    }
+
+    /// UnicodeDecodeError preserves the undecoded bytes and the half-open error bounds.
+    pub(super) fn unicode_decode(
+        bytes: Rc<super::Bytes>,
+        start: usize,
+        end: usize,
+        reason: &'static str,
+        message: String,
+    ) -> Self {
+        // SAFETY: kind 8 owns the original immutable bytes, retained by the failing decoder.
+        let object =
+            unsafe { OwnedWord::from_owned(Rc::into_raw(bytes) as usize, WordKind::new(8)) };
+        let args = [
+            Self::string_arg("utf-8"),
+            object,
+            Self::int_arg(crate::Int::from_usize(start)),
+            Self::int_arg(crate::Int::from_usize(end)),
+            Self::string_arg(reason),
+        ];
+        Self {
+            kind: Kind::UnicodeDecodeError,
+            payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
+                message: StrOwner::new(message.into()),
+                args: args.into_iter().collect(),
+            }))),
         }
     }
 
@@ -791,6 +860,7 @@ impl Storage {
             Payload::Exit(code) => exit_text(code.as_ref(), ""),
             Payload::Empty => StrOwner::new(Str::new("")),
             Payload::Message(message) => StrOwner::clone(message),
+            Payload::Arguments(arguments) => StrOwner::clone(&arguments.message),
             Payload::Process(process) => StrOwner::new(process.message()),
             Payload::Timeout(timeout) => StrOwner::new(timeout.message()),
             Payload::Key(key) if key.kind == WordKind::new(3) => {
@@ -1177,6 +1247,16 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
             let e = s.exception();
             let arg = match &e.payload {
                 Payload::Empty => Str::new(""),
+                Payload::Arguments(arguments) => {
+                    let mut result = String::new();
+                    for (index, arg) in arguments.args.iter().enumerate() {
+                        if index != 0 {
+                            result.push_str(", ");
+                        }
+                        super::values::write_repr(&mut result, arg.word, arg.kind);
+                    }
+                    result.into()
+                }
                 Payload::Key(k) => {
                     let mut s = String::new();
                     super::values::write_repr(&mut s, k.word, k.kind);
