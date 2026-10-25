@@ -931,7 +931,7 @@ impl Checker<'_> {
                     // dynamic -1 would create a pipe and change the returned type.
                     if (index == 5 && api == LaunchApi::CheckOutput)
                         || validation != 0
-                        || matches!(value.ty, Type::TextIO | Type::BinaryIO)
+                        || matches!(value.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
                         || integer_deadline(arg)
                         || matches!(&value.kind, ExprKind::Builtin(Builtin::FileFileno, _))
                     {
@@ -954,7 +954,7 @@ impl Checker<'_> {
             if (streams >> shift) & 15 == 6
                 && matches!(
                     args.values[args.order[param]].ty,
-                    Type::BinaryIO | Type::TextIO
+                    Type::BinaryIO | Type::TextIO | Type::StringIO
                 )
             {
                 streams |= 1 << shift;
