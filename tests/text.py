@@ -1,6 +1,7 @@
 """Compare native text parsing, fixed regexes and bounded URL decoding with CPython."""
 
 import argparse
+import ast
 from pathlib import Path
 import sys
 import tempfile
@@ -9,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comprehensions import require_result, run
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "text"
+STDLIB = FIXTURES.parents[2] / "benchmarks" / "cpython_stdlib"
 REJECTED = {
     "split_bytes": '"abc".split(b"b")',
     "split_wrong_limit": '"abc".split("b", True)',
@@ -52,6 +54,37 @@ REJECTED = {
 }
 
 
+def cpython_sub_cases(directory):
+    """Keep the three upstream bodies byte-identical, including their expected values."""
+    sys.path.insert(0, str(STDLIB))
+    from upstream import verify_upstream
+
+    verify_upstream()
+    data = (STDLIB / "upstream/Lib/test/test_re.py").read_bytes()
+    cls = next(n for n in ast.parse(data).body if isinstance(n, ast.ClassDef) and n.name == "ReTests")
+    adapter = b"""import re
+
+class Case:
+    checks: int
+
+    def __init__(self) -> None:
+        self.checks = 0
+
+    def assertEqual(self, actual: str, expected: str) -> None:
+        assert actual == expected
+        self.checks += 1
+
+"""
+    for name, count in (("test_bug_449964", 1), ("test_bug_449000", 4), ("test_bug_114660", 1)):
+        method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == name)
+        assert not method.decorator_list
+        body = b"".join(data.splitlines(keepends=True)[method.lineno - 1:method.end_lineno])
+        entry = f"\ncase = Case()\ncase.{name}()\nassert case.checks == {count}\n"
+        source = directory / (name + ".py")
+        source.write_bytes(adapter + body + entry.encode())
+        yield source
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -76,13 +109,13 @@ def main() -> None:
     checks = 0
     with tempfile.TemporaryDirectory(prefix="imre-text-") as directory:
         temporary = Path(directory)
-        for source in sorted(FIXTURES.glob("*.py")):
+        for source in [*sorted(FIXTURES.glob("*.py")), *cpython_sub_cases(temporary)]:
             expected = run([args.python, "-I", "-B", str(source)], temporary)
             require_result(expected, None)
             for level in args.opt_levels:
                 binary = temporary / f"{source.stem}-O{level}"
                 built = run([
-                    compiler, "build", str(source), "--module-root", str(FIXTURES),
+                    compiler, "build", str(source), "--module-root", str(source.parent),
                     "-o", str(binary), "--opt-level", level, *flags,
                 ], temporary)
                 require_result(built, None)
