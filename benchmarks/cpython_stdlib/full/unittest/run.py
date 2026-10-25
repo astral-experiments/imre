@@ -145,7 +145,7 @@ def run(args, level, root):
         directory.mkdir()
         if module == "testmock.testmock" and method not in MOCK_BLOCKERS:
             blob = manifest["files"][path.relative_to(HERE / "upstream").as_posix()]
-            native_defaults[case_id, 1] = NativeDefaultMethod(lang, directory, path, blob, operation)
+            native_defaults[case_id, 1] = NativeDefaultMethod(lang, directory, path, blob, ("imre", operation))
             continue
         fixture = testcase_fixture("bool" if method == "test_stop" else None)
         if module == "testmock.testmock":

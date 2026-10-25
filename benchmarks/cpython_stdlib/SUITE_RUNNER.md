@@ -131,7 +131,7 @@ source = upstream / "Lib/test/test_unittest/testmock/testmock.py"
 entry = NativeDefaultMethod(
     Toolchain(imre, runtime, clang, level), directory, source,
     "764585ec5d54688b483dca510d6fa187a9fc2531",
-    "unittest.mock.Mock.assert_not_called",
+    ("imre", "unittest.mock.Mock.assert_not_called"),
 )
 report = run_evidence(load_suite(reference["module"]), {}, reference, level,
                       native_defaults={(test_id, 1): entry})
@@ -139,6 +139,10 @@ report = run_evidence(load_suite(reference["module"]), {}, reference, level,
 
 Use a fresh existing directory for each binary and the full pinned reference
 from your module. Pass `reachable_only=True` to `Toolchain` to check that mode.
+Declare the location of the operation explicitly. For an operation delegated
+to a CPython child, pass `("cpython", description)`; use `assertions="mixed"`
+if assertions also run in both processes. The native entry alone cannot
+establish that a delegated operation or assertion ran in Imre.
 If your full reference includes approved skips, pass the same per-occurrence
 `exceptions` as in your other reports.
 

@@ -1,5 +1,6 @@
 """Regressions for per-occurrence attribution and rollup credit."""
 from copy import deepcopy
+from dataclasses import replace
 import hashlib
 import importlib.util
 import json
@@ -206,7 +207,7 @@ class DefaultFixtureTests(unittest.TestCase):
         data = source.read_bytes()
         blob = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
         return module.Example("test_value"), NativeDefaultMethod(
-            Toolchain(root, root, root, 0), root, source, blob, "unittest.TestCase.assertEqual")
+            Toolchain(root, root, root, 0), root, source, blob, ("imre", "unittest.TestCase.assertEqual"))
 
     def test_custom_fixtures_and_instance_state_are_never_promoted(self):
         for body, module in (
@@ -224,6 +225,20 @@ class DefaultFixtureTests(unittest.TestCase):
         case.configured = True
         self.assertIn("configured", entry.run(case)["reason"])
 
+
+    def test_delegated_operations_keep_their_actual_location(self):
+        case, entry = self.fixture()
+        stderr = ("test_value (__main__.Example.test_value) ... ok\n\n" + "-" * 70
+                  + "\nRan 1 test in 0.001s\n\nOK\n")
+        result = subprocess.CompletedProcess([], 0, "", stderr)
+        with (patch.object(Toolchain, "build", return_value=Path("case")),
+              patch("suite_native.subprocess.run", return_value=result)):
+            delegated = replace(entry, operation=("cpython", "operation in CPython child"))
+            report = run_evidence(unittest.TestSuite([case]), {}, reference(case.id()), 0,
+                                  native_defaults={(case.id(), 1): delegated})
+        row, = report["records"]
+        self.assertEqual(row["roles"]["fixture"], "imre")
+        self.assertEqual(row["classification"], "host-operation")
 
     def test_wrong_source_and_substituted_body_fail_integrity_checks(self):
         case, entry = self.fixture()

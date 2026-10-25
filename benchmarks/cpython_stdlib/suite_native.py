@@ -38,6 +38,7 @@ class Toolchain:
     reachable_only: bool = False
 
     def build(self, source, directory):
+        directory = directory.resolve()
         entry = directory / "case.py"
         entry.write_bytes(source)
         binary = directory / "case"
@@ -166,7 +167,7 @@ def _default_source(case, path, blob):
     parents = {child: parent for parent in ast.walk(method) for child in ast.iter_child_nodes(parent)}
     for node, parent in parents.items():
         if isinstance(node, ast.Name) and node.id == receiver:
-            if (not isinstance(parent, ast.Attribute) or parent.value is not node
+            if (not isinstance(parent, ast.Attribute) or parent.value is not node or not isinstance(parent.ctx, ast.Load)
                     or not (parent.attr.startswith("assert") or parent.attr in {"fail", "skipTest"})
                     or not hasattr(unittest.TestCase, parent.attr)):
                 raise NativeFixtureError(f"{case.id()}: depends on instance/class state outside the staged method")
@@ -195,9 +196,12 @@ class NativeDefaultMethod:
     directory: Path
     source: Path
     blob: str
-    operation: str
+    operation: tuple[str, str]
+    assertions: str = "imre"
 
     def run(self, case):
+        location, description = self.operation
+        execution_roles = roles(body="imre", assertions=self.assertions, operation=location, fixture="imre")
         try:
             entry, body = _default_source(case, self.source, self.blob)
         except NativeFixtureError as exc:
@@ -212,7 +216,7 @@ class NativeDefaultMethod:
             observation["evidence"].update(source_blob=self.blob, method_sha256=hashlib.sha256(body).hexdigest())
             return observation
         try:
-            result = subprocess.run([binary, "-v"], capture_output=True, text=True, timeout=60)
+            result = subprocess.run([binary, "-v"], cwd=self.directory, capture_output=True, text=True, timeout=60)
         except subprocess.TimeoutExpired:
             return {"outcome": "error", "reason": f"native runner timed out after 60 seconds for {case.id()}",
                     "roles": roles(body="unobserved", assertions="unobserved", operation="unobserved", fixture="unobserved"),
@@ -220,8 +224,11 @@ class NativeDefaultMethod:
         name = case._testMethodName
         staged_id = f"__main__.{type(case).__name__}.{name}"
         stderr = re.sub(r"(?m)^(Ran 1 test in )\d+\.\d+s$", r"\1<elapsed>s", result.stderr)
-        expected = f"{name} ({staged_id}) ... ok\n\n{'-' * 70}\nRan 1 test in <elapsed>s\n\nOK\n"
-        evidence = {"operation": self.operation, "fixture": "default TestCase lifecycle in native unittest.main",
+        label = f"{name} ({staged_id})"
+        if short := case.shortDescription():
+            label += "\n" + short
+        expected = f"{label} ... ok\n\n{'-' * 70}\nRan 1 test in <elapsed>s\n\nOK\n"
+        evidence = {"operation": description, "fixture": "default TestCase lifecycle in native unittest.main",
                     "source_blob": self.blob, "method_sha256": hashlib.sha256(body).hexdigest(),
                     "entry_sha256": hashlib.sha256(entry).hexdigest(), "staged_id": staged_id,
                     "stdout": result.stdout, "stderr": stderr, "status": result.returncode,
@@ -231,8 +238,7 @@ class NativeDefaultMethod:
                     "roles": roles(body="unobserved", assertions="unobserved", operation="unobserved",
                                    fixture="imre" if f"{name} ({staged_id}) ..." in stderr else "unobserved"),
                     "evidence": evidence}
-        return {"outcome": "pass", "roles": roles(body="imre", assertions="imre", operation="imre", fixture="imre"),
-                "evidence": evidence}
+        return {"outcome": "pass", "roles": execution_roles, "evidence": evidence}
 
 
 class _FixtureResult(unittest.TestResult):
