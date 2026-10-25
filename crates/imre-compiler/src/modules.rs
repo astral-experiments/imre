@@ -957,6 +957,7 @@ impl<'a> Loader<'a> {
                         // Emit the prefix now: even a list literal can fail to
                         // allocate before the next module's initializer runs.
                         if id == 0
+                            || !self.modules[id].is_package
                             || !self.modules[id].executable.iter().all(|&at| {
                                 let stmt = &parsed.syntax().body[at];
                                 value_name(stmt).is_some()
