@@ -1,7 +1,9 @@
 """Compare complete unmodified errno methods, failing controls, and the platform's real registry."""
 import argparse
 import hashlib
+import errno
 import json
+from itertools import zip_longest
 from pathlib import Path
 import shutil
 import subprocess
@@ -53,6 +55,15 @@ def main():
             assert status == 0 and not stderr and stdout.startswith(b"assertion: "), (c, oracle[c])
         assert oracle[("operations",)][0] == 0 and not oracle[("operations",)][2]
         print(f"CPython: {len(tests)} original methods, {len(cases) - len(tests) - 1} negative controls, {len(oracle[('operations',)][1].splitlines())} registry observations")
+        # An unsupported symbol is a runtime property of the target. Verify that an unused
+        # failing import precedes the next module initializer, including on an entry with no globals.
+        symbols = (HERE.parents[3] / "crates/imre-runtime/native/errno-symbols.txt").read_text().splitlines()
+        absent = next(line.split()[0] for line in symbols if line.strip() and not line.startswith("#")
+                      and not hasattr(errno, line.split()[0]))
+        unknown = "a_deliberately_missing_platform_attribute_well_over_32_bytes"
+        (root / "side_effect.py").write_text('print("child initialized")\n')
+        for case, name in (("platform-missing", absent), ("unknown", unknown)):
+            (root / f"{case}.py").write_text(f"from errno import {name} as unused\nimport side_effect\nprint('entry initialized')\n")
         for opt in args.opt_levels:
             for prog in sorted({c[0] for c in cases}):
                 command = [args.compiler.resolve(), "build", root / (prog + ".py"), "--module-root", root,
@@ -67,15 +78,35 @@ def main():
             for c in cases:
                 actual = observe(run(root / c[0], *c[1:], cwd=root))
                 if actual != oracle[c]:
-                    raise AssertionError((opt, c, oracle[c], actual))
-            print(f"O{opt}: {len(tests)}/{len(tests)} original methods, 2 failure controls, complete platform registry matched")
+                    expect=oracle[c]
+                    for line,(left,right) in enumerate(zip_longest(expect[1].splitlines(),actual[1].splitlines()),1):
+                        if left!=right:
+                            raise AssertionError(f"O{opt} {c}: stdout line {line}: CPython={str(left)[:500]} native={str(right)[:500]}")
+                    raise AssertionError((opt,c,"status/stderr",expect[0],actual[0],expect[2][:500],actual[2][:500]))
+            for case in ("platform-missing", "unknown"):
+                command = [args.compiler.resolve(), "build", root / (case + ".py"), "--module-root", root,
+                           "--runtime", args.runtime.resolve(), "--clang", args.clang,
+                           "--opt-level", opt, "--no-cache", "-o", root / case]
+                if args.sanitize:
+                    command.append("--sanitize")
+                result = run(*command, cwd=root)
+                if result.returncode:
+                    sys.stderr.buffer.write(result.stderr)
+                    return 1
+                expected = run(args.python, "-E", root / (case + ".py"), cwd=root)
+                actual = run(root / case, cwd=root)
+                assert expected.returncode == actual.returncode == 1 and expected.stdout == actual.stdout == b""
+                assert actual.stderr.startswith(b"ImportError: cannot import name ")
+                assert actual.stderr.splitlines() == expected.stderr.splitlines()[-1:], (expected.stderr, actual.stderr)
+            print(f"O{opt}: {len(tests)}/{len(tests)} original methods, 2 failure controls, complete platform registry and two unused failing imports matched")
             if args.result_dir:
                 args.result_dir.mkdir(exist_ok=True, parents=True)
                 report = {"cpython_commit": reference["cpython_commit"], "source_blob": digest,
                           "denominator": len(tests), "opt_level": opt, "platform": sys.platform,
                           "execution": "fresh native process per original method, direct method driver",
                           "tests": {t: {"status": "native"} for t in tests},
-                          "controls": {"missing-code": "matched", "missing-attribute": "matched"},
+                          "controls": {"missing-code": "matched", "missing-attribute": "matched",
+                                       "unknown-unused-import": "matched", "absent-target-unused-import": "matched"},
                           "registry_observations": len(oracle[("operations",)][1].splitlines())}
                 (args.result_dir / f"native-{sys.platform}-O{opt}.json").write_text(json.dumps(report, indent=2) + "\n")
     return 0

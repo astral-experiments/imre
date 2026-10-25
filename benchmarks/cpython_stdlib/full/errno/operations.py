@@ -1,6 +1,6 @@
 """Observe the target errno table, its aliases, and the shared mutable dictionary."""
 import errno
-from errno import EDOM as DOMAIN, ERANGE, errorcode as reverse
+from errno import EDOM as DOMAIN, ERANGE, errorcode as reverse, __name__ as module_name
 
 def evaluate(value: int) -> int:
     print("evaluated")
@@ -25,6 +25,7 @@ def main() -> None:
     print(DOMAIN == errno.EDOM)
     print(ERANGE == errno.ERANGE)
     print(ERANGE + 1)
+    print(module_name)
     print(errno.__name__)
     print(errno.__package__)
     print(getattr(errno, "EDOM"))

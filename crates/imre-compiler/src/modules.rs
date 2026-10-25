@@ -8,7 +8,7 @@ use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
-use crate::analysis::{CheckedOverload, Session};
+use crate::analysis::{CheckedDiagnostic, Session};
 use crate::ir::PosixPathOperation;
 use crate::watch::FileSystem;
 
@@ -34,32 +34,6 @@ const INTRINSIC_MODULES: &[&str] = &[
     "_types",
 ];
 
-/// Preserve the spelling of a target errno symbol through import aliases.
-/// Values and even the presence of a symbol come from the target C headers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ErrnoName([u8; 32]);
-
-impl ErrnoName {
-    pub(crate) fn new(s: &str) -> Option<Self> {
-        if s.len() > 32
-            || !(s.starts_with('E') || s.starts_with("WSA"))
-            || !s
-                .bytes()
-                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
-        {
-            return None;
-        }
-        let mut value = [0; 32];
-        value[..s.len()].copy_from_slice(s.as_bytes());
-        Some(Self(value))
-    }
-    pub(crate) fn name(&self) -> &str {
-        let n = self.0.iter().position(|&v| v == 0).unwrap_or(self.0.len());
-        std::str::from_utf8(&self.0[..n]).unwrap()
-    }
-}
-
-/// A source definition's identity, independent of its eventual runtime representation.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct DefinitionId {
     pub(crate) module: ModuleId,
@@ -117,6 +91,7 @@ pub(crate) enum IntrinsicModule {
     Io,
     Gzip,
     Hashlib,
+    Base64,
     Zipfile,
     Re,
     Enum,
@@ -141,6 +116,9 @@ pub(crate) enum Intrinsic {
     AddLevelName,
     LevelNamesMapping,
     LevelMap { names: bool },
+    LogRecord,
+    MakeLogRecord,
+    LogRecordFlag(u8),
     BasicConfig,
     LogLevel(i64),
     Abc,
@@ -181,8 +159,8 @@ pub(crate) enum Intrinsic {
     SysException,
     Stdin,
     OsName,
-    ErrnoConstant(ErrnoName),
-    ErrnoErrorcode,
+    ErrnoAttribute,
+    ErrnoFrom(usize),
     ModuleType,
     GetSysconfigPath,
     OsPathExists,
@@ -207,6 +185,7 @@ pub(crate) enum Intrinsic {
     Iterator,
     UnsupportedOperation,
     GzipOpen,
+    UrlsafeB64encode,
     Sha256,
     HashNew,
     HashAvailable,
@@ -257,6 +236,10 @@ pub(crate) enum Intrinsic {
     Path,
     PurePath(crate::ir::PathFlavor),
     Which,
+    CopyFile,
+    ShutilError,
+    SameFileError,
+    SpecialFileError,
     TemporaryDirectory,
     Popen,
     SubprocessRun,
@@ -313,6 +296,7 @@ impl IntrinsicModule {
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
             "hashlib" => Some(Self::Hashlib),
+            "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
             "re" => Some(Self::Re),
             "enum" => Some(Self::Enum),
@@ -328,7 +312,7 @@ impl IntrinsicModule {
         }
     }
 
-    fn symbol(self, name: &str) -> Option<Binding> {
+    pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
@@ -349,6 +333,12 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
+            (Self::Logging, "LogRecord") => Intrinsic::LogRecord,
+            (Self::Logging, "logThreads") => Intrinsic::LogRecordFlag(1),
+            (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
+            (Self::Logging, "logMultiprocessing") => Intrinsic::LogRecordFlag(4),
+            (Self::Logging, "logAsyncioTasks") => Intrinsic::LogRecordFlag(8),
+            (Self::Logging, "makeLogRecord") => Intrinsic::MakeLogRecord,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
             (Self::Logging, "getLevelName") => Intrinsic::GetLevelName,
             (Self::Logging, "addLevelName") => Intrinsic::AddLevelName,
@@ -399,10 +389,7 @@ impl IntrinsicModule {
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
             (Self::Os, "name") => Intrinsic::OsName,
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
-            (Self::Errno, "errorcode") => Intrinsic::ErrnoErrorcode,
-            (Self::Errno, name) if ErrnoName::new(name).is_some() => {
-                Intrinsic::ErrnoConstant(ErrnoName::new(name).unwrap())
-            }
+            (Self::Errno, _) => Intrinsic::ErrnoAttribute,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
@@ -445,6 +432,7 @@ impl IntrinsicModule {
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
+            (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
             (Self::Hashlib, "algorithms_available") => Intrinsic::HashAvailable,
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
@@ -494,6 +482,10 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Shutil, "which") => Intrinsic::Which,
+            (Self::Shutil, "copyfile") => Intrinsic::CopyFile,
+            (Self::Shutil, "Error") => Intrinsic::ShutilError,
+            (Self::Shutil, "SameFileError") => Intrinsic::SameFileError,
+            (Self::Shutil, "SpecialFileError") => Intrinsic::SpecialFileError,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
             (Self::Subprocess, "Popen") => Intrinsic::Popen,
@@ -562,8 +554,7 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
-    checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
-    checked_dict_deletions: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -576,6 +567,7 @@ pub(crate) struct SourceGraph {
     /// Split literal prefixes at imports so allocations and package exports are
     /// available to the child at the original point in Python's initialization.
     initialization: Vec<(ModuleId, Range<usize>)>,
+    pub(crate) errno_names: Vec<String>,
 }
 
 impl SourceGraph {
@@ -683,18 +675,33 @@ impl SourceGraph {
     /// Record only this call's overload diagnostic. Nested arguments still get
     /// their own diagnostics, including calls with the same method name.
     pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
-        self.checked_calls.borrow_mut()[module].push(call);
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
     /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
     pub(crate) fn checked_dict_deletion(&self, module: ModuleId, target: TextRange) {
-        self.checked_dict_deletions.borrow_mut()[module].push(target);
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
+    }
+
+    pub(crate) fn checked_keywords(
+        &self,
+        module: ModuleId,
+        keywords: impl Iterator<Item = TextRange>,
+    ) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .extend(keywords.map(CheckedDiagnostic::Keyword));
+    }
+
+    /// Target headers decide whether an errno from-import succeeds or raises ImportError.
+    pub(crate) fn checked_platform_import(&self, module: ModuleId, alias: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::PlatformImport(alias));
     }
 
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
     pub(crate) fn diagnostic_scopes(
         &self,
-    ) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<CheckedOverload>>) {
+    ) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<CheckedDiagnostic>>) {
         let overloads: Vec<Vec<_>> = self
             .modules
             .iter()
@@ -722,19 +729,13 @@ impl SourceGraph {
                         };
                         (self.resolve(id, &decorator.expression)
                             == Some(Binding::Intrinsic(Intrinsic::ContextManager)))
-                        .then_some(CheckedOverload::Decorator(decorator.range()))
+                        .then_some(CheckedDiagnostic::Decorator(decorator.range()))
                     })
                     .chain({
-                        let mut calls = self.checked_calls.borrow()[id].clone();
-                        calls.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        calls.dedup();
-                        calls.into_iter().map(CheckedOverload::Call)
-                    })
-                    .chain({
-                        let mut targets = self.checked_dict_deletions.borrow()[id].clone();
-                        targets.sort_unstable_by_key(|r| (r.start(), r.end()));
-                        targets.dedup();
-                        targets.into_iter().map(CheckedOverload::DictDeletion)
+                        let mut scopes = self.checked_diagnostics.borrow()[id].clone();
+                        scopes.sort_unstable_by_key(|scope| scope.sort_key());
+                        scopes.dedup();
+                        scopes
                     })
                     .collect()
             })
@@ -745,11 +746,17 @@ impl SourceGraph {
         )
     }
 
-    /// The entry needs its own initializer when it declares globals for later definitions.
+    /// The entry must initialize stored globals and validate platform imports before the next module.
     pub(crate) fn initializers(&self) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
         self.initialization
             .iter()
-            .filter(|(id, _)| *id != self.entry || !self.modules[*id].entry_globals.is_empty())
+            .filter(|(id, segment)| {
+                let module = &self.modules[*id];
+                *id != self.entry
+                    || !module.entry_globals.is_empty()
+                    || (!segment.is_empty()
+                        && errno_import(&module.parsed.syntax().body[segment.end - 1]).is_some())
+            })
             .cloned()
     }
 
@@ -924,6 +931,7 @@ struct Loader<'a> {
     allow_imports: bool,
     reachable_only: bool,
     initialization: Vec<(ModuleId, Range<usize>)>,
+    pub(crate) errno_names: Vec<String>,
 }
 
 impl<'a> Loader<'a> {
@@ -961,6 +969,7 @@ impl<'a> Loader<'a> {
             allow_imports: true,
             reachable_only: false,
             initialization: Vec::new(),
+            errno_names: Vec::new(),
         })
     }
 
@@ -1043,8 +1052,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
-            checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
-            checked_dict_deletions: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -1057,6 +1065,7 @@ impl<'a> Loader<'a> {
             modules: self.modules,
             entry,
             initialization: self.initialization,
+            errno_names: self.errno_names,
         };
         graph.reachable = reachable_only.then(|| reachability::Reachable::collect(&graph));
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
@@ -1154,6 +1163,12 @@ impl<'a> Loader<'a> {
                     }
                     self.import(id, statement)
                         .map_err(|error| self.modules[id].error(statement, &error))?;
+                    if errno_import(statement).is_some() {
+                        // The target decides which forward symbols exist. A failed from-import
+                        // must precede the next imported module, even if its alias is unused.
+                        self.initialization.push((id, segment..index + 1));
+                        segment = index + 1;
+                    }
                 }
                 ast::Stmt::Expr(value)
                     if matches!(&*value.value, ast::Expr::StringLiteral(_)) && !executable => {}
@@ -1253,24 +1268,37 @@ impl<'a> Loader<'a> {
                     && let Some(module) = self.intrinsic_module(&name)?
                 {
                     for alias in &import.names {
-                        let binding = module
-                            .symbol(alias.name.as_str())
-                            .filter(|binding| {
-                                self.reachable_only
-                                    || !matches!(
-                                        binding,
-                                        Binding::Intrinsic(Intrinsic::Declaration(_))
-                                            | Binding::IntrinsicModule(
-                                                IntrinsicModule::Declaration(_)
-                                            )
+                        let binding = if module == IntrinsicModule::Errno {
+                            let name = alias.name.as_str();
+                            let slot = self
+                                .errno_names
+                                .iter()
+                                .position(|n| n == name)
+                                .unwrap_or_else(|| {
+                                    self.errno_names.push(name.to_owned());
+                                    self.errno_names.len() - 1
+                                });
+                            Binding::Intrinsic(Intrinsic::ErrnoFrom(slot))
+                        } else {
+                            module
+                                .symbol(alias.name.as_str())
+                                .filter(|binding| {
+                                    self.reachable_only
+                                        || !matches!(
+                                            binding,
+                                            Binding::Intrinsic(Intrinsic::Declaration(_))
+                                                | Binding::IntrinsicModule(
+                                                    IntrinsicModule::Declaration(_)
+                                                )
+                                        )
+                                })
+                                .ok_or_else(|| {
+                                    format!(
+                                        "unsupported sealed standard-library export {name}.{}",
+                                        alias.name
                                     )
-                            })
-                            .ok_or_else(|| {
-                                format!(
-                                    "unsupported sealed standard-library export {name}.{}",
-                                    alias.name
-                                )
-                            })?;
+                                })?
+                        };
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
@@ -1560,6 +1588,18 @@ impl<'a> Loader<'a> {
         }
         Ok(id)
     }
+}
+
+pub(crate) fn errno_import(statement: &ast::Stmt) -> Option<&ast::StmtImportFrom> {
+    let ast::Stmt::ImportFrom(import) = statement else {
+        return None;
+    };
+    (import.level == 0
+        && import
+            .module
+            .as_ref()
+            .is_some_and(|name| name.as_str() == "errno"))
+    .then_some(import)
 }
 
 /// Allow an identity check with a closed builtin raise before importing a dependency.

@@ -18,7 +18,9 @@
   },
   "controls": {
     "missing-code": "matched",
-    "missing-attribute": "matched"
+    "missing-attribute": "matched",
+    "unknown-unused-import": "matched",
+    "absent-target-unused-import": "matched"
   },
-  "registry_observations": 716
+  "registry_observations": 744
 }

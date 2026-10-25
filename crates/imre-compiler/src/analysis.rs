@@ -116,10 +116,13 @@ impl Session {
         let vendored = ty_vendored::file_system().clone();
         // CPython's POSIX which() accepts a byte search path independently of
         // the command's type. The cross-platform typeshed overloads omit it.
-        system.fs().write_file_all(
-            SystemPathBuf::from(root).join("shutil.pyi"),
-            "from os import PathLike\nfrom typing import TypeVar\n_S = TypeVar('_S', str, bytes)\ndef which(cmd: _S | PathLike[_S], mode: int = ..., path: str | bytes | PathLike[str] | None = ...) -> _S | None: ...\n",
-        ).map_err(|error| error.to_string())?;
+        system
+            .fs()
+            .write_file_all(
+                SystemPathBuf::from(root).join("shutil.pyi"),
+                include_str!("stubs/shutil.pyi"),
+            )
+            .map_err(|error| error.to_string())?;
         let mut settings = ProgramSettings::empty(&vendored);
         settings.python_version.version = ruff_python_ast::PythonVersion::PY314;
         let mut roots = vec![SystemPathBuf::from(root)];
@@ -368,7 +371,7 @@ impl Session {
     pub(crate) fn check_scopes(
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
@@ -379,7 +382,7 @@ impl Session {
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -410,19 +413,31 @@ struct CheckedFile<'db> {
     #[returns(copy)]
     file: File,
     skipped: Vec<TextRange>,
-    overloads: Vec<CheckedOverload>,
+    overloads: Vec<CheckedDiagnostic>,
 }
 
-/// The frontend validates context-manager decorators and the exact calls
-/// it lowers with a signature different from typeshed's overloads.
+/// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum CheckedOverload {
+pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
     DictDeletion(TextRange),
+    PlatformImport(TextRange),
+    Keyword(TextRange),
 }
 
-impl CheckedOverload {
+impl CheckedDiagnostic {
+    pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
+        let (range, family) = match self {
+            Self::Decorator(r) => (r, 0),
+            Self::Call(r) => (r, 1),
+            Self::Keyword(r) => (r, 2),
+            Self::DictDeletion(r) => (r, 3),
+            Self::PlatformImport(r) => (r, 4),
+        };
+        (range.start(), range.end(), family)
+    }
+
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
             Self::Decorator(decorator) => {
@@ -430,6 +445,8 @@ impl CheckedOverload {
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
+            Self::PlatformImport(alias) => diagnostic == "unresolved-import" && alias == range,
+            Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
         }
     }
 }
@@ -573,7 +590,7 @@ impl AnalysisCache {
         fresh: &mut Session,
         inputs: &crate::SourceInputs,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         if let Some(cached) = &mut self.diagnostics
             && cached.same_files(fresh, inputs)

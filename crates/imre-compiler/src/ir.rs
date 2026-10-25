@@ -40,8 +40,10 @@ pub(crate) enum Type {
     Exception,
     /// An exception object known to own the given fixed payload layout.
     NamedException(usize),
-    /// An owned view of the immutable None, bool, int or str in SystemExit.code.
-    ExitCode,
+    /// A retained value projected from a structured builtin exception.
+    ExceptionField,
+    /// A builtin ImportError (including its ModuleNotFoundError and marker subclasses).
+    ImportException,
     /// A proved catch-only timeout with readonly float and nullable bytes fields.
     TimeoutExpired,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
@@ -54,7 +56,7 @@ pub(crate) enum Type {
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
     /// A synchronous child with statically known captured stream types.
-    Popen(ProcessCapture),
+    Popen(ProcessCapture, bool),
     /// Async process handle, with bits for the captured stdout and stderr slots.
     AsyncProcess(u8),
     Coroutine(usize),
@@ -70,6 +72,7 @@ pub(crate) enum Type {
     NativeModule,
     ModuleNamespace,
     ModuleMember,
+    LogRecord,
     Logger,
     TimedFileHandler,
     ClockTime,
@@ -160,7 +163,8 @@ impl std::fmt::Display for Type {
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception | Self::NamedException(_) => "Exception",
-            Self::ExitCode => "SystemExit.code",
+            Self::ExceptionField => "exception field",
+            Self::ImportException => "ImportError",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
@@ -170,7 +174,7 @@ impl std::fmt::Display for Type {
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
             Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
-            Self::Popen(_) => "subprocess.Popen",
+            Self::Popen(..) => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
             Self::EventLoop => "asyncio.AbstractEventLoop",
@@ -183,6 +187,7 @@ impl std::fmt::Display for Type {
             Self::NativeModule => "builtin module",
             Self::ModuleNamespace => "module namespace",
             Self::ModuleMember => "module attribute",
+            Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
@@ -519,6 +524,7 @@ pub(crate) enum Builtin {
     WallTime,
     Logging(LogOperation),
     Timed(TimedOperation),
+    LogRecord(LogRecordOperation),
     Input,
     Chr,
     Int,
@@ -539,6 +545,15 @@ pub(crate) enum Builtin {
     ExceptionRecord,
     /// A single non-string Python argument, retained for str/repr.
     ExceptionArgument(u32),
+    ImportErrorNew {
+        kind: u32,
+        fields: [Option<usize>; 3],
+    },
+    ImportErrorField(u32),
+    ImportErrorReset,
+    ExceptionFieldRepr,
+    ExceptionFieldLen,
+    ExceptionFieldIndex,
     ExceptionRepr,
     /// Python representation of a value with a fully known storage shape.
     Repr,
@@ -621,6 +636,8 @@ pub(crate) enum Builtin {
     BytesIter,
     Encode,
     Decode,
+    DecodeAscii,
+    UrlsafeB64encode,
     Sha256Hex,
     Sha256New,
     HashNew,
@@ -741,6 +758,7 @@ pub(crate) enum Builtin {
     TextFlush,
     TextClose,
     TextClosed,
+    FileFileno,
     DictGet,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
@@ -786,6 +804,7 @@ pub(crate) enum Builtin {
     SetDiscard,
     SetIter,
     ExceptionMessage,
+    JsonErrorField(u32),
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
     ExceptionWithCause,
     ExceptionCause,
@@ -860,6 +879,7 @@ pub(crate) enum RegexCapture {
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
+    Lower,
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -905,6 +925,10 @@ pub(crate) enum PathOperation {
     ReadBytes,
     WriteText,
     WriteBytes,
+    WriteTypeError,
+    WriteUnion {
+        binary: bool,
+    },
     Mkdir,
     Unlink,
     Rmdir,
@@ -959,6 +983,19 @@ pub(crate) enum TimedOperation {
     FilesToDelete,
     ShouldRollover,
     DoRollover,
+}
+
+/// Operations on a record with individually owned, named Python fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LogRecordOperation {
+    New,
+    Put,
+    Update,
+    Read,
+    Message,
+    Repr,
+    Flag,
+    SetFlag,
 }
 
 /// Operations on the native logging registry and its named loggers.
@@ -1017,10 +1054,14 @@ pub(crate) enum ProcessOperation {
     },
     PopenPid,
     PopenArgs,
+    PopenPipe(u8),
     PopenStatus {
         poll: bool,
     },
     PopenWait,
+    PopenCommunicate {
+        text: bool,
+    },
     PopenExit,
     PopenSignal,
     AsyncSpawn {
@@ -1077,6 +1118,7 @@ pub(crate) enum ProcessOperation {
     EnvironGet,
     GetCwd,
     Which,
+    CopyFile,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,
@@ -1115,7 +1157,10 @@ impl InstanceType {
             Self::Tuple => matches!(ty, Type::Tuple(_)),
             Self::Exception(_) => matches!(
                 ty,
-                Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+                Type::Exception
+                    | Type::ImportException
+                    | Type::TimeoutExpired
+                    | Type::NamedException(_)
             ),
         }
     }

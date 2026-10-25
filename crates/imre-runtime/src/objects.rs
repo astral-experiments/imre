@@ -65,6 +65,7 @@ enum Storage {
     ModuleNamespace(Rc<errno::Registry>),
     ModuleMember(errno::Member),
     Exception(exceptions::Exception),
+    ExceptionField(OwnedWord),
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),
@@ -87,6 +88,7 @@ enum Storage {
     Logger(Rc<Str>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
+    LogRecord(Box<logging::record::Record>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
 }

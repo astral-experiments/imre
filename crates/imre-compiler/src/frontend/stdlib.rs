@@ -653,7 +653,10 @@ impl Checker<'_> {
                 ),
             });
         }
-        if matches!(value.ty, Type::Exception | Type::NamedException(_)) {
+        if matches!(
+            value.ty,
+            Type::Exception | Type::ImportException | Type::NamedException(_)
+        ) {
             let op = if field.conversion == ast::ConversionFlag::Repr {
                 Builtin::ExceptionRepr
             } else {
@@ -668,6 +671,12 @@ impl Checker<'_> {
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(_))
         {
             return self.record_text(value, field);
+        }
+        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ExceptionField {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::ExceptionFieldRepr, vec![value]),
+            });
         }
         if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Document(_)) {
             return Ok(documents::op(ir::DocumentOp::Repr, Type::Str, vec![value]));
@@ -735,7 +744,8 @@ impl Checker<'_> {
                 | Type::Bytes
                 | Type::None
                 | Type::Exception
-                | Type::ExitCode
+                | Type::ExceptionField
+                | Type::ImportException
                 | Type::TimeoutExpired
         ) {
             return Err(error(

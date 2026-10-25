@@ -1,7 +1,6 @@
 //! Typed projections of a sealed native module; register values are read from the target.
 use super::*;
 use crate::ir::ErrnoOperation as Op;
-use crate::modules::ErrnoName;
 
 pub(super) fn op(op: Op, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
@@ -14,6 +13,19 @@ pub(super) fn module() -> Expr {
 }
 
 impl Checker<'_> {
+    /// Build the same structured exception as Python's from-import machinery.
+    pub(super) fn check_errno_import(&self, name: &str) -> Statement {
+        let condition = op(Op::Has, Type::Bool, vec![module(), unpacking::string(name)]);
+        let message = format!("cannot import name '{name}' from 'errno' (unknown location)");
+        let err = self.import_error_value(
+            41,
+            vec![unpacking::string(message)],
+            vec![unpacking::string("errno"), unpacking::string(name)],
+            [Some(1), None, Some(2)],
+        );
+        Statement::If(condition, Vec::new(), vec![Statement::Raise(Some(err))])
+    }
+
     pub(super) fn errno_attribute(&self, owner: Expr, name: &str) -> Expr {
         match name {
             "__dict__" => op(Op::Namespace, Type::ModuleNamespace, vec![owner]),
@@ -25,7 +37,11 @@ impl Checker<'_> {
             "__name__" | "__doc__" | "__package__" => {
                 op(Op::Text, Type::Str, vec![owner, unpacking::string(name)])
             }
-            name if ErrnoName::new(name).is_some() => {
+            name if (name.starts_with('E') || name.starts_with("WSA"))
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_') =>
+            {
                 op(Op::Number, Type::Int, vec![owner, unpacking::string(name)])
             }
             _ => op(
