@@ -34,6 +34,7 @@ mod doctest;
 mod documents;
 mod enums;
 mod errno;
+mod exception_forwarders;
 mod expandtabs;
 mod expansions;
 mod fixed_tuples;
@@ -101,6 +102,7 @@ mod warnings;
 mod zip_sums;
 mod zipfile;
 use assignments::LocalState;
+pub(crate) use calls::scalar_literal;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
 use module_values::{Initialization, ModuleValues};
@@ -199,7 +201,9 @@ impl ClassInfo {
                     .fields
                     .iter()
                     .map(|field| {
-                        if field.name == crate::classes::EXCEPTION_ARGS_SLOT {
+                        if field.name == crate::classes::EXCEPTION_ARGS_SLOT
+                            || class.forwarder.is_some()
+                        {
                             return Ok(Type::ObjectValue);
                         }
                         annotation_in_class(
@@ -651,6 +655,9 @@ pub(crate) fn lower_with_owners(
         }
         let mut instance_signatures = HashMap::<_, Signature>::new();
         for (index, method) in class.methods.iter().enumerate() {
+            if class.forwarder.is_some() && method.name.as_str() == "__init__" {
+                continue;
+            }
             let module_id = class.method_origins[index].module;
             let module = &graph.modules[module_id];
             let context = records::MethodContext {
@@ -2005,6 +2012,7 @@ struct Checker<'a> {
     super_method_base: Option<usize>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
+    exception_formatter: Option<bool>,
     initializing: bool,
 }
 
@@ -2066,6 +2074,7 @@ impl<'a> Checker<'a> {
             super_method_base: None,
             iterator_source: None,
             super_initializer: None,
+            exception_formatter: None,
             initializing: false,
         }
     }
@@ -2270,7 +2279,7 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
             });
         }
-        if expected == Type::ObjectValue && self.boxable_value(value.ty) {
+        if expected == Type::ObjectValue && self.object_value_supported(value.ty) {
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::BoxValue, vec![value]),
@@ -2869,8 +2878,8 @@ impl<'a> Checker<'a> {
     /// Captures the receiver before ordered bounds. Nullable integer operands
     /// preserve omitted bounds without allocating a general slice object.
     fn slice(&mut self, receiver: Expr, slice: &ast::ExprSlice) -> Result<Expr, String> {
-        if let Some(fields) = self.types.struct_sequence_fields(receiver.ty) {
-            return self.struct_sequence_slice(receiver, &fields, slice);
+        if let Some(fields) = self.types.library_tuple_fields(receiver.ty) {
+            return self.fixed_tuple_slice(receiver, &fields, slice);
         }
         if !matches!(receiver.ty, Type::Str | Type::Bytes)
             && self.types.element(receiver.ty).is_none()
@@ -4123,7 +4132,20 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::Return(return_) if !self.module_scope => {
                 let value = if let Some(value) = &return_.value {
-                    if self.inferred_returns.is_some() {
+                    if let Some(repr) = self.exception_formatter {
+                        let value = self.expr(value)?;
+                        if value.ty == Type::ObjectValue {
+                            Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Builtin(
+                                    Builtin::ExceptionFormatterResult(repr),
+                                    vec![value],
+                                ),
+                            }
+                        } else {
+                            self.coerce(value, Type::Str, statement)?
+                        }
+                    } else if self.inferred_returns.is_some() {
                         self.expr(value)?
                     } else {
                         self.expr_expected(value, self.returns)?
@@ -5565,6 +5587,16 @@ impl<'a> Checker<'a> {
                                 Builtin::Document(ir::DocumentOp::IsNull),
                                 vec![value],
                             ),
+                            _ if value.ty == Type::ObjectValue => ExprKind::Builtin(
+                                Builtin::ExceptionFieldIdentity { reversed: false },
+                                vec![
+                                    value,
+                                    Expr {
+                                        ty: Type::None,
+                                        kind: ExprKind::None,
+                                    },
+                                ],
+                            ),
                             _ => ExprKind::Builtin(Builtin::IsNone, vec![value]),
                         },
                     };
@@ -5685,16 +5717,15 @@ impl<'a> Checker<'a> {
                 if values.iter().any(|value| value.ty == Type::ObjectValue) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                         || !values.iter().all(|v| {
-                            v.ty == Type::ObjectValue
-                                || v.ty == Type::ListInt
-                                || self.boxable_value(v.ty)
+                            self.forwarding_value_supported(v.ty)
+                                || self.object_value_supported(v.ty)
                                 || self.types.mapping(v.ty) == Some((Type::Int, Type::Str))
                         })
                     {
                         return Err(error(
                             self.source,
                             expression,
-                            "object values support equality with concrete scalars, tuples or integer-to-string dictionaries",
+                            "object values support equality with scalars, tuples, typed lists, eligible dataclasses, or integer-to-string dictionaries",
                         ));
                     }
                     let reversed = values[0].ty != Type::ObjectValue;
@@ -5702,14 +5733,16 @@ impl<'a> Checker<'a> {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::SystemExitCodeEqual { reversed }, values),
                     };
-                    return Ok(if compare.ops[0] == ast::CmpOp::NotEq {
-                        Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Not(Box::new(eq)),
-                        }
-                    } else {
-                        eq
-                    });
+                    return Ok(
+                        if matches!(compare.ops[0], ast::CmpOp::NotEq | ast::CmpOp::IsNot) {
+                            Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Not(Box::new(eq)),
+                            }
+                        } else {
+                            eq
+                        },
+                    );
                 }
                 // Python StrEnum compares by its underlying str value, even
                 // against raw str or a member of another enum. A same-class
@@ -5838,6 +5871,10 @@ impl<'a> Checker<'a> {
                 }
                 if list.ty == Type::ObjectValue {
                     let index = self.expr_expected(&subscript.slice, Type::Int)?;
+                    // The runtime dispatches this exact integer access to the value's
+                    // Python protocol and raises TypeError when it cannot be indexed.
+                    self.graph
+                        .checked_index_read(self.module, subscript.range());
                     return Ok(Expr {
                         ty: Type::ObjectValue,
                         kind: ExprKind::Builtin(Builtin::ExceptionFieldIndex, vec![list, index]),
@@ -5916,9 +5953,10 @@ impl<'a> Checker<'a> {
                 self.expect(Type::Int, index.ty, expression)?;
                 if let ExprKind::Field(tuple, _) = &list.kind
                     && self.types.fields(tuple.ty).is_some()
+                    && self.graph.session.has_tuple_spreads(self.module)
                 {
                     self.graph
-                        .checked_tuple_list_read(self.module, subscript.range());
+                        .checked_index_read(self.module, subscript.range());
                 }
                 (
                     element,
@@ -5950,9 +5988,7 @@ impl<'a> Checker<'a> {
                 if let Some(flag) = self.command_flag(attribute)? {
                     return Ok(flag);
                 }
-                if let Some(Binding::Definition(definition)) = self.resolve(&attribute.value)
-                    && let Some(declaration) = self.types.namedtuple(definition)
-                {
+                if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
                     return self.namedtuple_class_attribute(attribute, &declaration);
                 }
                 if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
@@ -6037,7 +6073,8 @@ impl<'a> Checker<'a> {
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
-                    let field = self.classes.fields[class].len() - 1;
+                    let field =
+                        self.classes.declarations.definitions[class].exception_argument_slot();
                     if self.exception_tuple_slot(class) {
                         return Ok(Expr {
                             ty: Type::ObjectValue,
@@ -6197,6 +6234,7 @@ impl<'a> Checker<'a> {
                                 }),
                             )
                         }
+                        "args" => (Type::ObjectValue, Builtin::ExceptionArgs),
                         "code" => (Type::ObjectValue, Builtin::SystemExitCode),
                         "msg" => (Type::Str, Builtin::JsonErrorField(0)),
                         "doc" => (Type::Str, Builtin::JsonErrorField(1)),
@@ -6476,6 +6514,49 @@ impl<'a> Checker<'a> {
         self.call_with_key_view(call, None, receiver)
     }
 
+    /// Evaluate the receiver, key and default before the mapping probes its table.
+    fn dict_setdefault(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Expr,
+        args: &[ast::Expr],
+    ) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let Some((key_type, value_type)) = self.types.mapping(receiver.ty) else {
+            return Err(error(
+                self.source,
+                call,
+                "dict.setdefault requires a dictionary",
+            ));
+        };
+        let [key, rest @ ..] = args else {
+            return Err(error(self.source, call, "dict.setdefault requires a key"));
+        };
+        let key = self.expr_expected(key, key_type)?;
+        let value = match rest {
+            [default] => self.expr_expected(default, value_type)?,
+            [] => self.coerce(
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+                value_type,
+                call,
+            )?,
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "dict.setdefault takes at most two arguments",
+                ));
+            }
+        };
+        Ok(Expr {
+            ty: value_type,
+            kind: ExprKind::Builtin(Builtin::DictSetDefault, vec![receiver, key, value]),
+        })
+    }
+
     /// A direct `dict.keys()` operand roots the mapping until the operation.
     /// Other methods called `keys` still use ordinary class/module dispatch.
     fn union_operand(&mut self, source: &ast::Expr) -> Result<(Expr, Option<Type>), String> {
@@ -6500,10 +6581,8 @@ impl<'a> Checker<'a> {
         key_view: Option<&mut bool>,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
-        if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
-            && let Some(declaration) = self.types.namedtuple(definition)
-        {
-            return self.namedtuple_call(definition, &declaration, call);
+        if let Some((origin, declaration)) = self.namedtuple_factory(&call.func) {
+            return self.namedtuple_call(origin, &declaration, call);
         }
         if let Some((method, name)) = crate::classes::super_method(call)
             && self.unshadowed_builtin(name, "super")
@@ -6537,9 +6616,10 @@ impl<'a> Checker<'a> {
             return self.counter_unbound_update(call, op, method.attr.as_str());
         }
         if let ast::Expr::Attribute(method) = &*call.func
-            && method.attr.as_str() == "clear"
-            && (self.unshadowed_builtin(&method.value, "list")
-                || self.unshadowed_builtin(&method.value, "dict")
+            && matches!(method.attr.as_str(), "clear" | "setdefault")
+            && (self.unshadowed_builtin(&method.value, "dict")
+                || (method.attr.as_str() == "clear"
+                    && self.unshadowed_builtin(&method.value, "list"))
                 || matches!(
                     self.resolve(&method.value),
                     Some(Binding::Intrinsic(
@@ -6548,6 +6628,17 @@ impl<'a> Checker<'a> {
                 ))
         {
             self.reject_builtin_keywords(call)?;
+            if method.attr.as_str() == "setdefault" {
+                let Some((owner, args)) = call.arguments.args.split_first() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "unbound dict.setdefault requires a dictionary",
+                    ));
+                };
+                let receiver = self.expr(owner)?;
+                return self.dict_setdefault(call, receiver, args);
+            }
             let [owner] = call.arguments.args.as_ref() else {
                 return Err(error(
                     self.source,
@@ -7524,6 +7615,9 @@ impl<'a> Checker<'a> {
                         ty: receiver.ty,
                         kind: ExprKind::Builtin(Builtin::DictCopy, vec![receiver]),
                     });
+                }
+                if attribute.attr.as_str() == "setdefault" {
+                    return self.dict_setdefault(call, receiver, &call.arguments.args);
                 }
                 if attribute.attr.as_str() == "clear"
                     && call.arguments.args.is_empty()

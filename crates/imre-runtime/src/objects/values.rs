@@ -1,6 +1,6 @@
 //! Generated record operations recurse through the existing concrete word kinds.
-//! No operation calls user code or mutates a container; acyclic checked types
-//! bound recursion and keep every borrowed child rooted by its original owner.
+//! Structural traversal uses explicit cursors. Exception repr may call Python;
+//! it roots outstanding cursors before releasing control to the callback.
 
 use std::cmp::Ordering;
 use std::fmt::Write;
@@ -111,7 +111,7 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
     let Some(semantics) = (unsafe { left_layout.semantics.as_ref() }) else {
         return Comparison::Done(false);
     };
-    if !std::ptr::eq(left_layout, right_layout) {
+    if !std::ptr::eq(left_layout, right_layout) && !left_layout.same_class(right_layout) {
         // Named tuples compare structurally with other tuple layouts. Both
         // descriptors must agree on how to read every word before traversing.
         // SAFETY: the immutable descriptors cover each initialized field.
@@ -247,7 +247,7 @@ pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Res
                 resume,
             } => {
                 if let Some(position) = resume {
-                    pending.try_reserve(1).map_err(|_| Error::allocation())?;
+                    pending.try_reserve(1).map_err(|_| Error::memory_error())?;
                     pending.push((left, right, kind, position));
                 }
                 current = (child_left, child_right, child_kind, 0);
@@ -340,6 +340,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::ModuleMember(left), Storage::ModuleMember(right)) => {
+                    Comparison::Done(left.equal_member(right))
+                }
                 (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
                     super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
                 ),
@@ -389,14 +392,27 @@ pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
 
 /// # Safety
 /// The word and all descendants are rooted with the supplied representation;
-/// no runtime mutation or user callback can overlap formatting.
+/// an exception formatter may reenter after the traversal roots its pending cursors.
 pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind) {
-    let mut pending = Vec::new();
+    // SAFETY: callers supply initialized, rooted values of their declared representations.
+    unsafe { write_repr_with(output, word, kind, false) }
+}
+
+/// Format a rooted exception argument in display order, checking only digits actually emitted.
+pub(super) unsafe fn write_checked_repr(output: &mut String, word: usize, kind: WordKind) {
+    // SAFETY: the caller roots this value and checks pending state after formatting.
+    unsafe { write_repr_with(output, word, kind, true) }
+}
+
+type ReprStack = smallvec::SmallVec<[ReprTask; 4]>;
+
+unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, check_digits: bool) {
+    let mut pending = ReprStack::new();
+    let mut callback_roots = std::collections::HashMap::new();
     let mut current = Some(ReprTask::Word(word, kind));
     while let Some(task) = current.take().or_else(|| pending.pop()) {
-        // SAFETY: the root owns the whole immutable graph until formatting
-        // returns. Tasks retain only copied words and positions, never storage
-        // references or buffer addresses.
+        // SAFETY: tasks store values and positions, never references to mutable
+        // storage. A callback roots every pending value before it may mutate a parent.
         current = unsafe {
             match task {
                 ReprTask::Word(word, kind) => match kind.raw() & !NULLABLE {
@@ -407,13 +423,24 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         Some(ReprTask::Word(member, kind))
                     }
                     _ => {
-                        write_scalar(output, word, kind);
+                        if !write_scalar(output, word, kind, check_digits) {
+                            return;
+                        }
                         None
                     }
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
                         Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
+                        Storage::ModuleMember(member) => {
+                            let text = member.text(1);
+                            if !text.is_null() {
+                                // SAFETY: the metadata formatter returns an independently owned string.
+                                output.push_str(Rc::from_raw(text).as_str());
+                            }
+                            None
+                        }
+                        Storage::Exception(_) => Some(ReprTask::Exception(owner)),
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
@@ -459,6 +486,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                                         0,
                                         0,
                                         &mut pending,
+                                        check_digits,
                                     );
                                     debug_assert!(next.is_none());
                                 }
@@ -478,7 +506,9 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                                     pending.push(ReprTask::Object(owner, index + 1));
                                     return Some(ReprTask::Word(value, values.kind));
                                 }
-                                write_scalar(output, value, values.kind);
+                                if !write_scalar(output, value, values.kind, check_digits) {
+                                    return Some(ReprTask::Stop);
+                                }
                             }
                             output.push(']');
                             None
@@ -543,6 +573,29 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         _ => fail("SystemError", "unsupported resource representation"),
                     })
                 }
+                ReprTask::Exception(owner) => {
+                    // A custom repr can remove its own reference or a pending container.
+                    // Retain the cursors outside every StorageCell borrow. Formatting
+                    // ordinary values needs no extra owners.
+                    for task in &pending {
+                        if let Some((word, kind)) = task.root() {
+                            callback_roots
+                                .entry((word, kind.raw()))
+                                .or_insert_with(|| kind.acquire(word));
+                        }
+                    }
+                    let exception: Rc<Object> = super::acquire_rc(owner as usize);
+                    let text = super::exceptions::imre_exception_repr(Rc::as_ptr(&exception));
+                    if text.is_null() {
+                        return;
+                    }
+                    let text = Rc::from_raw(text);
+                    if super::exceptions::imre_error_pending() != 0 {
+                        return;
+                    }
+                    output.push_str(&text);
+                    None
+                }
                 ReprTask::Record(payload, position, written) => fields_repr(
                     output,
                     payload,
@@ -550,7 +603,9 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                     position,
                     written,
                     &mut pending,
+                    check_digits,
                 ),
+                ReprTask::Stop => return,
                 ReprTask::KeySeparator => {
                     output.push_str(": ");
                     None
@@ -561,10 +616,25 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
 }
 
 enum ReprTask {
+    Stop,
     Word(usize, WordKind),
     Object(*const Object, usize),
+    Exception(*const Object),
     Record(*const usize, usize, usize),
     KeySeparator,
+}
+
+impl ReprTask {
+    fn root(&self) -> Option<(usize, WordKind)> {
+        match *self {
+            Self::Word(word, kind) => Some((word, kind)),
+            Self::Object(owner, _) | Self::Exception(owner) => {
+                Some((owner as usize, WordKind::new(5)))
+            }
+            Self::Record(record, _, _) => Some((record as usize, WordKind::new(6))),
+            Self::KeySeparator | Self::Stop => None,
+        }
+    }
 }
 
 pub(super) struct ReprEntry {
@@ -576,7 +646,7 @@ pub(super) struct ReprEntry {
 fn format_entry(
     owner: *const Object,
     entry: Option<ReprEntry>,
-    pending: &mut Vec<ReprTask>,
+    pending: &mut ReprStack,
 ) -> Option<ReprTask> {
     let entry = entry?;
     pending.push(ReprTask::Object(owner, entry.next));
@@ -589,11 +659,16 @@ fn format_entry(
 
 /// # Safety
 /// The rooted word has its declared scalar, integer-list, or nullable representation.
-unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
+unsafe fn write_scalar(
+    output: &mut String,
+    word: usize,
+    kind: WordKind,
+    check_digits: bool,
+) -> bool {
     let raw = kind.raw();
     if raw & NULLABLE != 0 && word == 0 {
         output.push_str("None");
-        return;
+        return true;
     }
     // SAFETY: each branch borrows only its exact immutable scalar or container.
     unsafe {
@@ -611,20 +686,37 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
                 if let Some(value) = value.as_small() {
                     write!(output, "{value}").unwrap();
                 } else {
-                    write!(output, "{}", value.big()).unwrap();
+                    let value = value.big();
+                    if check_digits {
+                        static LIMIT: std::sync::LazyLock<num_bigint::BigUint> =
+                            std::sync::LazyLock::new(|| num_bigint::BigUint::from(10u8).pow(4300));
+                        if value.magnitude() >= &*LIMIT {
+                            super::exceptions::Error::new(super::exceptions::Kind::ValueError,
+                                "Exceeds the limit (4300 digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit").raise();
+                            return false;
+                        }
+                    }
+                    write!(output, "{value}").unwrap();
                 }
             }
             3 => super::exceptions::push_string_repr(&*(word as *const Str), output),
-            4 => (&*(word as *const List)).0.with(|values| {
-                output.push('[');
-                for (index, value) in values.iter().enumerate() {
-                    if index != 0 {
-                        output.push_str(", ");
+            4 => {
+                if !(&*(word as *const List)).0.with(|values| {
+                    output.push('[');
+                    for (index, value) in values.iter().enumerate() {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        if !write_scalar(output, value.0, WordKind::new(2), check_digits) {
+                            return false;
+                        }
                     }
-                    write_scalar(output, value.0, WordKind::new(2));
+                    output.push(']');
+                    true
+                }) {
+                    return false;
                 }
-                output.push(']');
-            }),
+            }
             7 => {
                 let value = if raw & NULLABLE != 0 {
                     *(word as *const f64)
@@ -637,6 +729,7 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
             _ => unreachable!("WordKind validates concrete representations"),
         }
     }
+    true
 }
 
 /// The compiler emits these bytes from already validated source identifiers.
@@ -651,7 +744,8 @@ unsafe fn fields_repr(
     layout: &super::records::RecordDescriptor,
     position: usize,
     mut written: usize,
-    pending: &mut Vec<ReprTask>,
+    pending: &mut ReprStack,
+    check_digits: bool,
 ) -> Option<ReprTask> {
     // SAFETY: public record representations always have static semantic metadata.
     let semantics = unsafe { layout.semantics.as_ref() }
@@ -697,7 +791,9 @@ unsafe fn fields_repr(
                 pending.push(ReprTask::Record(payload, index + 1, written));
                 return Some(ReprTask::Word(word, kind));
             }
-            write_scalar(output, word, kind);
+            if !write_scalar(output, word, kind, check_digits) {
+                return Some(ReprTask::Stop);
+            }
         }
         if plain_tuple && written == 1 {
             output.push(',');

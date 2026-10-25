@@ -679,6 +679,9 @@ pub(crate) enum Builtin {
     SystemExitCodeEqual {
         reversed: bool,
     },
+    ExceptionFieldIdentity {
+        reversed: bool,
+    },
     /// Evaluates and roots all arguments, then raises the last (an exception).
     RaiseException,
     WallTime,
@@ -726,8 +729,21 @@ pub(crate) enum Builtin {
     ImportErrorReset,
     ImportErrorRejectReset,
     BoxValue,
+    ObjectRecordProject(usize),
+    ObjectRecordIdentity {
+        class: usize,
+        reversed: bool,
+    },
     MappingObjectGet,
     ExceptionTupleView,
+    ExceptionKeywordSuggestion,
+    /// A new, completely initialized record for a proven forwarding constructor.
+    ExceptionRecordFields,
+    /// Check the return type of __str__ or __repr__ before crossing the formatter ABI.
+    ExceptionFormatterResult(bool),
+    ExceptionArgs,
+    ExceptionTupleIdentity,
+    SystemExitFromTuple,
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,
@@ -999,6 +1015,7 @@ pub(crate) enum Builtin {
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
     DequeNew,
+    DequeReset,
     DequeAppend {
         left: bool,
         extending: bool,
@@ -1045,6 +1062,7 @@ pub(crate) enum Builtin {
     /// Reads immutable bytes already proved valid by BytesValidateUtf8.
     DictGatherBytesInt,
     DictGetDefault,
+    DictSetDefault,
     /// The stored value type determines optional promotion on successful lookup.
     /// A third argument, when present, already has the flattened result type.
     DictTryGet(Type),

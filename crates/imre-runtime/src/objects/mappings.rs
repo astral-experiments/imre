@@ -411,6 +411,18 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         Ok(None)
     }
 
+    /// Probe an exact rooted key once. Only a miss acquires the table's key owner.
+    unsafe fn setdefault(&mut self, word: usize, default: V) -> Result<(V, bool), Error> {
+        // SAFETY: the caller roots an exact key of this table's representation.
+        let key = unsafe { K::borrow(word) };
+        let hash = HASHER.hash_one(&*key);
+        if let Some(index) = self.position(hash, &*key) {
+            return Ok((self.entries[index].as_ref().unwrap().value, false));
+        }
+        self.insert_absent(hash, (*key).clone(), default)?;
+        Ok((default, true))
+    }
+
     /// Transfers the removed key and value so they can drop outside the mutation.
     fn remove(&mut self, key: &K) -> Result<Option<Entry<K, V>>, Error> {
         let hash = key.try_hash()?;
@@ -910,8 +922,8 @@ impl Mapping {
         }
     }
 
-    /// Subscribe with a dynamic format-field key, preserving the mapping's missing-key policy.
-    pub(super) fn logging_item(&mut self, key: &OwnedWord) -> Result<Option<OwnedWord>, Error> {
+    /// Subscribe with a dynamically represented key, preserving the mapping's missing-key policy.
+    pub(super) fn subscript_value(&mut self, key: &OwnedWord) -> Result<Option<OwnedWord>, Error> {
         if key.kind.raw() != self.tables.key_kind() {
             return Ok(matches!(self.missing, Missing::Zero).then(|| {
                 // SAFETY: a Counter has integer values and zero is immediate.
@@ -1451,6 +1463,31 @@ impl Storage {
             Self::Dictionary(value) => value,
             _ => fail("SystemError", "expected a dictionary object"),
         }
+    }
+    /// Length of a mapping or set retained through a boxed Python value.
+    pub(super) fn mapping_or_set_len(&self) -> Option<usize> {
+        match self {
+            Self::Dictionary(mapping) => Some(mapping.tables.len()),
+            Self::Set(set) => Some(set.tables.len()),
+            _ => None,
+        }
+    }
+
+    /// Subscribe with a rooted Python int without interpreting it as a different table key kind.
+    pub(super) unsafe fn integer_subscript(
+        &mut self,
+        key: usize,
+    ) -> Option<Result<OwnedWord, Error>> {
+        let Self::Dictionary(mapping) = self else {
+            return None;
+        };
+        // SAFETY: the caller keeps its native integer alive until the boxed key acquires it.
+        let key = unsafe { WordKind::new(2).acquire(key) };
+        Some(
+            mapping
+                .subscript_value(&key)
+                .and_then(|item| item.ok_or_else(|| Error::key(key))),
+        )
     }
     pub(super) fn dictionary_mut(&mut self) -> &mut Mapping {
         match self {
@@ -2100,6 +2137,35 @@ pub unsafe extern "C" fn imre_dict_get_default(
     // SAFETY: the eager default remains rooted and has this exact value kind.
     unsafe { kind.acquire(default) }.into_word()
 }
+
+/// Return the stored value or insert the already evaluated default, bypassing
+/// the receiver's missing-key hook. Only a new entry changes iteration order.
+///
+/// # Safety
+/// The mapping and both argument words are rooted with their exact declared kinds.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_setdefault(
+    value: *const Object,
+    key: usize,
+    default: usize,
+) -> usize {
+    // SAFETY: all inputs remain rooted throughout the non-reentrant lookup and
+    // insertion. The table retains its own value and the caller receives another owner.
+    let result = unsafe {
+        object(value).0.with_mut(|s| {
+            let mapping = s.dictionary_mut();
+            let (word, inserted) =
+                table!(&mut mapping.tables, table => table.setdefault(key, default))?;
+            if inserted {
+                mapping.value_kind.acquire(word).into_word();
+                mapping.update_ascii_int(key, word);
+            }
+            Ok(mapping.value_kind.acquire(word).into_word())
+        })
+    };
+    crate::finish(result, 0)
+}
+
 /// # Safety
 /// Inputs match this dictionary's concrete types and preserve heap acyclicity.
 /// Acquisition precedes mutation, including replacement of the sole stored owner.

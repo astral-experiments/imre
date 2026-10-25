@@ -59,33 +59,42 @@ impl Builtin {
         match self {
             Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
-                if args
-                    .first()
-                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
+                if args.first().is_some_and(|e| {
+                    matches!(
+                        e.ty,
+                        Type::Exception | Type::NamedException(_) | Type::ObjectValue
+                    )
+                }) =>
             {
                 Contract::new(true, Unknown)
-            }
-            Self::Str if args.first().is_some_and(|e| e.ty == Type::ObjectValue) => {
-                Contract::new(true, PreservesOwners)
             }
             Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
+            | Self::ExceptionArgs
             | Self::ExceptionFieldLen
-            | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
+            | Self::ExceptionFieldIndex
+            | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
             Self::MappingObjectGet => Contract::new(true, PreservesOwners),
-            Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
-            Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
-            Self::ExceptionRepr
+            Self::BoxValue
+            | Self::ExceptionTupleView
+            | Self::ObjectRecordProject(_)
+            | Self::ObjectRecordIdentity { .. }
+            | Self::ExceptionTupleIdentity
+            | Self::ExceptionKeywordSuggestion
+            | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
+            // Formatting a projected task-group member may call its own __repr__.
+            Self::ExceptionFieldRepr
+            | Self::ExceptionRepr
             | Self::ExceptionMessage
             | Self::Logging(crate::ir::LogOperation::PrintActiveException) => {
                 Contract::new(true, Unknown)
             }
-            Self::ExceptionArgument(_) | Self::NamedException { .. } => {
-                Contract::new(false, PreservesLists)
-            }
+            Self::SystemExitFromTuple
+            | Self::ExceptionArgument(_)
+            | Self::NamedException { .. } => Contract::new(false, PreservesLists),
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
@@ -459,11 +468,13 @@ impl Builtin {
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
             | Self::DequeNew
+            | Self::DequeReset
             | Self::DequeCopy
             | Self::DequeExtendSource
             | Self::NamespaceDelete
             | Self::DictDelete
             | Self::DictPop
+            | Self::DictSetDefault
             | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
@@ -506,6 +517,7 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::ExceptionFieldIdentity { .. }
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName
@@ -882,6 +894,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_system_exit_code_equal"
                 | "imre_system_exit_code_text"
                 | "imre_exception_field_index"
+                | "imre_exception_formatter_result"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
@@ -983,6 +996,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_get_index"
                 | "imre_seq_set_index"
                 | "imre_deque_new"
+                | "imre_deque_reset"
                 | "imre_deque_append"
                 | "imre_deque_copy"
                 | "imre_deque_extend_source"

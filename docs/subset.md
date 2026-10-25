@@ -2,14 +2,18 @@
 
 This is a deliberately restricted Python dialect for closed, statically typed source graphs, including selected unchanged pure-Python libraries. Imre targets 64-bit Linux with Clang 18 and Apple Silicon macOS with Apple Clang. Compilation uses Rust, Ruff, and ty; the executable links only the independent Rust runtime and system libraries. It does not import CPython or interpret unsupported operations.
 
+See the [standard library support table](stdlib.md) for module examples and native CPython test counts.
+
 ## Accepted source
 
 Module functions with annotated results can use `functools.cache` or
 `functools.lru_cache` with a literal capacity. The native cache accepts fixed
 positional arguments with immutable key types. Bounded caches evict the least
 recently used key; zero disables storage, and `None` keeps all results.
-`cache_clear()` resets entries and counters. `cache_info()` supports unpacking
-and indexing the four snapshot fields. `cache_parameters()` returns a fresh
+`cache_clear()` resets entries and counters. `cache_info()` returns a fresh
+immutable `CacheInfo` tuple with named fields `hits`, `misses`, `maxsize`,
+and `currsize`. An earlier snapshot keeps its values after another lookup or
+clear. `cache_parameters()` returns a fresh
 dictionary containing `maxsize` and `typed`. Applying a second cache to a
 cached callable copies its public parameters; the outer wrapper still uses
 its own capacity for eviction and for `cache_info()`.
@@ -34,7 +38,7 @@ defaults and inspecting a partial's attributes are not yet supported.
 | Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`, `&`, `\|`, `^`, `<<`, `>>`, and `divmod`; `/` returns a correctly rounded float; unary `+`/`-`/`~` and `abs`; all six value comparisons, including chains |
 | Floats | Binary64 literals and exact storage; `+`, `-`, `*`, `/`, `//`, `%`; unary signs and `abs`; all six comparisons; mixed integer arithmetic and exact mixed comparisons; explicit numeric/string conversions |
 | Lists | One exact element type, including nested containers and classes; literals and starred displays, `list()` and `list(iterable)`, stable `sorted` with scalar or fixed-tuple keys, shallow concatenation, repetition, and slicing, checked negative indexing, indexed assignment, iteration, `append(value)`, `extend(source)`, `pop()`, `len(...)`; alias-visible mutation |
-| Dictionaries | Exact `int`, `str`, string enum, `bytes`, `Path`, or immutable fixed-tuple keys and one concrete value type; literals and `**` displays, contextual `dict()`, lookup/write/delete, numeric augmented writes, `in`/`not in`, `get`, `len`, and insertion-ordered key/items iteration |
+| Dictionaries | Exact `int`, `str`, string enum, `bytes`, `Path`, or immutable fixed-tuple keys and one concrete value type; literals and `**` displays, contextual `dict()`, lookup/write/delete, numeric augmented writes, `in`/`not in`, `get`, `setdefault(key[, value])`, `len`, and insertion-ordered key/items iteration |
 | Sets | Exact `int`, `str`, string enum, `bytes`, `Path`, or immutable fixed-tuple elements; literals and `*` displays, contextual `set()`, `add`, `discard`, `in`/`not in`, `len`, and iteration with unspecified order |
 | Comprehensions | Eager list, dictionary, and set comprehensions; immediately consumed generator expressions; nested `for` clauses and truth-tested filters; isolated target bindings |
 | Tuples | Fixed length and a type per position; literals, bounded literal indexing, nested/starred unpacking into names, fields, and subscripts, and `len(...)`; immutable slots; value equality for immutable field shapes and lexicographic ordering for ordered scalar shapes |
@@ -971,6 +975,17 @@ Use `typing.assert_never(member)` as a statement to check that every alternative
 
 ## Fixed classes
 
+An instance of a sealed `@dataclass(slots=True)` can be passed to an
+`object` parameter or returned as `object` when the class has generated
+initialization, equality and repr, no user-defined special methods or special
+fields, and only scalar or fixed-tuple fields. The object keeps the original
+instance alive: mutation through another reference is visible. Equality,
+identity with a typed instance, truth, repr, and `isinstance` consult its
+class. Guard a local with `isinstance(value, MyDataclass)` to read its fields.
+A dataclass has neither tuple length nor indexing; both operations raise its
+ordinary Python `TypeError`. Inheritance, mutable container fields, and
+unguarded access on a general `object` are outside this subset.
+
 Class bodies may bind a string literal or a fixed tuple of up to 1024 string
 literals. A tuple may alias an earlier tuple in the same class or concatenate
 it with a literal suffix. Reads through the class, an instance, and an
@@ -1094,6 +1109,9 @@ constructor accepts an iterable and an optional nonnegative `maxlen`. It support
 append, pop, and extend at either end, clear, shallow copy, equality, length,
 truth testing, and forward or reverse iteration. A saved append or pop method
 keeps its receiver alive. An unannotated empty deque defaults to integer elements.
+Calling `d.__init__(iterable, maxlen)` validates the new bound, clears the
+same deque, and consumes the iterable. If iteration raises, items already
+appended remain visible through aliases. Omitting `maxlen` removes the old bound.
 
 `list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition preserves element values and shares reference-type elements across positions. Lists of immutable value structs store scalar payloads inline; `list[int]` uses specialized tagged-integer storage. Other lists use owned runtime slots.
 
@@ -1222,6 +1240,23 @@ Exceptions contain an immutable category, message, optional explicit cause, and 
 
 ## Exceptions and cleanup
 
+A caught `Exception` or `BaseException`, including `cm.exception` from
+`unittest.TestCase.assertRaises`, exposes its original positional arguments in
+`error.args`. The tuple can outlive the handler. Its mutable contents still
+refer to the original objects. Read its length, index it, or format it with
+`repr`. An integer subscript on a retained dictionary looks up that key,
+and a missing key raises `KeyError`. A retained exception from a task group
+keeps its class and its own `str` and `repr` methods. An identity comparison with a known tuple (including another
+`error.args` getter) compares the underlying tuple. Assigning a new `.args`
+tuple and identity comparisons between arbitrary erased scalar values are
+outside the native subset.
+
+The args preserve how an error was raised. For example, a failed
+`subprocess.run(check=True)` has `(returncode, cmd)`; a failed
+`CompletedProcess.check_returncode()` also includes stdout and stderr.
+`SystemExit(1, 2).args` is the same tuple as its code, while
+`SystemExit((1, 2)).args` contains that tuple as one argument.
+
 An explicitly typed local assigned in a `try` body may be read after a handled exception. When a simple assignment did not complete on that path and no earlier value exists, the read raises `UnboundLocalError` (a `NameError`). A successfully assigned `None` remains an ordinary value.
 
 `ImportError` and its subclass `ModuleNotFoundError` retain their positional
@@ -1244,10 +1279,21 @@ including `None`, booleans, integers, strings, bytes, and fixed tuples of those
 values. The `super().__init__` form accepts zero arguments, one string, or
 multiple supported values. Constructor keyword arguments, typed fields, and custom `__str__` and
 `__repr__` methods use the same object after a raise. A class attribute can name
-such a constructor. Inheriting a user payload layout, dynamic constructors, and
-reinitializing an exception are outside this subset.
+such a constructor. A subclass can extend one inherited payload or inherit its
+constructor unchanged. A base handler sees its original fields, argument tuple
+and formatter; a sibling exception remains distinct. Two independent payload
+layouts, dynamic constructor selection and reinitializing a payload are unsupported.
 
-The constructible builtin categories are `Exception`, `ArithmeticError`, `ZeroDivisionError`, `OverflowError`, `LookupError`, `IndexError`, `KeyError`, `ValueError`, `AssertionError`, `RuntimeError`, `StopIteration`, `EOFError`, `OSError`, `TypeError`, `AttributeError`, `MemoryError`, `SystemError`, `UnicodeError`, `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`, plus the imported `io.UnsupportedOperation`. A constructor takes zero arguments or one supported argument (a string, number, bytes, container, or `None`). Mutable arguments remain live through `.args` and formatting. `raise Category` constructs the zero-argument form; `raise value` requires an exception instance. The annotation `Exception` admits this sealed family and can be used in parameters, returns, fields, containers, and optional values. Specific subclass annotations are currently rejected rather than erasing their narrower contracts. `BaseException` and `UnicodeDecodeError` are supported as handler categories, but not as constructors or storage annotations.
+An unannotated variadic exception initializer can store named parameters in
+fields and call `super().__init__` once, forwarding parameters or its positional
+tail. A subclass can do the same with fixed or variadic parameters. Supported
+values include None, bool, int, float, str, bytes, fixed tuples and typed lists
+of these values. Lists preserve identity and mutations in stored fields and
+in `.args`. A list whose elements contain `object` cannot be stored this way: a later mutation could create a reference cycle. Scalar literal defaults and keyword-only parameters are supported;
+computed or mutable defaults, positional-only parameters, `**kwargs`, arbitrary
+objects, and arbitrary code inside these unannotated initializers are unsupported.
+
+The constructible builtin categories are `Exception`, `ArithmeticError`, `ZeroDivisionError`, `OverflowError`, `LookupError`, `IndexError`, `KeyError`, `ValueError`, `AssertionError`, `RuntimeError`, `StopIteration`, `EOFError`, `OSError`, `TypeError`, `AttributeError`, `MemoryError`, `SystemError`, `UnicodeError`, `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`, plus the imported `io.UnsupportedOperation`. A constructor takes zero arguments or one supported argument (a string, number, bytes, container, or `None`). Mutable arguments remain live through `.args` and formatting. `raise Category` constructs the zero-argument form; `raise value` requires an exception instance. The annotation `Exception` admits this sealed family and can be used in parameters, returns, fields, containers, and optional values. Specific subclass annotations are currently rejected rather than erasing their narrower contracts. `BaseException` also works as an annotation for this family. Both `BaseException` and `UnicodeDecodeError` are supported as handler categories; directly constructing them is outside the subset.
 
 Handlers select the first matching fixed builtin category or nonempty tuple of categories, using the builtin hierarchy. A bare handler catches any supported exception. `except Category as name` binds an owned exception and deletes that name on every handler exit, even if it previously existed or was rebound inside the handler. Save it under another name to retain it. Bare `raise` uses the dynamically active exception, including from a called function or a `finally` block unwinding an exception; without an active exception it raises `RuntimeError`.
 

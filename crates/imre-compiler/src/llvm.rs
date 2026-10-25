@@ -4713,20 +4713,33 @@ impl Emitter<'_, '_> {
             Builtin::SystemExitCode => {
                 self.call("imre_system_exit_code", returns, &[&args[0].value])
             }
-            Builtin::SystemExitCodeEqual { reversed } => {
+            Builtin::SystemExitCodeEqual { reversed }
+            | Builtin::ExceptionFieldIdentity { reversed } => {
                 let i = usize::from(*reversed);
                 let other = &args[1 - i].value;
                 // Kind 5 denotes another object view in this ABI.
                 let kind = if self.module.types.mapping(other.ty).is_some() {
                     17
+                } else if matches!(builtin, Builtin::SystemExitCodeEqual { .. })
+                    && matches!(other.ty, Type::List(_))
+                {
+                    18
                 } else {
                     representation_kind(other.ty, &self.module.types)
                 };
                 let word = self.word(other);
-                let bit = self.checked_instruction(format!(
-                    "call i32 @imre_system_exit_code_equal(ptr {}, i32 {kind}, i64 {word})",
+                let function = if matches!(builtin, Builtin::ExceptionFieldIdentity { .. }) {
+                    "imre_exception_field_identity"
+                } else {
+                    "imre_system_exit_code_equal"
+                };
+                let bit = self.instruction(format!(
+                    "call i32 @{function}(ptr {}, i32 {kind}, i64 {word})",
                     args[i].value.operand
                 ));
+                if matches!(builtin, Builtin::SystemExitCodeEqual { .. }) {
+                    self.check_error();
+                }
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
@@ -5240,6 +5253,28 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::ObjectRecordProject(class) => {
+                let operand = self.boxed_record(&args[0].value, *class);
+                let record = Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                };
+                self.retain(&record);
+                record
+            }
+            Builtin::ObjectRecordIdentity { class, reversed } => {
+                let i = usize::from(*reversed);
+                let record = self.boxed_record(&args[i].value, *class);
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!(
+                        "icmp eq ptr {record}, {}",
+                        args[1 - i].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::BoxValue => {
                 let value = &args[0].value;
                 let kind = representation_kind(value.ty, &self.module.types);
@@ -5256,9 +5291,45 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::ExceptionArgs => self.call("imre_exception_args", returns, &[&args[0].value]),
+            Builtin::ExceptionTupleIdentity => {
+                let bit = self.instruction(format!(
+                    "call i32 @imre_exception_tuple_identity(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::SystemExitFromTuple => {
+                self.call("imre_system_exit_from_tuple", returns, &[&args[0].value])
+            }
             Builtin::ExceptionTupleView => {
                 self.call("imre_exception_tuple_view", returns, &[&args[0].value])
             }
+            Builtin::ExceptionRecordFields => {
+                let record = self.record(returns);
+                for (i, value) in args.iter().enumerate() {
+                    self.set_field(&record, i, &value.value);
+                }
+                record
+            }
+            Builtin::ExceptionKeywordSuggestion => self.call(
+                "imre_exception_keyword_message",
+                returns,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
+            Builtin::ExceptionFormatterResult(repr) => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @imre_exception_formatter_result(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*repr)
+                )),
+                small_integer: false,
+            },
             Builtin::ExceptionFieldRepr => {
                 self.call("imre_exception_field_repr", returns, &[&args[0].value])
             }
@@ -5888,6 +5959,14 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
+            Builtin::DequeReset => {
+                let bound = self.word(&args[1].value);
+                self.checked_line(format!(
+                    "call void @imre_deque_reset(ptr {}, i64 {bound})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             Builtin::DequeClear => {
                 self.void_call("imre_deque_clear", &[&args[0].value]);
                 none()
@@ -6014,7 +6093,7 @@ impl Emitter<'_, '_> {
                 Type::ListInt,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::DictGetDefault | Builtin::DictPop => {
+            Builtin::DictGetDefault | Builtin::DictSetDefault | Builtin::DictPop => {
                 let key = self.key_word(&args[1].value);
                 let default = args.get(2).map(|arg| self.word(&arg.value));
                 let receiver = &args[0].value.operand;
@@ -6023,6 +6102,11 @@ impl Emitter<'_, '_> {
                     let default = default.as_deref().unwrap_or("0");
                     self.checked_instruction(format!(
                         "call i64 @imre_dict_pop(ptr {receiver}, i64 {key}, i64 {default}, i32 {required})"
+                    ))
+                } else if matches!(builtin, Builtin::DictSetDefault) {
+                    let default = default.unwrap();
+                    self.checked_instruction(format!(
+                        "call i64 @imre_dict_setdefault(ptr {receiver}, i64 {key}, i64 {default})"
                     ))
                 } else {
                     let default = default.unwrap();
@@ -7762,11 +7846,18 @@ declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
 declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_box_value(i32, i64)
+declare ptr @imre_object_record_payload(ptr, ptr)
 declare ptr @imre_mapping_object_get(ptr, ptr)
 declare ptr @imre_exception_tuple_view(ptr)
+declare ptr @imre_exception_formatter_result(ptr, i32)
+declare ptr @imre_exception_args(ptr)
+declare i32 @imre_exception_field_matches(ptr, i32)
+declare i32 @imre_exception_tuple_identity(ptr, ptr)
+declare ptr @imre_system_exit_from_tuple(ptr)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
+declare ptr @imre_exception_keyword_message(ptr, ptr, ptr)
 declare ptr @imre_exception_argument(i32, ptr, i64, i32)
 declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)
@@ -7928,6 +8019,7 @@ declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
 declare ptr @imre_deque_new(i32, i64)
+declare void @imre_deque_reset(ptr, i64)
 declare void @imre_deque_append(ptr, i64, i32, i32)
 declare ptr @imre_deque_extend_source(ptr, ptr)
 declare ptr @imre_deque_copy(ptr)
@@ -7961,6 +8053,7 @@ declare i32 @imre_dict_try_get(ptr, i64, ptr)
 declare i32 @imre_dict_try_pop(ptr, i64, ptr)
 declare i64 @imre_dict_pop(ptr, i64, i64, i32)
 declare i64 @imre_dict_get_default(ptr, i64, i64)
+declare i64 @imre_dict_setdefault(ptr, i64, i64)
 declare void @imre_dict_set(ptr, i64, i64)
 declare void @imre_dict_delete(ptr, i64)
 declare void @imre_dict_clear(ptr)
@@ -8068,6 +8161,7 @@ declare ptr @imre_system_exit_code(ptr)
 declare i32 @imre_system_exit_code_kind(ptr)
 declare ptr @imre_system_exit_code_text(ptr)
 declare i32 @imre_system_exit_code_equal(ptr, i32, i64)
+declare i32 @imre_exception_field_identity(ptr, i32, i64)
 declare i32 @imre_system_exit_code_truth(ptr)
 declare void @imre_args_clear()
 declare void @imre_int_retain(i64)
