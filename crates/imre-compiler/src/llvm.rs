@@ -5762,6 +5762,14 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
+            Builtin::DequeReset => {
+                let bound = self.word(&args[1].value);
+                self.checked_line(format!(
+                    "call void @imre_deque_reset(ptr {}, i64 {bound})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             Builtin::DequeClear => {
                 self.void_call("imre_deque_clear", &[&args[0].value]);
                 none()
@@ -7767,6 +7775,7 @@ declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
 declare ptr @imre_deque_new(i32, i64)
+declare void @imre_deque_reset(ptr, i64)
 declare void @imre_deque_append(ptr, i64, i32, i32)
 declare ptr @imre_deque_extend_source(ptr, ptr)
 declare ptr @imre_deque_copy(ptr)
