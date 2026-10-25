@@ -678,6 +678,12 @@ impl SourceGraph {
             .is_none_or(|r| r.inherited_class_method(class, name))
     }
 
+    pub(crate) fn unused_literal_global(&self, definition: DefinitionId) -> bool {
+        self.reachable
+            .as_ref()
+            .is_some_and(|r| r.unused_literals.contains(&definition))
+    }
+
     pub(crate) fn includes_method(&self, module: ModuleId, method: &ast::StmtFunctionDef) -> bool {
         self.reachable
             .as_ref()
