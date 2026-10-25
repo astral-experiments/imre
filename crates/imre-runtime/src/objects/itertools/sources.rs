@@ -84,7 +84,7 @@ pub(super) unsafe fn try_acquire(mode: u32, word: usize) -> Result<Rc<Object>, E
 }
 
 /// The compiler supplies a rooted value of the exact selected source form.
-unsafe fn acquire(mode: u32, source: usize) -> Rc<Object> {
+pub(super) unsafe fn acquire(mode: u32, source: usize) -> Rc<Object> {
     // SAFETY: all leaf constructors return one independent owner. A cursor
     // input is already an iterator, so its position and identity are shared.
     unsafe {

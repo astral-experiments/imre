@@ -207,16 +207,18 @@ impl Checker<'_> {
         if self.is_builtin_iter(call) && call.arguments.args.len() != 1 {
             return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
         }
-        if self.is_chain_from_iterable(call) || matches!(
-            self.resolve(&call.func),
-            Some(Binding::Intrinsic(
-                Intrinsic::Repeat
-                    | Intrinsic::Count
-                    | Intrinsic::Islice
-                    | Intrinsic::Cycle
-                    | Intrinsic::Batched
-            ))
-        ) {
+        if self.is_chain_from_iterable(call)
+            || matches!(
+                self.resolve(&call.func),
+                Some(Binding::Intrinsic(
+                    Intrinsic::Repeat
+                        | Intrinsic::Count
+                        | Intrinsic::Islice
+                        | Intrinsic::Cycle
+                        | Intrinsic::Batched
+                ))
+            )
+        {
             let cursor = self.call(call)?;
             let element = self.types.cursor_element(cursor.ty).unwrap();
             return Ok(Some(Iteration::Prepared(

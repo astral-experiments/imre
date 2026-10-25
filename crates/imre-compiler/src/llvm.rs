@@ -5250,19 +5250,27 @@ impl Emitter<'_, '_> {
                 let source = &args[0].value;
                 let word = self.word(source);
                 let call = if let Builtin::ChainFrom(inner) = builtin {
-                    let outer = iterable_mode(source.ty);
+                    let outer = checked_iterable_mode(source.ty);
                     let inner = checked_iterable_mode(*inner);
                     format!("call ptr @imre_chain_from(i32 {outer}, i64 {word}, i32 {inner})")
                 } else {
                     let fields = self.module.types.fields(source.ty).unwrap();
                     let length = fields.len();
-                    let modes = self
-                        .byte_array(fields.into_iter().map(|ty| checked_iterable_mode(ty) as u8).collect());
+                    let modes = self.byte_array(
+                        fields
+                            .into_iter()
+                            .map(|ty| checked_iterable_mode(ty) as u8)
+                            .collect(),
+                    );
                     format!("call ptr @imre_chain(i64 {word}, ptr @{modes}, i64 {length})")
                 };
                 Value {
                     ty: returns,
-                    operand: self.instruction(call),
+                    operand: if matches!(builtin, Builtin::ChainFrom(_)) {
+                        self.checked_pointer(call)
+                    } else {
+                        self.instruction(call)
+                    },
                     small_integer: false,
                 }
             }

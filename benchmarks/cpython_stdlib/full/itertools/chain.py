@@ -43,6 +43,19 @@ except TypeError as err:
     print(str(err))
 print(next(bad_inner, -1))
 
+# from_iterable acquires its outer argument at construction, even without a pull.
+try:
+    chain.from_iterable(42)
+except TypeError as err:
+    print(str(err))
+deferred = chain(False)
+print("constructed positional chain")
+try:
+    next(deferred)
+except TypeError as err:
+    print(str(err))
+print(next(deferred, -1))
+
 outer = {"ab": 0, "z": 0}
 changed = chain.from_iterable(outer)
 outer["q"] = 0

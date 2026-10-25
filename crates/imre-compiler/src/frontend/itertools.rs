@@ -121,10 +121,11 @@ impl Checker<'_> {
                     "chain.from_iterable takes one iterable",
                 ));
             };
-            let (outer, inner) = self.cursor_source(outer)?;
+            let source = self.cursor_source_value(outer)?;
+            let inner = self.chain_element(source.ty, outer)?.unwrap_or(Type::Int);
             (
                 Builtin::ChainFrom(inner),
-                outer,
+                source,
                 self.chain_element(inner, call)?,
             )
         } else {

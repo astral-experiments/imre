@@ -50,23 +50,14 @@ impl Chain {
                     u32::from(modes[i])
                 }
             };
-            let invalid = match mode {
-                8 => Some("NoneType"),
-                9 => Some("int"),
-                10 => Some("bool"),
-                11 => Some("float"),
-                _ => None,
-            };
-            if let Some(name) = invalid {
-                self.outer.take();
-                return Err(Error::new(
-                    Kind::TypeError,
-                    format!("'{name}' object is not iterable"),
-                ));
-            }
             // SAFETY: the compiler's mode describes this rooted source word.
-            self.active
-                .replace(Some(unsafe { sources::acquire(mode, inner.word) }));
+            match unsafe { sources::try_acquire(mode, inner.word) } {
+                Ok(active) => self.active.replace(Some(active)),
+                Err(error) => {
+                    self.outer.take();
+                    return Err(error);
+                }
+            };
         }
     }
 }
@@ -95,8 +86,8 @@ pub unsafe extern "C" fn imre_chain(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_chain_from(outer: u32, source: usize, inner: u32) -> *const Object {
     // SAFETY: the caller roots the iterable until this acquisition completes.
-    Chain::cursor(
-        unsafe { sources::acquire(outer, source) },
-        Modes::Uniform(inner),
-    )
+    match unsafe { sources::try_acquire(outer, source) } {
+        Ok(outer) => Chain::cursor(outer, Modes::Uniform(inner)),
+        Err(error) => error.returning(std::ptr::null()),
+    }
 }
