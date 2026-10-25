@@ -1,0 +1,56 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "runner": "benchmarks/cpython_stdlib/full/doctest/native.py",
+  "sha256": {
+    "imre": "d43bc60e9b9e4afe6202a916688a9e8aac1c6aad4ddc7d6ca79d0f3cd4730bb3",
+    "runtime": "aa2efe9f857e07a583fcd7798f8a075f0d791d5899829fc3a848a5bd890f245c"
+  },
+  "levels": {
+    "0": {
+      "json": {
+        "ids": [
+          "json"
+        ],
+        "examples": 32,
+        "outcome": "blocked",
+        "diagnostic": "Compiling <entry>/case.py (-O0)\ndoctest json, example 26: import decimal requires a runtime module initializer"
+      },
+      "json.encoder": {
+        "ids": [
+          "json.encoder.JSONEncoder.encode"
+        ],
+        "examples": 2,
+        "outcome": "blocked",
+        "diagnostic": "Compiling <entry>/case.py (-O0)\ndoctest json.encoder.JSONEncoder.encode, example 1: unsupported sealed standard-library export json.encoder.JSONEncoder"
+      },
+      "json.decoder": {
+        "ids": [],
+        "examples": 0,
+        "outcome": "empty-suite"
+      }
+    },
+    "3": {
+      "json": {
+        "ids": [
+          "json"
+        ],
+        "examples": 32,
+        "outcome": "blocked",
+        "diagnostic": "Compiling <entry>/case.py (-O3)\ndoctest json, example 26: import decimal requires a runtime module initializer"
+      },
+      "json.encoder": {
+        "ids": [
+          "json.encoder.JSONEncoder.encode"
+        ],
+        "examples": 2,
+        "outcome": "blocked",
+        "diagnostic": "Compiling <entry>/case.py (-O3)\ndoctest json.encoder.JSONEncoder.encode, example 1: unsupported sealed standard-library export json.encoder.JSONEncoder"
+      },
+      "json.decoder": {
+        "ids": [],
+        "examples": 0,
+        "outcome": "empty-suite"
+      }
+    }
+  }
+}

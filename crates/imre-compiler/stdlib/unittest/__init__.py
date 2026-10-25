@@ -117,17 +117,22 @@ def _pretty_list(flat: str, items: list[str]) -> list[str]:
 
 class TestCase:
     failureException: ClassVar[type[Exception]] = AssertionError
+    _testMethodName: str
     longMessage: bool
     maxDiff: int | None
     _diffThreshold: int
 
     def __init__(self) -> None:
+        self._testMethodName = "runTest"
         self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
 
     def countTestCases(self) -> int:
         return 1
+
+    def id(self) -> str:
+        return self.__class__.__module__ + "." + self.__class__.__qualname__ + "." + self._testMethodName
 
     def _formatMessage(self, msg: str | None, standardMsg: str) -> str:
         if msg is None:

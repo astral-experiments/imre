@@ -78,7 +78,7 @@ impl Checker<'_> {
 
     /// A path protocol result must be a string or bytes; do not recursively call
     /// another object's protocol. Nullable and tagged inputs are evaluated once.
-    fn fspath_protocol(
+    pub(super) fn fspath_protocol(
         &mut self,
         value: Expr,
         at: &ast::Expr,
