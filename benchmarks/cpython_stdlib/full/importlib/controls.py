@@ -47,7 +47,25 @@ def log_text(events: list[str], label: str) -> str:
     return label
 
 
+def parent_identity(prefix: str, code: int) -> None:
+    name = prefix + ".child"
+    value = machinery.ModuleSpec(name, None).parent
+    print(value is prefix)
+    print(value is machinery.ModuleSpec(name, None).parent)
+    if len(prefix) == 1:
+        print(value is chr(code))
+        print(value is name[0])
+
+
 def exercise() -> None:
+    parent_identity('', 0)
+    parent_identity('a', 97)
+    parent_identity('é', 233)
+    parent_identity('ÿ', 255)
+    parent_identity('Ā', 256)
+    parent_identity('aa', 0)
+    parent_identity('non_short_identifier', 0)
+    parent_identity('not-a-name', 0)
     print(parent.machinery.ModuleSpec("aliased", None).name)
     events: list[str] = []
     loader = Loader(events)
