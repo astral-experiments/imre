@@ -266,6 +266,30 @@ impl Checker<'_> {
         ))
     }
 
+    /// Evaluate the metadata receiver before looking up its field name.
+    pub(super) fn implementation_hasattr(&mut self, receiver: Expr, name: Expr) -> Expr {
+        let names = Expr {
+            ty: self.types.list(Type::Str),
+            kind: ExprKind::List(
+                crate::version::IMPLEMENTATION
+                    .iter()
+                    .map(|s| unpacking::string(*s))
+                    .collect(),
+            ),
+        };
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Expr(receiver)],
+                clear: vec![],
+                value: Box::new(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::StringListContains, vec![name, names]),
+                }),
+            },
+        }
+    }
+
     pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "hasattr" && !self.names.contains_key("hasattr"))
             && self.resolve(&call.func).is_none()
@@ -711,11 +735,7 @@ impl Checker<'_> {
 
     pub(super) fn sys_version_info(&self, implementation: bool) -> Expr {
         Expr {
-            ty: self.types.struct_sequence(
-                "sys.version_info",
-                crate::version::FIELDS,
-                vec![Type::Int, Type::Int, Type::Int, Type::Str, Type::Int],
-            ),
+            ty: crate::version::info_type(self.types),
             kind: ExprKind::Builtin(Builtin::SysVersionInfo { implementation }, vec![]),
         }
     }

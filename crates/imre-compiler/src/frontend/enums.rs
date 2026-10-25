@@ -496,6 +496,7 @@ impl Checker<'_> {
                 && types
                     .iter()
                     .any(|ty| self.types.tuple_metadata(*ty).is_some()))
+            || types == [Type::SysImplementation; 2]
             || types == [Type::Logger; 2]
             || types
                 .iter()

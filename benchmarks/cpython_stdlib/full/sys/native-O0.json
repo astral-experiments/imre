@@ -44,6 +44,116 @@
       "fixture_execution": "CPython module/class/instance hooks; native instance in child",
       "method_sha256": "3d8664bb71e753cdf68f9889cd02173e0f710634dce4965a6a2c5cf5101d6cad"
     },
+    "test.test_sys.SysModuleTest.test_implementation": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "original CPython module/class/instance hooks",
+      "calls": [
+        [
+          "has",
+          "name"
+        ],
+        [
+          "name"
+        ],
+        [
+          "has",
+          "version"
+        ],
+        [
+          "version"
+        ],
+        [
+          "has",
+          "hexversion"
+        ],
+        [
+          "hexversion"
+        ],
+        [
+          "has",
+          "cache_tag"
+        ],
+        [
+          "cache_tag"
+        ],
+        [
+          "has",
+          "supports_isolated_interpreters"
+        ],
+        [
+          "supports_isolated_interpreters"
+        ],
+        [
+          "has",
+          "version"
+        ],
+        [
+          "version"
+        ],
+        [
+          "prefix"
+        ],
+        [
+          "major"
+        ],
+        [
+          "minor"
+        ],
+        [
+          "major"
+        ],
+        [
+          "minor"
+        ],
+        [
+          "micro"
+        ],
+        [
+          "releaselevel"
+        ],
+        [
+          "serial"
+        ],
+        [
+          "has",
+          "hexversion"
+        ],
+        [
+          "hexversion"
+        ],
+        [
+          "has",
+          "name"
+        ],
+        [
+          "name"
+        ],
+        [
+          "has",
+          "name"
+        ],
+        [
+          "name"
+        ],
+        [
+          "has",
+          "supports_isolated_interpreters"
+        ],
+        [
+          "supports_isolated_interpreters"
+        ],
+        [
+          "has",
+          "name"
+        ],
+        [
+          "name"
+        ]
+      ]
+    },
     "test.test_sys.SysModuleTest.test_ioencoding_nonascii": {
       "status": "upstream-skip",
       "reason": "requires FS encoding to match locale"

@@ -268,6 +268,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
+            | Type::SysImplementation
             | Type::CompletedProcess(_, None)
             | Type::ActivePopen
             | Type::EventLoop
@@ -736,6 +737,7 @@ impl Types {
             | Type::HandlerLock
             | Type::Path
             | Type::PurePath(_)
+            | Type::SysImplementation
             | Type::CompletedProcess(..)
             | Type::EventLoop
             | Type::Coroutine(_)
