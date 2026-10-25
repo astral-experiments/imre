@@ -4764,16 +4764,11 @@ impl<'a> Checker<'a> {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
         if binary.op == ast::Operator::Mod
-            && let ExprKind::Str(pattern) = &left.kind
+            && matches!(left.ty, Type::Str | Type::StrLiteral(_))
             && matches!(right.ty, Type::Str | Type::StrLiteral(_))
         {
-            return self.percent_string(pattern, right).ok_or_else(|| {
-                error(
-                    self.source,
-                    binary,
-                    "literal percent formatting supports one %s field and %% escapes",
-                )
-            });
+            left = Self::string_value(left);
+            right = Self::string_value(right);
         }
         if binary.op == ast::Operator::Add
             && left.ty == Type::JsonValue
@@ -6280,6 +6275,22 @@ impl<'a> Checker<'a> {
         }
         if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::MockCallList { mark })) = self.resolve(&call.func)
+        {
+            self.reject_builtin_keywords(call)?;
+            let [values] = call.arguments.args.as_ref() else {
+                return Err(error(self.source, call, "expected a mock call list"));
+            };
+            let values = self.expr(values)?;
+            if !matches!(self.types.element(values.ty), Some(Type::Class(c)) if self.bundled_mock_class(c, "_Call"))
+            {
+                return Err(error(self.source, call, "expected a mock call list"));
+            }
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::MockCallList { mark }, vec![values]),
+            });
         }
         if let Some(suite) = self.doctest_suite(call)? {
             return Ok(suite);
