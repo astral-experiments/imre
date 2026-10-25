@@ -1,7 +1,7 @@
-"""Native file rotation handlers."""
+"""Handlers exported from logging.handlers."""
 
 import os
-from logging import FileHandler, LogRecord
+from logging import FileHandler, Handler, LogRecord
 from pathlib import Path
 from typing import TextIO
 
@@ -83,3 +83,31 @@ class RotatingFileHandler(BaseRotatingHandler):
             FileHandler.emit(self, record)
         except Exception:
             self.handleError(record)
+
+
+class BufferingHandler(Handler):
+    capacity: int
+    buffer: list[LogRecord | None]
+
+    def __init__(self, capacity: int) -> None:
+        super().__init__()
+        self.capacity = capacity
+        self.buffer = []
+
+    def shouldFlush(self, record: LogRecord | None) -> bool:
+        return len(self.buffer) >= self.capacity
+
+    def emit(self, record: LogRecord | None) -> None:
+        self.buffer.append(record)
+        if self.shouldFlush(record):
+            self.flush()
+
+    def flush(self) -> None:
+        with self.lock:
+            self.buffer.clear()
+
+    def close(self) -> None:
+        try:
+            self.flush()
+        finally:
+            super().close()

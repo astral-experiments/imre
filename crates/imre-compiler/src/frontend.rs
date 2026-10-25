@@ -16,6 +16,7 @@ mod argparse;
 mod assignments;
 mod asyncio;
 mod bytes;
+mod cache_paths;
 mod cached_properties;
 mod call_binding_errors;
 mod callables;
@@ -78,6 +79,7 @@ mod powers;
 mod processes;
 mod projected_equality;
 mod properties;
+mod readiness;
 mod record_inputs;
 mod records;
 mod regex;
@@ -457,6 +459,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "RecursionError" => return Some(43),
         "Warning" => return Some(80),
         "RuntimeWarning" => return Some(81),
+        "DeprecationWarning" => return Some(82),
         _ => {}
     }
     if name == "ImportError" {
@@ -1140,6 +1143,10 @@ pub(crate) fn lower_with_owners(
         .extend_layouts(&mut classes.fields);
     Ok((
         ir::Module {
+            ignore_python_environment: graph
+                .command_startup
+                .as_ref()
+                .is_some_and(|(flags, _)| flags.isolated),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             class_fields: classes.fields,
@@ -1384,9 +1391,15 @@ fn signature(
         });
         parameter_types.push(Some(ty));
     }
+    // A .pyi describes the linked C function. Its ellipsis is not an executable body.
+    let inert = graph.modules[module].archive.is_none() && annotations::inert_body(function);
+    if inert && let Some(ast::Expr::Name(n)) = function.returns.as_deref() {
+        graph.deferred_name(module, n.range());
+    }
     let returns = function
         .returns
         .as_deref()
+        .filter(|_| !inert)
         .filter(|value| {
             graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                 && namedtuples::annotation(graph, module, value, types).is_none()
@@ -1403,9 +1416,11 @@ fn signature(
             }
         })
         .transpose()?
+        .or(inert.then_some(Type::None))
         .or_else(|| match (receiver, function.name.as_str()) {
             (Some(_), "__init__" | "__post_init__") => Some(Type::None),
             (Some(_), "__str__" | "__repr__") => Some(Type::Str),
+            (Some(_), "__bool__") => Some(Type::Bool),
             _ => None,
         });
     let id = inference.register(parameter_types, returns, none_defaults);
@@ -1579,6 +1594,9 @@ fn annotation_with_aliases(
         }
         Some(Binding::Intrinsic(Intrinsic::Any)) if graph.mutable_documents => {
             return Ok(documents::ANY);
+        }
+        Some(Binding::Intrinsic(Intrinsic::Readiness(ir::Readiness::New))) => {
+            return Ok(Type::Poll);
         }
         Some(Binding::Intrinsic(Intrinsic::Deque)) => return Ok(types.deque(Type::Int)),
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
@@ -3862,10 +3880,7 @@ impl<'a> Checker<'a> {
             return Ok((Vec::new(), true));
         }
         let result = match statement {
-            ast::Stmt::FunctionDef(function) => {
-                self.define_local_function(function)?;
-                None
-            }
+            ast::Stmt::FunctionDef(function) => self.define_local_function(function)?,
             ast::Stmt::Assign(assign) => {
                 return Ok((self.assignment_statement(assign)?, true));
             }
@@ -4017,6 +4032,9 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Stmt::Expr(expression) => {
+                if matches!(&*expression.value, ast::Expr::EllipsisLiteral(_)) {
+                    return Ok((Vec::new(), true));
+                }
                 if let ast::Expr::Yield(yielded) = &*expression.value
                     && let Some(element) = self.generator_item
                     && let Some(value) = &yielded.value
@@ -5168,8 +5186,18 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Int(level.to_string()),
             });
         }
+        if let Some(prefix) = self.cache_config(expression) {
+            return Ok(cache_paths::op(
+                ir::CachePathOperation::Get(prefix),
+                self.types.optional(Type::Str),
+                vec![],
+            ));
+        }
         self.reject_class_receiver_value(expression)?;
-        if self.local_function_binding(expression).is_some() {
+        if let Some(binding) = self.local_function_binding(expression) {
+            if let Some(slot) = binding.value_slot {
+                return Ok(self.local(slot));
+            }
             return Err(error(
                 self.source,
                 expression,
@@ -6078,7 +6106,7 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
-                if attribute.attr.as_str() == "machinery"
+                if matches!(attribute.attr.as_str(), "machinery" | "util")
                     && self.resolve(&attribute.value)
                         == Some(Binding::IntrinsicModule(
                             crate::modules::IntrinsicModule::Importlib,
@@ -6088,7 +6116,10 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         attribute,
-                        "import importlib.machinery before reading the machinery attribute",
+                        &format!(
+                            "import importlib.{} before reading the {} attribute",
+                            attribute.attr, attribute.attr
+                        ),
                     ));
                 }
                 if let Some(flag) = self.command_flag(attribute)? {
@@ -6128,6 +6159,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if matches!(receiver.ty, Type::AnnotationValue(_)) {
+                    return self.annotation_attribute(receiver, attribute);
+                }
                 if let Type::ChainMap(id) = receiver.ty
                     && attribute.attr.as_str() == "maps"
                 {
@@ -6825,6 +6859,10 @@ impl<'a> Checker<'a> {
                 "argument unpacking requires a source-defined function or method",
             ));
         }
+        if let Some(Binding::Intrinsic(Intrinsic::CachePath { reverse })) = self.resolve(&call.func)
+        {
+            return self.cache_path_call(call, reverse);
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) {
             return self.module_spec(call);
         }
@@ -7071,6 +7109,9 @@ impl<'a> Checker<'a> {
                         vec![self.expr_expected(code, Type::Int)?],
                     ),
                 });
+            }
+            Some(Binding::Intrinsic(Intrinsic::Readiness(op))) => {
+                return self.readiness_call(call, op);
             }
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
@@ -7515,6 +7556,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::CodecInfo {
                 return self.codec_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::Poll {
+                return self.poll_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);

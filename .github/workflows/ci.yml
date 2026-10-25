@@ -233,6 +233,10 @@ jobs:
             Lib/ensurepip/_bundled
             Modules
           persist-credentials: false
+      - name: Compare POSIX fd readiness with CPython
+        env:
+          PYTHONPATH: .cpython-stdlib-reference/Lib
+        run: python3 tests/posix_readiness.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --host-original
       - name: Check native string line boundaries and Unicode predicates against CPython
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
@@ -546,6 +550,11 @@ jobs:
           target/release/imre build examples/manifest_planner/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/manifest-planner
           python3 benchmarks/reference/incremental_planner/build.py --manifest --artifact-dir /tmp/imre-manifest-reference --target-dir target/incremental-reference
           python3 benchmarks/manifest_validate.py --python python3 --binary /tmp/manifest-planner --rust-bigint /tmp/imre-manifest-reference/planner-manifest-bigint --output /tmp/imre-manifest-reference/validation.json
+      - name: Verify task board requests and journal recovery
+        run: |
+          target/release/imre build examples/task_board/app.py --module-root examples/task_board --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o "$RUNNER_TEMP/task-board"
+          python3 examples/task_board/verify.py --python python3
+          python3 examples/task_board/verify.py --binary "$RUNNER_TEMP/task-board"
       - name: Validate inventory reconciliation against CPython and Rust
         run: |
           target/release/imre build examples/inventory_reconciliation/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/inventory-reconciliation

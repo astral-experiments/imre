@@ -11,6 +11,8 @@ pub(crate) enum Type {
     BuiltinClass,
     /// An immutable annotation reference with a known layout for its owner.
     ForwardRef(usize),
+    /// One of the exact values returned by a heterogeneous annotation dictionary.
+    AnnotationValue(usize),
     Str,
     /// A closed domain of strings with ordinary string storage and ownership.
     StrLiteral(usize),
@@ -102,6 +104,7 @@ pub(crate) enum Type {
     ModuleSpec(usize),
     CodecInfo,
     Sha256,
+    Poll,
     JsonDecoder,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -201,6 +204,7 @@ impl std::fmt::Display for Type {
             Self::Bool => "bool",
             Self::BuiltinClass => "type",
             Self::ForwardRef(_) => "annotationlib.ForwardRef",
+            Self::AnnotationValue(_) => "annotation value",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -249,6 +253,7 @@ impl std::fmt::Display for Type {
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
             Self::CodecInfo => "codecs.CodecInfo",
+            Self::Poll => "select.poll",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -282,6 +287,8 @@ impl std::fmt::Display for Type {
 }
 
 pub(crate) struct Module {
+    /// Interpreter-style -I commands ignore Python process environment variables at startup.
+    pub ignore_python_environment: bool,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -355,8 +362,9 @@ impl Module {
 
     /// Capture arguments, the original invocation, and source search paths only
     /// for modules that use them; a bare import needs no runtime state.
-    pub(crate) fn startup_usage(&self) -> (bool, bool, bool) {
+    pub(crate) fn startup_usage(&self) -> (bool, bool, bool, bool) {
         let mut linecache = false;
+        let mut cache_paths = false;
         let mut argv = false;
         let mut original = false;
         for function in self.functions.iter().chain([&self.entry]) {
@@ -364,6 +372,9 @@ impl Module {
                 ExprKind::Builtin(Builtin::SysArgv, _) => argv = true,
                 ExprKind::Builtin(Builtin::SysOrigArgv, _) => original = true,
                 ExprKind::Builtin(Builtin::Linecache(..), _) => linecache = true,
+                ExprKind::Builtin(Builtin::CachePath(_) | Builtin::ModuleCacheFromOrigin, _) => {
+                    cache_paths = true
+                }
                 ExprKind::Builtin(Builtin::WarningFormat { .. }, args)
                     if args[5].ty != Type::Str =>
                 {
@@ -372,7 +383,7 @@ impl Module {
                 _ => {}
             });
         }
-        (argv || original, original, linecache)
+        (argv || original, original, linecache, cache_paths)
     }
 }
 
@@ -602,6 +613,16 @@ pub(crate) enum ArgparseOutput {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum CachePathOperation {
+    Get(bool),
+    Set(bool),
+    Tag,
+    Forward,
+    Reverse,
+    Debug,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum LinecacheOperation {
     Getline,
     Getlines,
@@ -649,6 +670,11 @@ pub(crate) enum Builtin {
     ClassNameView,
     NewForwardRef,
     ForwardRefField(usize),
+    BoxAnnotation(usize),
+    AnnotationMember(usize),
+    AnnotationRef,
+    AnnotationIs,
+    StaticFunction(usize),
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
@@ -1036,6 +1062,7 @@ pub(crate) enum Builtin {
     DictFromKeysTarget,
     ModuleParentPrefix,
     ModuleCacheFromOrigin,
+    CachePath(CachePathOperation),
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,
@@ -1483,6 +1510,17 @@ pub(crate) enum LogOperation {
     Emit,
 }
 
+/// Kernel readiness for exact integer descriptors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Readiness {
+    New,
+    Register,
+    Modify,
+    Unregister,
+    Poll,
+    Select,
+}
+
 /// POSIX descriptor calls use the target's C int and file descriptor flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
@@ -1626,6 +1664,7 @@ pub(crate) enum ProcessOperation {
     CredentialId {
         group: bool,
     },
+    Readiness(Readiness),
     OsErrorField(u32),
     Strerror,
     QuoteCommandArgument,

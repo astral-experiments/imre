@@ -1,6 +1,6 @@
 //! Ownership lowering and textual LLVM emission, with no C or interpreter layer.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
@@ -53,6 +53,7 @@ impl Type {
             Self::Bool => "i1",
             Self::Str
             | Self::ForwardRef(_)
+            | Self::AnnotationValue(_)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -105,6 +106,7 @@ impl Type {
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
+            | Self::Poll
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -127,6 +129,7 @@ impl Type {
             Self::Float => "0.0",
             Self::Str
             | Self::ForwardRef(_)
+            | Self::AnnotationValue(_)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -179,6 +182,7 @@ impl Type {
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
+            | Self::Poll
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -321,7 +325,7 @@ fn emit_program(
             }
         });
     }
-    let (uses_sys_argv, uses_orig_argv, uses_linecache) = module.startup_usage();
+    let (uses_sys_argv, uses_orig_argv, uses_linecache, uses_cache_paths) = module.startup_usage();
     let mut emitter = Emitter {
         module,
         output,
@@ -331,6 +335,7 @@ fn emit_program(
         string_literals: BTreeMap::new(),
         uses_string_interning: false,
         tuple_literals: BTreeMap::new(),
+        static_functions: BTreeSet::new(),
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
@@ -370,6 +375,7 @@ fn emit_program(
         uses_linecache,
         uses_percent_tuple: false,
         uses_builtins_last: module.uses_builtins_last(),
+        uses_cache_paths,
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -527,6 +533,7 @@ struct Emitter<'a, 'module> {
     string_literals: BTreeMap<Vec<u8>, usize>,
     uses_string_interning: bool,
     tuple_literals: BTreeMap<usize, Vec<String>>,
+    static_functions: BTreeSet<String>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
@@ -566,6 +573,7 @@ struct Emitter<'a, 'module> {
     uses_linecache: bool,
     uses_percent_tuple: bool,
     uses_builtins_last: bool,
+    uses_cache_paths: bool,
     has_extensions: bool,
 }
 
@@ -764,6 +772,7 @@ impl Emitter<'_, '_> {
             | Type::Tuple(_)
             | Type::Callable(_)
             | Type::ForwardRef(_)
+            | Type::AnnotationValue(_)
             | Type::ModuleSpec(_)
             | Type::CompletedProcess(..) => "record",
             Type::List(_)
@@ -810,6 +819,7 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::Poll
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -1820,6 +1830,12 @@ impl Emitter<'_, '_> {
             self.line("call void @imre_record_error_init()");
             self.line("call void @imre_stdio_init()");
             self.line("call void @imre_init_literals()");
+        }
+        if entry && self.uses_cache_paths {
+            self.line(format!(
+                "call void @imre_cache_paths_init(i32 {})",
+                u32::from(!self.module.ignore_python_environment)
+            ));
         }
         if entry && self.uses_linecache {
             self.line("call void @imre_linecache_init()");
@@ -3337,9 +3353,14 @@ impl Emitter<'_, '_> {
             self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
         } else {
             match left.ty {
-                Type::ForwardRef(_) => {
+                Type::ForwardRef(_) | Type::AnnotationValue(_) => {
+                    let symbol = if matches!(left.ty, Type::ForwardRef(_)) {
+                        "imre_forward_ref_equal"
+                    } else {
+                        "imre_annotation_equal"
+                    };
                     let equal = self.instruction(format!(
-                        "call i32 @imre_forward_ref_equal(ptr {}, ptr {})",
+                        "call i32 @{symbol}(ptr {}, ptr {})",
                         left.operand, right.operand
                     ));
                     let pred = if matches!(op, Compare::Equal) {
@@ -3504,6 +3525,7 @@ impl Emitter<'_, '_> {
                 | Type::PlainObject
                 | Type::PathInfo
                 | Type::CodecInfo
+                | Type::Poll
                 | Type::Sha256
                 | Type::JsonDecoder
                 | Type::ZipFile
@@ -3728,6 +3750,27 @@ impl Emitter<'_, '_> {
             self.release_operand(&list);
             return none();
         }
+        if let Builtin::StaticFunction(id) = builtin {
+            let root = self.output.global_ref(format!("static_function_{id}"));
+            self.static_functions.insert(root.clone());
+            return self.rooted_record(returns, &root, |emitter| emitter.expr(&expressions[0]));
+        }
+        if let Builtin::AnnotationMember(layout) = builtin {
+            let frame = Expr {
+                ty: Type::Tuple(*layout),
+                kind: ExprKind::Builtin(Builtin::RecordView, expressions.to_vec()),
+            };
+            return self.expression(&Expr {
+                ty: returns,
+                kind: ExprKind::Field(Box::new(frame), 0),
+            });
+        }
+        if let Builtin::BoxAnnotation(layout) = builtin {
+            return Value {
+                ty: returns,
+                ..self.record_from_fields(Type::Tuple(*layout), expressions)
+            };
+        }
         if let Builtin::ForwardRefField(index) = builtin {
             let [reference] = expressions else {
                 unreachable!()
@@ -3888,7 +3931,10 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::ForwardRefField(_)
+            Builtin::StaticFunction(_)
+            | Builtin::AnnotationMember(_)
+            | Builtin::BoxAnnotation(_)
+            | Builtin::ForwardRefField(_)
             | Builtin::NewForwardRef
             | Builtin::LiteralStringView
             | Builtin::ClassNameView
@@ -4626,6 +4672,22 @@ impl Emitter<'_, '_> {
             Builtin::UnionProject => {
                 let value = self.own_operand(args.into_iter().next().unwrap());
                 return self.union_project(value, returns);
+            }
+            Builtin::AnnotationRef => self.call(
+                "imre_annotation_ref",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::AnnotationIs => {
+                let bit = self.instruction(format!(
+                    "call i32 @imre_annotation_is(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
             }
             Builtin::IsBuiltinSubclass => {
                 let result = self.instruction(format!(
@@ -5984,9 +6046,52 @@ impl Emitter<'_, '_> {
             Builtin::ModuleParentPrefix => {
                 self.call("imre_module_parent_prefix", returns, &[&args[0].value])
             }
-            Builtin::ModuleCacheFromOrigin => {
-                self.call("imre_module_cache_from_origin", returns, &[&args[0].value])
+            Builtin::CachePath(operation) => {
+                use crate::ir::CachePathOperation as Op;
+                match *operation {
+                    Op::Get(prefix) => {
+                        let word = self.instruction(format!(
+                            "call i64 @imre_cache_config_get(i32 {})",
+                            u32::from(prefix)
+                        ));
+                        self.decode_word(word, returns)
+                    }
+                    Op::Set(prefix) => {
+                        let word = self.word(&args[0].value);
+                        self.line(format!(
+                            "call void @imre_cache_config_set(i32 {}, i64 {word})",
+                            u32::from(prefix)
+                        ));
+                        none()
+                    }
+                    Op::Tag => self.call("imre_cache_path_tag", returns, &[]),
+                    Op::Forward => self.call(
+                        "imre_cache_from_source",
+                        returns,
+                        &[&args[0].value, &args[1].value, &args[2].value],
+                    ),
+                    Op::Reverse => self.call(
+                        "imre_source_from_cache",
+                        returns,
+                        &[&args[0].value, &args[1].value],
+                    ),
+                    Op::Debug => {
+                        let a =
+                            self.instruction(format!("zext i1 {} to i32", args[0].value.operand));
+                        let b =
+                            self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                        self.checked_line(format!(
+                            "call void @imre_cache_debug_validate(i32 {a}, i32 {b})"
+                        ));
+                        none()
+                    }
+                }
             }
+            Builtin::ModuleCacheFromOrigin => self.call(
+                "imre_module_cache_from_origin",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::NamespaceWrap | Builtin::NamespaceDict => self.call(
                 if matches!(builtin, Builtin::NamespaceWrap) {
                     "imre_namespace_wrap"
@@ -6536,6 +6641,7 @@ impl Emitter<'_, '_> {
                     Type::None => self.void_call("imre_print_none", &[]),
                     Type::ListInt
                     | Type::ForwardRef(_)
+                    | Type::AnnotationValue(_)
                     | Type::BuiltinClass
                     | Type::Class(_)
                     | Type::List(_)
@@ -6582,6 +6688,7 @@ impl Emitter<'_, '_> {
                     | Type::SimpleNamespace(_)
                     | Type::PathInfo
                     | Type::CodecInfo
+                    | Type::Poll
                     | Type::Sha256
                     | Type::JsonDecoder
                     | Type::ZipFile
@@ -6805,6 +6912,7 @@ impl Emitter<'_, '_> {
             Type::None => "0".to_owned(),
             Type::Str
             | Type::ForwardRef(_)
+            | Type::AnnotationValue(_)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -6856,6 +6964,7 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::Poll
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -6893,6 +7002,7 @@ impl Emitter<'_, '_> {
             Type::None => "0".to_owned(),
             Type::Str
             | Type::ForwardRef(_)
+            | Type::AnnotationValue(_)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -6944,6 +7054,7 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::Poll
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -7498,6 +7609,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Str | Type::StrLiteral(_) => 3,
         Type::BuiltinClass => 11,
         Type::ForwardRef(_) => 12,
+        Type::AnnotationValue(_) => 13,
         Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
@@ -7551,6 +7663,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::SimpleNamespace(_)
         | Type::PathInfo
         | Type::CodecInfo
+        | Type::Poll
         | Type::Sha256
         | Type::JsonDecoder
         | Type::ZipFile
@@ -7786,6 +7899,16 @@ declare ptr @imre_subprocess_quote_argument(i64, i32)
 declare i64 @imre_os_lseek(i64, i64, i64)
 declare i64 @imre_os_dup(i64)
 declare i64 @imre_os_dup2(i64, i64, i64)
+@imre_os_pollin = external constant i64
+@imre_os_pollpri = external constant i64
+@imre_os_pollout = external constant i64
+@imre_os_pollerr = external constant i64
+@imre_os_pollhup = external constant i64
+@imre_os_pollnval = external constant i64
+declare ptr @imre_poll_new()
+declare void @imre_poll_update(ptr, i32, i64, i64)
+declare ptr @imre_poll_wait(ptr, i32, i64, ptr)
+declare void @imre_select_wait(ptr, ptr, ptr, i32, i64, ptr)
 declare void @imre_os_pipe(ptr)
 declare void @imre_os_pipe2(ptr, i64)
 declare i32 @imre_os_isatty(i64)
@@ -8073,6 +8196,10 @@ declare void @imre_record_retain(ptr)
 declare void @imre_record_release(ptr)
 declare i32 @imre_record_equal(ptr, ptr) nounwind
 declare i32 @imre_forward_ref_equal(ptr, ptr) nounwind
+declare i32 @imre_annotation_kind(ptr) nounwind
+declare i32 @imre_annotation_equal(ptr, ptr) nounwind
+declare i32 @imre_annotation_is(ptr, ptr) nounwind
+declare ptr @imre_annotation_ref(ptr, ptr)
 declare i32 @imre_builtin_issubclass(ptr, ptr) nounwind
 declare i32 @imre_sequence_equal(ptr, ptr) nounwind
 declare i32 @imre_tuple_compare(ptr, ptr) nounwind
@@ -8451,7 +8578,14 @@ declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)
 declare ptr @imre_module_parent_prefix(ptr)
-declare i64 @imre_module_cache_from_origin(i64)
+declare i64 @imre_module_cache_from_origin(i64, ptr)
+declare void @imre_cache_paths_init(i32)
+declare i64 @imre_cache_config_get(i32)
+declare void @imre_cache_config_set(i32, i64)
+declare ptr @imre_cache_path_tag()
+declare ptr @imre_cache_from_source(ptr, ptr, ptr)
+declare ptr @imre_source_from_cache(ptr, ptr)
+declare void @imre_cache_debug_validate(i32, i32)
 declare ptr @imre_str_slice(ptr, i64, i64, i64)
 declare ptr @imre_float_count(double, i32, i64)
 declare ptr @imre_progression(i64, i64, i64)
