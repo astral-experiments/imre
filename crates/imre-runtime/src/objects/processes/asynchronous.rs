@@ -1,7 +1,6 @@
 //! Async subprocess handles live on the language thread. Only the direct child
 //! and owned native pipe buffers cross into its reaping worker.
 
-use crate::ObjectOwner;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
@@ -29,8 +28,8 @@ unsafe fn wait_for_process(handle: *const Object) -> bool {
         return true;
     }
     // SAFETY: the compiler roots this exact process through the await.
-    let owner: ObjectOwner = unsafe { ObjectOwner::acquire_word(handle as usize) };
-    ready(&owner) || asyncio::suspend(Box::new(move || ready(&owner)))
+    let owner: crate::ObjectOwner = unsafe { crate::ObjectOwner::acquire_word(handle as usize) };
+    ready(&owner) || asyncio::suspend(Rc::new(move || ready(&owner))).is_none()
 }
 
 pub(in crate::objects) struct AsyncProcess {
@@ -116,7 +115,7 @@ pub unsafe extern "C" fn imre_async_process_spawn(
     let result = unsafe { prepare_process(args, cwd, env) }
         .and_then(|(launch, cwd)| AsyncProcess::spawn(launch, cwd.as_ref(), stdout, stderr))
         .map(|process| {
-            ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+            crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
                 Storage::AsyncProcess(Box::new(process)),
             ))))
         });
@@ -179,7 +178,7 @@ pub unsafe extern "C" fn imre_async_process_communicate(
                 .enumerate()
             {
                 let owner: *const Bytes = if captured {
-                    Rc::into_raw(Rc::new(std::mem::take(bytes)))
+                    crate::BytesOwner::into_raw(crate::BytesOwner::new(std::mem::take(bytes)))
                 } else {
                     std::ptr::null()
                 };

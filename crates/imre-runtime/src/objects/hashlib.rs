@@ -1,9 +1,7 @@
 //! SHA-256 handles share a mutable hash state; digest reads finalize a snapshot.
 
-use crate::ObjectOwner;
 use crate::StrOwner;
 use std::cell::RefCell;
-use std::rc::Rc;
 
 use sha2::digest::Output;
 use sha2::{Digest, Sha256};
@@ -33,7 +31,7 @@ pub unsafe extern "C" fn imre_hash_new(name: *const Str, data: *const Bytes) -> 
     finish(result, std::ptr::null())
 }
 
-thread_local! { static AVAILABLE: RefCell<Option<ObjectOwner>> = const { RefCell::new(None) }; }
+thread_local! { static AVAILABLE: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) }; }
 
 /// The public algorithms set has a stable identity; changing it does not enable a provider.
 #[unsafe(no_mangle)]
@@ -42,13 +40,18 @@ pub extern "C" fn imre_hash_algorithms_available() -> *const Object {
     AVAILABLE.with_borrow_mut(|slot| {
         let set = slot.get_or_insert_with(|| {
             // SAFETY: the fresh string-keyed set transfers one reference to this slot.
-            let set = unsafe { ObjectOwner::from_raw(imre_set_new(3)) };
+            let set = unsafe { crate::ObjectOwner::from_raw(imre_set_new(3)) };
             let name = StrOwner::new(Str::from("sha256"));
             // SAFETY: both exact inputs are rooted; the set acquires its own key.
-            unsafe { imre_set_add(ObjectOwner::as_ptr(&set), StrOwner::as_ptr(&name) as usize) };
+            unsafe {
+                imre_set_add(
+                    crate::ObjectOwner::as_ptr(&set),
+                    StrOwner::as_ptr(&name) as usize,
+                )
+            };
             set
         });
-        ObjectOwner::into_raw(ObjectOwner::clone(set))
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(set))
     })
 }
 
@@ -58,9 +61,9 @@ pub(super) fn clear_algorithms() {
 }
 
 fn handle(state: Sha256) -> *const Object {
-    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(Storage::Sha256(
-        Box::new(state),
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::Sha256(Box::new(state)),
+    ))))
 }
 
 #[inline]
@@ -133,7 +136,7 @@ pub unsafe extern "C" fn imre_sha256_copy(hash: *const Object) -> *const Object 
 pub unsafe extern "C" fn imre_sha256_digest(hash: *const Object) -> *const Bytes {
     // SAFETY: only the copied state is consumed by finalize.
     let digest = unsafe { snapshot(hash) }.finalize();
-    Rc::into_raw(Rc::new(digest.to_vec()))
+    crate::BytesOwner::into_raw(crate::BytesOwner::new(digest.to_vec()))
 }
 
 /// # Safety

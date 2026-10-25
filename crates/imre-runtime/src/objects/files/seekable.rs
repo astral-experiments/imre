@@ -1,12 +1,11 @@
 //! Positioned binary I/O on ordinary files, in-memory files, and ZIP members.
 
-use super::super::{acquire_rc, zipfile::Member};
+use super::super::{c_int, zipfile::Member};
 use super::*;
-use crate::ObjectOwner;
 use num_traits::ToPrimitive;
 
 pub(super) struct Memory {
-    data: Rc<Bytes>,
+    data: crate::BytesOwner,
     position: u64,
 }
 
@@ -40,10 +39,10 @@ impl Memory {
         let end = start
             .checked_add(bytes.len())
             .ok_or_else(Error::allocation)?;
-        if Rc::get_mut(&mut self.data).is_none() {
-            self.data = Rc::new(copied(&self.data)?);
+        if crate::BytesOwner::get_mut(&mut self.data).is_none() {
+            self.data = crate::BytesOwner::new(copied(&self.data)?);
         }
-        let data = Rc::get_mut(&mut self.data).unwrap();
+        let data = crate::BytesOwner::get_mut(&mut self.data).unwrap();
         if end > data.len() {
             data.try_reserve(end - data.len())
                 .map_err(|_| Error::allocation())?;
@@ -69,8 +68,10 @@ impl Memory {
 }
 
 impl FileState {
-    pub(in crate::objects) fn memory(data: Rc<Bytes>) -> ObjectOwner {
+    pub(in crate::objects) fn memory(data: crate::BytesOwner) -> crate::ObjectOwner {
         Self {
+            fd: None,
+            raw: false,
             name: None,
             kind: FileKind::Memory,
             stream: Some(Stream::Memory(Memory { data, position: 0 })),
@@ -78,8 +79,10 @@ impl FileState {
         .into_object()
     }
 
-    pub(in crate::objects) fn member(member: Member) -> ObjectOwner {
+    pub(in crate::objects) fn member(member: Member) -> crate::ObjectOwner {
         Self {
+            fd: None,
+            raw: false,
             name: Some(member.name().clone()),
             kind: FileKind::Member,
             stream: Some(Stream::Member(Box::new(member))),
@@ -87,8 +90,8 @@ impl FileState {
         .into_object()
     }
 
-    fn into_object(self) -> ObjectOwner {
-        ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
+    pub(super) fn into_object(self) -> crate::ObjectOwner {
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
     }
 
     pub(super) fn check_member(&mut self, message: &'static str) -> Result<()> {
@@ -99,7 +102,7 @@ impl FileState {
         }
     }
 
-    pub(super) fn read_bytes(&mut self, limit: Option<usize>) -> Result<Bytes> {
+    pub(in crate::objects) fn read_bytes(&mut self, limit: Option<usize>) -> Result<Bytes> {
         match self.kind {
             FileKind::Memory => match self.stream()? {
                 Stream::Memory(m) => m.read(limit),
@@ -133,6 +136,32 @@ impl FileState {
         }
     }
 
+    /// Convert a signed absolute seek using this stream's Python rules.
+    pub(in crate::objects) fn absolute_offset(&mut self, offset: i128) -> Result<u64> {
+        match self.kind {
+            FileKind::Memory => {
+                let signed = i64::try_from(offset).map_err(|_| {
+                    Error::new(
+                        Kind::OverflowError,
+                        "Python int too large to convert to C ssize_t",
+                    )
+                })?;
+                self.stream()?;
+                u64::try_from(signed).map_err(|_| {
+                    Error::new(Kind::ValueError, format!("negative seek value {offset}"))
+                })
+            }
+            FileKind::Member => {
+                self.check_member("seek on closed file.")?;
+                Ok(offset.clamp(0, i128::from(i64::MAX)) as u64)
+            }
+            _ => {
+                self.stream()?;
+                disk_offset(offset)
+            }
+        }
+    }
+
     pub(in crate::objects) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
         if self.kind == FileKind::BinaryRead && self.stream.is_none() {
             return Err(Error::new(Kind::ValueError, "seek of closed file"));
@@ -141,13 +170,17 @@ impl FileState {
             Stream::Read(input) => input.seek(at),
             Stream::Memory(m) => m.seek(at),
             Stream::Member(m) => m.seek(at),
-            Stream::Write(_) => Err(Error::new(Kind::UnsupportedOperation, "seek")),
+            Stream::UnreadGzip { .. } | Stream::Write(_) | Stream::TextMemory(_) => {
+                Err(Error::new(Kind::UnsupportedOperation, "seek"))
+            }
         }
     }
 
     pub(in crate::objects) fn read_into(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self.stream()? {
             Stream::Read(input) => input.read_into(buf),
+            Stream::UnreadGzip { .. } if buf.is_empty() => Ok(0),
+            Stream::UnreadGzip { .. } => self.input()?.read_into(buf),
             Stream::Memory(m) => {
                 let n = m.remaining().len().min(buf.len());
                 buf[..n].copy_from_slice(&m.remaining()[..n]);
@@ -159,9 +192,23 @@ impl FileState {
                 buf[..bytes.len()].copy_from_slice(&bytes);
                 Ok(bytes.len())
             }
-            Stream::Write(_) => Err(Error::new(Kind::UnsupportedOperation, "read")),
+            Stream::Write(_) | Stream::TextMemory(_) => {
+                Err(Error::new(Kind::UnsupportedOperation, "read"))
+            }
         }
     }
+}
+
+/// Convert a Python file offset into the position used by POSIX file operations.
+pub(in crate::objects) fn disk_offset(offset: i128) -> Result<u64> {
+    let signed = i64::try_from(offset).map_err(|_| {
+        Error::new(
+            Kind::ValueError,
+            "cannot fit 'int' into an offset-sized integer",
+        )
+    })?;
+    u64::try_from(signed)
+        .map_err(|_| super::errno_error(io::Error::from_raw_os_error(libc::EINVAL)))
 }
 
 /// Construct a BytesIO, sharing its immutable initial bytes until the first write.
@@ -171,12 +218,12 @@ impl FileState {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_io(initial: *const Bytes) -> *const Object {
     let data = if initial.is_null() {
-        Rc::new(Vec::new())
+        crate::BytesOwner::new(Vec::new())
     } else {
         // SAFETY: the caller keeps the bytes owner live throughout construction.
-        unsafe { acquire_rc(initial as usize) }
+        unsafe { crate::acquire_bytes(initial as usize) }
     };
-    ObjectOwner::into_raw(FileState::memory(data))
+    crate::ObjectOwner::into_raw(FileState::memory(data))
 }
 
 /// Reposition the cursor using Python's signed offset and integer whence.
@@ -192,25 +239,17 @@ pub unsafe extern "C" fn imre_binary_seek(
     // SAFETY: no callbacks can invalidate any of the three borrowed values.
     let result = unsafe {
         let offset = Int::borrow(offset);
-        let whence = Int::borrow(whence);
         object(file).0.with_mut(|s| {
             let f = s.file_mut();
             f.check_member("seek on closed file.")?;
-            let whence = whence
-                .as_small()
-                .or_else(|| whence.big().to_i64())
-                .unwrap_or(i64::MAX);
+            if let Some(Stream::Member(member)) = &mut f.stream {
+                return member.seek_offset(&offset, Int::borrow(whence).as_small().unwrap_or(-1));
+            }
+            if f.kind == FileKind::GzipBinaryRead {
+                f.stream()?;
+            }
+            let whence = i64::from(c_int(whence)?);
             let off = match f.kind {
-                FileKind::Member => offset
-                    .as_small()
-                    .or_else(|| offset.big().to_i64())
-                    .unwrap_or_else(|| {
-                        if offset.big().sign() == num_bigint::Sign::Minus {
-                            i64::MIN
-                        } else {
-                            i64::MAX
-                        }
-                    }),
                 FileKind::Memory => {
                     let off = offset
                         .as_small()
@@ -246,27 +285,9 @@ pub unsafe extern "C" fn imre_binary_seek(
                 }
             };
             let at = match whence {
-                0 if off >= 0 => SeekFrom::Start(off as u64),
-                0 if f.kind == FileKind::Member => SeekFrom::Start(0),
-                0 if f.kind == FileKind::Memory => {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        format!("negative seek value {off}"),
-                    ));
-                }
-                0 => {
-                    return Err(super::errno_error(io::Error::from_raw_os_error(
-                        libc::EINVAL,
-                    )));
-                }
+                0 => SeekFrom::Start(f.absolute_offset(i128::from(off))?),
                 1 => SeekFrom::Current(off),
                 2 => SeekFrom::End(off),
-                _ if f.kind == FileKind::Member => {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        "whence must be os.SEEK_SET (0), os.SEEK_CUR (1), or os.SEEK_END (2)",
-                    ));
-                }
                 _ if f.kind == FileKind::Memory => {
                     return Err(Error::new(
                         Kind::ValueError,

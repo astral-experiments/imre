@@ -1,5 +1,6 @@
 //! Usage and help formatting for long options, using Python code-point widths.
 
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::fmt::Write;
 use std::io::IsTerminal;
@@ -7,7 +8,8 @@ use std::io::IsTerminal;
 use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategoryGroup};
 
 use super::super::python_whitespace;
-use super::{Kind, OptionSpec, Parser, Subcommands};
+use super::exceptions::{Error, Kind as ExceptionKind};
+use super::{ArgumentGroup, OptionSpec, Parser, Subcommands};
 
 /// Parse the positive decimal width accepted by shutil.get_terminal_size().
 fn positive_columns(value: &str) -> Option<usize> {
@@ -25,18 +27,7 @@ fn positive_columns(value: &str) -> Option<usize> {
             count += 1;
         }
     }
-    // Beyond the minimum threshold, CPython's decimal conversion guard can
-    // reject a width even when it consists almost entirely of leading zeroes.
-    if count > 640 {
-        let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(4300);
-        if limit != 0 && count > limit {
-            return None;
-        }
-    }
-    (width > 0).then_some(width)
+    (width > 0 && super::decimal_digits_allowed(count)).then_some(width)
 }
 
 pub(super) fn width() -> usize {
@@ -86,21 +77,18 @@ fn paint(enabled: bool, code: &str, text: &str) -> String {
 
 impl OptionSpec {
     fn dest(&self) -> String {
-        self.flags()
-            .find_map(|s| s.strip_prefix("--"))
-            .unwrap_or_else(|| self.flag.trim_start_matches('-'))
-            .replace('-', "_")
+        self.dest.clone()
     }
 
     fn label(&self, summary: bool, color: bool) -> String {
-        let mut metavar = if self.choices.is_empty() {
+        let mut metavar = if !self.has_choices {
             if self.positional() {
                 self.dest()
             } else {
                 self.dest().to_uppercase()
             }
         } else {
-            format!("{{{}}}", self.choices.join(","))
+            format!("{{{}}}", self.choices_text(",", false))
         };
         if self.positional() {
             if summary {
@@ -109,14 +97,21 @@ impl OptionSpec {
             return paint(color, if summary { "32" } else { "1;32" }, &metavar);
         }
         metavar = self.nargs.label(&metavar);
-        let option_color = |flag: &str, bold: bool| match (flag.starts_with("--"), bold) {
+        let option_color = |flag: &str, bold: bool| match (flag.chars().count() > 2, bold) {
             (true, true) => "1;36",
             (true, false) => "36",
             (false, true) => "1;32",
             (false, false) => "32",
         };
         if summary {
-            if self.kind == Kind::Bool {
+            if !self.takes_value() {
+                if self.action == super::Action::BooleanOptional {
+                    return paint(
+                        color,
+                        option_color(&self.flag, false),
+                        &self.flags().collect::<Vec<_>>().join(" | "),
+                    );
+                }
                 return paint(color, option_color(&self.flag, false), &self.flag);
             }
             return if color {
@@ -134,7 +129,7 @@ impl OptionSpec {
             .map(|flag| paint(color, option_color(flag, true), flag))
             .collect::<Vec<_>>()
             .join(", ");
-        if self.kind != Kind::Bool {
+        if self.takes_value() {
             label.push(' ');
             label.push_str(&paint(color, "1;33", &metavar));
         }
@@ -265,7 +260,7 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 }
 
 fn usage_lines(
-    parts: &[(usize, String)],
+    parts: &[(usize, impl AsRef<str>)],
     indent: usize,
     mut initial: usize,
     width: usize,
@@ -283,7 +278,7 @@ fn usage_lines(
             initial += 1;
             output.push(' ');
         }
-        output.push_str(part);
+        output.push_str(part.as_ref());
         initial += length;
         first = false;
     }
@@ -291,15 +286,63 @@ fn usage_lines(
 }
 
 impl Subcommands {
-    fn metavar(&self) -> String {
-        format!(
-            "{{{}}}",
-            self.choices
-                .iter()
-                .map(|child| child.name.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        )
+    pub(super) fn metavar(&self) -> String {
+        self.metavar
+            .clone()
+            .unwrap_or_else(|| format!("{{{}}}", self.spellings().collect::<Vec<_>>().join(",")))
+    }
+    fn write_rows(
+        &self,
+        output: &mut String,
+        prog: &str,
+        width: usize,
+        position: usize,
+        color: bool,
+    ) -> Result<(), Error> {
+        let label = self.metavar();
+        help_row(
+            output,
+            width,
+            position,
+            2,
+            &label,
+            &paint(color, "1;32", &label),
+            &ActionHelp::new(self.help.as_deref().unwrap_or_default(), prog, None),
+        )?;
+        for child in &self.choices {
+            if let Some(help) = &child.help {
+                let label = child.label();
+                help_row(
+                    output,
+                    width,
+                    position,
+                    4,
+                    &label,
+                    &paint(color, "1;32", &label),
+                    &ActionHelp::new(help, prog, None),
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The action header depends on the original help, before substitutions.
+enum ActionHelp {
+    Missing,
+    Whitespace,
+    Expanded(String),
+}
+
+impl ActionHelp {
+    fn new(template: &str, prog: &str, option: Option<&OptionSpec>) -> Self {
+        if template.is_empty() {
+            Self::Missing
+        } else if template.chars().all(python_whitespace) {
+            Self::Whitespace
+        } else {
+            Self::Expanded(expand(template, prog, option))
+        }
     }
 }
 
@@ -311,12 +354,12 @@ fn help_row(
     indent: usize,
     label: &str,
     styled: &str,
-    help: &str,
-) {
+    help: &ActionHelp,
+) -> Result<(), Error> {
     write!(output, "{}{styled}", " ".repeat(indent)).unwrap();
-    if help.is_empty() {
+    if matches!(help, ActionHelp::Missing) {
         output.push('\n');
-        return;
+        return Ok(());
     }
     let fits = indent + len(label) + 2 <= position;
     if !fits {
@@ -327,62 +370,92 @@ fn help_row(
     } else {
         position
     };
-    if help.chars().all(python_whitespace) {
+    if fits {
+        output.push_str(&" ".repeat(padding));
+    }
+    let ActionHelp::Expanded(text) = help else {
         if fits {
-            output.push_str(&" ".repeat(padding));
             output.push('\n');
         }
-        return;
+        return Ok(());
+    };
+    if text.is_empty() {
+        // An empty substitution leaves the next action on this line.
+        return Ok(());
     }
-    output.push_str(&" ".repeat(padding));
-    for (index, line) in wrap(help, width.saturating_sub(position).max(11))
-        .iter()
-        .enumerate()
-    {
-        if index != 0 {
+    let lines = wrap(text, width.saturating_sub(position).max(11));
+    if lines.is_empty() {
+        // HelpFormatter indexes the first line when the expansion is nonempty.
+        return Err(Error::new(
+            ExceptionKind::IndexError,
+            "list index out of range",
+        ));
+    }
+    for (index, line) in lines.iter().enumerate() {
+        if !fits || index != 0 {
             output.push_str(&" ".repeat(position));
         }
         writeln!(output, "{line}").unwrap();
     }
+    Ok(())
+}
+
+fn start_section(output: &mut String) {
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push('\n');
 }
 
 impl Parser {
     /// Subparser names use the parent's uncolored usage without its options.
-    pub(super) fn set_child_programs(&mut self) {
+    pub(super) fn set_child_programs(&mut self) -> Result<(), Error> {
         let Some(commands) = &mut self.subcommands else {
-            return;
+            return Ok(());
         };
-        let mut parts = vec![(len(&self.prog), self.prog.clone())];
+        let mut parts = vec![(len(&self.prog), Cow::Borrowed(self.prog.as_str()))];
         parts.extend(self.options.iter().filter(|o| o.positional()).map(|o| {
             let label = o.label(true, false);
-            (len(&label), label)
+            (len(&label), Cow::Owned(label))
         }));
         let width = width();
         let prog = if parts.len() == 1 {
-            self.prog.clone()
+            Cow::Borrowed(self.prog.as_str())
         } else if parts.iter().map(|(length, _)| length + 1).sum::<usize>() - 1 > width
             && len(&self.prog) * 4 > width.saturating_mul(3)
         {
-            format!("{}\n{}", self.prog, usage_lines(&parts[1..], 0, 0, width))
+            Cow::Owned(format!(
+                "{}\n{}",
+                self.prog,
+                usage_lines(&parts[1..], 0, 0, width)
+            ))
         } else {
-            usage_lines(&parts, len(&self.prog) + 1, 0, width)
+            Cow::Owned(usage_lines(&parts, len(&self.prog) + 1, 0, width))
         };
+        let prog = prog.trim_matches(python_whitespace);
         for child in &mut commands.choices {
-            child.parser.prog = format!("{} {}", prog.trim_matches(python_whitespace), child.name);
+            let child_prog = &mut child.parser.prog;
+            child_prog.clear();
+            child_prog
+                .try_reserve_exact(prog.len() + 1 + child.name.len())
+                .map_err(|_| Error::allocation())?;
+            child_prog.push_str(prog);
+            child_prog.push(' ');
+            child_prog.push_str(&child.name);
         }
+        Ok(())
     }
 
     fn description(&self, text: &str, width: usize, indent: usize) -> String {
-        let text = if text.contains("%(prog)") {
-            expand(text, &self.prog, None)
-        } else {
-            text.to_owned()
-        };
+        let expanded = text
+            .contains("%(prog)")
+            .then(|| expand(text, &self.prog, None));
+        let text = expanded.as_deref().unwrap_or(text);
         let prefix = " ".repeat(indent);
         if self.raw {
-            let mut offsets = super::super::LineOffsets::new(&text);
+            let mut offsets = super::super::LineOffsets::new(text);
             let mut result = String::new();
-            while let Some(line) = offsets.next(&text) {
+            while let Some(line) = offsets.next(text) {
                 result.push_str(&prefix);
                 result.push_str(&text[line.start..offsets.start]);
             }
@@ -391,7 +464,7 @@ impl Parser {
             // _format_text subtracts the current indent before textwrap.fill;
             // textwrap then counts its initial/subsequent indent in that width.
             let width = width.saturating_sub(indent).max(11);
-            wrap(&text, width.saturating_sub(indent).max(1))
+            wrap(text, width.saturating_sub(indent).max(1))
                 .into_iter()
                 .map(|line| format!("{prefix}{line}"))
                 .collect::<Vec<_>>()
@@ -401,26 +474,12 @@ impl Parser {
 
     pub(super) fn usage(&self, width: usize) -> String {
         let color = color_enabled();
-        let short = format!("[{}]", paint(color, "32", "-h"));
-        let mut parts = vec![
-            (len(&self.prog), paint(color, "1;35", &self.prog)),
-            (4, short),
-        ];
-        for option in self.options.iter().filter(|o| !o.positional()) {
-            let length = len(&option.label(true, false));
-            let styled = option.label(true, color);
-            parts.push(if option.required {
-                (length, styled)
-            } else {
-                (length + 2, format!("[{styled}]"))
-            });
+        let mut parts = vec![(len(&self.prog), paint(color, "1;35", &self.prog))];
+        if let Some([short, _]) = &self.help_flags {
+            parts.push((len(short) + 2, format!("[{}]", paint(color, "32", short))));
         }
-        let mut positional: Vec<_> = self
-            .options
-            .iter()
-            .filter(|o| o.positional())
-            .map(|option| (len(&option.label(true, false)), option.label(true, color)))
-            .collect();
+        let mut positional = Vec::new();
+        self.usage_actions(color, &mut parts, &mut positional);
         if let Some(commands) = &self.subcommands {
             let word = format!("{} ...", commands.metavar());
             positional.push((len(&word), paint(color, "32", &word)));
@@ -428,7 +487,9 @@ impl Parser {
         let prefix = "usage: ".len();
         let mut text = paint(color, "1;34", "usage: ");
         let width_of = |parts: &[(usize, String)]| parts.iter().map(|(n, _)| n + 1).sum::<usize>();
-        if prefix + width_of(&parts) + width_of(&positional) - 1 <= width {
+        if (parts.len() == 1 && positional.is_empty())
+            || prefix + width_of(&parts) + width_of(&positional) - 1 <= width
+        {
             text.push_str(
                 &parts
                     .iter()
@@ -438,6 +499,9 @@ impl Parser {
                     .join(" "),
             );
         } else {
+            if parts.len() == 1 {
+                parts.append(&mut positional);
+            }
             let short_prog = (prefix + len(&self.prog)) * 4 <= 3 * width;
             let indent = if short_prog {
                 prefix + len(&self.prog) + 1
@@ -465,7 +529,101 @@ impl Parser {
         text
     }
 
-    pub(super) fn help(&self, description: &str) -> String {
+    /// Keep positionals in declaration order, moving a group's options beside its first positional.
+    fn usage_actions(
+        &self,
+        color: bool,
+        optionals: &mut Vec<(usize, String)>,
+        positionals: &mut Vec<(usize, String)>,
+    ) {
+        let mut grouped = vec![Vec::new(); self.mutex_required.len()];
+        for (slot, option) in self.options.iter().enumerate() {
+            if !option.positional()
+                && let Some(id) = option.mutex
+            {
+                grouped[id].push(slot);
+            }
+        }
+        let mut used = vec![false; self.options.len()];
+        for positional in [true, false] {
+            for (slot, option) in self.options.iter().enumerate() {
+                if option.positional() != positional || used[slot] {
+                    continue;
+                }
+                let output = if positional {
+                    &mut *positionals
+                } else {
+                    &mut *optionals
+                };
+                if let Some(id) = option.mutex {
+                    let mut alternatives = std::mem::take(&mut grouped[id]);
+                    if positional {
+                        alternatives.push(slot);
+                    }
+                    for &other in &alternatives {
+                        used[other] = true;
+                    }
+                    self.usage_group(&alternatives, self.mutex_required[id], color, output);
+                } else {
+                    self.usage_group(&[slot], false, color, output);
+                }
+            }
+        }
+    }
+
+    fn usage_group(
+        &self,
+        slots: &[usize],
+        required: bool,
+        color: bool,
+        output: &mut Vec<(usize, String)>,
+    ) {
+        let alternatives = slots.len() > 1;
+        for (index, &slot) in slots.iter().enumerate() {
+            let option = &self.options[slot];
+            let plain = option.label(true, false);
+            let (mut length, mut styled) = if alternatives && option.positional() {
+                let label = plain
+                    .strip_prefix('[')
+                    .and_then(|s| s.strip_suffix(']'))
+                    .unwrap_or(&plain);
+                (len(label), paint(color, "32", label))
+            } else {
+                (len(&plain), option.label(true, color))
+            };
+            if alternatives {
+                if index == 0 {
+                    styled.insert(0, if required { '(' } else { '[' });
+                    length += 1;
+                }
+                let suffix = if index + 1 < slots.len() {
+                    " |"
+                } else if required {
+                    ")"
+                } else {
+                    "]"
+                };
+                styled.push_str(suffix);
+                length += suffix.len();
+            } else if !option.positional() && !option.required && !required {
+                styled = format!("[{styled}]");
+                length += 2;
+            }
+            output.push((length, styled));
+        }
+    }
+
+    fn open_group(&self, output: &mut String, group: &ArgumentGroup, width: usize, color: bool) {
+        start_section(output);
+        if let Some(title) = &group.title {
+            writeln!(output, "{}", paint(color, "1;34", &format!("{title}:"))).unwrap();
+        }
+        if let Some(text) = &group.description {
+            writeln!(output, "{}\n", self.description(text, width, 2)).unwrap();
+        }
+    }
+
+    pub(super) fn help(&self, description: &str) -> Result<String, Error> {
         let width = width();
         let mut output = self.usage(width);
         if !description.is_empty() {
@@ -475,22 +633,25 @@ impl Parser {
             }
         }
         let color = color_enabled();
-        let mut rows = vec![(
-            "-h, --help".to_owned(),
-            format!(
-                "{}, {}",
-                paint(color, "1;32", "-h"),
-                paint(color, "1;36", "--help")
-            ),
-            "show this help message and exit".to_owned(),
-        )];
+        let mut rows = Vec::new();
+        if let Some([short, long]) = &self.help_flags {
+            rows.push((
+                format!("{short}, {long}"),
+                format!(
+                    "{}, {}",
+                    paint(color, "1;32", short),
+                    paint(color, "1;36", long)
+                ),
+                ActionHelp::Expanded("show this help message and exit".to_owned()),
+            ));
+        }
         let mut positionals = Vec::new();
-        let mut grouped = vec![Vec::new(); self.groups.len()];
+        let mut grouped: Vec<_> = self.groups.iter().map(|_| Vec::new()).collect();
         for option in &self.options {
             let row = (
                 option.label(false, false),
                 option.label(false, color),
-                expand(&option.help, &self.prog, Some(option)),
+                ActionHelp::new(&option.help, &self.prog, Some(option)),
             );
             if let Some(group) = option.group {
                 grouped[group].push(row);
@@ -506,72 +667,53 @@ impl Parser {
             .chain(grouped.iter().flatten())
             .map(|(label, _, _)| len(label))
             .max()
-            .unwrap();
+            .unwrap_or(0);
         if let Some(commands) = &self.subcommands {
             max_header = max_header.max(len(&commands.metavar()));
             for child in &commands.choices {
                 if child.help.is_some() {
-                    max_header = max_header.max(2 + len(&child.name));
+                    max_header = max_header.max(2 + len(&child.label()));
                 }
             }
         }
         let position = (max_header + 4)
             .min(24)
             .min(width.saturating_sub(20).max(4));
-        if !positionals.is_empty() || self.subcommands.is_some() {
-            writeln!(
-                output,
-                "\n{}",
-                paint(color, "1;34", "positional arguments:")
-            )
-            .unwrap();
+        let inline = self
+            .subcommands
+            .as_ref()
+            .filter(|commands| commands.group.is_none());
+        if !positionals.is_empty() || inline.is_some() {
+            start_section(&mut output);
+            writeln!(output, "{}", paint(color, "1;34", "positional arguments:")).unwrap();
             for (label, styled, help) in positionals {
-                help_row(&mut output, width, position, 2, &label, &styled, &help);
+                help_row(&mut output, width, position, 2, &label, &styled, &help)?;
             }
         }
-        if let Some(commands) = &self.subcommands {
-            let label = commands.metavar();
-            help_row(
-                &mut output,
-                width,
-                position,
-                2,
-                &label,
-                &paint(color, "1;32", &label),
-                "",
-            );
-            for child in &commands.choices {
-                if let Some(help) = &child.help {
-                    help_row(
-                        &mut output,
-                        width,
-                        position,
-                        4,
-                        &child.name,
-                        &paint(color, "1;32", &child.name),
-                        &expand(help, &self.prog, None),
-                    );
-                }
-            }
+        if let Some(commands) = inline {
+            commands.write_rows(&mut output, &self.prog, width, position, color)?;
         }
-        writeln!(output, "\n{}", paint(color, "1;34", "options:")).unwrap();
+        if !rows.is_empty() {
+            start_section(&mut output);
+            writeln!(output, "{}", paint(color, "1;34", "options:")).unwrap();
+        }
         for (label, styled, help) in rows {
-            help_row(&mut output, width, position, 2, &label, &styled, &help);
+            help_row(&mut output, width, position, 2, &label, &styled, &help)?;
         }
         for (group, rows) in self.groups.iter().zip(grouped) {
             if rows.is_empty() && group.description.is_none() {
                 continue;
             }
-            output.push('\n');
-            if let Some(title) = &group.title {
-                writeln!(output, "{}", paint(color, "1;34", &format!("{title}:"))).unwrap();
-            }
-            if let Some(text) = &group.description {
-                writeln!(output, "{}\n", self.description(text, width, 2)).unwrap();
-            }
+            self.open_group(&mut output, group, width, color);
             for (label, styled, help) in rows {
-                help_row(&mut output, width, position, 2, &label, &styled, &help);
+                help_row(&mut output, width, position, 2, &label, &styled, &help)?;
             }
+        }
+        if let Some(commands) = &self.subcommands
+            && let Some(group) = &commands.group
+        {
+            self.open_group(&mut output, group, width, color);
+            commands.write_rows(&mut output, &self.prog, width, position, color)?;
         }
         // HelpFormatter collapses three or more newlines throughout the report,
         // including blank lines at the edges of a raw module docstring.
@@ -580,7 +722,7 @@ impl Parser {
         }
         output.truncate(output.trim_end_matches('\n').len());
         output.push('\n');
-        output
+        Ok(output)
     }
 }
 
@@ -608,10 +750,10 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                 ("default", Some(option)) => option.default.as_deref().unwrap_or("None").to_owned(),
                 ("const", Some(option)) => option.constant.as_deref().unwrap_or("None").to_owned(),
                 ("choices", Some(option)) => {
-                    if option.choices.is_empty() {
+                    if !option.has_choices {
                         "None".into()
                     } else {
-                        option.choices.join(", ")
+                        option.choices_text(", ", false)
                     }
                 }
                 ("required", Some(option)) => {
@@ -622,7 +764,7 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                     }
                 }
                 ("nargs", Some(option)) => {
-                    if option.kind == Kind::Bool {
+                    if !option.takes_value() {
                         "0".into()
                     } else {
                         option.nargs.spelling()

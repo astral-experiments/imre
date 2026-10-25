@@ -1,8 +1,6 @@
 //! Immutable byte values with exact ownership, Python repr, and strict UTF-8.
 
-use crate::ObjectOwner;
 use crate::StrOwner;
-use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{AsciiEscape, Escape};
@@ -10,7 +8,7 @@ use ruff_python_literal::escape::{AsciiEscape, Escape};
 use super::exceptions::{Error, Kind, Result, finish};
 use super::sequences::SliceIndices;
 use super::words::{OwnedWord, WordKind};
-use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, acquire_rc, fail};
+use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, fail};
 
 /// Reserves an entire immutable result before copying any bytes into it.
 fn allocate(length: usize) -> Result<Bytes> {
@@ -29,7 +27,7 @@ pub(super) struct ByteOutput {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_byte_output_new() -> *const Object {
-    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
         Storage::ByteOutput(ByteOutput {
             bytes: Vec::new(),
             invalid: false,
@@ -139,7 +137,9 @@ pub unsafe extern "C" fn imre_byte_output_finish(output: *const Object) -> *cons
                     "bytes must be in range(0, 256)",
                 ));
             }
-            Ok(Rc::into_raw(Rc::new(std::mem::take(&mut output.bytes))))
+            Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(
+                std::mem::take(&mut output.bytes),
+            )))
         })
     };
     finish(result, std::ptr::null())
@@ -192,7 +192,7 @@ pub unsafe extern "C" fn imre_bytes_literal(data: *const u8, length: usize) -> *
     let mut value =
         allocate(length).unwrap_or_else(|_| fail("MemoryError", "bytes allocation failed"));
     value.extend_from_slice(data);
-    Rc::into_raw(Rc::new(value))
+    crate::BytesOwner::into_raw(crate::BytesOwner::new(value))
 }
 
 /// # Safety
@@ -200,15 +200,15 @@ pub unsafe extern "C" fn imre_bytes_literal(data: *const u8, length: usize) -> *
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_retain(value: *const Bytes) {
     if !value.is_null() {
-        // SAFETY: the rooted pointer identifies an exact Rc<Bytes> allocation.
+        // SAFETY: the rooted pointer identifies an exact crate::BytesOwner allocation.
         unsafe { retained(value) };
     }
 }
 
 /// Returns a new owner of the caller's rooted immutable bytes.
 unsafe fn retained(value: *const Bytes) -> *const Bytes {
-    // SAFETY: the caller roots this exact Rc<Bytes> allocation.
-    unsafe { Rc::increment_strong_count(value) };
+    // SAFETY: the caller roots this exact crate::BytesOwner allocation.
+    unsafe { crate::retain_bytes(value) };
     value
 }
 
@@ -217,8 +217,8 @@ unsafe fn retained(value: *const Bytes) -> *const Bytes {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_release(value: *const Bytes) {
     if !value.is_null() {
-        // SAFETY: the caller transfers one exact Rc<Bytes> reference.
-        unsafe { Rc::decrement_strong_count(value) };
+        // SAFETY: the caller transfers one exact crate::BytesOwner reference.
+        unsafe { crate::release_bytes(value) };
     }
 }
 
@@ -265,6 +265,40 @@ pub unsafe extern "C" fn imre_bytes_truthy(value: *const Bytes) -> u32 {
 pub unsafe extern "C" fn imre_bytes_compare(left: *const Bytes, right: *const Bytes) -> i32 {
     // SAFETY: both immutable inputs remain alive and no borrow escapes.
     unsafe { (&*left).cmp(&*right) as i32 }
+}
+
+/// Tests for an immutable subsequence; the empty needle matches even empty bytes.
+///
+/// # Safety
+/// Both byte handles remain rooted throughout the search.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_contains(needle: *const Bytes, haystack: *const Bytes) -> u32 {
+    // SAFETY: both byte buffers are immutable and rooted for the call.
+    u32::from(unsafe { memchr::memmem::find(&*haystack, &*needle) }.is_some())
+}
+
+/// Integer needles are byte values, including on an empty haystack, not indices.
+///
+/// # Safety
+/// Root the canonical integer and immutable bytes; pending error state is clear.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_contains_int(needle: usize, haystack: *const Bytes) -> u32 {
+    // Canonical integers outside the tagged small range cannot represent a byte.
+    // SAFETY: the caller roots the exact canonical integer until this call returns.
+    let byte = unsafe { Int::borrow(needle) }
+        .as_small()
+        .and_then(|n| u8::try_from(n).ok());
+    let Some(byte) = byte else {
+        return finish(
+            Err(Error::new(
+                Kind::ValueError,
+                "byte must be in range(0, 256)",
+            )),
+            0,
+        );
+    };
+    // SAFETY: the caller keeps the immutable haystack alive.
+    u32::from(memchr::memchr(byte, unsafe { &*haystack }).is_some())
 }
 
 /// # Safety
@@ -360,7 +394,7 @@ pub unsafe extern "C" fn imre_bytes_slice(
             }
             let mut result = allocate(slice.len())?;
             result.extend(slice.map(|at| bytes[at]));
-            Ok(Rc::into_raw(Rc::new(result)))
+            Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(result)))
         })
     };
     finish(result, std::ptr::null())
@@ -379,7 +413,7 @@ pub unsafe extern "C" fn imre_bytes_count(count: usize) -> *const Bytes {
         }
         let mut value = allocate(count as usize)?;
         value.resize(count as usize, 0);
-        Ok(Rc::into_raw(Rc::new(value)))
+        Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(value)))
     })();
     finish(result, std::ptr::null())
 }
@@ -416,7 +450,7 @@ pub unsafe extern "C" fn imre_bytes_list(value: *const List) -> *const Bytes {
             // SAFETY: equal-length chunk pairs initialized every output byte.
             // An error leaves only unpublished u8 values, which need no cleanup.
             result.set_len(values.len());
-            Ok(Rc::into_raw(Rc::new(result)))
+            Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(result)))
         })
     };
     finish(result, std::ptr::null())
@@ -443,7 +477,7 @@ pub unsafe extern "C" fn imre_bytes_concat(
         let mut result = allocate(length)?;
         result.extend_from_slice(left_bytes);
         result.extend_from_slice(right_bytes);
-        Ok(Rc::into_raw(Rc::new(result)))
+        Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(result)))
     })();
     finish(result, std::ptr::null())
 }
@@ -470,7 +504,7 @@ pub unsafe extern "C" fn imre_bytes_repeat(value: *const Bytes, count: usize) ->
         for _ in 0..count {
             result.extend_from_slice(bytes);
         }
-        Ok(Rc::into_raw(Rc::new(result)))
+        Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(result)))
     })();
     finish(result, std::ptr::null())
 }
@@ -485,13 +519,35 @@ pub unsafe extern "C" fn imre_str_encode(value: *const Str) -> *const Bytes {
     unsafe { imre_bytes_literal(value.as_ptr(), value.len()) }
 }
 
-/// Renders Python's strict UTF-8 decode error from the invalid sequence bounds.
+/// A borrowed file buffer must become the immutable input in a codec exception.
+pub(super) fn owned_input(value: &[u8]) -> Result<crate::BytesOwner> {
+    let mut bytes = allocate(value.len())?;
+    bytes.extend_from_slice(value);
+    crate::BytesOwner::try_new(bytes).map_err(|_| Error::memory_error())
+}
+
+/// A borrowed slice must become the immutable byte object in the exception arguments.
 pub(super) fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
-    decode_owned_error(Rc::new(value.to_vec()), error)
+    match owned_input(value) {
+        Ok(bytes) => decode_owned_error(bytes, error),
+        Err(error) => error,
+    }
+}
+
+pub(super) fn ascii_decode_error(bytes: crate::BytesOwner, index: usize) -> Error {
+    let byte = bytes[index];
+    let reason = "ordinal not in range(128)";
+    Error::unicode_decode(
+        "ascii",
+        bytes,
+        index..index + 1,
+        reason,
+        format!("'ascii' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"),
+    )
 }
 
 /// Most decoders already own the immutable input. Retain it only on the failing path.
-fn decode_owned_error(value: Rc<Bytes>, error: std::str::Utf8Error) -> Error {
+pub(super) fn decode_owned_error(value: crate::BytesOwner, error: std::str::Utf8Error) -> Error {
     let start = error.valid_up_to();
     let end = error
         .error_len()
@@ -509,9 +565,9 @@ fn decode_owned_error(value: Rc<Bytes>, error: std::str::Utf8Error) -> Error {
         format!("bytes in position {start}-{}", end - 1)
     };
     Error::unicode_decode(
+        "utf-8",
         value,
-        start,
-        end,
+        start..end,
         reason,
         format!("'utf-8' codec can't decode {location}: {reason}"),
     )
@@ -526,7 +582,54 @@ pub unsafe extern "C" fn imre_bytes_decode(value: *const Bytes) -> *const Str {
     let result = std::str::from_utf8(bytes)
         .map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text))))
         // SAFETY: this caller still roots the exact byte object passed to the failing decode.
-        .map_err(|error| decode_owned_error(unsafe { super::acquire_rc(value as usize) }, error));
+        .map_err(|error| {
+            // SAFETY: this exact bytes input remains rooted; acquire takes an owner for the error.
+            decode_owned_error(unsafe { crate::acquire_bytes(value as usize) }, error)
+        });
+    finish(result, std::ptr::null())
+}
+
+/// Decode strict ASCII, reporting the first offending byte as CPython does.
+///
+/// # Safety
+/// The caller roots the immutable input through validation and copying.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_decode_ascii(value: *const Bytes) -> *const Str {
+    // SAFETY: the exact bytes remain owned by the caller.
+    let data = unsafe { &*value };
+    let result = if let Some(index) = data.iter().position(|b| !b.is_ascii()) {
+        // SAFETY: the original immutable bytes are still owned by this caller.
+        Err(ascii_decode_error(
+            unsafe { crate::acquire_bytes(value as usize) },
+            index,
+        ))
+    } else {
+        let text = std::str::from_utf8(data).expect("ASCII is valid UTF-8");
+        Str::try_new(text)
+            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
+            .map_err(|_| Error::allocation())
+    };
+    finish(result, std::ptr::null())
+}
+
+/// Encode bytes with the URL-safe alphabet and include standard Base64 padding.
+///
+/// # Safety
+/// The caller roots the immutable byte input. The result owns its bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_urlsafe_b64encode(value: *const Bytes) -> *const Bytes {
+    use base64::{Engine, engine::general_purpose::URL_SAFE};
+    // SAFETY: the exact bytes remain rooted until encoding finishes.
+    let data = unsafe { &*value };
+    let result = (|| {
+        let n = base64::encoded_len(data.len(), true).ok_or_else(Error::allocation)?;
+        let mut encoded = allocate(n)?;
+        encoded.resize(n, 0);
+        URL_SAFE
+            .encode_slice(data, &mut encoded)
+            .expect("exact Base64 capacity");
+        Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(encoded)))
+    })();
     finish(result, std::ptr::null())
 }
 
@@ -540,8 +643,10 @@ pub unsafe extern "C" fn imre_bytes_decode_splitlines(value: *const Bytes) -> *c
     let bytes = unsafe { &*value };
     let result = std::str::from_utf8(bytes)
         // SAFETY: this caller still roots the exact byte object passed to the failing decode.
-        .map_err(|error| decode_owned_error(unsafe { super::acquire_rc(value as usize) }, error))
-        .and_then(|text| super::split_lines(text, |range| super::text::owned_string(&text[range])));
+        .map_err(|error| decode_owned_error(unsafe { crate::acquire_bytes(value as usize) }, error))
+        .and_then(|text| {
+            super::split_lines(text, |range| super::text::try_owned_string(&text[range]))
+        });
     finish(result, std::ptr::null())
 }
 
@@ -558,16 +663,16 @@ pub unsafe extern "C" fn imre_bytes_validate_utf8(value: *const Bytes) -> *const
     let bytes = unsafe { &*value };
     if let Err(error) = std::str::from_utf8(bytes) {
         // SAFETY: the validator's caller roots this exact immutable byte owner.
-        return decode_owned_error(unsafe { super::acquire_rc(value as usize) }, error)
+        return decode_owned_error(unsafe { crate::acquire_bytes(value as usize) }, error)
             .returning(std::ptr::null());
     }
-    // SAFETY: the rooted exact Rc<Bytes> allocation provides the returned owner.
+    // SAFETY: the rooted exact crate::BytesOwner allocation provides the returned owner.
     unsafe { retained(value) }
 }
 
 /// A cursor owns its immutable input independently of the user's source binding.
 pub(super) struct BytesIterator {
-    owner: Rc<Bytes>,
+    owner: crate::BytesOwner,
     position: usize,
 }
 
@@ -587,8 +692,8 @@ impl BytesIterator {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_iter(value: *const Bytes) -> *const Object {
     // SAFETY: the rooted source acquires an independent owner for the cursor.
-    let owner = unsafe { acquire_rc(value as usize) };
-    ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+    let owner = unsafe { crate::acquire_bytes(value as usize) };
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
         Storage::BytesIterator(BytesIterator { owner, position: 0 }),
     ))))
 }
@@ -600,6 +705,7 @@ mod tests {
         imre_error_pending, imre_error_take, imre_exception_matches, imre_exception_message,
     };
     use crate::{BigInt, MAX_SMALL, MIN_SMALL};
+    use std::rc::Rc;
 
     /// Consumes one indexing failure and checks the exact public diagnostic.
     fn assert_index_error(expected: &str) {
@@ -608,12 +714,13 @@ mod tests {
         // SAFETY: taking the pending exception transfers one live owner, and
         // message extraction returns another independently owned string.
         unsafe {
-            let error = ObjectOwner::from_raw(error);
+            let error = crate::ObjectOwner::from_raw(error);
             assert_eq!(
-                imre_exception_matches(ObjectOwner::as_ptr(&error), Kind::IndexError as u32),
+                imre_exception_matches(crate::ObjectOwner::as_ptr(&error), Kind::IndexError as u32),
                 1
             );
-            let message = StrOwner::from_raw(imre_exception_message(ObjectOwner::as_ptr(&error)));
+            let message =
+                StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(message.as_str(), expected);
         }
         assert_eq!(imre_error_pending(), 0);
@@ -621,11 +728,11 @@ mod tests {
 
     #[test]
     fn unchanged_bytes_results_share_the_input_allocation() {
-        let value = Rc::new(vec![0, 1, 2]);
-        let empty = Rc::new(Vec::new());
-        let input = Rc::as_ptr(&value);
-        let empty_ptr = Rc::as_ptr(&empty);
-        // SAFETY: the two Rc owners root the inputs, and each result transfers one owner.
+        let value = crate::BytesOwner::new(vec![0, 1, 2]);
+        let empty = crate::BytesOwner::new(Vec::new());
+        let input = crate::BytesOwner::as_ptr(&value);
+        let empty_ptr = crate::BytesOwner::as_ptr(&empty);
+        // SAFETY: the two byte owners root the inputs, and each result transfers one owner.
         unsafe {
             for result in [
                 imre_bytes_slice(input, 0, 0, 0),
@@ -633,10 +740,13 @@ mod tests {
                 imre_bytes_concat(input, empty_ptr),
                 imre_bytes_concat(empty_ptr, input),
             ] {
-                assert!(Rc::ptr_eq(&Rc::from_raw(result), &value));
+                assert!(crate::BytesOwner::ptr_eq(
+                    &crate::BytesOwner::from_raw(result),
+                    &value
+                ));
             }
         }
-        assert_eq!(Rc::strong_count(&value), 1);
+        assert_eq!(crate::BytesOwner::strong_count(&value), 1);
     }
 
     #[test]
@@ -698,49 +808,74 @@ mod tests {
     }
 
     #[test]
+    fn ascii_decode_error_retains_its_input_and_offsets() {
+        let input = crate::BytesOwner::new(b"a\xffb".to_vec());
+        let observer = input.clone();
+        // SAFETY: input roots the bytes until the decoder returns.
+        assert!(unsafe { imre_bytes_decode_ascii(crate::BytesOwner::as_ptr(&input)) }.is_null());
+        drop(input);
+        // SAFETY: taking the pending error transfers its owner.
+        let error = unsafe { crate::ObjectOwner::from_raw(imre_error_take()) };
+        // SAFETY: error roots the exception, and repr transfers a new string owner.
+        let repr = unsafe {
+            crate::StrOwner::from_raw(crate::objects::exceptions::imre_exception_repr(
+                crate::ObjectOwner::as_ptr(&error),
+            ))
+        };
+        assert_eq!(
+            repr.as_str(),
+            r"UnicodeDecodeError('ascii', b'a\xffb', 1, 2, 'ordinal not in range(128)')"
+        );
+        assert_eq!(crate::BytesOwner::strong_count(&observer), 2);
+        drop(error);
+        assert_eq!(crate::BytesOwner::strong_count(&observer), 1);
+    }
+
+    #[test]
     fn utf8_validation_preserves_identity_ownership_and_decode_errors() {
         for text in ["", "ascii\0", "é\u{10ffff}"] {
-            let source = Rc::new(text.as_bytes().to_vec());
-            let weak = Rc::downgrade(&source);
+            let source = crate::BytesOwner::new(text.as_bytes().to_vec());
+            let observer = source.clone();
             // SAFETY: validation borrows one rooted input and transfers one
             // owner of that same allocation, which outlives the original root.
             unsafe {
-                let result = imre_bytes_validate_utf8(Rc::as_ptr(&source));
-                assert_eq!(result, Rc::as_ptr(&source));
-                let result = Rc::from_raw(result);
-                assert_eq!(Rc::strong_count(&source), 2);
+                let result = imre_bytes_validate_utf8(crate::BytesOwner::as_ptr(&source));
+                assert_eq!(result, crate::BytesOwner::as_ptr(&source));
+                let result = crate::BytesOwner::from_raw(result);
+                assert_eq!(crate::BytesOwner::strong_count(&source), 3);
                 drop(source);
                 assert_eq!(result.as_slice(), text.as_bytes());
                 drop(result);
-                assert!(weak.upgrade().is_none());
+                assert_eq!(crate::BytesOwner::strong_count(&observer), 1);
             }
         }
         for bytes in [vec![0xff], vec![b'a', 0xe2, 0x82], vec![b'a', 0xe2, b' ']] {
-            let source = Rc::new(bytes);
+            let source = crate::BytesOwner::new(bytes);
             // SAFETY: each failure transfers one exception; both are consumed
             // before the next call, and failed validation acquires no owner.
             unsafe {
-                assert!(imre_bytes_decode(Rc::as_ptr(&source)).is_null());
-                let ordinary = ObjectOwner::from_raw(imre_error_take());
-                let expected =
-                    StrOwner::from_raw(imre_exception_message(ObjectOwner::as_ptr(&ordinary)));
-                assert!(imre_bytes_validate_utf8(Rc::as_ptr(&source)).is_null());
-                let error = ObjectOwner::from_raw(imre_error_take());
+                assert!(imre_bytes_decode(crate::BytesOwner::as_ptr(&source)).is_null());
+                let ordinary = crate::ObjectOwner::from_raw(imre_error_take());
+                let expected = StrOwner::from_raw(imre_exception_message(
+                    crate::ObjectOwner::as_ptr(&ordinary),
+                ));
+                assert!(imre_bytes_validate_utf8(crate::BytesOwner::as_ptr(&source)).is_null());
+                let error = crate::ObjectOwner::from_raw(imre_error_take());
                 assert_eq!(
                     imre_exception_matches(
-                        ObjectOwner::as_ptr(&error),
+                        crate::ObjectOwner::as_ptr(&error),
                         Kind::UnicodeDecodeError as u32
                     ),
                     1
                 );
                 let message =
-                    StrOwner::from_raw(imre_exception_message(ObjectOwner::as_ptr(&error)));
+                    StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
                 assert_eq!(message, expected);
                 // Both failures own the original bytes for exception repr, without copying them.
-                assert_eq!(Rc::strong_count(&source), 3);
+                assert_eq!(crate::BytesOwner::strong_count(&source), 3);
                 drop(error);
                 drop(ordinary);
-                assert_eq!(Rc::strong_count(&source), 1);
+                assert_eq!(crate::BytesOwner::strong_count(&source), 1);
                 assert_eq!(imre_error_pending(), 0);
             }
         }
@@ -750,9 +885,15 @@ mod tests {
     fn byte_output_transfers_its_allocation_at_conversion() {
         // SAFETY: the sole owner roots this private builder through conversion.
         unsafe {
-            let output = ObjectOwner::from_raw(imre_byte_output_new());
+            let output = crate::ObjectOwner::from_raw(imre_byte_output_new());
             imre_byte_output_reserve_range(std::ptr::null(), 1, 2001, 3, 2);
-            imre_byte_output_reserve_range(ObjectOwner::as_ptr(&output), 1, 2001, 3, usize::MAX);
+            imre_byte_output_reserve_range(
+                crate::ObjectOwner::as_ptr(&output),
+                1,
+                2001,
+                3,
+                usize::MAX,
+            );
             output.0.with(|storage| {
                 let Storage::ByteOutput(output) = storage else {
                     unreachable!()
@@ -761,7 +902,7 @@ mod tests {
                 assert!(output.bytes.is_empty());
             });
             assert_eq!(
-                imre_byte_output_append_pair(ObjectOwner::as_ptr(&output), 1, 511),
+                imre_byte_output_append_pair(crate::ObjectOwner::as_ptr(&output), 1, 511),
                 1
             );
             let buffer = output.0.with(|storage| {
@@ -770,9 +911,11 @@ mod tests {
                 };
                 output.bytes.as_ptr()
             });
-            let result = Rc::from_raw(imre_byte_output_finish(ObjectOwner::as_ptr(&output)));
+            let result = crate::BytesOwner::from_raw(imre_byte_output_finish(
+                crate::ObjectOwner::as_ptr(&output),
+            ));
             drop(output);
-            assert_eq!(result.as_ptr(), buffer);
+            assert_eq!(result.as_slice().as_ptr(), buffer);
             assert_eq!(result.as_slice(), [0, 255]);
         }
     }
@@ -791,7 +934,7 @@ mod tests {
             // SAFETY: both aliases root the exact list and conversion returns
             // one independently owned immutable bytes object.
             unsafe {
-                let converted = Rc::from_raw(imre_bytes_list(Rc::as_ptr(&source)));
+                let converted = crate::BytesOwner::from_raw(imre_bytes_list(Rc::as_ptr(&source)));
                 assert_eq!(*converted, expected);
                 assert_eq!(Rc::strong_count(&source), 2);
                 alias.0.with_mut(|values| {
@@ -828,16 +971,17 @@ mod tests {
                 // conversion transfers only a pending exception owner.
                 unsafe {
                     assert!(imre_bytes_list(Rc::as_ptr(&source)).is_null());
-                    let error = ObjectOwner::from_raw(imre_error_take());
+                    let error = crate::ObjectOwner::from_raw(imre_error_take());
                     assert_eq!(
                         imre_exception_matches(
-                            ObjectOwner::as_ptr(&error),
+                            crate::ObjectOwner::as_ptr(&error),
                             Kind::ValueError as u32
                         ),
                         1
                     );
-                    let message =
-                        StrOwner::from_raw(imre_exception_message(ObjectOwner::as_ptr(&error)));
+                    let message = StrOwner::from_raw(imre_exception_message(
+                        crate::ObjectOwner::as_ptr(&error),
+                    ));
                     assert_eq!(message.as_str(), "bytes must be in range(0, 256)");
                     source.0.with(|values| {
                         assert_eq!(values.len(), 129);

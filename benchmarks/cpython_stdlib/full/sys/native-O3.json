@@ -3,38 +3,133 @@
   "opt_level": 3,
   "denominator": 97,
   "tests": {
-    "test.test_sys.SysModuleTest.test_43581": {
-      "execution": "native-body",
-      "status": "pass",
-      "assertions": 1,
-      "method_sha256": "12671c09b2ae0da29212cad51371d22c9fe2bbfb8e25d6505e8f4adb5d8964a2"
-    },
     "test.test_sys.ActiveExceptionTests.test_sys_exception_no_exception": {
-      "execution": "native-body",
       "status": "pass",
-      "assertions": 1,
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
       "method_sha256": "e9ae316ea5c7f6dcc265f3be947387d10898624e8534aaa215d750a46d69e351"
     },
-    "test.test_sys.SysModuleTest.test_getdefaultencoding": {
-      "execution": "host-driven-native",
+    "test.test_sys.SysModuleTest.test_43581": {
       "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "12671c09b2ae0da29212cad51371d22c9fe2bbfb8e25d6505e8f4adb5d8964a2"
+    },
+    "test.test_sys.SysModuleTest.test_getdefaultencoding": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "CPython module/class/instance hooks",
       "calls": [
         "default-argument",
         "default"
       ]
     },
     "test.test_sys.SysModuleTest.test_getfilesystemencoding": {
-      "execution": "host-driven-native",
       "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "CPython module/class/instance hooks",
       "calls": [
         "filesystem",
         "platform"
       ]
     },
     "test.test_sys.SysModuleTest.test_ioencoding_nonascii": {
-      "execution": "host-driven-native",
+      "status": "upstream-skip",
+      "reason": "requires FS encoding to match locale"
+    },
+    "test.test_sys.SysModuleTest.test_orig_argv": {
       "status": "pass",
-      "child_sha256": "1a63a0572c34482cedb75d0835392866200128b18a4bd5365f26954c3cc12c94"
+      "execution": "host-driven-native",
+      "body": "CPython; original child: Imre",
+      "assertions": "CPython",
+      "fixture_execution": "CPython module/class/instance hooks",
+      "calls": [
+        "sys.argv",
+        "sys.orig_argv"
+      ]
+    },
+    "test.test_sys.SysModuleTest.test_thread_info": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "original CPython module/class/instance hooks",
+      "calls": [
+        "thread_info",
+        "length",
+        "name",
+        "lock",
+        "platform",
+        "name"
+      ]
+    },
+    "test.test_sys.TestSysJIT.test_jit_is_available": {
+      "status": "pass",
+      "execution": "mixed",
+      "body": "CPython; both child sources: Imre",
+      "assertions": "Imre in each child; CPython checks child status",
+      "fixture_execution": "CPython unittest hooks and original assert_python_ok",
+      "calls": [
+        "sys._jit.is_available"
+      ],
+      "children": [
+        {
+          "sha256": "b4654be9dbe8607862a7d048c249a3423760d11ba065f50bd5070c6d9455e0dd",
+          "PYTHON_JIT": "0",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        },
+        {
+          "sha256": "b4654be9dbe8607862a7d048c249a3423760d11ba065f50bd5070c6d9455e0dd",
+          "PYTHON_JIT": "1",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        }
+      ]
+    },
+    "test.test_sys.TestSysJIT.test_jit_is_enabled": {
+      "status": "pass",
+      "execution": "mixed",
+      "body": "CPython; both child sources: Imre",
+      "assertions": "Imre in each child; CPython checks child status",
+      "fixture_execution": "CPython unittest hooks and original assert_python_ok",
+      "calls": [
+        "sys._jit.is_available"
+      ],
+      "children": [
+        {
+          "sha256": "45282e21eb881778d38af07d9dbcfe98dd065230a8af7524f500a8c6a9ecaeb2",
+          "PYTHON_JIT": "0",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        },
+        {
+          "sha256": "45282e21eb881778d38af07d9dbcfe98dd065230a8af7524f500a8c6a9ecaeb2",
+          "PYTHON_JIT": "1",
+          "fixture_options": [
+            "-X",
+            "faulthandler"
+          ],
+          "launch": "compile the original -c source directly"
+        }
+      ]
     }
   }
 }

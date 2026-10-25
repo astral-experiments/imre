@@ -1,0 +1,82 @@
+# ID suffix 	 native disposition 	 specific outstanding behavior (proposals remain in the denominator)
+ActiveExceptionTests.test_exc_info_no_exception	blocked	The native handler stack has an exception value, but no sys.exc_info tuple API. Returning a constant triple outside handlers would leave active-handler semantics wrong.
+ActiveExceptionTests.test_exc_info_with_exception_instance	blocked	The tuple must identify the ValueError type, the caught ValueError(42) object, and that object's actual traceback.
+ActiveExceptionTests.test_exc_info_with_exception_type	blocked	Raising the exception class must preserve the caught instance, its runtime type and traceback across sys.exc_info().
+ActiveExceptionTests.test_sys_exception_with_exception_instance	blocked	Native handler identity works; compiling the unchanged body also requires ValueError(42) and passing ValueError as a class value to assertIsInstance (#501, #508).
+ActiveExceptionTests.test_sys_exception_with_exception_type	blocked	The complete native body passes the real ValueError class to assertIsInstance before checking identity; that class operand is unsupported (#501, #508).
+DisplayHookTest.test_custom_displayhook	blocked	Assigning a Python callable to sys.displayhook must affect eval of code compiled in single mode.
+DisplayHookTest.test_gh130163	blocked	The hook must hold the active output stream while an object's __repr__ replaces sys.stdout and forces collection.
+DisplayHookTest.test_lost_displayhook	blocked	Deleting the displayhook must cause single-mode eval to raise RuntimeError; neither mutable sys hooks nor single-mode eval exist.
+DisplayHookTest.test_original_displayhook	blocked	The native default hook must write to a swappable stdout, update builtins._, ignore None, and report a deleted stdout.
+ExceptHookTest.test_excepthook	blocked	Calling the default hook with invalid exception data must route an unraisable diagnostic to a captured stderr.
+ExceptHookTest.test_excepthook_bytes_filename	blocked	Rendering a SyntaxError with a bytes filename needs structured exception args, line data and a replaceable stderr.
+ExceptHookTest.test_original_excepthook	blocked	Formatted frames, sys.exc_info unpacking, and the callable original hook must work in the captured-stderr fixture.
+SizeofTest.test_asyncgen_hooks	blocked	Callable identities must survive get/set, invalid setters must leave both hooks untouched, and async generators must consult those hooks.
+SizeofTest.test_changing_sys_stderr_and_removing_reference	blocked	Writing a shutdown diagnostic must retain the stream even when its write method removes the last sys.stderr reference.
+SizeofTest.test_default	proposed	Both assertions require CPython's variable PyObject header plus one PyLong digit for True, including getsizeof(True, -1). Imre uses a tagged bool; only those byte counts are proposed.
+SizeofTest.test_errors	blocked	getsizeof must invoke user __sizeof__, propagate exceptions, return the caller's sentinel, and reject overflow. The separate CPython GC-header arithmetic does not exempt these behaviors.
+SizeofTest.test_gc_head_size	proposed	The two exact sizes use _testinternalcapi.SIZEOF_PYGC_HEAD, CPython PyVarObject headers and digit size; those headers do not exist on Imre bools/lists.
+SizeofTest.test_objecttypes	proposed	The assertions enumerate exact C struct sizes for Objects/ types, including pointers, PyLong digits and CPython Unicode caches. Imre uses different layouts; ordinary getsizeof stays open.
+SizeofTest.test_pythontypes	proposed	The _ast.AST, traceback and sys.flags byte sizes are calculated from CPython C pointer layouts and struct-sequence fields; those expressions do not specify Imre object sizes.
+SizeofTest.test_slots	proposed	This test derives subclass sizes from CPython's three additional slot pointers and, when needed, the GC header, including an additional GC header relative to the base object.
+SysModuleTest.test_attributes	blocked	This single routine also reads float_info, int_info, hash_info, prefixes, builtin names and implementation metadata. Hash and digit descriptions need to agree with actual native algorithms.
+SysModuleTest.test_c_locale_surrogateescape	blocked	The native child needs per-stream error policies under LC_ALL=C, PYTHONCOERCECLOCALE=0, -X utf8=0 and PYTHONIOENCODING overrides.
+SysModuleTest.test_call_tracing	blocked	sys.call_tracing must accept a real callable and tuple and reject the non-tuple argument. The native tracing/callable boundary is absent.
+SysModuleTest.test_clear_type_cache	proposed	The sole call is deprecated sys._clear_type_cache(), whose warning refers to CPython's method lookup cache. Imre statically resolves methods; this proposes only this private cache warning.
+SysModuleTest.test_current_exceptions	blocked	The sys snapshot must associate each running thread with its active exception; a current-thread TLS value alone cannot satisfy the two-thread fixture.
+SysModuleTest.test_current_frames	blocked	Requires a live frame snapshot for a blocked second thread, its f_back chain and code names. No Python-visible native frame registry exists.
+SysModuleTest.test_debugmallocstats	proposed	The stderr assertions name pymalloc arenas and the free PyDictObjects list. Imre does not use those CPython allocators or freelists.
+SysModuleTest.test_disable_gil_abi	proposed	This sole assertion ties the CPython extension ABI suffix 't' to its Py_GIL_DISABLED configure flag. Imre does not implement that binary extension ABI.
+SysModuleTest.test_dlopenflags	blocked	A persistent native loader policy must be shared by get/setdlopenflags and future extension loading, with errors for invalid arity.
+SysModuleTest.test_executable	blocked	Imre currently returns the host helper interpreter; the original also relaunches with overridden argv[0], executable and PATH. A host Python child cannot validate the native boundary (#302).
+SysModuleTest.test_exit	blocked	The unchanged method verifies the native caught payloads and child exits through stderr flushing. Compiling its next child with lone U+DCFF fails before the final Latin-1 check (#405, #409).
+SysModuleTest.test_exit_codes_under_repl	blocked	Requires interactive stdin/REPL execution and exit propagation from exit(), __import__('sys').exit and raise SystemExit for statuses 0 and 123.
+SysModuleTest.test_getallocatedblocks	blocked	The check uses live allocation counts before and after gc.collect, with optional total refcount/intern accounting. The native allocator does not expose these counters.
+SysModuleTest.test_getframe	blocked	A callable native frame must expose the test function's actual code object by identity and reject out-of-range depth and extra arguments.
+SysModuleTest.test_getframemodulename	blocked	Depth must follow real frame links (including the unittest caller), produce its module name and return None past the stack.
+SysModuleTest.test_getrecursionlimit	blocked	The native call graph rejects recursive cycles and has no enforced logical interpreter recursion limit to query.
+SysModuleTest.test_implementation	blocked	Public PEP 421 fields need an actual Imre version, named version tuple, cache policy and isolation capabilities. A local implementation is being aligned with the shared named-tuple layout (#497).
+SysModuleTest.test_intern	blocked	The original parent can query one live native string table. The whole native body also needs its test.support/random imports, callable assertions and the original local str subclass S with its own __hash__.
+SysModuleTest.test_ioencoding	blocked	The native streams must honor CP424, ASCII replacement/strict/surrogateescape, and emit Python UnicodeEncodeError for unencodable writes.
+SysModuleTest.test_is_finalizing	blocked	The runtime must transition during final destruction, after atexit; the original reads sys.is_finalizing both during execution and inside __del__.
+SysModuleTest.test_is_gil_enabled	reference-only	The reference predicate is configured by CPython's build. The native thread model must supply an honest GIL capability; the host build flag is not target evidence.
+SysModuleTest.test_issue20602	blocked	Original child reads and prints sys.flags and sys.float_info from __del__ during shutdown; native destruction must keep both usable.
+SysModuleTest.test_module_names	blocked	The runtime needs an immutable frozenset of its standard library module names and iterable native string elements.
+SysModuleTest.test_no_duplicates_in_meta_path	blocked	The static module loader does not expose Python's mutable meta_path or its initialized finder instances.
+SysModuleTest.test_posix_locale_surrogateescape	blocked	The same verified child checks stdin/stdout/stderr error policies under LC_ALL=POSIX, both with and without an encoding override.
+SysModuleTest.test_recursionlimit_recovery	blocked	Repeated genuine native recursive calls must raise RecursionError at each configured depth and recover for the next depth.
+SysModuleTest.test_refcount	blocked	Native getrefcount must reject missing arguments, preserve the None singleton count across global bindings and expose total count only if available.
+SysModuleTest.test_setrecursionlimit	blocked	Setting and restoring the process recursion limit requires a persistent native interpreter and enforcement on subsequent calls.
+SysModuleTest.test_setrecursionlimit_to_depth	blocked	Rejecting a limit below the current depth needs actual frame depth and exception-safe restoration of nested calls.
+SysModuleTest.test_stdlib_dir	blocked	The target directory must agree with the target os module's file origin; a CPython installation path is not a native standard library.
+SysModuleTest.test_subinterp_intern_dynamically_allocated	proposed	The asserted addresses of dynamically interned strings must differ across CPython subinterpreters. Imre lacks isolated interpreters; public sys.intern remains open.
+SysModuleTest.test_subinterp_intern_singleton	proposed	The assertions require shared zero- and one-character Latin-1 singleton addresses across CPython interpreters, including a private _is_interned result.
+SysModuleTest.test_subinterp_intern_statically_allocated	proposed	The fixture compares process addresses for CPython's Tools/build/generate_global_objects.py string list across interpreters. Imre has no equivalent generated table.
+SysModuleTest.test_switchinterval	blocked	Requires persistent get/set of a real thread switch interval, floating-point round trips, and invalid type/value checks.
+SysModuleTest.test_sys_flags	blocked	Read actual launch flags by 18 dynamic attribute names, preserve their bool/int types, and expose struct-sequence length and representation.
+SysModuleTest.test_sys_flags_no_instantiation	blocked	The flags value and its type must exist, and Python-level construction of that type must be rejected.
+SysModuleTest.test_sys_ignores_cleaning_up_user_data	blocked	Storing a user object on sys and finalizing its failing destructor quietly needs mutable module attributes and native shutdown ownership.
+SysModuleTest.test_sys_tracebacklimit	blocked	Real chained native frames must be formatted or suppressed according to mutable sys.tracebacklimit on uncaught errors.
+SysModuleTest.test_sys_version_info_no_instantiation	blocked	Needs a real version-info type object and its construction error, in addition to exposed tuple fields and indexing.
+TestRemoteExec.test_new_namespace_for_each_remote_exec	blocked	Each injected script must run in a new globals dictionary distinct from the target's __main__.__dict__.
+TestRemoteExec.test_remote_exec	blocked	Inject and execute the actual script at a safe point in the waiting target; no native debugger transport exists.
+TestRemoteExec.test_remote_exec_bytes	blocked	The same cross-process operation must accept a bytes path without involving a CPython child.
+TestRemoteExec.test_remote_exec_disabled_by_env	blocked	The target must honor PYTHON_DISABLE_REMOTE_DEBUG=1 and report its disabled state to the caller.
+TestRemoteExec.test_remote_exec_disabled_by_xoption	blocked	The target must honor -Xdisable-remote-debug and the injector must report that policy; command-line flags and transport are prerequisites.
+TestRemoteExec.test_remote_exec_in_process_without_debug_fails_envvar	blocked	Starting the caller itself with the disabling environment variable must prevent remote_exec before it reaches the target.
+TestRemoteExec.test_remote_exec_in_process_without_debug_fails_xoption	blocked	Starting the caller with -Xdisable-remote-debug must prevent its remote_exec operation.
+TestRemoteExec.test_remote_exec_invalid_pid	blocked	Native remote_exec must validate a nonexistent target PID and raise OSError.
+TestRemoteExec.test_remote_exec_invalid_script	blocked	Native remote_exec must reject None and integer script values with TypeError before transport.
+TestRemoteExec.test_remote_exec_invalid_script_path	blocked	Calling remote_exec on the current PID with a nonexistent script path must produce OSError.
+TestRemoteExec.test_remote_exec_raises_audit_event	blocked	Deliver the event and its actual script path to the target's audit hook while the injected script runs.
+TestRemoteExec.test_remote_exec_syntax_error	blocked	An invalid remote script must produce SyntaxError in the target without killing its process or printing script output.
+TestRemoteExec.test_remote_exec_undecodable	blocked	The debugger and native filesystem/argv string domain must preserve a filename containing undecodable bytes.
+TestRemoteExec.test_remote_exec_with_exception	blocked	An exception in injected code must be reported by the target main thread while its process continues.
+TestRemoteExec.test_remote_exec_with_self_process	blocked	The current native process must schedule its own script and observe its output at a safe point.
+TestSysJIT.test_jit_is_active	proposed	The child imports _testinternalcapi.TIER2_THRESHOLD and _testcapi.pyobject_vectorcall to assert CPython tier transitions around C and inlined frames. This proposal applies to these two private CPython APIs; Imre exposes the JIT capability of its own compilation mode.
+UnraisableHookTest.test_custom_unraisablehook	blocked	The native hook must receive the original error, exception type, traceback, offending object and formatted message. The unchanged trigger uses _testcapi.err_writeunraisable/err_formatunraisable.
+UnraisableHookTest.test_custom_unraisablehook_fail	blocked	Reporting failure of the user's hook needs the actual hook repr and traceback; its input is produced via _testcapi.err_writeunraisable.
+UnraisableHookTest.test_original_unraisablehook	blocked	The default hook must write real diagnostics from the _testcapi.err_writeunraisable/err_formatunraisable fixture, preserving offending object and traceback.
+UnraisableHookTest.test_original_unraisablehook_err	blocked	A failing __del__ must route exceptions to the actual retained stderr even when the exception's __str__ fails.
+UnraisableHookTest.test_original_unraisablehook_exception_qualname	blocked	A _testcapi.err_writeunraisable trigger must print a nested exception's qualname and selectively omit the builtins or __main__ module prefix.
+UnraisableHookTest.test_original_unraisablehook_wrong_type	blocked	Calling sys.__unraisablehook__ with an arbitrary object must raise TypeError; no original native unraisable hook exists yet.

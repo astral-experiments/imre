@@ -4,7 +4,6 @@
 //! Only its temporary syntax tree is dynamic; published values use the same exact
 //! native storage and cleanup rules as typed JSON.
 
-use crate::ObjectOwner;
 use crate::StrOwner;
 use ::toml::de::{DeTable, DeValue};
 
@@ -71,6 +70,16 @@ fn optional(value: OwnedWord, schema: &Schema) -> OwnedWord {
     unsafe { OwnedWord::from_owned(word, schema.storage()) }
 }
 
+fn copy_string(value: &str, allocation: &mut Option<Error>) -> Result<crate::StrOwner, String> {
+    Str::try_new(value)
+        .ok()
+        .and_then(|text| StrOwner::try_new(text).ok())
+        .ok_or_else(|| {
+            *allocation = Some(Error::allocation());
+            String::new()
+        })
+}
+
 fn convert(
     value: &DeValue<'_>,
     schema: &Schema,
@@ -91,7 +100,7 @@ fn convert(
             integer.into_raw()
         }
         (STRING, DeValue::String(value)) => {
-            StrOwner::into_raw(StrOwner::new(Str::new(value))) as usize
+            StrOwner::into_raw(copy_string(value, allocation)?) as usize
         }
         (BOOLEAN, DeValue::Boolean(value)) => usize::from(*value),
         (FLOAT, DeValue::Float(value)) => value
@@ -101,23 +110,31 @@ fn convert(
             .to_bits() as usize,
         (LIST, DeValue::Array(values)) => {
             let child = schema.child();
+            let mut allocation_error = || {
+                *allocation = Some(Error::allocation());
+                String::new()
+            };
             if schema.word_kind == 4 {
-                let values = values
-                    .iter()
-                    .map(|value| {
-                        convert(value.get_ref(), child, allocation)
-                            .map(|value| Int(value.into_word()))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                crate::new_list(values) as usize
+                let mut result = Vec::new();
+                result
+                    .try_reserve_exact(values.len())
+                    .map_err(|_| allocation_error())?;
+                for value in values {
+                    result.push(Int(convert(value.get_ref(), child, allocation)?.into_word()));
+                }
+                crate::new_list(result) as usize
             } else {
                 let mut result = Words::new(child.word_kind);
+                result
+                    .values
+                    .try_reserve_exact(values.len())
+                    .map_err(|_| allocation_error())?;
                 for value in values {
                     result
                         .values
                         .push(convert(value.get_ref(), child, allocation)?.into_word());
                 }
-                ObjectOwner::into_raw(result.into_object()) as usize
+                crate::ObjectOwner::into_raw(result.into_object()) as usize
             }
         }
         (DICTIONARY, DeValue::Table(values)) => {
@@ -125,7 +142,7 @@ fn convert(
             let mut result = super::super::mappings::Mapping::new(3, child.word_kind);
             for (name, value) in values {
                 let value = convert(value.get_ref(), child, allocation)?;
-                let word = StrOwner::into_raw(StrOwner::new(Str::new(name.get_ref()))) as usize;
+                let word = StrOwner::into_raw(copy_string(name.get_ref(), allocation)?) as usize;
                 // SAFETY: the key transfers one newly allocated string owner.
                 let key = unsafe { OwnedWord::from_owned(word, WordKind::new(3)) };
                 assert!(
@@ -136,8 +153,8 @@ fn convert(
                     "parser rejected duplicate keys"
                 );
             }
-            ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
-                Storage::Dictionary(Box::new(result)),
+            crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                Storage::Dictionary(crate::objects::mappings::TableOwner::new(result)),
             )))) as usize
         }
         (RECORD, DeValue::Table(values)) => {
@@ -148,8 +165,13 @@ fn convert(
             let owner = unsafe { OwnedWord::from_owned(pointer as usize, schema.storage()) };
             for (index, field) in fields.iter().enumerate() {
                 let value = if let Some(value) = values.get(field.name()) {
-                    convert(value.get_ref(), field.schema(), allocation)
-                        .map_err(|error| format!("field {:?}: {error}", field.name()))?
+                    convert(value.get_ref(), field.schema(), allocation).map_err(|error| {
+                        if allocation.is_some() {
+                            error
+                        } else {
+                            format!("field {:?}: {error}", field.name())
+                        }
+                    })?
                 } else {
                     field
                         .missing::<serde_json::Error>(allocation)
@@ -290,18 +312,19 @@ pub unsafe extern "C" fn imre_toml_keys(text: *const Str) -> *const Object {
     .map_err(|error: String| Error::new(Kind::TomlDecodeError, error));
     let result = table.and_then(|table| {
         // SAFETY: this is one fresh set owner.
-        let keys = unsafe { ObjectOwner::from_raw(super::super::mappings::imre_set_new(3)) };
+        let keys = unsafe { crate::ObjectOwner::from_raw(super::super::mappings::imre_set_new(3)) };
         for (name, _) in table {
-            let string = StrOwner::new(Str::new(name.get_ref()));
+            let text = Str::try_new(name.get_ref()).map_err(|_| Error::allocation())?;
+            let string = StrOwner::try_new(text).map_err(|_| Error::allocation())?;
             // SAFETY: the set has string key storage and insertion retains the rooted key.
             unsafe {
                 super::super::mappings::set_add(
-                    ObjectOwner::as_ptr(&keys),
+                    crate::ObjectOwner::as_ptr(&keys),
                     StrOwner::as_ptr(&string) as usize,
                 )
             }?;
         }
-        Ok(ObjectOwner::into_raw(keys))
+        Ok(crate::ObjectOwner::into_raw(keys))
     });
     finish(result, std::ptr::null())
 }
@@ -327,6 +350,35 @@ pub unsafe extern "C" fn imre_toml_decode(text: *const Str, schema: *const Schem
     finish(result, std::ptr::null())
 }
 
+pub(super) fn datetimes_equal(left: &str, right: &str) -> bool {
+    left == right || utc_instant(left).is_some_and(|instant| Some(instant) == utc_instant(right))
+}
+
+fn utc_instant(text: &str) -> Option<(i64, u8, u32)> {
+    use toml_datetime::{Datetime, Offset};
+
+    let value: Datetime = text.parse().ok()?;
+    let (date, time) = (value.date?, value.time?);
+    let offset = match value.offset? {
+        Offset::Z => 0,
+        Offset::Custom { minutes } => i64::from(minutes),
+    };
+
+    // Count days from March so leap days fall at the end of the year.
+    let year = i64::from(date.year) - i64::from(date.month <= 2);
+    let month = (i64::from(date.month) + 9) % 12;
+    let days = 365 * year + year / 4 - year / 100
+        + year / 400
+        + (153 * month + 2) / 5
+        + i64::from(date.day);
+    let minutes = (days * 24 + i64::from(time.hour)) * 60 + i64::from(time.minute) - offset;
+    Some((
+        minutes,
+        time.second.unwrap_or(0),
+        time.nanosecond.unwrap_or(0),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,5 +390,37 @@ mod tests {
         let message = tomllib_parse_error(&text, error);
         assert!(message.len() < 128, "{message}");
         assert!(message.ends_with("(at line 1, column 8196)"), "{message}");
+    }
+
+    #[test]
+    fn offset_datetimes_compare_by_instant() {
+        for (left, right, expected) in [
+            (
+                "2000-01-01 00:00:00+00:00",
+                "1999-12-31 23:30:00-00:30",
+                true,
+            ),
+            (
+                "2000-03-01 00:01:00+00:15",
+                "2000-02-29 23:46:00+00:00",
+                true,
+            ),
+            (
+                "1900-03-01 00:01:00+00:15",
+                "1900-02-28 23:46:00+00:00",
+                true,
+            ),
+            (
+                "2000-01-01 00:00:00.000001+00:00",
+                "1999-12-31 23:30:00-00:30",
+                false,
+            ),
+            ("2000-01-01 00:00:00", "2000-01-01 00:00:00+00:00", false),
+            ("2000-01-01", "2000-01-01", true),
+            ("12:00:00", "12:00:01", false),
+        ] {
+            assert_eq!(datetimes_equal(left, right), expected, "{left} / {right}");
+            assert_eq!(datetimes_equal(right, left), expected, "{right} / {left}");
+        }
     }
 }

@@ -247,7 +247,11 @@ impl<T> Default for Weak<T> {
 }
 
 impl<T> Weak<T> {
-    #[cfg(test)]
+    /// Compare allocation identity without reading a value whose last owner may have dropped.
+    pub(crate) fn as_ptr(&self) -> *const T {
+        self.0.map_or(std::ptr::null(), |p| p.cast::<T>().as_ptr())
+    }
+
     pub(crate) fn strong_count(&self) -> usize {
         // SAFETY: a live weak observer roots the counters.
         self.0.map_or(0, |p| unsafe { p.as_ref() }.strong.get())

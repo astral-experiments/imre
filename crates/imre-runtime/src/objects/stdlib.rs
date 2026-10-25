@@ -1,6 +1,5 @@
 //! Sealed scalar sorting and UTF-8 builders. User callbacks finish before entry.
 
-use crate::ObjectOwner;
 use crate::StrOwner;
 use std::cmp::Ordering;
 
@@ -29,19 +28,60 @@ fn ordered_indices(
     Some(indices)
 }
 
+/// Tuple comparison may run out of traversal space. Merge indices in scratch
+/// storage so an error can leave the caller's list and all its owners untouched.
+unsafe fn tuple_key_order(words: &[usize], reverse: bool) -> Option<SmallVec<[usize; 4]>> {
+    let mut order = SmallVec::<[usize; 4]>::new();
+    order.try_reserve_exact(words.len()).ok()?;
+    order.extend(0..words.len());
+    let mut scratch = SmallVec::<[usize; 4]>::new();
+    scratch.try_reserve_exact(words.len()).ok()?;
+    scratch.resize(words.len(), 0);
+    let mut width = 1;
+    while width < words.len() {
+        for (input, output) in order.chunks(2 * width).zip(scratch.chunks_mut(2 * width)) {
+            let (mut left, mut right) = input.split_at(width.min(input.len()));
+            let mut slots = output.iter_mut();
+            while let (Some(&a), Some(&b)) = (left.first(), right.first()) {
+                // SAFETY: the key list roots all tuples of this exact ordered shape.
+                let cmp = unsafe {
+                    super::values::tuple_order(words[a] as *const usize, words[b] as *const usize)
+                }?;
+                let first = if (if reverse { cmp.reverse() } else { cmp }).is_le() {
+                    &mut left
+                } else {
+                    &mut right
+                };
+                *slots.next().unwrap() = first[0];
+                *first = &first[1..];
+            }
+            slots
+                .into_slice()
+                .copy_from_slice(if left.is_empty() { right } else { left });
+        }
+        std::mem::swap(&mut order, &mut scratch);
+        width *= 2;
+    }
+    Some(order)
+}
+
 /// Walks each cycle with owner-preserving swaps, marking visited indices in the permutation.
 fn permute<T>(values: &mut [T], order: &mut [usize]) {
-    if values.len() != order.len() {
+    permute_with(values.len(), order, |a, b| values.swap(a, b));
+}
+
+fn permute_with(len: usize, order: &mut [usize], mut swap: impl FnMut(usize, usize)) {
+    if len != order.len() {
         fail("SystemError", "sort key count differs from value count");
     }
-    for start in 0..values.len() {
+    for start in 0..len {
         let mut current = start;
         while order[current] != current {
             let next = std::mem::replace(&mut order[current], current);
             if next == start {
                 break;
             }
-            values.swap(current, next);
+            swap(current, next);
             current = next;
         }
     }
@@ -192,13 +232,15 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Option<SmallVe
         object(keys.cast()).0.with(|storage| {
             let values = storage.sequence();
             values.check_kind(kind);
+            if kind == 6 {
+                return tuple_key_order(&values.values, reverse);
+            }
             ordered_indices(values.values.len(), reverse, |left, right| {
                 let (left, right) = (values.values[left], values.values[right]);
                 match kind {
                     1 => left.cmp(&right),
                     10 => super::string_enums::compare(left, right),
                     3 => (&*(left as *const Str)).cmp(&*(right as *const Str)),
-                    6 => super::values::tuple_order(left as *const usize, right as *const usize),
                     8 => (&*(left as *const Bytes)).cmp(&*(right as *const Bytes)),
                     _ => fail("SystemError", "unsupported sort key representation"),
                 }
@@ -226,13 +268,19 @@ pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const 
         // SAFETY: the exact descriptor and cached length travel with the owners.
         let saved = unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let words = storage.sequence_mut();
-                words.check_kind(kind);
+                let words = if storage.sequence_storage().rows().is_some() {
+                    debug_assert_eq!(kind, 6);
+                    storage.sequence_storage_mut()
+                } else {
+                    let words = storage.sequence_mut();
+                    words.check_kind(kind);
+                    words
+                };
                 std::mem::replace(words, Words::sorting_empty(kind))
             })
         };
         // Preserve the header verbatim, including a surrounding sort's marker.
-        ObjectOwner::into_raw(ObjectOwner::new(Object(StorageCell::new(
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
             Storage::Sequence(saved),
         ))))
         .cast()
@@ -259,7 +307,7 @@ pub unsafe extern "C" fn imre_list_extend_unhinted(list: *const (), kind: u32) {
         // SAFETY: the real length stays unchanged at zero.
         unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let words = storage.sequence_mut();
+                let words = storage.sequence_storage_mut();
                 if words.is_sorting_empty() {
                     words.update_header();
                 }
@@ -298,11 +346,11 @@ pub unsafe extern "C" fn imre_sort_restore(
         // any value during access. Normal scope cleanup later drops the additions.
         unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let current = storage.sequence_mut();
+                let current = storage.sequence_storage_mut();
                 let modified = !current.is_sorting_empty();
                 object(saved.cast())
                     .0
-                    .with_mut(|storage| std::mem::swap(current, storage.sequence_mut()));
+                    .with_mut(|storage| std::mem::swap(current, storage.sequence_storage_mut()));
                 modified
             })
         }
@@ -364,9 +412,17 @@ pub unsafe extern "C" fn imre_sort_by_keys(
         // SAFETY: no storage reference escapes and swaps never drop an owner.
         unsafe {
             object(values.cast()).0.with_mut(|storage| {
-                let values = storage.sequence_mut();
-                values.check_kind(element_kind);
-                permute(&mut values.values, &mut order);
+                if let Some(rows) = storage.sequence_storage_mut().rows_mut() {
+                    match rows.reorder_shared(&order) {
+                        Ok(false) => permute_with(rows.len(), &mut order, |a, b| rows.swap(a, b)),
+                        Ok(true) => {}
+                        Err(error) => error.raise(),
+                    }
+                } else {
+                    let values = storage.sequence_mut();
+                    values.check_kind(element_kind);
+                    permute(&mut values.values, &mut order);
+                }
             })
         };
     }
@@ -420,9 +476,48 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
     }
 }
 
+/// Parse a decimal field or item index, including Python's Unicode decimal digits.
+pub(super) fn format_index(name: &str) -> crate::Result<Option<usize>> {
+    let mut index = 0isize;
+    // A decimal prefix can overflow before a nondigit makes this a named field.
+    for ch in name.chars() {
+        let Some(digit) = crate::integer_text::decimal_digit(ch) else {
+            return Ok(None);
+        };
+        index = index
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(isize::from(digit)))
+            .ok_or_else(|| {
+                Error::new(Kind::ValueError, "Too many decimal digits in format string")
+            })?;
+    }
+    Ok(Some(index as usize))
+}
+
+/// Both keyword-only formatters have an empty tuple of positional arguments.
+pub(super) fn check_keyword_field(name: &str) -> crate::Result<()> {
+    if let Some(index) = format_index(name)? {
+        return Err(Error::new(
+            Kind::IndexError,
+            compact_str::format_compact!(
+                "Replacement index {index} out of range for positional args tuple"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+enum FormatValue<'a> {
+    Text(&'a str),
+    Integer(std::mem::ManuallyDrop<crate::Int>),
+}
+
 /// Substitutes plain named fields in encounter order. A missing field can raise
 /// before a malformed brace later in the same template.
-fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> crate::Result<Str> {
+fn format_named<'a>(
+    template: &str,
+    field: impl Fn(&str) -> Option<FormatValue<'a>>,
+) -> crate::Result<Str> {
     // A long template can consist entirely of fields with empty replacements.
     let mut result = Str::default();
     let mut rest = template;
@@ -481,27 +576,7 @@ fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> 
             tail = &spec[end..];
         }
         rest = tail.strip_prefix('}').ok_or_else(unmatched)?;
-        if name
-            .chars()
-            .all(|ch| crate::integer_text::decimal_digit(ch).is_some())
-        {
-            let index = name
-                .chars()
-                .try_fold(0isize, |index, ch| {
-                    index
-                        .checked_mul(10)?
-                        .checked_add(crate::integer_text::decimal_digit(ch)? as isize)
-                })
-                .ok_or_else(|| {
-                    Error::new(Kind::ValueError, "Too many decimal digits in format string")
-                })?;
-            return Err(Error::new(
-                Kind::IndexError,
-                compact_str::format_compact!(
-                    "Replacement index {index} out of range for positional args tuple"
-                ),
-            ));
-        }
+        check_keyword_field(name)?;
         let text = field(name).ok_or_else(|| Error::string_key(Str::new(name)))?;
         if !supported {
             return Err(Error::new(
@@ -509,7 +584,12 @@ fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> 
                 "Imre str.format supports plain named fields and !s",
             ));
         }
-        result.push_str(text);
+        match text {
+            FormatValue::Text(text) => result.push_str(text),
+            FormatValue::Integer(value) => {
+                result.push_str(&crate::integer_text::decimal_string(&value)?)
+            }
+        }
     }
     result.push_str(rest);
     Ok(result)
@@ -529,7 +609,7 @@ pub unsafe extern "C" fn imre_str_format(
     let formatted = format_named(template, |name| {
         fields.iter().find_map(|&[key, value]| {
             // SAFETY: the operands stay immutable and rooted until formatting ends.
-            unsafe { ((&*key).as_str() == name).then(|| (&*value).as_str()) }
+            unsafe { ((&*key).as_str() == name).then(|| FormatValue::Text((&*value).as_str())) }
         })
     });
     super::finish(
@@ -538,17 +618,45 @@ pub unsafe extern "C" fn imre_str_format(
     )
 }
 
+/// Format named fields without converting unused or not-yet-selected integers.
+///
+/// # Safety
+/// The caller roots the template and every (name, word, representation) triple
+/// while the formatter borrows each matching field.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_format_fields(
+    template: *const Str,
+    fields: *const [usize; 3],
+    count: usize,
+) -> *const Str {
+    // SAFETY: the compiler creates one triple per evaluated keyword argument.
+    let (template, fields) = unsafe { (&*template, std::slice::from_raw_parts(fields, count)) };
+    let result = format_named(template, |name| {
+        fields.iter().find_map(|&[key, value, kind]| {
+            // SAFETY: these immutable words use the signature-checked string and integer tags.
+            unsafe {
+                ((&*(key as *const Str)).as_str() == name).then(|| match kind {
+                    2 => FormatValue::Integer(crate::Int::borrow(value)),
+                    3 => FormatValue::Text((&*(value as *const Str)).as_str()),
+                    _ => unreachable!("invalid string-format field type"),
+                })
+            }
+        })
+    });
+    super::finish(result.and_then(crate::checked_owned_str), std::ptr::null())
+}
+
 /// # Safety
 /// All three handles are rooted immutable UTF-8 strings. Empty matches occur at
 /// Unicode scalar boundaries, including both ends, exactly as Python str.replace.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_replace(
-    input: *const Str,
+    value: *const Str,
     old: *const Str,
     new: *const Str,
 ) -> *const Str {
     // SAFETY: inputs remain immutable and rooted through both sizing and copying.
-    let (value, old, new) = unsafe { (&*input, &*old, &*new) };
+    let (value, old, new) = unsafe { (&*value, &*old, &*new) };
     let count = if old == new {
         0
     } else {
@@ -556,7 +664,9 @@ pub unsafe extern "C" fn imre_str_replace(
     };
     if count == 0 {
         // SAFETY: the caller roots the input; the unchanged result takes its own owner.
-        return StrOwner::into_raw(unsafe { StrOwner::acquire_word(input as usize) });
+        return StrOwner::into_raw(unsafe {
+            crate::StrOwner::acquire_word(std::ptr::from_ref(value) as usize)
+        });
     }
     let length = value
         .len()
@@ -612,6 +722,36 @@ pub extern "C" fn imre_float_format(value: f64, precision: u32, flags: u32) -> *
     StrOwner::into_raw(StrOwner::new(result))
 }
 
+/// Suspend the current native thread, rounding a positive timeout up to nanoseconds.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_time_sleep(seconds: f64) {
+    let error = if seconds.is_nan() {
+        Some(Error::new(
+            Kind::ValueError,
+            "Invalid value NaN (not a number)",
+        ))
+    } else if !seconds.is_finite() || seconds.abs() >= i64::MAX as f64 / 1e9 {
+        Some(Error::new(
+            Kind::OverflowError,
+            "timestamp out of range for platform time_t",
+        ))
+    } else if seconds < 0.0 {
+        Some(Error::new(
+            Kind::ValueError,
+            "sleep length must be non-negative",
+        ))
+    } else {
+        None
+    };
+    if let Some(e) = error {
+        e.raise();
+        return;
+    }
+    let duration = std::time::Duration::from_secs(seconds.trunc() as u64)
+        + std::time::Duration::from_nanos((seconds.fract() * 1e9).ceil() as u64);
+    std::thread::sleep(duration);
+}
+
 /// Seconds since the Unix epoch, including the subsecond fraction.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_wall_time() -> f64 {
@@ -659,8 +799,8 @@ mod tests {
     fn empty_named_fields_do_not_reserve_the_template_length() {
         let template = "{x}".repeat(20_000) + "{y}";
         let result = format_named(&template, |name| match name {
-            "x" => Some(""),
-            "y" => Some("雪"),
+            "x" => Some(FormatValue::Text("")),
+            "y" => Some(FormatValue::Text("雪")),
             _ => None,
         })
         .unwrap_or_else(|_| panic!("valid named fields"));
@@ -697,8 +837,8 @@ mod tests {
         for (reverse, order) in [(0, [1, 4, 3, 0, 2]), (1, [0, 2, 3, 1, 4])] {
             // SAFETY: the list and its string owners stay rooted throughout the sort.
             unsafe {
-                let list = ObjectOwner::from_raw(super::super::imre_seq_new(3));
-                let pointer = ObjectOwner::as_ptr(&list);
+                let list = crate::ObjectOwner::from_raw(super::super::imre_seq_new(3));
+                let pointer = crate::ObjectOwner::as_ptr(&list);
                 for text in &texts {
                     super::super::imre_seq_append(pointer, StrOwner::as_ptr(text) as usize, 3);
                 }
@@ -743,15 +883,21 @@ mod tests {
         // SAFETY: both strings and both distinct list handles stay rooted. The
         // saved list is released exactly once after restoration.
         unsafe {
-            let list = ObjectOwner::from_raw(super::super::imre_seq_new(3));
-            let alias = ObjectOwner::clone(&list);
-            let target = ObjectOwner::as_ptr(&list);
+            let list = crate::ObjectOwner::from_raw(super::super::imre_seq_new(3));
+            let alias = crate::ObjectOwner::clone(&list);
+            let target = crate::ObjectOwner::as_ptr(&list);
             super::super::imre_seq_append(target, StrOwner::as_ptr(&original) as usize, 3);
-            let saved = ObjectOwner::from_raw(imre_sort_detach(target.cast(), 3).cast::<Object>());
+            let saved =
+                crate::ObjectOwner::from_raw(imre_sort_detach(target.cast(), 3).cast::<Object>());
             assert!(alias.0.with(|storage| storage.sequence().values.is_empty()));
             assert_eq!(StrOwner::strong_count(&original), 2);
             super::super::imre_seq_append(target, StrOwner::as_ptr(&addition) as usize, 3);
-            imre_sort_restore(target.cast(), 3, ObjectOwner::as_ptr(&saved).cast(), 0);
+            imre_sort_restore(
+                target.cast(),
+                3,
+                crate::ObjectOwner::as_ptr(&saved).cast(),
+                0,
+            );
             assert_eq!(
                 alias.0.with(|storage| storage.sequence().values[0]),
                 StrOwner::as_ptr(&original) as usize,

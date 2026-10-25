@@ -9,7 +9,7 @@
         "native_calls": 10,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: local functions require annotated parameters and return types"
         }
       },
       "test.test_functools.TestReduceC.test_iterator_usage": {
@@ -17,7 +17,7 @@
         "native_calls": 7,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
         }
       },
       "test.test_functools.TestReduceC.test_reduce": {
@@ -26,7 +26,7 @@
         "host_binding": 1,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
         }
       },
       "test.test_functools.TestReducePy.test_initial_keyword": {
@@ -34,7 +34,7 @@
         "native_calls": 10,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: local functions require annotated parameters and return types"
         }
       },
       "test.test_functools.TestReducePy.test_iterator_usage": {
@@ -42,7 +42,7 @@
         "native_calls": 7,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
         }
       },
       "test.test_functools.TestReducePy.test_reduce": {
@@ -51,16 +51,17 @@
         "host_binding": 1,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
         }
       },
       "test.test_functools.TestReducePy.test_reduce_with_kwargs": {
-        "status": "failed",
-        "host_binding": 1,
-        "diagnostic": "TypeError: adapter.<locals>.invoke() got some positional-only arguments passed as keyword arguments: 'function'",
+        "status": "mixed",
+        "host_binding": 2,
+        "host_warnings": 2,
+        "native_calls": 2,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:14: Imre: unknown class method"
         }
       }
     },
@@ -70,7 +71,7 @@
         "native_calls": 10,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: local functions require annotated parameters and return types"
         }
       },
       "test.test_functools.TestReduceC.test_iterator_usage": {
@@ -78,7 +79,7 @@
         "native_calls": 7,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
         }
       },
       "test.test_functools.TestReduceC.test_reduce": {
@@ -87,7 +88,7 @@
         "host_binding": 1,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
         }
       },
       "test.test_functools.TestReducePy.test_initial_keyword": {
@@ -95,7 +96,7 @@
         "native_calls": 10,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: local functions require annotated parameters and return types"
         }
       },
       "test.test_functools.TestReducePy.test_iterator_usage": {
@@ -103,7 +104,7 @@
         "native_calls": 7,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
         }
       },
       "test.test_functools.TestReducePy.test_reduce": {
@@ -112,16 +113,235 @@
         "host_binding": 1,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
         }
       },
       "test.test_functools.TestReducePy.test_reduce_with_kwargs": {
-        "status": "failed",
-        "host_binding": 1,
-        "diagnostic": "TypeError: adapter.<locals>.invoke() got some positional-only arguments passed as keyword arguments: 'function'",
+        "status": "mixed",
+        "host_binding": 2,
+        "host_warnings": 2,
+        "native_calls": 2,
         "complete_native_body": {
           "status": "compiler_blocked",
-          "diagnostic": "<case>/case.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+          "diagnostic": "<case>/case.py:8:14: Imre: unknown class method"
+        }
+      }
+    }
+  },
+  "keyword_controls": {
+    "0": {
+      "python": {
+        "function_and_sequence": {
+          "reference": {
+            "value": 16,
+            "warnings": [
+              [
+                "DeprecationWarning",
+                "Calling functools.reduce with keyword arguments \"function\" or \"sequence\" is deprecated in Python 3.14 and will be forbidden in Python 3.16."
+              ]
+            ]
+          },
+          "adapter": {
+            "value": 16,
+            "warnings": [
+              [
+                "DeprecationWarning",
+                "Calling functools.reduce with keyword arguments \"function\" or \"sequence\" is deprecated in Python 3.14 and will be forbidden in Python 3.16."
+              ]
+            ]
+          },
+          "counts": {
+            "host_binding": 1,
+            "host_warnings": 1,
+            "native_calls": 1
+          }
+        },
+        "sequence": {
+          "reference": {
+            "value": 16,
+            "warnings": [
+              [
+                "DeprecationWarning",
+                "Calling functools.reduce with keyword arguments \"function\" or \"sequence\" is deprecated in Python 3.14 and will be forbidden in Python 3.16."
+              ]
+            ]
+          },
+          "adapter": {
+            "value": 16,
+            "warnings": [
+              [
+                "DeprecationWarning",
+                "Calling functools.reduce with keyword arguments \"function\" or \"sequence\" is deprecated in Python 3.14 and will be forbidden in Python 3.16."
+              ]
+            ]
+          },
+          "counts": {
+            "host_binding": 1,
+            "host_warnings": 1,
+            "native_calls": 1
+          }
+        },
+        "initial": {
+          "reference": {
+            "value": 16,
+            "warnings": []
+          },
+          "adapter": {
+            "value": 16,
+            "warnings": []
+          },
+          "counts": {
+            "native_calls": 1
+          }
+        }
+      },
+      "accelerator": {
+        "function_and_sequence": {
+          "reference": {
+            "exception": "TypeError",
+            "warnings": []
+          },
+          "adapter": {
+            "exception": "TypeError",
+            "warnings": []
+          },
+          "counts": {
+            "host_binding": 1
+          }
+        },
+        "sequence": {
+          "reference": {
+            "exception": "TypeError",
+            "warnings": []
+          },
+          "adapter": {
+            "exception": "TypeError",
+            "warnings": []
+          },
+          "counts": {
+            "host_binding": 1
+          }
+        },
+        "initial": {
+          "reference": {
+            "value": 16,
+            "warnings": []
+          },
+          "adapter": {
+            "value": 16,
+            "warnings": []
+          },
+          "counts": {
+            "native_calls": 1
+          }
+        }
+      }
+    },
+    "3": {
+      "python": {
+        "function_and_sequence": {
+          "reference": {
+            "value": 16,
+            "warnings": [
+              [
+                "DeprecationWarning",
+                "Calling functools.reduce with keyword arguments \"function\" or \"sequence\" is deprecated in Python 3.14 and will be forbidden in Python 3.16."
+              ]
+            ]
+          },
+          "adapter": {
+            "value": 16,
+            "warnings": [
+              [
+                "DeprecationWarning",
+                "Calling functools.reduce with keyword arguments \"function\" or \"sequence\" is deprecated in Python 3.14 and will be forbidden in Python 3.16."
+              ]
+            ]
+          },
+          "counts": {
+            "host_binding": 1,
+            "host_warnings": 1,
+            "native_calls": 1
+          }
+        },
+        "sequence": {
+          "reference": {
+            "value": 16,
+            "warnings": [
+              [
+                "DeprecationWarning",
+                "Calling functools.reduce with keyword arguments \"function\" or \"sequence\" is deprecated in Python 3.14 and will be forbidden in Python 3.16."
+              ]
+            ]
+          },
+          "adapter": {
+            "value": 16,
+            "warnings": [
+              [
+                "DeprecationWarning",
+                "Calling functools.reduce with keyword arguments \"function\" or \"sequence\" is deprecated in Python 3.14 and will be forbidden in Python 3.16."
+              ]
+            ]
+          },
+          "counts": {
+            "host_binding": 1,
+            "host_warnings": 1,
+            "native_calls": 1
+          }
+        },
+        "initial": {
+          "reference": {
+            "value": 16,
+            "warnings": []
+          },
+          "adapter": {
+            "value": 16,
+            "warnings": []
+          },
+          "counts": {
+            "native_calls": 1
+          }
+        }
+      },
+      "accelerator": {
+        "function_and_sequence": {
+          "reference": {
+            "exception": "TypeError",
+            "warnings": []
+          },
+          "adapter": {
+            "exception": "TypeError",
+            "warnings": []
+          },
+          "counts": {
+            "host_binding": 1
+          }
+        },
+        "sequence": {
+          "reference": {
+            "exception": "TypeError",
+            "warnings": []
+          },
+          "adapter": {
+            "exception": "TypeError",
+            "warnings": []
+          },
+          "counts": {
+            "host_binding": 1
+          }
+        },
+        "initial": {
+          "reference": {
+            "value": 16,
+            "warnings": []
+          },
+          "adapter": {
+            "value": 16,
+            "warnings": []
+          },
+          "counts": {
+            "native_calls": 1
+          }
         }
       }
     }

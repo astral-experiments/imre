@@ -3,7 +3,6 @@
 //! this nonreentrant operation. Each result record owns its key and lists.
 
 use super::*;
-use crate::ObjectOwner;
 use crate::StrOwner;
 use crate::objects::records::{RecordDescriptor, allocate_record};
 use crate::objects::{Words, stdlib::shared_prefix};
@@ -129,5 +128,5 @@ unsafe fn gather<const N: usize>(
             }
         }
     }
-    Some(ObjectOwner::into_raw(result.into_object()))
+    Some(crate::ObjectOwner::into_raw(result.into_object()))
 }

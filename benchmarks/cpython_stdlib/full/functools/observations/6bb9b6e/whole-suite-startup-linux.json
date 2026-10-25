@@ -1,0 +1,68 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "0d9e142c24549ebcc7115781408c09564f7141f4c31de1dd9e8315ea620a652d",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_functools",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_functools.py:7:1: Imre: unsupported sealed standard-library export itertools.permutations"
+    },
+    {
+      "suite": "test.test_functools",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_functools.py:7:1: Imre: unsupported sealed standard-library export itertools.permutations"
+    },
+    {
+      "suite": "test.test_functools",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_functools.py:7:1: Imre: unsupported sealed standard-library export itertools.permutations"
+    },
+    {
+      "suite": "test.test_functools",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_functools.py:7:1: Imre: unsupported sealed standard-library export itertools.permutations"
+    },
+    {
+      "suite": "test.test_free_threading.test_functools",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_free_threading/test_functools.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+    },
+    {
+      "suite": "test.test_free_threading.test_functools",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_free_threading/test_functools.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+    },
+    {
+      "suite": "test.test_free_threading.test_functools",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_free_threading/test_functools.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+    },
+    {
+      "suite": "test.test_free_threading.test_functools",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_free_threading/test_functools.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+    }
+  ],
+  "compiler_revision": "6bb9b6eff0da53cc87fd9879a0e7b1b107d1c753",
+  "compiler_tree": "d0417cbb23a9e6db6d936de5c1f9e32ab685a168"
+}

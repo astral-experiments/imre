@@ -4,12 +4,11 @@
 //! async-signal-safe descriptor, signal, and exec operations; language owners
 //! remain in the parent. All requested pipes are drained before decoding or check.
 
-use crate::ObjectOwner;
 use crate::StrOwner;
 use std::ffi::{CStr, CString, OsStr};
 use std::fs;
 use std::io::{self, Read};
-use std::os::fd::{AsFd, AsRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -23,8 +22,14 @@ use super::records::{RecordDescriptor, imre_record_new};
 use super::words::{OwnedWord, WordKind};
 use super::{Bytes, Int, Object, Storage, Str, fail, object};
 
+mod argv;
 mod asynchronous;
+mod launch_error;
+mod pass_fds;
+mod popen;
+mod shell_output;
 pub(super) use asynchronous::AsyncProcess;
+pub(super) use popen::{Popen, retain_live_owner};
 
 #[cfg(target_os = "linux")]
 unsafe extern "C" {
@@ -35,16 +40,31 @@ unsafe extern "C" {
 /// Its sealed string and path elements cannot point back to the exception.
 #[derive(Clone)]
 pub(super) struct ProcessError {
-    cmd: ObjectOwner,
+    positional_streams: bool,
+    cmd: OwnedWord,
     returncode: i32,
     stdout: OwnedWord,
     stderr: OwnedWord,
 }
 
 impl ProcessError {
+    /// run(check=True) passes output by keyword; CompletedProcess.check_returncode uses positional streams.
+    pub(super) fn arguments(&self) -> smallvec::SmallVec<[OwnedWord; 5]> {
+        let mut fields = smallvec::smallvec![
+            OwnedWord {
+                kind: WordKind::new(2),
+                word: exit_word(self.returncode)
+            },
+            self.cmd.clone()
+        ];
+        if self.positional_streams {
+            fields.extend([self.stdout.clone(), self.stderr.clone()]);
+        }
+        fields
+    }
     pub(super) fn field(&self, field: u32, tagged: bool) -> usize {
         match field {
-            0 => ObjectOwner::into_raw(self.cmd.clone()) as usize,
+            0 => self.cmd.clone().into_word(),
             1 => exit_word(self.returncode),
             2..=4 => {
                 let output = if field == 3 {
@@ -65,15 +85,7 @@ impl ProcessError {
     }
 
     pub(super) fn message(&self) -> Str {
-        let mut cmd = String::new();
-        // SAFETY: this owner roots the original acyclic argv list during repr.
-        unsafe {
-            super::values::write_repr(
-                &mut cmd,
-                ObjectOwner::as_ptr(&self.cmd) as usize,
-                WordKind::new(5),
-            );
-        }
+        let cmd = argv::display(&self.cmd);
         if self.returncode < 0 {
             let signal = -self.returncode;
             if let Some(name) = signal_name(signal) {
@@ -100,48 +112,80 @@ enum Deadline {
     Float(f64),
 }
 
+impl Deadline {
+    fn seconds(&self) -> Result<f64> {
+        match self {
+            Self::Integer(seconds) => crate::floats::int_to_float(seconds),
+            Self::Float(seconds) => Ok(*seconds),
+        }
+    }
+
+    /// # Safety
+    /// A nonzero word is a rooted integer (2) or a nullable float pointer (7).
+    unsafe fn from_word(kind: u32, word: usize) -> Option<Self> {
+        // SAFETY: the caller supplies the representation selected by the kind.
+        unsafe {
+            match kind {
+                0 => None,
+                2 => Some(Self::Integer(Int::clone(&Int::borrow(word)))),
+                7 => (word as *const f64).as_ref().copied().map(Self::Float),
+                _ => fail("SystemError", "invalid process deadline kind"),
+            }
+        }
+    }
+}
+
 /// A deadline failure owns the original argv and undecoded pipe snapshots.
 /// Empty streams distinguish an observed EOF from no data observed before expiry.
 #[derive(Clone)]
 pub(super) struct TimeoutError {
-    cmd: ObjectOwner,
+    cmd: OwnedWord,
     timeout: Deadline,
-    stdout: Option<Rc<Bytes>>,
-    stderr: Option<Rc<Bytes>>,
+    // communicate resets .timeout after the final wait; args keeps that wait's budget.
+    wait_budget: Option<f64>,
+    stdout: Option<crate::BytesOwner>,
+    stderr: Option<crate::BytesOwner>,
 }
 
 impl TimeoutError {
+    pub(super) fn arguments(&self) -> smallvec::SmallVec<[OwnedWord; 5]> {
+        let timeout = match (&self.timeout, self.wait_budget) {
+            (_, Some(n)) => OwnedWord {
+                kind: WordKind::new(7),
+                word: n.to_bits() as usize,
+            },
+            (Deadline::Integer(n), None) => OwnedWord {
+                kind: WordKind::new(2),
+                word: n.clone().into_raw(),
+            },
+            (Deadline::Float(n), None) => OwnedWord {
+                kind: WordKind::new(7),
+                word: n.to_bits() as usize,
+            },
+        };
+        smallvec::smallvec![self.cmd.clone(), timeout]
+    }
     /// The compiler proves the numeric field's exact kind at every read.
     pub(super) fn field(&self, field: u32) -> usize {
         match field {
-            0 => ObjectOwner::into_raw(self.cmd.clone()) as usize,
+            0 => self.cmd.clone().into_word(),
             1 => match &self.timeout {
                 Deadline::Integer(seconds) => seconds.clone().into_raw(),
                 Deadline::Float(seconds) => seconds.to_bits() as usize,
             },
-            2 | 4 => self
-                .stdout
-                .as_ref()
-                .map_or(0, |value| Rc::into_raw(value.clone()) as usize),
-            3 => self
-                .stderr
-                .as_ref()
-                .map_or(0, |value| Rc::into_raw(value.clone()) as usize),
+            2 | 4 => self.stdout.as_ref().map_or(0, |value| {
+                crate::BytesOwner::into_raw(value.clone()) as usize
+            }),
+            3 => self.stderr.as_ref().map_or(0, |value| {
+                crate::BytesOwner::into_raw(value.clone()) as usize
+            }),
             _ => fail("SystemError", "invalid timeout exception field"),
         }
     }
 
     /// Formatting observes later mutations of the same rooted argv list.
     pub(super) fn message(&self) -> Str {
-        let mut cmd = String::new();
-        // SAFETY: this owner roots an exact acyclic list[str] during repr.
-        unsafe {
-            super::values::write_repr(
-                &mut cmd,
-                ObjectOwner::as_ptr(&self.cmd) as usize,
-                WordKind::new(5),
-            );
-        }
+        let cmd = argv::display(&self.cmd);
         let seconds = match &self.timeout {
             Deadline::Integer(seconds) => Str::from(seconds.big().to_string()),
             Deadline::Float(seconds) => crate::floats::render(*seconds),
@@ -202,6 +246,17 @@ fn signal_name(signal: i32) -> Option<&'static str> {
         #[cfg(target_os = "linux")]
         value if value == libc::SIGRTMAX() => "SIGRTMAX",
         _ => return None,
+    })
+}
+
+/// A traced stop can be reported by waitpid without WUNTRACED. Popen
+/// exposes the negative stop signal just as it exposes a terminating signal.
+fn returncode(status: ExitStatus) -> i32 {
+    status.code().unwrap_or_else(|| {
+        -status
+            .stopped_signal()
+            .or_else(|| status.signal())
+            .unwrap_or(0)
     })
 }
 
@@ -406,8 +461,35 @@ impl PathSearch {
     }
 }
 
+struct ChildAttributes {
+    new_session: bool,
+    group: libc::pid_t,
+    mask: Option<libc::mode_t>,
+    keep: Vec<RawFd>,
+}
+
+impl Default for ChildAttributes {
+    fn default() -> Self {
+        Self {
+            new_session: false,
+            group: -1,
+            mask: None,
+            keep: Vec::new(),
+        }
+    }
+}
+
+impl ChildAttributes {
+    /// A negative group other than -1 skips setpgid, but still selects CPython's
+    /// fork/exec path and preserves the caller's executable object on failure.
+    fn requires_fork(&self) -> bool {
+        self.new_session || self.group != -1 || self.mask.is_some() || !self.keep.is_empty()
+    }
+}
+
 struct Launch {
     argv: CStrings,
+    executable: Option<CString>,
     env: Option<CStrings>,
     search: Option<PathSearch>,
     descriptors: Descriptors,
@@ -415,8 +497,17 @@ struct Launch {
 
 impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
+    #[cfg(test)]
     fn new(argv: Vec<CString>, env: Option<StringPairs>) -> Result<Self> {
-        let program = &argv[0];
+        Self::with_executable(argv, env, None)
+    }
+
+    fn with_executable(
+        argv: Vec<CString>,
+        env: Option<StringPairs>,
+        executable: Option<CString>,
+    ) -> Result<Self> {
+        let program = executable.as_ref().unwrap_or_else(|| &argv[0]);
         let search = if program.as_bytes().contains(&b'/') {
             None
         } else {
@@ -434,6 +525,7 @@ impl Launch {
         let env = env.map(CStrings::from_environment).transpose()?;
         Ok(Self {
             argv: CStrings::new(argv)?,
+            executable,
             env,
             search,
             descriptors: Descriptors::prepare().map_err(os_error)?,
@@ -447,7 +539,15 @@ impl Launch {
     /// Call only from Command::pre_exec after stdio and cwd setup. Every referenced
     /// buffer was allocated in the parent; only async-signal-safe libc operations
     /// and allocation-free OS-error construction are allowed until exec or _exit.
-    unsafe fn exec_child(&mut self) -> io::Result<()> {
+    unsafe fn exec_child(
+        &mut self,
+        close_fds: bool,
+        attributes: &ChildAttributes,
+    ) -> io::Result<()> {
+        if let Some(mask) = attributes.mask {
+            // SAFETY: this is the forked child; umask never fails.
+            unsafe { libc::umask(mask) };
+        }
         for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
             // SAFETY: restore_signals resets dispositions Python ignores; signal
             // is async-signal-safe and both arguments are valid signal constants.
@@ -455,8 +555,23 @@ impl Launch {
                 return Err(io::Error::last_os_error());
             }
         }
-        // SAFETY: this is the forked child after Command's stdio setup.
-        unsafe { self.descriptors.apply()? };
+        // SAFETY: setsid and setpgid are async-signal-safe. Apply them in
+        // CPython's order; a new session leader cannot also change its group.
+        if attributes.new_session && unsafe { libc::setsid() } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if attributes.group >= 0
+            // SAFETY: this is the forked child and group is a validated pid_t.
+            && unsafe { libc::setpgid(0, attributes.group) } < 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        if close_fds {
+            // SAFETY: the forked child owns its descriptor table.
+            unsafe { self.descriptors.apply()? };
+            // SAFETY: this runs only after fork. No allocator or callback is used.
+            unsafe { pass_fds::inherit(&attributes.keep)? };
+        }
         let mut saved_error = None;
         let mut last_error = libc::ENOENT;
         let mut attempt = |executable| {
@@ -480,48 +595,107 @@ impl Launch {
                 saved_error = Some(last_error);
             }
         };
-        let program = &self.argv.strings[0];
+        let program = self
+            .executable
+            .as_ref()
+            .unwrap_or_else(|| &self.argv.strings[0]);
         if let Some(search) = &mut self.search {
             search.visit(program, attempt);
         } else {
             attempt(program.as_ptr());
         }
-        Err(io::Error::from_raw_os_error(
+        Err(launch_error::child_errno(
+            launch_error::Site::Executable,
             saved_error.unwrap_or(last_error),
         ))
     }
 
-    fn spawn(mut self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
+    fn spawn(self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
+        self.spawn_tagged(cwd, streams, [-1; 3], ChildAttributes::default())
+            .map_err(|err| launch_error::decode(err).1)
+    }
+
+    fn spawn_tagged(
+        mut self,
+        cwd: Option<&CString>,
+        streams: u32,
+        descriptors: [RawFd; 3],
+        attributes: ChildAttributes,
+    ) -> io::Result<Child> {
+        // STDOUT in the stdin slot reaches child descriptor setup as fd -2.
+        if (streams >> 12) & 15 == 5 {
+            return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
+        // Check before opening any stdio or launch-error pipes: an invalid caller
+        // fd must not accidentally become valid when Command allocates a pipe.
+        for &fd in &attributes.keep {
+            // SAFETY: F_GETFD validates the supplied fd without changing it.
+            if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        // Check the original descriptor table before duplicating anything. A
+        // duplicate for stdout must not make a closed stderr descriptor valid.
+        for fd in descriptors.into_iter().filter(|&fd| fd >= 0) {
+            // SAFETY: fcntl validates the supplied integer even when it is closed.
+            if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
         // Duplicate the parent's explicit descriptors before setting up either
         // child stream. stderr=STDOUT instead follows the child's chosen stdout.
-        fn output(mode: u32) -> io::Result<Stdio> {
+        fn output(mode: u32, descriptor: RawFd) -> io::Result<Stdio> {
             Ok(match mode {
                 0 | 5 => Stdio::inherit(),
                 1 => Stdio::piped(),
                 2 => Stdio::null(),
                 3 => Stdio::from(io::stdout().as_fd().try_clone_to_owned()?),
                 4 => Stdio::from(io::stderr().as_fd().try_clone_to_owned()?),
+                6 | 7 => {
+                    // SAFETY: fcntl validates the source and returns a new owned
+                    // descriptor with the same open file description (and offset).
+                    let fd = unsafe { libc::fcntl(descriptor, libc::F_DUPFD_CLOEXEC, 3) };
+                    if fd < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    // SAFETY: only the new descriptor is transferred to Command.
+                    Stdio::from(unsafe { OwnedFd::from_raw_fd(fd) })
+                }
+                8 => Stdio::from(io::stdin().as_fd().try_clone_to_owned()?),
                 _ => fail("SystemError", "invalid subprocess stream mode"),
             })
         }
-        let mut command = Command::new(OsStr::from_bytes(self.argv.strings[0].as_bytes()));
+        let program = self
+            .executable
+            .as_ref()
+            .unwrap_or_else(|| &self.argv.strings[0]);
+        let mut command = Command::new(OsStr::from_bytes(program.as_bytes()));
         let stderr = (streams >> 4) & 15;
         command
-            .stdin(Stdio::inherit())
-            .stdout(output(streams & 15)?)
-            .stderr(output(stderr)?);
-        if let Some(cwd) = cwd {
-            command.current_dir(OsStr::from_bytes(cwd.as_bytes()));
-        }
+            .stdin(output((streams >> 12) & 15, descriptors[0])?)
+            .stdout(output(streams & 15, descriptors[1])?)
+            .stderr(output(stderr, descriptors[2])?);
+        let cwd = cwd.cloned();
         // SAFETY: this private closure contains only owned immutable native data;
         // exec_child performs no allocation, locking, callback, or language drop.
         // It never returns Ok, so Command cannot fall through to libc execvp.
         unsafe {
             command.pre_exec(move || {
+                if let Some(directory) = &cwd
+                    && libc::chdir(directory.as_ptr()) < 0
+                {
+                    let errno = io::Error::last_os_error()
+                        .raw_os_error()
+                        .unwrap_or(libc::EIO);
+                    return Err(launch_error::child_errno(
+                        launch_error::Site::Directory,
+                        errno,
+                    ));
+                }
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                self.exec_child()
+                self.exec_child(streams & (1 << 17) == 0, &attributes)
             })
         };
         command.spawn()
@@ -583,35 +757,10 @@ impl ChildGuard {
 /// Timeout capture stops at the deadline rather than waiting for descendant pipes.
 enum Captured {
     Completed(ExitStatus, Vec<u8>, Vec<u8>),
-    TimedOut(Option<Vec<u8>>, Option<Vec<u8>>),
+    TimedOut(Option<Vec<u8>>, Option<Vec<u8>>, Option<f64>),
 }
 
-/// Matches POSIX communicate: poll fairly, snapshot before post-deadline reads,
-/// then kill/reap the direct child without an unbounded post-timeout pipe drain.
-fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
-    let started = Instant::now();
-    let mut child = ChildGuard {
-        child,
-        reaped: false,
-    };
-    let timeout = match deadline {
-        Deadline::Integer(seconds) => crate::floats::int_to_float(seconds)?,
-        Deadline::Float(seconds) => *seconds,
-    };
-    let mut stdout = child.child.stdout.take();
-    let mut stderr = child.child.stderr.take();
-    let fds = [
-        stdout.as_ref().map_or(-1, AsRawFd::as_raw_fd),
-        stderr.as_ref().map_or(-1, AsRawFd::as_raw_fd),
-    ];
-    if fds == [-1, -1] {
-        // With no selector CPython simply waits, even for NaN, +inf or large
-        // finite deadlines that poll() would have rejected converting to ms.
-        return wait_timeout(&mut child, started, timeout, [Vec::new(), Vec::new()]);
-    }
-    for fd in fds.into_iter().filter(|&fd| fd >= 0) {
-        nonblocking(fd).map_err(os_error)?;
-    }
+fn poll_milliseconds(timeout: f64) -> Result<i32> {
     if timeout.is_nan() {
         return Err(Error::new(
             Kind::ValueError,
@@ -626,7 +775,7 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
     }
     // Python's poll first converts milliseconds to its signed nanosecond clock,
     // then bounds the millisecond argument to the platform's signed C int.
-    let milliseconds = ((timeout - started.elapsed().as_secs_f64()) * 1000.0).ceil();
+    let milliseconds = (timeout * 1000.0).ceil();
     if milliseconds >= 9_223_372_036_855.0 {
         return Err(Error::new(
             Kind::OverflowError,
@@ -636,6 +785,33 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
     if milliseconds > f64::from(i32::MAX) {
         return Err(Error::new(Kind::OverflowError, "timeout is too large"));
     }
+    Ok(milliseconds as i32)
+}
+
+/// Matches POSIX communicate: poll fairly, snapshot before post-deadline reads,
+/// then kill/reap the direct child without an unbounded post-timeout pipe drain.
+fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
+    let started = Instant::now();
+    let mut child = ChildGuard {
+        child,
+        reaped: false,
+    };
+    let timeout = deadline.seconds()?;
+    let mut stdout = child.child.stdout.take();
+    let mut stderr = child.child.stderr.take();
+    let fds = [
+        stdout.as_ref().map_or(-1, AsRawFd::as_raw_fd),
+        stderr.as_ref().map_or(-1, AsRawFd::as_raw_fd),
+    ];
+    if fds == [-1, -1] {
+        // With no selector CPython simply waits, even for NaN, +inf or large
+        // finite deadlines that poll() would have rejected converting to ms.
+        return wait_timeout(&mut child, started, timeout, [Vec::new(), Vec::new()]);
+    }
+    for fd in fds.into_iter().filter(|&fd| fd >= 0) {
+        nonblocking(fd).map_err(os_error)?;
+    }
+    poll_milliseconds(timeout - started.elapsed().as_secs_f64())?;
     let duration = if timeout > 0.0 {
         Duration::from_secs_f64(timeout)
     } else {
@@ -659,6 +835,7 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
             return Ok(Captured::TimedOut(
                 observed[0].then_some(stdout),
                 observed[1].then_some(stderr),
+                None,
             ));
         }
         let milliseconds = ((deadline - now).as_secs_f64() * 1000.0).ceil() as i32;
@@ -723,6 +900,7 @@ fn wait_timeout(
     timeout: f64,
     outputs: [Vec<u8>; 2],
 ) -> Result<Captured> {
+    let wait_budget = timeout - started.elapsed().as_secs_f64();
     let mut delay = Duration::from_millis(1);
     loop {
         if let Some(status) = child.try_wait().map_err(os_error)? {
@@ -732,7 +910,7 @@ fn wait_timeout(
         let remaining = timeout - started.elapsed().as_secs_f64();
         if remaining <= 0.0 {
             child.terminate().map_err(os_error)?;
-            return Ok(Captured::TimedOut(None, None));
+            return Ok(Captured::TimedOut(None, None, Some(wait_budget)));
         }
         let sleep = Duration::try_from_secs_f64(remaining).unwrap_or(delay);
         std::thread::sleep(delay.min(sleep));
@@ -936,9 +1114,9 @@ pub unsafe extern "C" fn imre_environ_get(key: *const Str, default: *const Str) 
 /// # Safety
 /// `entries` is null or a live null-terminated array of C-string pointers. The array
 /// and strings remain immutable until this function returns.
-unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<ObjectOwner> {
+unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<crate::ObjectOwner> {
     // SAFETY: new transfers one fresh exact dict[str, str] owner.
-    let result = unsafe { ObjectOwner::from_raw(imre_dict_new(3, 3)) };
+    let result = unsafe { crate::ObjectOwner::from_raw(imre_dict_new(3, 3)) };
     let decode = |bytes: &[u8]| {
         std::str::from_utf8(bytes).map(Str::from).map_err(|_| {
             Error::new(
@@ -953,7 +1131,7 @@ unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<Ob
         // SAFETY: both the new dictionary and exact string key remain rooted.
         if unsafe {
             imre_dict_contains(
-                ObjectOwner::as_ptr(&result),
+                crate::ObjectOwner::as_ptr(&result),
                 StrOwner::as_ptr(&key) as usize,
             )
         } == 0
@@ -963,7 +1141,7 @@ unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<Ob
             // can observe this new acyclic dictionary before it is complete.
             unsafe {
                 super::mappings::dict_set(
-                    ObjectOwner::as_ptr(&result),
+                    crate::ObjectOwner::as_ptr(&result),
                     StrOwner::as_ptr(&key) as usize,
                     StrOwner::as_ptr(&value) as usize,
                 )?;
@@ -981,7 +1159,7 @@ pub extern "C" fn imre_environ_copy() -> *const Object {
     // has no environment mutation or language threads. Rust vars_os omits empty
     // names, so the raw POSIX entries are required for Python-compatible copies.
     let result = unsafe { environment_snapshot(native_environ()) };
-    finish(result.map(ObjectOwner::into_raw), std::ptr::null())
+    finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }
 
 /// Runs one argv command with inherited stdin and two captured UTF-8 text streams.
@@ -990,7 +1168,7 @@ pub extern "C" fn imre_environ_copy() -> *const Object {
 ///
 /// # Safety
 /// Root an exact list[str], nullable UTF-8 cwd, and nullable dict[str, str]. `check`
-/// is 0 or 1. `descriptor` is immutable static metadata with a string-list field, an integer, and two None/str/bytes stream fields.
+/// is 0 or 1. `descriptor` is immutable static metadata with the original command field, an integer, and two None/str/bytes stream fields.
 /// Enter with pending clear. Success transfers one fully initialized record owner;
 /// null means pending must be checked before using the result. Inputs are borrowed.
 #[unsafe(no_mangle)]
@@ -1071,16 +1249,21 @@ fn copy_argv(words: &[usize], copy: impl Fn(usize) -> Result<CString>) -> Result
 }
 
 /// # Safety
-/// The caller roots an exact argv list whose elements are all strings.
-unsafe fn native_argv(args: *const Object) -> Result<Vec<CString>> {
-    // SAFETY: only independent native strings escape the immutable list borrow.
+/// The caller roots the legacy ABI's exact list and optional directory/environment.
+unsafe fn spawn_list(
+    args: *const Object,
+    cwd: *const Str,
+    env: *const Object,
+    streams: u32,
+) -> Result<Child> {
+    popen::cleanup();
+    // SAFETY: the compiler passes a rooted exact list, never a tuple or a scalar.
+    let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
+    let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
+    // SAFETY: the original configuration remains rooted while spawn reports any error.
     unsafe {
-        object(args).0.with(|storage| {
-            let values = storage.sequence();
-            values.check_kind(3);
-            copy_argv(&values.values, |word| {
-                cstring((&*(word as *const Str)).as_bytes())
-            })
+        launch_error::spawn(&cmd, &config, streams, [-1; 3], false, |_| {
+            Ok(ChildAttributes::default())
         })
     }
 }
@@ -1089,46 +1272,20 @@ unsafe fn native_argv(args: *const Object) -> Result<Vec<CString>> {
 /// The caller roots an exact list of strings, Paths, or their closed union.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *const Str {
-    // SAFETY: inspect only the exact runtime representations admitted by this call.
-    let argv = unsafe {
-        object(args).0.with(|storage| -> Result<Vec<CString>> {
-            let list = storage.sequence();
-            copy_argv(&list.values, |word| {
-                let (word, ty) = if list.kind.raw() == 9 {
-                    super::unions::member(word)
-                } else {
-                    (word, list.kind)
-                };
-                match ty.raw() {
-                    3 => cstring((&*(word as *const Str)).as_bytes()),
-                    5 => object(word as *const Object)
-                        .0
-                        .with(|storage| match storage {
-                            Storage::Path { .. } => cstring(storage.path().as_bytes()),
-                            _ => fail("SystemError", "expected a subprocess Path argument"),
-                        }),
-                    _ => fail("SystemError", "invalid subprocess argument kind"),
-                }
-            })
-        })
-    };
-    let run = argv.and_then(|argv| {
-        if argv.is_empty() {
-            return Err(Error::new(Kind::IndexError, "list index out of range"));
-        }
-        let child = Launch::new(argv, None)?.spawn(None, 1).map_err(os_error)?;
-        let (status, stdout, _) = capture(child).map_err(capture_error)?;
-        Ok((status, StrOwner::new(decode_utf8_text(stdout)?)))
-    });
+    // SAFETY: the caller roots the exact list for the duration of this operation.
+    let run =
+        unsafe { spawn_list(args, std::ptr::null(), std::ptr::null(), 1) }.and_then(|child| {
+            let (status, stdout, _) = capture(child).map_err(capture_error)?;
+            Ok((status, StrOwner::new(decode_utf8_text(stdout)?)))
+        });
     match run {
         Ok((status, stdout)) if status.success() => StrOwner::into_raw(stdout),
         Ok((status, stdout)) => {
             raise_process(ProcessError {
+                positional_streams: false,
                 // SAFETY: the exception acquires the original rooted argv.
-                cmd: unsafe { ObjectOwner::acquire_word(args as usize) },
-                returncode: status
-                    .code()
-                    .unwrap_or_else(|| -status.signal().unwrap_or(0)),
+                cmd: unsafe { WordKind::new(5).acquire(args as usize) },
+                returncode: returncode(status),
                 // SAFETY: each field transfers one decoded string or no owner.
                 stdout: unsafe {
                     OwnedWord::from_owned(StrOwner::into_raw(stdout) as usize, WordKind::new(3))
@@ -1152,12 +1309,7 @@ pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *c
 pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u32) {
     let run = || -> Result<ExitStatus> {
         // SAFETY: all argv owners are rooted by the caller.
-        let argv = unsafe { native_argv(args)? };
-        if argv.is_empty() {
-            return Err(Error::new(Kind::IndexError, "list index out of range"));
-        }
-        let launch = Launch::new(argv, None)?;
-        let child = launch.spawn(None, 4).map_err(os_error)?;
+        let child = unsafe { spawn_list(args, std::ptr::null(), std::ptr::null(), 4)? };
         ChildGuard {
             child,
             reaped: false,
@@ -1171,11 +1323,10 @@ pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u
     };
     match run() {
         Ok(status) if check != 0 && !status.success() => raise_process(ProcessError {
+            positional_streams: false,
             // SAFETY: the original list remains rooted while acquiring our owner.
-            cmd: unsafe { ObjectOwner::acquire_word(args as usize) },
-            returncode: status
-                .code()
-                .unwrap_or_else(|| -status.signal().unwrap_or(0)),
+            cmd: unsafe { WordKind::new(5).acquire(args as usize) },
+            returncode: returncode(status),
             stdout: absent(),
             stderr: absent(),
         }),
@@ -1190,20 +1341,55 @@ unsafe fn prepare_process(
     cwd: *const Str,
     env: *const Object,
 ) -> Result<(Launch, Option<CString>)> {
+    popen::cleanup();
+    // SAFETY: existing run and asynchronous ABIs accept an exact list.
+    let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0, true);
+    // SAFETY: the legacy arguments have their original word representations.
+    let (launch, cwd, _) = unsafe {
+        prepare_command(&WordKind::new(5).acquire(args as usize), &config, || {
+            Ok(ChildAttributes::default())
+        })?
+    };
+    Ok((launch, cwd))
+}
+
+/// Conversion error shared by POSIX launch arguments that take a C int.
+fn c_int_overflow() -> Error {
+    Error::new(
+        Kind::OverflowError,
+        "Python int too large to convert to C int",
+    )
+}
+
+/// # Safety
+/// The exact optional directory and environment stay rooted across conversion.
+unsafe fn prepare_command(
+    cmd: &OwnedWord,
+    config: &popen::LaunchConfig,
+    child_attributes: impl FnOnce() -> Result<ChildAttributes>,
+) -> Result<(Launch, Option<CString>, ChildAttributes)> {
     // SAFETY: the caller roots the exact argv, optional directory and environment.
     unsafe {
         // Python selects args[0], validates every environment name, then
         // converts native strings. Preserve that order for mixed failures.
-        if object(args)
-            .0
-            .with(|storage| storage.sequence().values.is_empty())
+        if config.shell
+            && cmd.kind.raw() == 5
+            && object(cmd.word as *const Object)
+                .0
+                .with(|s| matches!(s, Storage::Path { .. } | Storage::PurePath(_)))
         {
+            return Err(Error::new(
+                Kind::TypeError,
+                "path-like args is not allowed when shell is true",
+            ));
+        }
+        if !config.shell && config.executable.is_null() && argv::first(cmd).is_none() {
             return Err(Error::new(Kind::IndexError, "list index out of range"));
         }
-        let env = if env.is_null() {
+        let env = if config.env.is_null() {
             None
         } else {
-            Some(object(env).0.with(|storage| {
+            Some(object(config.env).0.with(|storage| {
                 let Storage::Dictionary(mapping) = storage else {
                     fail("SystemError", "expected an environment dictionary");
                 };
@@ -1219,11 +1405,30 @@ unsafe fn prepare_process(
                 "illegal environment variable name",
             ));
         }
-        let argv = native_argv(args)?;
-        let cwd = (!cwd.is_null())
-            .then(|| cstring((&*cwd).as_bytes()))
-            .transpose()?;
-        Ok((Launch::new(argv, env)?, cwd))
+        // _execute_child validates environment names before _fork_exec converts
+        // its integer arguments. Conversion of argv and cwd to C strings follows.
+        let attributes = child_attributes()?;
+        let executable = argv::optional_path(config.executable, config.executable_kind)?;
+        let mut argv = argv::copy(cmd)?;
+        if config.shell {
+            let default = if cfg!(target_os = "android") {
+                c"/system/bin/sh"
+            } else {
+                c"/bin/sh"
+            };
+            let shell = executable
+                .as_deref()
+                .filter(|p| !p.to_bytes().is_empty())
+                .unwrap_or(default);
+            argv.try_reserve(2).map_err(|_| Error::allocation())?;
+            argv.splice(..0, [shell.to_owned(), c"-c".to_owned()]);
+        }
+        let cwd = argv::optional_path(config.cwd, config.cwd_kind)?;
+        Ok((
+            Launch::with_executable(argv, env, executable)?,
+            cwd,
+            attributes,
+        ))
     }
 }
 
@@ -1257,15 +1462,7 @@ pub unsafe extern "C" fn imre_subprocess_run_modes(
     }
     // SAFETY: the caller supplies either None, a rooted integer, or a nullable float.
     unsafe {
-        let timeout = match deadline_kind {
-            0 => None,
-            2 => Some(Deadline::Integer(Int::clone(&Int::borrow(deadline)))),
-            7 => (deadline as *const f64)
-                .as_ref()
-                .copied()
-                .map(Deadline::Float),
-            _ => fail("SystemError", "invalid process deadline kind"),
-        };
+        let timeout = Deadline::from_word(deadline_kind, deadline);
         run_process(args, cwd, env, check, streams, timeout, descriptor)
     }
 }
@@ -1275,7 +1472,7 @@ fn completed_stream(data: Vec<u8>, kind: WordKind) -> Result<OwnedWord> {
     let word = match kind.raw() {
         0 => 0,
         3 => StrOwner::into_raw(StrOwner::new(decode_utf8_text(data)?)) as usize,
-        8 => Rc::into_raw(Rc::new(data)) as usize,
+        8 => crate::BytesOwner::into_raw(crate::BytesOwner::new(data)) as usize,
         _ => fail("SystemError", "invalid process output field kind"),
     };
     // SAFETY: each arm transfers its correctly typed owned allocation, or None.
@@ -1292,42 +1489,33 @@ unsafe fn run_process(
     timeout: Option<Deadline>,
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
-    // SAFETY: only independent native strings escape the exact input storage.
-    let prepared = unsafe { prepare_process(args, cwd, env) };
-    let (launch, cwd) = match prepared {
-        Ok(prepared) => prepared,
-        Err(error) => return error.returning(std::ptr::null_mut()),
-    };
-    let captured = launch
-        .spawn(cwd.as_ref(), streams)
-        .map_err(os_error)
-        .and_then(|child| {
-            if let Some(timeout) = &timeout {
-                capture_timeout(child, timeout)
-            } else {
-                capture(child)
-                    .map(|(status, stdout, stderr)| Captured::Completed(status, stdout, stderr))
-                    .map_err(capture_error)
-            }
-        });
+    // SAFETY: the caller roots the exact argv, directory and environment.
+    let captured = unsafe { spawn_list(args, cwd, env, streams) }.and_then(|child| {
+        if let Some(timeout) = &timeout {
+            capture_timeout(child, timeout)
+        } else {
+            capture(child)
+                .map(|(status, stdout, stderr)| Captured::Completed(status, stdout, stderr))
+                .map_err(capture_error)
+        }
+    });
     let (status, stdout, stderr) = match captured {
         Ok(Captured::Completed(status, stdout, stderr)) => (status, stdout, stderr),
-        Ok(Captured::TimedOut(stdout, stderr)) => {
+        Ok(Captured::TimedOut(stdout, stderr, wait_budget)) => {
             raise_timeout(TimeoutError {
                 // SAFETY: the original argv stays rooted across launch and capture.
-                cmd: unsafe { ObjectOwner::acquire_word(args as usize) },
+                cmd: unsafe { WordKind::new(5).acquire(args as usize) },
                 timeout: timeout.expect("only a deadline produces a timeout"),
-                stdout: stdout.map(Rc::new),
-                stderr: stderr.map(Rc::new),
+                wait_budget,
+                stdout: stdout.map(crate::BytesOwner::new),
+                stderr: stderr.map(crate::BytesOwner::new),
             });
             return std::ptr::null_mut();
         }
         Err(error) => return error.returning(std::ptr::null_mut()),
     };
     let result: Result<_> = (|| {
-        let returncode = status
-            .code()
-            .unwrap_or_else(|| -status.signal().unwrap_or(0));
+        let returncode = returncode(status);
         // SAFETY: the compiler’s four-field descriptor outlives this run.
         let kinds = unsafe { [*(*descriptor).kinds.add(2), *(*descriptor).kinds.add(3)] };
         // Python decodes stdout before stderr, even when check=True would fail.
@@ -1343,9 +1531,10 @@ unsafe fn run_process(
     };
     // SAFETY: the caller retains the original list through this operation. Keeping
     // that exact owner preserves CompletedProcess.args and CalledProcessError.cmd.
-    let args = unsafe { ObjectOwner::acquire_word(args as usize) };
+    let args = unsafe { WordKind::new(5).acquire(args as usize) };
     if check != 0 && returncode != 0 {
         raise_process(ProcessError {
+            positional_streams: false,
             cmd: args,
             returncode,
             stdout,
@@ -1353,13 +1542,26 @@ unsafe fn run_process(
         });
         return std::ptr::null_mut();
     }
+    // SAFETY: the call site's descriptor matches the prepared arguments and streams.
+    unsafe { completed_record(descriptor, args, returncode, stdout, stderr) }
+}
+
+/// Transfer the exact original command and completed streams to an owned result.
+/// The caller guarantees that all four field owners match the static descriptor.
+unsafe fn completed_record(
+    descriptor: *const RecordDescriptor,
+    args: OwnedWord,
+    returncode: i32,
+    stdout: OwnedWord,
+    stderr: OwnedWord,
+) -> *mut usize {
     // SAFETY: static metadata describes these four exact fields. No fallible work
     // remains; typed stores preserve reference provenance and transfer each owner.
     unsafe {
         let result = imre_record_new(descriptor);
         result
-            .cast::<*const Object>()
-            .write(ObjectOwner::into_raw(args));
+            .cast::<*const ()>()
+            .write(args.into_word() as *const ());
         result.add(1).write(exit_word(returncode));
         for (index, stream) in [stdout, stderr].into_iter().enumerate() {
             let field = result.add(index + 2);
@@ -1379,7 +1581,7 @@ unsafe fn run_process(
 ///
 /// # Safety
 /// `record` is a rooted, fully initialized sealed CompletedProcess record with
-/// a string-list field, an integer, and two None/str/bytes stream fields. Enter with pending clear and check it immediately afterward.
+/// the original command field, an integer, and two None/str/bytes stream fields. Enter with pending clear and check it immediately afterward.
 /// Neither the record nor any field owner is consumed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_subprocess_check(record: *const usize) {
@@ -1396,7 +1598,8 @@ pub unsafe extern "C" fn imre_subprocess_check(record: *const usize) {
             kind.acquire(kind.read_record_field(record.add(index)))
         };
         ProcessError {
-            cmd: ObjectOwner::acquire_word(record.cast::<*const Object>().read() as usize),
+            positional_streams: true,
+            cmd: acquire_stream(0),
             returncode,
             stdout: acquire_stream(2),
             stderr: acquire_stream(3),
@@ -1467,15 +1670,15 @@ mod tests {
         }
     }
 
-    fn args(values: &[&str]) -> ObjectOwner {
+    fn args(values: &[&str]) -> crate::ObjectOwner {
         // SAFETY: new transfers one fresh exact list[str] owner.
-        let result = unsafe { ObjectOwner::from_raw(imre_seq_new(3)) };
+        let result = unsafe { crate::ObjectOwner::from_raw(imre_seq_new(3)) };
         for value in values {
             let value = StrOwner::new(Str::new(value));
             // SAFETY: insertion acquires the rooted exact string into this list.
             unsafe {
                 imre_seq_append(
-                    ObjectOwner::as_ptr(&result),
+                    crate::ObjectOwner::as_ptr(&result),
                     StrOwner::as_ptr(&value) as usize,
                     3,
                 )
@@ -1484,22 +1687,41 @@ mod tests {
         result
     }
 
-    fn environment(values: &[(&str, &str)]) -> ObjectOwner {
+    fn environment(values: &[(&str, &str)]) -> crate::ObjectOwner {
         // SAFETY: new transfers one fresh exact dict[str, str] owner.
-        let result = unsafe { ObjectOwner::from_raw(imre_dict_new(3, 3)) };
+        let result = unsafe { crate::ObjectOwner::from_raw(imre_dict_new(3, 3)) };
         for (key, value) in values {
             let key = StrOwner::new(Str::new(key));
             let value = StrOwner::new(Str::new(value));
             // SAFETY: both strings remain rooted while insertion acquires them.
             unsafe {
                 crate::objects::mappings::imre_dict_set(
-                    ObjectOwner::as_ptr(&result),
+                    crate::ObjectOwner::as_ptr(&result),
                     StrOwner::as_ptr(&key) as usize,
                     StrOwner::as_ptr(&value) as usize,
                 );
             }
         }
         result
+    }
+
+    #[test]
+    fn decode_a_real_stopped_child() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "kill -STOP $$; exit 7"])
+            .spawn()
+            .unwrap();
+        let pid = child.id() as libc::pid_t;
+        let mut raw = 0;
+        // SAFETY: this test owns the child, and waitpid writes one int to raw.
+        let stopped = unsafe { libc::waitpid(pid, &mut raw, libc::WUNTRACED) };
+        // Resume and reap before checking the decoded result.
+        // SAFETY: the stopped child has not exited and its PID is still owned.
+        let resumed = unsafe { libc::kill(pid, libc::SIGCONT) };
+        assert_eq!(resumed, 0);
+        assert_eq!(child.wait().unwrap().code(), Some(7));
+        assert_eq!(stopped, pid);
+        assert_eq!(returncode(ExitStatus::from_raw(raw)), -libc::SIGSTOP);
     }
 
     #[test]
@@ -1564,20 +1786,20 @@ mod tests {
             // SAFETY: the exact list and cwd remain rooted until spawn returns.
             unsafe {
                 let child = imre_async_process_spawn(
-                    ObjectOwner::as_ptr(&argv),
+                    crate::ObjectOwner::as_ptr(&argv),
                     &cwd,
                     std::ptr::null(),
                     1,
                     1,
                 );
                 assert!(!child.is_null());
-                ObjectOwner::from_raw(child)
+                crate::ObjectOwner::from_raw(child)
             }
         };
         let first = spawn("first", "second");
         assert_eq!(
             // SAFETY: the first process is rooted and waits for a missing file.
-            unsafe { imre_async_process_status(ObjectOwner::as_ptr(&first), false) },
+            unsafe { imre_async_process_status(crate::ObjectOwner::as_ptr(&first), false) },
             0
         );
         let second = spawn("second", "first");
@@ -1588,7 +1810,7 @@ mod tests {
             semantics: std::ptr::null(),
         };
         for owner in [first, second] {
-            let process = ObjectOwner::as_ptr(&owner);
+            let process = crate::ObjectOwner::as_ptr(&owner);
             // SAFETY: each newly owned pair roots two immutable byte buffers
             // until its release. Its descriptor outlives both communications.
             unsafe {
@@ -1608,11 +1830,11 @@ mod tests {
     }
 
     fn run(
-        args: &ObjectOwner,
+        args: &crate::ObjectOwner,
         cwd: Option<&str>,
-        env: Option<&ObjectOwner>,
+        env: Option<&crate::ObjectOwner>,
         check: bool,
-    ) -> std::result::Result<Completed, ObjectOwner> {
+    ) -> std::result::Result<Completed, crate::ObjectOwner> {
         const KINDS: [u32; 4] = [5, 2, 3, 3];
         let descriptor = Box::new(RecordDescriptor {
             length: KINDS.len(),
@@ -1624,15 +1846,15 @@ mod tests {
         // every returned record; pending errors transfer into an independent Rc.
         unsafe {
             let payload = imre_subprocess_run(
-                ObjectOwner::as_ptr(args),
+                crate::ObjectOwner::as_ptr(args),
                 cwd.as_ref().map_or(std::ptr::null(), |cwd| cwd),
-                env.map_or(std::ptr::null(), ObjectOwner::as_ptr),
+                env.map_or(std::ptr::null(), crate::ObjectOwner::as_ptr),
                 u32::from(check),
                 &*descriptor,
             );
             if payload.is_null() {
                 assert_eq!(imre_error_pending(), 1);
-                Err(ObjectOwner::from_raw(imre_error_take()))
+                Err(crate::ObjectOwner::from_raw(imre_error_take()))
             } else {
                 assert_eq!(imre_error_pending(), 0);
                 Ok(Completed {
@@ -1643,7 +1865,11 @@ mod tests {
         }
     }
 
-    fn success(args: &ObjectOwner, cwd: Option<&str>, env: Option<&ObjectOwner>) -> Completed {
+    fn success(
+        args: &crate::ObjectOwner,
+        cwd: Option<&str>,
+        env: Option<&crate::ObjectOwner>,
+    ) -> Completed {
         match run(args, cwd, env, false) {
             Ok(result) => result,
             Err(_) => panic!("controlled child unexpectedly failed to run"),
@@ -1651,30 +1877,31 @@ mod tests {
     }
 
     fn failure(
-        args: &ObjectOwner,
+        args: &crate::ObjectOwner,
         cwd: Option<&str>,
-        env: Option<&ObjectOwner>,
+        env: Option<&crate::ObjectOwner>,
         check: bool,
-    ) -> ObjectOwner {
+    ) -> crate::ObjectOwner {
         match run(args, cwd, env, check) {
             Ok(_) => panic!("controlled child unexpectedly succeeded"),
             Err(error) => error,
         }
     }
 
-    fn assert_kind(error: &ObjectOwner, kind: Kind) {
+    fn assert_kind(error: &crate::ObjectOwner, kind: Kind) {
         // SAFETY: the error remains rooted and the expected kind is a valid ABI id.
-        let matches = unsafe { imre_exception_matches(ObjectOwner::as_ptr(error), kind as u32) };
+        let matches =
+            unsafe { imre_exception_matches(crate::ObjectOwner::as_ptr(error), kind as u32) };
         assert_eq!(matches, 1);
     }
 
-    fn message(error: &ObjectOwner) -> StrOwner {
+    fn message(error: &crate::ObjectOwner) -> StrOwner {
         // SAFETY: formatting returns one owned string from the rooted exception.
-        unsafe { StrOwner::from_raw(imre_exception_message(ObjectOwner::as_ptr(error))) }
+        unsafe { StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(error))) }
     }
 
     /// Exercises the public deadline ABI and transfers the resulting pending owner.
-    fn timeout_failure(args: &ObjectOwner, timeout: f64) -> ObjectOwner {
+    fn timeout_failure(args: &crate::ObjectOwner, timeout: f64) -> crate::ObjectOwner {
         const KINDS: [u32; 4] = [5, 2, 3, 3];
         let descriptor = RecordDescriptor {
             length: KINDS.len(),
@@ -1684,7 +1911,7 @@ mod tests {
         // SAFETY: exact rooted inputs and static field kinds survive the call.
         unsafe {
             let result = imre_subprocess_run_timeout(
-                ObjectOwner::as_ptr(args),
+                crate::ObjectOwner::as_ptr(args),
                 std::ptr::null(),
                 std::ptr::null(),
                 1,
@@ -1696,16 +1923,16 @@ mod tests {
                 panic!("controlled timeout unexpectedly succeeded");
             }
             assert_eq!(imre_error_pending(), 1);
-            ObjectOwner::from_raw(imre_error_take())
+            crate::ObjectOwner::from_raw(imre_error_take())
         }
     }
 
     /// Reads one nullable immutable bytes owner from an exact timeout view.
-    fn timeout_bytes(error: &ObjectOwner, field: u32) -> Option<Rc<Bytes>> {
+    fn timeout_bytes(error: &crate::ObjectOwner, field: u32) -> Option<crate::BytesOwner> {
         // SAFETY: the caller proves TimeoutExpired and selects a nullable byte field.
         unsafe {
-            let word = imre_subprocess_timeout_field(ObjectOwner::as_ptr(error), field);
-            (word != 0).then(|| Rc::from_raw(word as *const Bytes))
+            let word = imre_subprocess_timeout_field(crate::ObjectOwner::as_ptr(error), field);
+            (word != 0).then(|| crate::BytesOwner::from_raw(word as *const Bytes))
         }
     }
 
@@ -1716,14 +1943,14 @@ mod tests {
             "-c",
             r#"printf 'raw\r\n\377\342\202'; printf %s "$$" >&2; exec sleep 10"#,
         ]);
-        let weak = ObjectOwner::downgrade(&args);
+        let weak = crate::ObjectOwner::downgrade(&args);
         let error = timeout_failure(&args, 0.5);
         assert_kind(&error, Kind::TimeoutExpired);
         assert_kind(&error, Kind::SubprocessError);
         assert_kind(&error, Kind::Exception);
         let stdout = timeout_bytes(&error, 2).unwrap();
         let output = timeout_bytes(&error, 4).unwrap();
-        assert!(Rc::ptr_eq(&stdout, &output));
+        assert!(crate::BytesOwner::ptr_eq(&stdout, &output));
         assert_eq!(stdout.as_slice(), b"raw\r\n\xff\xe2\x82");
         let stderr = timeout_bytes(&error, 3).unwrap();
         let pid: i32 = std::str::from_utf8(&stderr).unwrap().parse().unwrap();
@@ -1739,25 +1966,25 @@ mod tests {
             );
             assert_eq!(
                 imre_exception_matches(
-                    ObjectOwner::as_ptr(&error),
+                    crate::ObjectOwner::as_ptr(&error),
                     Kind::CalledProcessError as u32
                 ),
                 0
             );
             assert_eq!(
                 f64::from_bits(
-                    imre_subprocess_timeout_field(ObjectOwner::as_ptr(&error), 1) as u64
+                    imre_subprocess_timeout_field(crate::ObjectOwner::as_ptr(&error), 1) as u64
                 ),
                 0.5
             );
-            let cmd = ObjectOwner::from_raw(imre_subprocess_timeout_field(
-                ObjectOwner::as_ptr(&error),
+            let cmd = crate::ObjectOwner::from_raw(imre_subprocess_timeout_field(
+                crate::ObjectOwner::as_ptr(&error),
                 0,
             ) as *const Object);
-            assert!(ObjectOwner::ptr_eq(&cmd, &args));
+            assert!(crate::ObjectOwner::ptr_eq(&cmd, &args));
             let addition = StrOwner::new(Str::new("mutated"));
             imre_seq_append(
-                ObjectOwner::as_ptr(&args),
+                crate::ObjectOwner::as_ptr(&args),
                 StrOwner::as_ptr(&addition) as usize,
                 3,
             );
@@ -1799,7 +2026,7 @@ mod tests {
         let stdout = child.stdout.as_mut().unwrap();
         stdout.read_exact(&mut ready).unwrap();
         assert_eq!(ready, [b'!']);
-        let Ok(Captured::TimedOut(Some(stdout), Some(stderr))) =
+        let Ok(Captured::TimedOut(Some(stdout), Some(stderr), None)) =
             capture_timeout(child, &Deadline::Float(1.0))
         else {
             panic!("expected a timeout with both output streams");
@@ -1854,7 +2081,7 @@ mod tests {
             "-c",
             "import os; os.write(1, 'é\\r\\n🦀\\r'.encode()); os.write(2, b'err\\r'); raise SystemExit(7)",
         ]);
-        let weak = ObjectOwner::downgrade(&args);
+        let weak = crate::ObjectOwner::downgrade(&args);
         let result = success(&args, None, Some(&environment(&[])));
         assert_eq!(result.code(), 7);
         assert_eq!(result.text(2), "é\n🦀\n");
@@ -1865,16 +2092,16 @@ mod tests {
         let error = unsafe {
             assert_eq!(
                 result.payload.cast::<*const Object>().read(),
-                ObjectOwner::as_ptr(&args)
+                crate::ObjectOwner::as_ptr(&args)
             );
             imre_seq_append(
-                ObjectOwner::as_ptr(&args),
+                crate::ObjectOwner::as_ptr(&args),
                 StrOwner::as_ptr(&addition) as usize,
                 3,
             );
             imre_subprocess_check(result.payload);
             assert_eq!(imre_error_pending(), 1);
-            ObjectOwner::from_raw(imre_error_take())
+            crate::ObjectOwner::from_raw(imre_error_take())
         };
         for kind in [
             Kind::CalledProcessError,
@@ -1887,33 +2114,37 @@ mod tests {
         // SAFETY: every field accessor transfers one owner of its documented
         // representation; the alias views are acquired and dropped independently.
         unsafe {
-            let cmd = ObjectOwner::from_raw(imre_subprocess_error_field(
-                ObjectOwner::as_ptr(&error),
+            let cmd = crate::ObjectOwner::from_raw(imre_subprocess_error_field(
+                crate::ObjectOwner::as_ptr(&error),
                 0,
             ) as *const Object);
-            assert!(ObjectOwner::ptr_eq(&cmd, &args));
+            assert!(crate::ObjectOwner::ptr_eq(&cmd, &args));
             assert_eq!(
-                Int(imre_subprocess_error_field(ObjectOwner::as_ptr(&error), 1)).as_small(),
+                Int(imre_subprocess_error_field(
+                    crate::ObjectOwner::as_ptr(&error),
+                    1
+                ))
+                .as_small(),
                 Some(7)
             );
             let stdout = StrOwner::from_raw(imre_subprocess_error_field(
-                ObjectOwner::as_ptr(&error),
+                crate::ObjectOwner::as_ptr(&error),
                 2,
             ) as *const Str);
             let output = StrOwner::from_raw(imre_subprocess_error_field(
-                ObjectOwner::as_ptr(&error),
+                crate::ObjectOwner::as_ptr(&error),
                 4,
             ) as *const Str);
             assert!(StrOwner::ptr_eq(&stdout, &output));
             assert_eq!(stdout.as_str(), "é\n🦀\n");
             let stderr = StrOwner::from_raw(imre_subprocess_error_field(
-                ObjectOwner::as_ptr(&error),
+                crate::ObjectOwner::as_ptr(&error),
                 3,
             ) as *const Str);
             assert_eq!(stderr.as_str(), "err\n");
             let addition = StrOwner::new(Str::new("newest"));
             imre_seq_append(
-                ObjectOwner::as_ptr(&args),
+                crate::ObjectOwner::as_ptr(&args),
                 StrOwner::as_ptr(&addition) as usize,
                 3,
             );
@@ -1958,7 +2189,10 @@ mod tests {
             true,
         );
         assert_kind(&error, Kind::UnicodeDecodeError);
-        assert_eq!(message(&error).as_str(), "invalid UTF-8 at byte 3");
+        assert_eq!(
+            message(&error).as_str(),
+            "'utf-8' codec can't decode byte 0xff in position 3: invalid start byte"
+        );
         let split = success(
             &args(&[
                 "/usr/bin/python3",
@@ -2079,8 +2313,13 @@ mod tests {
         assert_kind(&error, Kind::CalledProcessError);
         assert!(message(&error).ends_with("died with <Signals.SIGTERM: 15>."));
         // SAFETY: the error accessor transfers one canonical tagged integer.
-        let code =
-            unsafe { Int(imre_subprocess_error_field(ObjectOwner::as_ptr(&error), 1)).as_small() };
+        let code = unsafe {
+            Int(imre_subprocess_error_field(
+                crate::ObjectOwner::as_ptr(&error),
+                1,
+            ))
+            .as_small()
+        };
         assert_eq!(code, Some(-15));
         crate::initialize_io();
         let signaled = success(
@@ -2096,7 +2335,7 @@ mod tests {
     fn guarded_error_fields_preserve_attribute_names_and_pending_ownership() {
         // SAFETY: this creates one owned ordinary exception from zero arguments.
         let ordinary = unsafe {
-            ObjectOwner::from_raw(imre_exception_new(
+            crate::ObjectOwner::from_raw(imre_exception_new(
                 Kind::ValueError as u32,
                 std::ptr::null(),
             ))
@@ -2109,11 +2348,14 @@ mod tests {
             // the field id is valid, and the failed call returns no field owner.
             let error = unsafe {
                 assert_eq!(
-                    imre_subprocess_error_field(ObjectOwner::as_ptr(&ordinary), field as u32),
+                    imre_subprocess_error_field(
+                        crate::ObjectOwner::as_ptr(&ordinary),
+                        field as u32
+                    ),
                     0
                 );
                 assert_eq!(imre_error_pending(), 1);
-                ObjectOwner::from_raw(imre_error_take())
+                crate::ObjectOwner::from_raw(imre_error_take())
             };
             assert_kind(&error, Kind::AttributeError);
             assert_eq!(
@@ -2221,7 +2463,7 @@ mod tests {
             Err(error) => error.raise(),
         }
         // SAFETY: decoding published exactly one owned pending exception.
-        let error = unsafe { ObjectOwner::from_raw(imre_error_take()) };
+        let error = unsafe { crate::ObjectOwner::from_raw(imre_error_take()) };
         assert_kind(&error, Kind::UnicodeDecodeError);
         assert_eq!(
             message(&error).as_str(),
@@ -2237,13 +2479,13 @@ mod tests {
         {
             assert!(copy.is_null());
             // SAFETY: failed decoding publishes one pending exception owner.
-            let error = unsafe { ObjectOwner::from_raw(imre_error_take()) };
+            let error = unsafe { crate::ObjectOwner::from_raw(imre_error_take()) };
             assert_kind(&error, Kind::UnicodeDecodeError);
             return;
         }
         assert!(!copy.is_null());
         // SAFETY: the snapshot transfers one exact dictionary owner.
-        let copy = unsafe { ObjectOwner::from_raw(copy) };
+        let copy = unsafe { crate::ObjectOwner::from_raw(copy) };
         let key = StrOwner::new(Str::new("IMRE_RUNTIME_CONTROLLED_COPY_KEY"));
         let value = StrOwner::new(Str::new("controlled-copy-only"));
         let previous = std::env::var_os(key.as_str());
@@ -2251,7 +2493,7 @@ mod tests {
         // dictionary; it has no link back to the process's native environment.
         unsafe {
             crate::objects::mappings::imre_dict_set(
-                ObjectOwner::as_ptr(&copy),
+                crate::ObjectOwner::as_ptr(&copy),
                 StrOwner::as_ptr(&key) as usize,
                 StrOwner::as_ptr(&value) as usize,
             )

@@ -6,7 +6,6 @@ use crate::StrOwner;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fmt::Write;
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish, string_repr};
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, Words, files, object};
@@ -374,7 +373,10 @@ pub unsafe extern "C" fn imre_zip_read(
     let result =
         // SAFETY: the caller supplies an archive that stays live for the metadata query.
         unsafe { with_archive(archive, |a| a.member(key, is_info)) }.and_then(|mut m| m.read(None));
-    finish(result.map(|b| Rc::into_raw(Rc::new(b))), std::ptr::null())
+    finish(
+        result.map(|b| crate::BytesOwner::into_raw(crate::BytesOwner::new(b))),
+        std::ptr::null(),
+    )
 }
 
 /// Return the first member with a BadZipFile error, or None for a healthy archive.
