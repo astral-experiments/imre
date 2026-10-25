@@ -1,5 +1,6 @@
 import copy
 from dataclasses import dataclass
+from functools import cached_property
 
 events: list[int] = []
 values: list[int] = [41]
@@ -41,6 +42,13 @@ class ImmutableBase:
 @dataclass(frozen=True)
 class Immutable(ImmutableBase):
     count: int
+
+class Cached:
+    tags = [1]
+
+    @cached_property
+    def computed(self) -> list[int]:
+        return [7]
 
 class Constructed:
     words = ["class"]
@@ -137,3 +145,11 @@ ImmutableBase.marks = ["after"]
 print(frozen.marks)
 print(lookup[Immutable(7)])
 print(repr(frozen))
+cached = Cached()
+kept = cached.computed
+cached.tags = [3]
+print(cached.computed is kept)
+print(cached.tags)
+del cached.tags
+print(cached.tags)
+print(cached.computed)
