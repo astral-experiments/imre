@@ -38,6 +38,7 @@ impl Checker<'_> {
                 | Type::ListInt
                 | Type::Path
                 | Type::PurePath(_)
+                | Type::Calendar(_)
                 | Type::PlainObject => {}
                 Type::Class(id) => {
                     // The runtime formatter cannot invoke user repr on constructor defaults.
