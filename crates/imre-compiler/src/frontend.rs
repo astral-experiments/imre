@@ -4569,10 +4569,12 @@ impl<'a> Checker<'a> {
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
                         && matches!((ty, right), (Type::Class(_), Type::Class(_)));
-                    if !numeric && !records {
+                    let counters = self.types.is_counter(ty) && self.types.is_counter(right);
+                    if !numeric && !records && !counters {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
+                        || counters
                         || ty == Type::Bytes
                         || matches!(ty, Type::Tuple(_)) && self.types.ordered_key(ty);
                     let op = match op {

@@ -710,6 +710,31 @@ impl Mapping {
         pairs
     }
 
+    /// Compares the counts at every key in the union, including keys stored with
+    /// negative counts on only one side. Missing counts are zero.
+    ///
+    /// # Safety
+    /// Both mappings are rooted Counters with exact integer values.
+    unsafe fn counter_counts_all(&self, other: &Self, mut check: impl FnMut(i32) -> bool) -> bool {
+        let shared_kind = self.tables.key_kind() == other.tables.key_kind();
+        let zero = Int::small(0).unwrap().0;
+        // SAFETY: equal table kinds share a key representation, and both tables
+        // root their borrowed keys and counts throughout these immutable visits.
+        unsafe {
+            self.tables.all(|key, left| {
+                let right = if shared_kind {
+                    other.tables.lookup(key)
+                } else {
+                    None
+                };
+                check(crate::imre_int_compare(left, right.unwrap_or(zero)))
+            }) && other.tables.all(|key, right| {
+                (shared_kind && self.tables.lookup(key).is_some())
+                    || check(crate::imre_int_compare(zero, right))
+            })
+        }
+    }
+
     /// # Safety
     /// Both tables and all values are rooted and immutable for this traversal.
     pub(super) unsafe fn compare_entry(
@@ -721,20 +746,8 @@ impl Mapping {
         if self.missing == Missing::Zero && other.missing == Missing::Zero {
             // Counts of absent keys are zero in either direction, including
             // for another Counter nested in a record or in a sequence.
-            let agrees = |left: &Self, right: &Self| {
-                left.tables.all(|key, value| {
-                    let count = if left.tables.key_kind() == right.tables.key_kind() {
-                        // SAFETY: immutable source tables root equal key kinds.
-                        unsafe { right.tables.lookup(key) }
-                    } else {
-                        None
-                    };
-                    let count = count.unwrap_or(Int::small(0).unwrap().0);
-                    // SAFETY: both Counter values are rooted canonical integers.
-                    unsafe { crate::imre_int_compare(value, count) == 0 }
-                })
-            };
-            return Comparison::Done(agrees(self, other) && agrees(other, self));
+            // SAFETY: the missing-value policy identifies two exact Counters.
+            return Comparison::Done(unsafe { self.counter_counts_all(other, |order| order == 0) });
         }
         if self.tables.key_kind() != other.tables.key_kind()
             || self.value_kind != other.value_kind
@@ -1120,6 +1133,30 @@ pub unsafe extern "C" fn imre_dict_sum_values(mapping: *const Object, start: usi
 pub unsafe extern "C" fn imre_counter_total(value: *const Object) -> usize {
     // SAFETY: the caller roots this integer mapping and the zero start is immediate.
     unsafe { imre_dict_sum_values(value, Int::small(0).unwrap().0) }
+}
+
+/// Tests multiset inclusion, optionally requiring at least one smaller count.
+///
+/// # Safety
+/// Both arguments root exact integer-valued Counters; they may alias.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_counter_subset(
+    left: *const Object,
+    right: *const Object,
+    strict: u32,
+) -> u32 {
+    // SAFETY: immutable visits borrow only rooted keys and integer counts.
+    u32::from(unsafe {
+        object(left).0.with(|a| {
+            object(right).0.with(|b| {
+                let mut smaller = false;
+                a.dictionary().counter_counts_all(b.dictionary(), |order| {
+                    smaller |= order < 0;
+                    order <= 0
+                }) && (strict == 0 || smaller)
+            })
+        })
+    })
 }
 
 /// Attaches the exact element descriptor to a native `defaultdict(list)`.
