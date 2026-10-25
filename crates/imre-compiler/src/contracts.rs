@@ -58,13 +58,10 @@ impl Builtin {
 
         match self {
             Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
-            Self::Str if args.first().is_some_and(|e| e.ty == Type::Bytes) => {
-                Contract::new(true, PreservesLists)
-            }
             Self::Str
-                if args.first().is_some_and(|e| {
-                    matches!(e.ty, Type::ImportException | Type::ExceptionField)
-                }) =>
+                if args
+                    .first()
+                    .is_some_and(|e| matches!(e.ty, Type::Bytes | Type::ImportException)) =>
             {
                 Contract::new(true, PreservesLists)
             }
@@ -75,15 +72,19 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::Str if args.first().is_some_and(|e| e.ty == Type::ObjectValue) => {
+                Contract::new(true, PreservesOwners)
+            }
             Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
-            | Self::ExceptionFieldIndex
-            | Self::ExceptionFieldRepr => Contract::new(true, PreservesLists),
-            Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
+            | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
+            Self::MappingObjectGet => Contract::new(true, PreservesOwners),
+            Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
+            Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
@@ -272,6 +273,8 @@ impl Builtin {
                 | ProcessOperation::Which
                 | ProcessOperation::RmTree
                 | ProcessOperation::CopyTree(_)
+                | ProcessOperation::Move(_)
+                | ProcessOperation::DestInSrc
                 | ProcessOperation::IgnorePatterns
                 | ProcessOperation::TreeErrorArgs
                 | ProcessOperation::Copy(_)
@@ -299,6 +302,7 @@ impl Builtin {
             Self::BytesGet
             | Self::WrapperAttributes(_)
             | Self::Chr
+            | Self::Ord
             | Self::IntegerPower
             | Self::ModularPower
             | Self::NegativeIntegerPower
@@ -316,6 +320,7 @@ impl Builtin {
             | Self::KeyIntersection
             | Self::KeyDifference
             | Self::RegexGroupDict
+            | Self::RegexFindIter
             | Self::Errno(_)
             | Self::DictGet
             | Self::NamespaceWrap
@@ -485,6 +490,7 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName
             | Self::SysOrigArgv
@@ -778,8 +784,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_json_index"
                 | "imre_json_decoder_decode"
                 | "imre_exception_message"
-                | "imre_system_exit_code_text"
-                | "imre_exception_field_repr"
                 | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
                 | "imre_json_iter"
@@ -853,6 +857,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_splitlines"
                 | "imre_str_splitlines_options"
                 | "imre_str_translate"
+                | "imre_mapping_object_get"
+                | "imre_exception_field_repr"
+                | "imre_system_exit_code_text"
                 | "imre_exception_field_index"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"

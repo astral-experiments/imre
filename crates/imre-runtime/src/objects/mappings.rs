@@ -824,6 +824,20 @@ impl Mapping {
         }
     }
 
+    /// Look up an integer through an object view without reading a string-key
+    /// table as a tagged integer. The result retains its exact value descriptor.
+    pub(super) fn integer_word(&self, key: &Int) -> Option<OwnedWord> {
+        let Tables::Int(table) = &self.tables else {
+            return None;
+        };
+        // SAFETY: the caller roots an exact integer; the table owns the value.
+        unsafe {
+            table
+                .lookup(key.0)
+                .map(|entry| self.value_kind.acquire(entry.value))
+        }
+    }
+
     /// Subscribe with a dynamic format-field key, preserving the mapping's missing-key policy.
     pub(super) fn logging_item(&mut self, key: &OwnedWord) -> Result<Option<OwnedWord>, Error> {
         if key.kind.raw() != self.tables.key_kind() {
@@ -1596,6 +1610,30 @@ pub unsafe extern "C" fn imre_cache_clear(state: *const Object, key: u32, value:
             .0
             .with_mut(|s| std::mem::replace(s.cache_mut(), empty))
     });
+}
+
+/// Look up one value lazily through a read-only string-key mapping view.
+///
+/// # Safety
+/// Both handles are rooted; the mapping stores supported concrete or boxed values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_mapping_object_get(
+    value: *const Object,
+    key: *const Str,
+) -> *const Object {
+    // SAFETY: the shared dictionary borrow only retains the found value.
+    let found = unsafe { object(value).0.with(|s| s.dictionary().logging_key(&*key)) };
+    let Some(field) = found else {
+        // SAFETY: the same dictionary and string key remain rooted.
+        return unsafe { missing_key(value, key as usize) }.returning(std::ptr::null());
+    };
+    if field.kind.raw() == 5 {
+        // The only accepted object-handle value layout is the existing box.
+        return field.into_word() as *const Object;
+    }
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ObjectValue(
+        field,
+    )))))
 }
 
 /// Creates a dictionary with concrete scalar keys and one shared value descriptor.
@@ -2420,6 +2458,7 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
                     .then(|| (OwnedWord::from_owned(path as usize, WordKind::new(5)), None))
             }),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
+            Storage::RegexIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
             Storage::DequeIterator(iterator) => iterator.next(),

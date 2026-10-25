@@ -213,6 +213,16 @@ where
     }
 }
 
+fn checked_name(bytes: &[u8]) -> Result<CString, Error> {
+    CString::new(bytes).map_err(|_| Error::new(Kind::ValueError, "embedded null byte"))
+}
+
+/// Remove the copied source of a move using rmtree's default error handler.
+pub(super) fn remove_root(path: &Path, original: Option<Rc<Object>>) -> Result<(), Error> {
+    let name = checked_name(path.as_os_str().as_bytes())?;
+    remove_with(path, original, name, None, true, |_, _, error| Err(error))
+}
+
 fn remove_with<E: From<Error>>(
     path: &Path,
     root_object: Option<Rc<Object>>,
@@ -301,8 +311,7 @@ pub unsafe extern "C" fn imre_shutil_rmtree(
             // SAFETY: the remaining tags name a rooted str or bytes.
             unsafe { super::spelling(path, tag) }
         };
-        let name =
-            CString::new(bytes).map_err(|_| Error::new(Kind::ValueError, "embedded null byte"))?;
+        let name = checked_name(bytes)?;
         let path = Path::new(OsStr::from_bytes(bytes));
         if fd_kind == 2 {
             return Err(Error::new(
