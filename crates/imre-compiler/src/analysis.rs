@@ -72,6 +72,10 @@ impl Session {
         let intrinsic = SystemPathBuf::from(root).join("imre");
         for (name, stub) in [
             (
+                "_imre_mock",
+                "def mark_call_list(values: list, /) -> bool: ...\ndef is_call_list(values: list, /) -> bool: ...\n",
+            ),
+            (
                 "_imre_doctest",
                 "def capture_start() -> None: ...\ndef capture_take() -> str: ...\ndef display(value: object, /) -> None: ...\ndef ascii_output(text: str, /) -> str: ...\ndef execute(test: object, debug: bool, /) -> None: ...\n",
             ),
@@ -105,6 +109,13 @@ impl Session {
             .write_file_all(
                 intrinsic.join("__init__.pyi"),
                 "from . import json as json, toml as toml\n",
+            )
+            .map_err(|error| error.to_string())?;
+        system
+            .fs()
+            .write_file_all(
+                intrinsic.join("_logging.pyi"),
+                include_str!("../stdlib/logging/runtime.pyi"),
             )
             .map_err(|error| error.to_string())?;
         system
@@ -522,6 +533,7 @@ pub(crate) enum CheckedDiagnostic {
     BuiltinImport(TextRange),
     ExcessArgument(TextRange),
     PositionalKeyword(TextRange),
+    RepeatedKeyword(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -536,6 +548,7 @@ impl CheckedDiagnostic {
             Self::BuiltinImport(range) => (range, 5),
             Self::ExcessArgument(range) => (range, 6),
             Self::PositionalKeyword(range) => (range, 7),
+            Self::RepeatedKeyword(range) => (range, 8),
         };
         (range.start(), range.end(), kind)
     }
@@ -548,6 +561,9 @@ impl CheckedDiagnostic {
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
+            Self::RepeatedKeyword(keyword) => {
+                diagnostic == "parameter-already-assigned" && keyword == range
+            }
             Self::PositionalKeyword(keyword) => {
                 diagnostic == "positional-only-parameter-as-kwarg" && keyword == range
             }

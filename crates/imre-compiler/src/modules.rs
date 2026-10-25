@@ -69,6 +69,7 @@ pub(crate) enum IntrinsicModule {
     Dataclasses,
     Difflib,
     DoctestRuntime,
+    MockRuntime,
     Logging,
     LoggingConfig,
     LoggingHandlers,
@@ -141,6 +142,9 @@ pub(crate) enum Intrinsic {
     GetLevelName,
     AddLevelName,
     LevelNamesMapping,
+    HandlerRename,
+    HandlerLookup,
+    HandlerLevelType,
     LevelMap { names: bool },
     LogRecord,
     MakeLogRecord,
@@ -223,6 +227,7 @@ pub(crate) enum Intrinsic {
     DocCaptureTake,
     DocDisplay,
     DocAscii,
+    MockCallList { mark: bool },
     DocExecute,
     Final,
     Argv,
@@ -238,6 +243,7 @@ pub(crate) enum Intrinsic {
     Literal,
     Callable,
     Sequence,
+    Mapping,
     Iterable,
     Iterator,
     UnsupportedOperation,
@@ -325,6 +331,7 @@ pub(crate) enum Intrinsic {
     GetEnv,
     GetCwd,
     Strerror,
+    StatResult,
     Fd(crate::ir::FdOperation),
     DescriptorConstant(&'static str),
     FsPath,
@@ -373,6 +380,7 @@ impl IntrinsicModule {
             "dataclasses" => Some(Self::Dataclasses),
             "difflib" => Some(Self::Difflib),
             "_imre_doctest" => Some(Self::DoctestRuntime),
+            "_imre_mock" => Some(Self::MockRuntime),
             "pathlib" => Some(Self::Pathlib),
             "shlex" => Some(Self::Shlex),
             "tempfile" => Some(Self::Tempfile),
@@ -605,6 +613,8 @@ impl IntrinsicModule {
             (Self::DoctestRuntime, "display") => Intrinsic::DocDisplay,
             (Self::DoctestRuntime, "ascii_output") => Intrinsic::DocAscii,
             (Self::DoctestRuntime, "execute") => Intrinsic::DocExecute,
+            (Self::MockRuntime, "mark_call_list") => Intrinsic::MockCallList { mark: true },
+            (Self::MockRuntime, "is_call_list") => Intrinsic::MockCallList { mark: false },
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
@@ -617,6 +627,7 @@ impl IntrinsicModule {
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Typing | Self::CollectionsAbc, "Sequence") => Intrinsic::Sequence,
+            (Self::Typing | Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping,
             (Self::Typing | Self::CollectionsAbc, "Iterable") => Intrinsic::Iterable,
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
@@ -935,6 +946,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
     }
 
+    /// The native binder raises for this keyword because the receiver was already bound.
+    pub(crate) fn checked_repeated_keyword(&self, module: ModuleId, keyword: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::RepeatedKeyword(keyword));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,
@@ -1224,7 +1241,7 @@ fn resolve_binding(
     }
 }
 
-const LOGGING_CLASSES: &str = "__imre_logging_classes__";
+pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
 const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
 
@@ -1251,7 +1268,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
-                    (IntrinsicModule::Logging, ast::Stmt::ClassDef(_))
+                    (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))))
         })
     })
@@ -1740,6 +1757,27 @@ impl<'a> Loader<'a> {
                     return Err("wildcard imports are unsupported".into());
                 }
                 let name = self.import_name(id, import)?;
+                if import.level == 0 && name == "imre._logging" {
+                    if !self.modules[id].is_bundled(LOGGING_CLASSES) {
+                        return Err("the private logging implementation is not importable".into());
+                    }
+                    for alias in &import.names {
+                        let method = match alias.name.as_str() {
+                            "_rename_handler" => Intrinsic::HandlerRename,
+                            "_lookup_handler" => Intrinsic::HandlerLookup,
+                            "_Level" => Intrinsic::HandlerLevelType,
+                            _ => {
+                                return Err(format!(
+                                    "unknown private logging symbol: {}",
+                                    alias.name
+                                ));
+                            }
+                        };
+                        let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                        self.bind(id, local.as_str(), Binding::Intrinsic(method), alias)?;
+                    }
+                    return Ok(());
+                }
                 if import.level == 0
                     && let Some(module) = self.intrinsic_module(&name, Some(&import.names))?
                 {
