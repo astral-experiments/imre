@@ -16,6 +16,7 @@ on:
           - 'dd3d22a86a1a7072292ac7e7f73895f3f768a0ac'
           - '033cb48f08e3877cc0003866086fd4a947109d36'
           - '45375ede540b8bd3912f95b1345a4fc586505673'
+          - '8c29f1ac2d63f4040bd7cca2ab92d7d03337f08a'
 permissions:
   contents: read
 jobs:
