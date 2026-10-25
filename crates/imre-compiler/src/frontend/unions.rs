@@ -106,6 +106,17 @@ impl Checker<'_> {
             ))]);
         }
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
+            && self.types.namedtuple(definition).is_some()
+        {
+            return Ok(self
+                .types
+                .tuples()
+                .into_iter()
+                .filter(|(ty, _)| self.types.namedtuple_definition(*ty) == Some(definition))
+                .map(|(ty, _)| InstanceType::Exact(ty))
+                .collect());
+        }
+        if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(&class) = self.classes.declarations.ids.get(&definition)
         {
             let records = &self.classes.declarations;

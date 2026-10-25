@@ -171,6 +171,7 @@ pub(crate) enum Intrinsic {
     StrEnum,
     EnumAuto,
     DefaultDict,
+    NamedTuple,
     Counter,
     GroupBy,
     Chain,
@@ -367,6 +368,7 @@ impl IntrinsicModule {
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Itertools, "groupby") => Intrinsic::GroupBy,
             (Self::Itertools, "chain") => Intrinsic::Chain,
@@ -988,6 +990,27 @@ impl<'a> Loader<'a> {
                 }
                 ast::Stmt::Expr(value)
                     if matches!(&*value.value, ast::Expr::StringLiteral(_)) && !executable => {}
+                ast::Stmt::Assign(_)
+                    if value_name(statement).is_some()
+                        && matches!(module_value(statement), Some(ast::Expr::Call(call))
+                        if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::NamedTuple))) =>
+                {
+                    if executable && id == 0 {
+                        return Err(self.modules[id].error(
+                            statement,
+                            "definitions must precede executable module statements",
+                        ));
+                    }
+                    self.bind(
+                        id,
+                        value_name(statement).unwrap(),
+                        Binding::Definition(DefinitionId {
+                            module: id,
+                            statement: index,
+                        }),
+                        statement,
+                    )?;
+                }
                 _ => {
                     let entry_global = id == 0
                         && !executable

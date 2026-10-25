@@ -33,6 +33,7 @@ mod local_functions;
 mod logging;
 mod matching;
 mod module_values;
+mod namedtuples;
 mod paths;
 mod pipelines;
 mod posixpath;
@@ -395,6 +396,7 @@ pub(crate) fn lower_with_owners(
     graph: &SourceGraph,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
     let types = Types::default();
+    namedtuples::collect(graph, &types)?;
     let mut classes = ClassInfo::new(graph, &types)?;
     dataclass_values::validate(&classes, graph, &types)?;
     let mut signatures = HashMap::new();
@@ -593,6 +595,14 @@ pub(crate) fn lower_with_owners(
                     .map(|value| (value, signature.returns)),
             );
         for (annotation, ty) in annotated {
+            if let Some(definition) = namedtuples::annotation(graph, *module, annotation, &types)
+                && types.namedtuple_definition(ty) != Some(definition)
+            {
+                return Err(graph.modules[*module].error(
+                    annotation,
+                    "inferred value must be an instance of the annotated namedtuple",
+                ));
+            }
             if graph.resolve(*module, annotation)
                 == Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                 && !matches!(ty, Type::Class(id) if classes.parsers.namespace(id))
@@ -1026,6 +1036,7 @@ fn signature(
                 .filter(|value| {
                     graph.resolve(module, value)
                         != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+                        && namedtuples::annotation(graph, module, value, types).is_none()
                 })
                 .map(|value| {
                     if let ast::Expr::Subscript(sequence) = value
@@ -1102,6 +1113,7 @@ fn signature(
         .as_deref()
         .filter(|value| {
             graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+                && namedtuples::annotation(graph, module, value, types).is_none()
         })
         .map(|value| {
             if let ast::Expr::Subscript(subscript) = value
@@ -4569,7 +4581,10 @@ impl<'a> Checker<'a> {
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
                         && matches!((ty, right), (Type::Class(_), Type::Class(_)));
-                    if !numeric && !records {
+                    let tuples = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                        && matches!((ty, right), (Type::Tuple(_), Type::Tuple(_)))
+                        && self.types.fields(ty) == self.types.fields(right);
+                    if !numeric && !records && !tuples {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
@@ -4774,6 +4789,22 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if let Some(Binding::Definition(definition)) = self.resolve(&attribute.value)
+                    && let Some(declaration) = self.types.namedtuple(definition)
+                {
+                    return match attribute.attr.as_str() {
+                        "_fields" | "__match_args__" => Ok(self.namedtuple_fields(&declaration)),
+                        "__name__" => Ok(Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Str(declaration.name.clone()),
+                        }),
+                        _ => Err(error(
+                            self.source,
+                            attribute,
+                            "unsupported namedtuple class attribute",
+                        )),
+                    };
+                }
                 if let Some(class) = self.class_reference(&attribute.value) {
                     if let Some(member) = self.enum_member(class, attribute.attr.as_str()) {
                         return Ok(member);
@@ -4781,6 +4812,29 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some(definition) = self.types.namedtuple_definition(receiver.ty) {
+                    let declaration = self.types.namedtuple(definition).unwrap();
+                    if matches!(attribute.attr.as_str(), "_fields" | "__match_args__") {
+                        let fields = self.namedtuple_fields(&declaration);
+                        return Ok(Expr {
+                            ty: fields.ty,
+                            kind: ExprKind::Scope {
+                                body: vec![Statement::Expr(receiver)],
+                                clear: vec![],
+                                value: Box::new(fields),
+                            },
+                        });
+                    }
+                    let index = declaration
+                        .fields
+                        .iter()
+                        .position(|name| name == attribute.attr.as_str())
+                        .ok_or_else(|| error(self.source, attribute, "unknown namedtuple field"))?;
+                    return Ok(Expr {
+                        ty: self.types.fields(receiver.ty).unwrap()[index],
+                        kind: ExprKind::Field(Box::new(receiver), index),
+                    });
+                }
                 if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
                     match attribute.attr.as_str() {
                         "name" => {
@@ -5037,6 +5091,11 @@ impl<'a> Checker<'a> {
         key_view: Option<&mut bool>,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
+        if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
+            && let Some(declaration) = self.types.namedtuple(definition)
+        {
+            return self.namedtuple_call(definition, &declaration, call);
+        }
         if crate::classes::super_init(call) {
             return self.call_super_initializer(call);
         }
