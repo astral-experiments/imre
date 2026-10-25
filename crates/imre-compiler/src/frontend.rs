@@ -16,6 +16,7 @@ mod argparse;
 mod assignments;
 mod asyncio;
 mod cached_properties;
+mod call_binding_errors;
 mod callables;
 mod calls;
 mod comprehensions;
@@ -72,6 +73,7 @@ mod truthiness;
 mod unbound_locals;
 mod unions;
 mod unittest;
+mod unittest_bound;
 mod unittest_equality;
 mod unittest_main;
 mod unittest_mock;
@@ -5622,6 +5624,9 @@ impl<'a> Checker<'a> {
                         .any(|field| field.name == attribute.attr.as_str())
                 {
                     return self.mock_child(class, receiver, attribute);
+                }
+                if let Some(bound) = self.bound_unittest_assertion(attribute, &receiver) {
+                    return Ok(bound);
                 }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 if let Some(name) = attribute.value.as_name_expr()
