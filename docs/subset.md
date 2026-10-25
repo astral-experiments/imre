@@ -1212,6 +1212,11 @@ Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the count
 order. Each positive integer count repeats its key; a change to a later entry
 is visible when the iterator reaches it.
 
+`_collections._count_elements(mapping, iterable)`, also exported by
+`collections`, adds one per yielded key. It accepts dictionaries with integer
+counts and concrete classes with `get` and `__setitem__` methods. It updates
+the receiver before requesting another key, so mutations survive later errors.
+
 `mapping.clear()` removes every entry in place and returns `None`. Aliases see
 the empty dictionary; a `Counter` still returns zero for a missing key, and a
 `defaultdict` keeps its factory. `dict.clear(mapping)` and the inherited class
@@ -1237,6 +1242,11 @@ Unary `+` and `-` select positive counts and negated negative counts. Binary `+`
 `mapping.copy()` on a plain typed dictionary returns a fresh dictionary in
 insertion order. Each key and value is shared with the source; inserting or
 deleting an entry in the copy leaves the source dictionary unchanged.
+
+`array.array` is available as a class value: it retains its module, name,
+representation and identity. `issubclass` recognizes its virtual registration
+with `collections.abc.MutableSequence` and `collections.abc.Sequence`, and
+distinguishes both from `collections.abc.MutableMapping`.
 
 `dict.fromkeys(iterable, value)` builds a fresh dictionary in first-key order.
 It evaluates the value once, defaults it to `None`, and shares that object

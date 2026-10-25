@@ -79,6 +79,9 @@ fn class(ty: Type) -> Option<(&'static str, InstanceType)> {
 
 /// Test bool before int: both match an int instance test.
 fn value_class(types: &Types, arg: &Expr) -> Option<Expr> {
+    if types.is_unread_argument(arg.ty) {
+        return Some(field(arg.clone(), 0, Type::Str));
+    }
     if let Some(inner) = types.payload(arg.ty) {
         let present = Expr {
             ty: inner,
@@ -150,6 +153,29 @@ impl Registration {
 }
 
 impl Checker<'_> {
+    /// Store the class alongside the original owned value. Its concrete record
+    /// descriptor releases the payload after the caller and callback finish.
+    pub(super) fn unread_argument(&mut self, arg: &ast::Expr, ty: Type) -> Result<Expr, String> {
+        let value = self.expr(arg)?;
+        if value.ty == ty {
+            return Ok(value);
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let value = scope.hold(self, value);
+        let name = value_class(self.types, &value).ok_or_else(|| {
+            error(
+                self.source,
+                arg,
+                "this callback argument needs a known builtin class",
+            )
+        })?;
+        let frame = Expr {
+            ty: self.types.tuple(vec![Type::Str, value.ty]),
+            kind: ExprKind::Tuple(vec![name, value]),
+        };
+        Ok(scope.finish(builtin(Builtin::RecordView, ty, vec![frame])))
+    }
+
     /// An unbound function cannot retain its dispatcher through a captured receiver.
     fn dispatch_target(&mut self, node: &ast::Expr) -> Result<Expr, String> {
         let value = self.expr(node)?;
@@ -182,10 +208,15 @@ impl Checker<'_> {
             ));
         };
         let target = self.dispatch_target(node)?;
-        self.new_dispatcher(target, call)
+        self.new_dispatcher(target, self.declared_function_text(node), call)
     }
 
-    fn new_dispatcher(&mut self, target: Expr, node: &impl Ranged) -> Result<Expr, String> {
+    fn new_dispatcher(
+        &mut self,
+        target: Expr,
+        text: Option<function_text::FunctionText>,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
         let mut scope = calls::ArgumentScope::default();
         let target = scope.hold(self, target);
         let (parameters, returns) = self.types.signature(target.ty).unwrap();
@@ -244,6 +275,7 @@ impl Checker<'_> {
                 module: self.module,
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: self.graph.modules[self.module]
                     .error(node, "recursive indirect single dispatch is unsupported"),
                 function,
@@ -257,9 +289,24 @@ impl Checker<'_> {
                 entries: vec![(unpacking::string("object"), target.clone())],
             },
         };
+        let none = || Expr {
+            ty: Type::None,
+            kind: ExprKind::None,
+        };
+        let metadata = if let Some(text) = text {
+            let doc = text.doc.as_deref().map_or_else(none, unpacking::string);
+            let doc = self.coerce(doc, self.types.optional(Type::Str), node)?;
+            Expr {
+                ty: self.types.payload(layout.metadata).unwrap(),
+                kind: ExprKind::Tuple(vec![unpacking::string(&text.name), doc]),
+            }
+        } else {
+            none()
+        };
+        let metadata = self.coerce(metadata, layout.metadata, node)?;
         let frame = Expr {
             ty: layout.frame,
-            kind: ExprKind::Tuple(vec![target, table]),
+            kind: ExprKind::Tuple(vec![target, table, metadata]),
         };
         Ok(scope.finish(Expr {
             ty,
@@ -268,6 +315,48 @@ impl Checker<'_> {
                 receiver: Some(Box::new(frame)),
             },
         }))
+    }
+
+    /// Read the copy held by this dispatcher, independent of its current registry.
+    pub(super) fn dispatch_attribute(
+        &mut self,
+        receiver: &Expr,
+        layout: DispatchFunction,
+        name: &str,
+    ) -> Option<Expr> {
+        let (index, ty) = match name {
+            "__wrapped__" => return Some(original(receiver.clone(), layout)),
+            "__name__" => (0, Type::Str),
+            "__doc__" => (1, self.types.optional(Type::Str)),
+            _ => return None,
+        };
+        let mut scope = calls::ArgumentScope::default();
+        let metadata = scope.hold(
+            self,
+            field(context(receiver.clone(), layout), 2, layout.metadata),
+        );
+        let missing = builtin(
+            Builtin::RaiseException,
+            ty,
+            vec![Expr {
+                ty: Type::Exception,
+                kind: ExprKind::Exception {
+                    kind: exception_kind("NotImplementedError").unwrap(),
+                    message: Some(Box::new(unpacking::string(
+                        "wrapper text is unavailable for this native callable",
+                    ))),
+                },
+            }],
+        );
+        let text = Expr {
+            ty: self.types.payload(layout.metadata).unwrap(),
+            kind: ExprKind::Unwrap(Box::new(metadata.clone())),
+        };
+        Some(scope.finish(conditional(
+            builtin(Builtin::IsNone, Type::Bool, vec![metadata]),
+            missing,
+            field(text, index, ty),
+        )))
     }
 
     pub(super) fn single_dispatch_method(
@@ -376,7 +465,9 @@ impl Checker<'_> {
         def: &ast::StmtFunctionDef,
     ) -> Result<Expr, String> {
         match decorator {
-            LocalDecorator::Dispatch => self.new_dispatcher(target, def),
+            LocalDecorator::Dispatch => {
+                self.new_dispatcher(target, Some(self.function_text(def)), def)
+            }
             LocalDecorator::Register(selection) => selection.apply(self, target, def),
         }
     }

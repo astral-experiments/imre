@@ -34,8 +34,8 @@ impl View {
                 )
             };
         }
-        let left_root = self.snapshot_root();
-        let right_root = right.snapshot_root();
+        let left_root = self.snapshot_root()?;
+        let right_root = right.snapshot_root()?;
         let left = left_root.as_ref().unwrap_or(self);
         let right = right_root.as_ref().unwrap_or(right);
         if left.nodes.deep() || right.nodes.deep() {

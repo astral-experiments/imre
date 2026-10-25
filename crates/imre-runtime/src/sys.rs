@@ -1,5 +1,6 @@
 //! The process's two UTF-8 text output streams use the same buffering as print.
 mod intern;
+mod recursion;
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
 use crate::StrOwner;
 use crate::objects::errno_error;

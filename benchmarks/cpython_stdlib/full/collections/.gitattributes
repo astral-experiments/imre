@@ -1,3 +1,4 @@
 upstream/** linguist-vendored=true -text whitespace=-trailing-space
 reference-linux.json linguist-generated=true
 runs/*/evidence-linux.json linguist-generated=true
+array/*/evidence-linux.json linguist-generated=true

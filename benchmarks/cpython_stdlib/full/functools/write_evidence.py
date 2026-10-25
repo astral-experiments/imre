@@ -18,6 +18,8 @@ def observe(name, level, body, body_rev, probes):
     if state == "native_body_host_fixture":
         if name.endswith(".test_with_bound_and_unbound_methods"):
             operation = "Native functools.partial constructs and calls both bound and unbound str.join."
+        elif name.endswith(".TestSingleDispatch.test_simple_overloads"):
+            operation = "Imre creates the dispatcher, registers int, and selects native callbacks for str, int, and list."
         elif name.endswith(".test_get_annotations"):
             operation = ("Imre creates an lru_cache wrapper, reads the original and wrapper annotations, "
                          "and compares both dictionaries with the expected builtin class objects.")

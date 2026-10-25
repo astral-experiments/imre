@@ -68,6 +68,23 @@ impl Memory {
 }
 
 impl FileState {
+    /// Expose the entire buffer without advancing the cursor. Later writes detach shared bytes.
+    fn memory_value(&mut self) -> Result<crate::BytesOwner> {
+        if self.kind != FileKind::Memory {
+            return Err(Error::new(
+                Kind::AttributeError,
+                format!(
+                    "'{}' object has no attribute 'getvalue'",
+                    self.binary_type_name()
+                ),
+            ));
+        }
+        let Stream::Memory(memory) = self.stream()? else {
+            unreachable!()
+        };
+        Ok(memory.data.clone())
+    }
+
     pub(in crate::objects) fn memory(data: crate::BytesOwner) -> crate::ObjectOwner {
         Self {
             fd: None,
@@ -209,6 +226,15 @@ pub(in crate::objects) fn disk_offset(offset: i128) -> Result<u64> {
     })?;
     u64::try_from(signed)
         .map_err(|_| super::errno_error(io::Error::from_raw_os_error(libc::EINVAL)))
+}
+
+/// # Safety
+/// The caller roots the binary file while its memory snapshot is acquired.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_io_value(stream: *const Object) -> *const Bytes {
+    // SAFETY: there is no callback during the checked, cursor-preserving buffer read.
+    let bytes = unsafe { object(stream).0.with_mut(|s| s.file_mut().memory_value()) };
+    finish(bytes.map(crate::BytesOwner::into_raw), std::ptr::null())
 }
 
 /// Construct a BytesIO, sharing its immutable initial bytes until the first write.

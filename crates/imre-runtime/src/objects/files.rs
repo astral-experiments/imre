@@ -128,7 +128,7 @@ impl FileState {
         read: bool,
         text: bool,
         bufsize: i32,
-    ) -> crate::ObjectOwner {
+    ) -> Result<crate::ObjectOwner> {
         let fd = file.as_raw_fd();
         // Popen treats line buffering as a TextIOWrapper option and uses the
         // default binary buffer underneath. Binary mode also falls back to default.
@@ -138,10 +138,10 @@ impl FileState {
             bufsize as usize
         };
         let stream = if read {
-            Stream::Read(Input::pipe(file, !text, capacity))
+            Stream::Read(Input::pipe(file, !text, capacity)?)
         } else {
             crate::initialize_io();
-            Stream::Write(Output::pipe(file, capacity, text && bufsize == 1))
+            Stream::Write(Output::pipe(file, capacity, text && bufsize == 1)?)
         };
         let kind = if text {
             FileKind::Text
@@ -150,19 +150,33 @@ impl FileState {
         } else {
             FileKind::BinaryWrite
         };
-        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(Self {
-            fd: Some(fd),
-            raw: !text && capacity == 0,
-            name: None,
-            stream: Some(stream),
-            kind,
-        })))))
+        Ok(crate::ObjectOwner::new(Object(StorageCell::new(
+            Storage::File(Box::new(Self {
+                fd: Some(fd),
+                raw: !text && capacity == 0,
+                name: None,
+                stream: Some(stream),
+                kind,
+            })),
+        ))))
     }
 
     fn stream(&mut self) -> Result<&mut Stream> {
         self.stream
             .as_mut()
             .ok_or_else(|| Error::new(Kind::ValueError, "I/O operation on closed file."))
+    }
+
+    /// A codec writer forwards missing attributes to the actual binary stream.
+    pub(super) fn binary_type_name(&self) -> &'static str {
+        match self.kind {
+            FileKind::Memory => "_io.BytesIO",
+            FileKind::BinaryRead => "_io.BufferedReader",
+            FileKind::BinaryWrite => "_io.BufferedWriter",
+            FileKind::GzipBinaryRead => "GzipFile",
+            FileKind::Member => "ZipExtFile",
+            FileKind::Text | FileKind::TextMemory => unreachable!("expected a binary stream"),
+        }
     }
 
     pub(super) fn read(&mut self) -> Result<Str> {
@@ -508,7 +522,7 @@ fn open_state(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<Fi
             }
             Stream::Read(input)
         }
-        _ => Stream::Write(Output::new(file, capacity, binary)),
+        _ => Stream::Write(Output::new(file, capacity, binary)?),
     };
     Ok(FileState {
         fd: Some(fd),
@@ -893,15 +907,14 @@ mod tests {
     fn buffer_allocation_failure_is_distinct_from_os_enomem() {
         Error::memory_error().raise();
         let empty = imre_error_take();
+        // SAFETY: releasing the taken handle makes the reserved slot available again.
+        unsafe { imre_object_release(empty) };
         os_error(io::Error::from(io::ErrorKind::OutOfMemory)).raise();
         let error = imre_error_take();
-        // A failed reservation must use the preallocated, argument-free exception.
+        // A failed reservation reuses the available, argument-free exception.
         assert_eq!(error, empty);
-        // SAFETY: each take transferred one owner of the same exception.
-        unsafe {
-            imre_object_release(error);
-            imre_object_release(empty);
-        }
+        // SAFETY: the second take transferred one owner.
+        unsafe { imre_object_release(error) };
         os_error(io::Error::from_raw_os_error(libc::ENOMEM)).raise();
         take_error(Kind::OSError);
     }
@@ -1012,7 +1025,7 @@ mod tests {
             FileState {
                 fd: Some(file.as_raw_fd()),
                 raw: false,
-                stream: Some(Stream::Write(Output::new(file, 8192, false))),
+                stream: Some(Stream::Write(Output::new(file, 8192, false).ok().unwrap())),
                 kind: FileKind::Text,
                 name: None,
             },

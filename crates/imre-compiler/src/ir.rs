@@ -39,6 +39,8 @@ pub(crate) enum Type {
     StringKeys,
     Tuple(usize),
     VarTuple(usize),
+    /// A functools key retains its comparator and, for a bound key, its object.
+    CmpKey(usize, bool),
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
     /// Private state retained by an independently constructed function cache.
@@ -76,6 +78,8 @@ pub(crate) enum Type {
     PurePath(PathFlavor),
     /// The shared, independently retained metadata view of an exact concrete Path.
     PathInfo,
+    /// Native implementation metadata has one stable, struct-like owner.
+    SysImplementation,
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
@@ -122,6 +126,8 @@ pub(crate) enum Type {
     CodecInfo,
     /// A POSIX IPv4 stream socket with shared descriptor ownership.
     Socket,
+    CodecWriterClass,
+    CodecWriter,
     Sha256,
     Poll,
     JsonDecoder,
@@ -290,6 +296,7 @@ impl std::fmt::Display for Type {
             Self::BuiltinClass => "type",
             Self::ForwardRef(_) => "annotationlib.ForwardRef",
             Self::AnnotationValue(_) => "annotation value",
+            Self::CmpKey(..) => "functools.KeyWrapper",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -314,6 +321,7 @@ impl std::fmt::Display for Type {
             Self::PathInfo => "pathlib.types.PathInfo",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
+            Self::SysImplementation => "sys.implementation",
             Self::CompletedProcess(capture, _) if capture.text => {
                 "subprocess.CompletedProcess[str]"
             }
@@ -354,6 +362,8 @@ impl std::fmt::Display for Type {
             Self::CodecInfo => "codecs.CodecInfo",
             Self::Poll => "select.poll",
             Self::Socket => "socket.socket",
+            Self::CodecWriterClass => "type[codecs.StreamWriter]",
+            Self::CodecWriter => "codecs.StreamWriter",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -388,6 +398,12 @@ impl std::fmt::Display for Type {
     }
 }
 
+/// The information an actual Python call must keep until it returns or unwinds.
+pub(crate) enum SourceFrame {
+    Depth,
+    Module(String),
+}
+
 pub(crate) struct Module {
     /// Interpreter-style -I commands ignore Python process environment variables at startup.
     pub ignore_python_environment: bool,
@@ -404,6 +420,8 @@ pub(crate) struct Module {
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
     pub globals: Vec<Type>,
+    /// Source functions and entry in emission order. Synthetic helpers have no frame.
+    pub source_frames: Vec<Option<SourceFrame>>,
     pub functions: Vec<Function>,
     pub entry: Function,
 }
@@ -460,14 +478,20 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
-    /// Only programs that can own a display value need to clear the namespace at shutdown.
+    /// Release the rooted namespace bindings at shutdown if this program uses them.
     pub(crate) fn uses_builtins_last(&self) -> bool {
         let mut used = false;
         for function in self.functions.iter().chain([&self.entry]) {
             walk_expressions(&function.body, &mut |value| {
                 used |= matches!(
                     value.kind,
-                    ExprKind::Builtin(Builtin::BuiltinsSetLast | Builtin::SysDisplayHook, _)
+                    ExprKind::Builtin(
+                        Builtin::BuiltinsSetLast
+                            | Builtin::SysDisplayHook
+                            | Builtin::BuiltinsLen
+                            | Builtin::BuiltinsSetLen,
+                        _
+                    )
                 );
             });
         }
@@ -778,6 +802,8 @@ pub(crate) enum Builtin {
     Cycle,
     SysDisplayHook,
     BuiltinsLast,
+    BuiltinsLen,
+    BuiltinsSetLen,
     BuiltinsHasLast,
     BuiltinsSetLast,
     BuiltinsDeleteLast,
@@ -799,6 +825,9 @@ pub(crate) enum Builtin {
     },
     StrEnumName,
     ClassNameView,
+    ClassNamePart {
+        module: bool,
+    },
     NewForwardRef,
     ForwardRefField(usize),
     BoxAnnotation(usize),
@@ -846,6 +875,7 @@ pub(crate) enum Builtin {
     SysThreadText {
         version: bool,
     },
+    SysImplementation,
     SysVersionInfo {
         implementation: bool,
     },
@@ -1038,6 +1068,7 @@ pub(crate) enum Builtin {
     CodecEncode,
     CodecDecode,
     Socket(SocketOp),
+    CodecWriter(WriterOperation),
     Sha256Hex,
     Sha256New,
     HashNew,
@@ -1052,6 +1083,7 @@ pub(crate) enum Builtin {
     },
     Sha256Copy,
     BytesIo,
+    BytesIoValue,
     StringIo(StringIoOperation),
     ContextVar(ContextOperation),
     BinarySeek,
@@ -1104,6 +1136,9 @@ pub(crate) enum Builtin {
     SysArgv,
     OptionalStrConcat,
     SysOrigArgv,
+    SysGetFrameModuleName,
+    SysGetRecursionLimit,
+    SysSetRecursionLimit,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
         namespace: usize,
@@ -1682,6 +1717,21 @@ pub(crate) enum LogRecordOperation {
     SetFlag,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WriterOperation {
+    Class,
+    New,
+    Write,
+    Flush,
+    Close,
+    Reset,
+    Encoding,
+    SetEncoding,
+    Stream,
+    Errors,
+    SetErrors,
+}
+
 /// Operations on the native logging registry and its named loggers.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
@@ -1825,6 +1875,10 @@ pub(crate) enum ProcessOperation {
         poll: bool,
     },
     PopenSetStatus,
+    PopenSetPoll {
+        returns_none: bool,
+    },
+    PopenDeletePoll,
     PopenWait,
     PopenCommunicate {
         text: bool,

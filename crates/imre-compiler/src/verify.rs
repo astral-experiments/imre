@@ -7,6 +7,12 @@ use crate::ir::{
 
 /// Checks identities before layouts, then validates statements and expression shapes.
 pub(crate) fn module(module: &Module) -> Result<(), String> {
+    require(
+        module.source_frames.is_empty()
+            || (module.source_frames.len() == module.functions.len() + 1
+                && module.source_frames.last().is_some_and(Option::is_some)),
+        "source frame metadata must cover the functions and module entry",
+    )?;
     let classes = module.class_fields.len();
     module.types.verify_shapes(classes)?;
     require(
@@ -158,6 +164,7 @@ impl Verifier<'_> {
             Type::Class(class) => self.module.class_fields[class].clone(),
             Type::Tuple(_) => self.module.types.fields(receiver).unwrap(),
             Type::ModuleSpec(id) => self.module.types.module_spec_fields(id),
+            Type::SysImplementation => crate::version::implementation_fields(&self.module.types),
             Type::CompletedProcess(capture, cmd) => {
                 return match field {
                     0 => same(value, self.module.types.completed_command(cmd)),
@@ -625,6 +632,7 @@ mod tests {
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: Vec::new(),
             entry: Function {
                 params: Vec::new(),

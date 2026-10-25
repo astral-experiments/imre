@@ -503,6 +503,7 @@ mod tests {
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions,
             entry: function(Vec::new(), Vec::new(), Vec::new()),
         }

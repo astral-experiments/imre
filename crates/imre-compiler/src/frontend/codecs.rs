@@ -1,5 +1,23 @@
 //! Native codec registry lookup and stateless byte/text conversion.
 use super::*;
+use crate::ir::WriterOperation as Writer;
+
+pub(super) fn writer(op: Writer, ty: Type, args: Vec<Expr>) -> Expr {
+    Expr {
+        ty,
+        kind: ExprKind::Builtin(Builtin::CodecWriter(op), args),
+    }
+}
+
+fn parameter(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
+    Parameter {
+        name: name.into(),
+        ty,
+        default,
+        kind: ParameterKind::PositionalOrKeyword,
+        sign_only: false,
+    }
+}
 
 fn argument_type(ty: Type) -> Option<String> {
     Some(match ty {
@@ -13,6 +31,52 @@ fn argument_type(ty: Type) -> Option<String> {
 }
 
 impl Checker<'_> {
+    /// Resolve the class through the same codec entry used by lookup().encode/decode.
+    pub(super) fn codec_getwriter(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let args = self.arguments(call, &[parameter("encoding", Type::Str, None)], None)?;
+        let info = self.ordered_builtin(Builtin::CodecLookup, Type::CodecInfo, args);
+        Ok(writer(Writer::Class, Type::CodecWriterClass, vec![info]))
+    }
+
+    pub(super) fn codec_writer_new(
+        &mut self,
+        class: Expr,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let args = self.arguments(
+            call,
+            &[
+                parameter("stream", Type::BinaryIO, None),
+                parameter("errors", Type::Str, Some(unpacking::string("strict"))),
+            ],
+            Some(class),
+        )?;
+        // The factory protocol declares positional-only parameters. These concrete
+        // codecs use the ordinary StreamWriter(stream, errors) initializer.
+        for keyword in &call.arguments.keywords {
+            self.graph
+                .checked_positional_keyword(self.module, keyword.range());
+        }
+        Ok(self.ordered_builtin(Builtin::CodecWriter(Writer::New), Type::CodecWriter, args))
+    }
+
+    pub(super) fn codec_writer_method(
+        &mut self,
+        receiver: Expr,
+        attr: &ast::ExprAttribute,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let (op, params) = match attr.attr.as_str() {
+            "write" => (Writer::Write, vec![parameter("object", Type::Str, None)]),
+            "flush" => (Writer::Flush, vec![]),
+            "close" => (Writer::Close, vec![]),
+            "reset" => (Writer::Reset, vec![]),
+            _ => return Err(error(self.source, attr, "unsupported stream writer method")),
+        };
+        let args = self.arguments(call, &params, Some(receiver))?;
+        Ok(self.ordered_builtin(Builtin::CodecWriter(op), Type::None, args))
+    }
+
     /// Bind str.encode's two options after evaluating its receiver and arguments in source order.
     pub(super) fn str_encode(
         &mut self,
@@ -162,6 +226,10 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let (op, input_type, result_type) = match attr.attr.as_str() {
+            "streamwriter" => {
+                let class = writer(Writer::Class, Type::CodecWriterClass, vec![receiver]);
+                return self.codec_writer_new(class, call);
+            }
             "encode" => (Builtin::CodecEncode, Type::Str, Type::Bytes),
             "decode" => (Builtin::CodecDecode, Type::Bytes, Type::Str),
             _ => {
