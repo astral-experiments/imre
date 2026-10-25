@@ -48,7 +48,7 @@ ASSERTIONS = {
     "testAssertLess": "assertLess", "testAssertLessEqual": "assertLessEqual",
     "testAssertGreater": "assertGreater", "testAssertGreaterEqual": "assertGreaterEqual",
     "testNotEqual": "assertNotEqual", "test_baseAssertEqual": "_baseAssertEqual",
-    "testAssertRaises": "assertRaises",
+    "testAssertRaises": "assertRaises", "testAssertDictEqual": "assertDictEqual",
 }
 # These CPython passes still fail at native compilation. Keep their first
 # precise source diagnostic in the report; a different failure stops the gate.
@@ -107,6 +107,13 @@ def check_assertion(binary, operation, level):
             if operation == "assertRaises":
                 return scope
             def call(*operands, msg=None):
+                if operation == "assertDictEqual":
+                    if (len(operands) != 2 or any(type(d) is not dict for d in operands)
+                            or any(type(s) is not str for d in operands for pair in d.items() for s in pair)):
+                        raise TypeError("expected two string dictionaries")
+                    invoke([*(len(d) for d in operands),
+                            *(s for d in operands for pair in d.items() for s in pair)], msg)
+                    return
                 unary = operation in {"assertTrue", "assertFalse"}
                 if len(operands) != (1 if unary else 2) or not all(
                     type(value) is (bool if unary else int) for value in operands
@@ -134,7 +141,7 @@ def run(args, level, root):
     lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
     verify_source_modules(lang, root)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["truth_protocol", "equality_protocol", "boolean_equality", "mock_protocol", "mock_reset", "mock_globals", "callable_protocol", "bound_assertions",
+    for name in ["truth_protocol", "equality_protocol", "mapping_protocol", "boolean_equality", "mock_protocol", "mock_reset", "mock_globals", "callable_protocol", "bound_assertions",
                  "callable_binding", "context_regex", "loader_names", *("context_" + family for family in families)]:
         control = root / name
         if (HERE / name).is_dir():
