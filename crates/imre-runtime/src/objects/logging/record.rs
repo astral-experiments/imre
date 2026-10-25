@@ -458,6 +458,19 @@ fn star_integer(args: &mut impl Iterator<Item = OwnedWord>) -> Result<Int> {
     }
 }
 
+/// An exact scalar supplies its Python class name in a rejected conversion.
+fn scalar_name(kind: WordKind) -> Option<&'static str> {
+    Some(match kind.raw() {
+        0 => "NoneType",
+        1 => "bool",
+        2 => "int",
+        3 => "str",
+        7 => "float",
+        8 => "bytes",
+        _ => return None,
+    })
+}
+
 /// The full format supplies the Unicode character offset for invalid conversions.
 fn percent_value_in<'a>(
     fmt: &'a str,
@@ -558,12 +571,12 @@ fn percent_value_in<'a>(
                 // SAFETY: this arm has an integer descriptor and a live owner.
                 2 => unsafe { Int::borrow(value.word) }.big().into_owned(),
                 7 if "diu".contains(c) => {
-                    num_traits::FromPrimitive::from_f64(f64::from_bits(value.word as u64).trunc())
-                        .ok_or_else(|| {
-                        Error::new(Kind::ValueError, "cannot convert float to integer")
-                    })?
+                    crate::floats::float_to_integer(f64::from_bits(value.word as u64))?
                 }
-                3 => {
+                _ => {
+                    let Some(name) = scalar_name(value.kind) else {
+                        return Err(Error::new(Kind::TypeError, "format requires a number"));
+                    };
                     let required = if "diu".contains(c) {
                         "a real number"
                     } else {
@@ -571,10 +584,9 @@ fn percent_value_in<'a>(
                     };
                     return Err(Error::new(
                         Kind::TypeError,
-                        format!("%{c} format: {required} is required, not str"),
+                        format!("%{c} format: {required} is required, not {name}"),
                     ));
                 }
-                _ => return Err(Error::new(Kind::TypeError, "format requires a number")),
             };
             let mut digits = n.to_str_radix(if c == 'o' {
                 8
@@ -645,6 +657,11 @@ fn percent_value_in<'a>(
                         Error::new(Kind::OverflowError, "%c arg not in range(0x110000)")
                     })?
                     .to_string()
+            } else if let Some(name) = scalar_name(value.kind) {
+                return Err(Error::new(
+                    Kind::TypeError,
+                    format!("%c requires an int or a unicode character, not {name}"),
+                ));
             } else {
                 return Err(Error::new(Kind::TypeError, "%c requires int or char"));
             }
@@ -658,8 +675,13 @@ fn percent_value_in<'a>(
                     crate::floats::int_to_float(&n)?
                 }
                 1 => value.word as f64,
-                3 => return Err(Error::new(Kind::TypeError, "must be real number, not str")),
-                _ => return Err(Error::new(Kind::TypeError, "must be real number")),
+                _ => {
+                    let message = scalar_name(value.kind).map_or_else(
+                        || "must be real number".to_owned(),
+                        |name| format!("must be real number, not {name}"),
+                    );
+                    return Err(Error::new(Kind::TypeError, message));
+                }
             };
             let precision = precision.unwrap_or(6);
             let spec = format!("%{flags}{width}.{precision}{c}");
