@@ -578,8 +578,8 @@ fn write_output(write: impl FnOnce(&mut Output) -> io::Result<()>) -> io::Result
 
 /// Handles write failures only after releasing the writer lock.
 fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
-    if write_output(write).is_err() {
-        Error::new(Kind::OSError, "could not write standard output").raise();
+    if let Err(error) = write_output(write) {
+        objects::errno_error(error).raise();
     }
 }
 
@@ -591,8 +591,8 @@ fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
 pub unsafe extern "C" fn imre_stderr_line(text: *const Str) {
     // SAFETY: the caller owns the text for this call.
     let text = unsafe { &*text };
-    if sys::write_stderr(text, true).is_err() {
-        Error::new(Kind::OSError, "could not write standard error").raise();
+    if let Err(error) = sys::write_stderr(text, true) {
+        objects::errno_error(error).raise();
     }
 }
 
@@ -705,11 +705,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
             7 => Some(x ^ y),
             3 | 4 => {
                 if y == 0 {
-                    return Error::new(
-                        Kind::ZeroDivisionError,
-                        "integer division or modulo by zero",
-                    )
-                    .returning(1);
+                    return Error::new(Kind::ZeroDivisionError, "division by zero").returning(1);
                 }
                 let (q, r) = (x / y, x % y);
                 let adjust = r != 0 && (r < 0) != (y < 0);
@@ -737,11 +733,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
         7 => a.as_ref() ^ b.as_ref(),
         3 | 4 => {
             if b.is_zero() {
-                return Error::new(
-                    Kind::ZeroDivisionError,
-                    "integer division or modulo by zero",
-                )
-                .returning(1);
+                return Error::new(Kind::ZeroDivisionError, "division by zero").returning(1);
             }
             let (q, r) = (a.as_ref() / b.as_ref(), a.as_ref() % b.as_ref());
             let adjust = !r.is_zero() && r.is_negative() != b.is_negative();
@@ -1095,31 +1087,52 @@ pub unsafe extern "C" fn imre_list_release(value: *const List) {
 
 /// Converts an index before a storage borrow, without truncating large integers.
 #[inline]
-fn decode_index(value: &Int) -> Result<isize> {
-    if let Some(raw) = value
-        .as_small()
-        .and_then(|value| isize::try_from(value).ok())
-    {
-        Ok(raw)
+fn signed_index(value: &Int) -> Option<isize> {
+    if let Some(raw) = value.as_small().and_then(|n| isize::try_from(n).ok()) {
+        Some(raw)
     } else {
-        big_index(&value.big()).ok_or_else(Error::index)
+        big_index(&value.big())
     }
 }
 
-/// Normalizes negative indices and rejects out-of-bounds accesses.
-// Expose the bounds check to get/set so LLVM can remove their redundant checks.
+fn decode_index(value: &Int) -> Result<isize> {
+    signed_index(value).ok_or_else(Error::index)
+}
+
 #[inline]
-fn index(raw: isize, length: usize) -> Result<usize> {
-    let normalized = if raw < 0 {
-        // An underflow wraps above `length`, so the same bounds check rejects it.
+fn normalized_index(raw: isize, length: usize) -> Option<usize> {
+    // An underflow wraps above length, so the same bounds check rejects it.
+    let at = if raw < 0 {
         length.wrapping_add_signed(raw)
     } else {
         raw as usize
     };
-    if normalized >= length {
-        return Err(Error::index());
-    }
-    Ok(normalized)
+    (at < length).then_some(at)
+}
+
+/// Normalizes negative list indices and rejects out-of-bounds accesses.
+#[inline]
+fn index(raw: isize, length: usize) -> Result<usize> {
+    normalized_index(raw, length).ok_or_else(Error::index)
+}
+
+/// Returns a bounded fixed-tuple field offset, or sets IndexError before the load.
+///
+/// # Safety
+/// The caller roots the exact integer and supplies the tuple's real length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_tuple_index(word: usize, length: usize) -> usize {
+    // SAFETY: the generated call preserves the exact integer for this conversion.
+    let value = unsafe { Int::borrow(word) };
+    let Some(raw) = signed_index(&value) else {
+        return Error::new(
+            Kind::IndexError,
+            "cannot fit 'int' into an index-sized integer",
+        )
+        .returning(0);
+    };
+    normalized_index(raw, length)
+        .unwrap_or_else(|| Error::new(Kind::IndexError, "tuple index out of range").returning(0))
 }
 
 /// Keeps arbitrary-precision conversion out of the common indexed-access path.
@@ -2347,6 +2360,27 @@ mod tests {
             let remainder = Int(unsafe { imre_int_binary(a.0, b.0, 4) });
             assert_eq!(quotient.as_small(), Some(q));
             assert_eq!(remainder.as_small(), Some(r));
+        }
+    }
+
+    #[test]
+    fn zero_integer_divisors_report_the_python_message() {
+        let zero = Int::small(0).unwrap();
+        for numerator in [Int::small(7).unwrap(), Int::new(BigInt::from(1) << 130_u32)] {
+            for op in [3, 4] {
+                // SAFETY: both integer handles remain live. Take the owned error and message.
+                unsafe {
+                    assert_eq!(imre_int_binary(numerator.0, zero.0, op), 1);
+                    let error = imre_error_take();
+                    assert_eq!(
+                        imre_exception_matches(error, Kind::ZeroDivisionError as u32),
+                        1
+                    );
+                    let message = Rc::from_raw(imre_exception_message(error));
+                    assert_eq!(message.as_str(), "division by zero");
+                    objects::imre_object_release(error);
+                }
+            }
         }
     }
 

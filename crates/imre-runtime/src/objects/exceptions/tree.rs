@@ -26,6 +26,26 @@ impl Error {
 }
 
 impl Errors {
+    /// Reuse the owned one-element tuple for both typed and generic exception views.
+    pub(super) fn args(
+        &self,
+        layout: &'static records::RecordDescriptor,
+    ) -> super::Result<OwnedWord> {
+        // SAFETY: this immutable layout describes exactly the owned list in slot zero.
+        unsafe {
+            if self.args.get().is_none() {
+                let tuple = records::allocate_record(layout);
+                if tuple.is_null() {
+                    return Err(Error::allocation());
+                }
+                tuple.write(Rc::into_raw(Rc::clone(&self.entries)) as usize);
+                let owned = OwnedWord::from_owned(tuple as usize, WordKind::new(6));
+                assert!(self.args.set(owned).is_ok());
+            }
+            Ok(self.args.get().unwrap().clone())
+        }
+    }
+
     pub(super) fn message(&self) -> Rc<Str> {
         let mut repr = String::new();
         // SAFETY: the list and all its tuple entries are retained by this payload.
@@ -84,16 +104,9 @@ pub unsafe extern "C" fn imre_shutil_tree_error_args(
                     "exception does not have copytree error entries",
                 ));
             };
-            if errors.args.get().is_none() {
-                let tuple = records::allocate_record(layout);
-                if tuple.is_null() {
-                    return Err(Error::allocation());
-                }
-                tuple.write(Rc::into_raw(Rc::clone(&errors.entries)) as usize);
-                let owned = OwnedWord::from_owned(tuple as usize, WordKind::new(6));
-                assert!(errors.args.set(owned).is_ok());
-            }
-            Ok(errors.args.get().unwrap().clone().into_word() as *const usize)
+            errors
+                .args(&*layout)
+                .map(|tuple| tuple.into_word() as *const usize)
         })
     };
     finish(result, std::ptr::null())
