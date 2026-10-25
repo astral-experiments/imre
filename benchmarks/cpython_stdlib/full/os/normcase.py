@@ -192,6 +192,7 @@ def main():
     for name in ("imre", "runtime", "clang", "cpython-source", "result"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--opt-level", type=int, choices=(0, 3), required=True)
+    parser.add_argument("--check", action="store_true", help="compare this run with the recorded Linux evidence")
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5) or os.name != "posix":
         parser.error("requires CPython 3.14.5 on POSIX")
@@ -228,6 +229,11 @@ def main():
               "format": "posix-normcase-v1", "selected_posixpath_occurrences": len(selected), "reference": {key: "pass" for key in selected},
               "occurrences": records, "fnmatch_policy": policy}
     result.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    if args.check:
+        stored = json.loads((HERE / "normcase-linux.json").read_bytes())
+        matching = [run for run in stored["runs"] if run["optimization"] == args.opt_level]
+        if matching != [report]:
+            raise ValueError("POSIX normcase results differ from the recorded fixture roles or observations")
 
 
 if __name__ == "__main__":
