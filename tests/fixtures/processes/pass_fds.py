@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -53,21 +54,23 @@ finally:
     os.close(first)
     os.close(second)
 
+true_path = shutil.which("true")
+assert true_path is not None
 try:
-    subprocess.Popen(["/bin/true"], pass_fds=(654321,))
+    subprocess.Popen([true_path], pass_fds=(654321,))
 except OSError:
     print("closed descriptor rejected")
 try:
-    subprocess.Popen(["/bin/true"], pass_fds=(-1,))
+    subprocess.Popen([true_path], pass_fds=(-1,))
 except ValueError as error:
     print(str(error))
 try:
-    subprocess.Popen(["/bin/true"], pass_fds=(1 << 34,))
+    subprocess.Popen([true_path], pass_fds=(1 << 34,))
 except ValueError as error:
     print(str(error))
 
 try:
-    subprocess.Popen(["/bin/true"], pass_fds=(-1,), umask=2**65)
+    subprocess.Popen([true_path], pass_fds=(-1,), umask=2**65)
 except OverflowError as error:
     print(str(error))
 try:
@@ -76,20 +79,20 @@ except ValueError as error:
     print(str(error))
 
 # Only the fork path iterates an explicit None, before C narrows child settings.
-for program in ["/bin/true", "true"]:
+for program in [true_path, "true"]:
     try:
         print(subprocess.call([program], pass_fds=None, close_fds=False))
     except TypeError as error:
         print(str(error))
 try:
-    subprocess.call(["/bin/true"], pass_fds=None, umask=2**65)
+    subprocess.call([true_path], pass_fds=None, umask=2**65)
 except TypeError as error:
     print(str(error))
 try:
-    subprocess.call(["/bin/true"], pass_fds=(1,), umask=-(2**90))
+    subprocess.call([true_path], pass_fds=(1,), umask=-(2**90))
 except OverflowError as error:
     print(str(error))
 try:
-    print(subprocess.call(["/bin/true"], pass_fds=(), umask=-(2**90), close_fds=False))
+    print(subprocess.call([true_path], pass_fds=(), umask=-(2**90), close_fds=False))
 except OverflowError as error:
     print(str(error))
