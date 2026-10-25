@@ -375,7 +375,7 @@ pub unsafe extern "C" fn imre_struct_append(
             if words.rows().is_none() {
                 // A generic empty list (including sort's detached destination)
                 // first learns its layout on append.
-                words.pack_structs();
+                words.pack_structs()?;
                 if words.rows().is_none() {
                     debug_assert!(words.values.is_empty());
                     *words = Words::from_rows(Rows::new(&*layout));
