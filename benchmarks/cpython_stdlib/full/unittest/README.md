@@ -41,8 +41,8 @@ checks Python’s numeric comparison with integers, the original operand spellin
 in failed comparisons, and a subclass’s failure exception and message policy.
 
 The unchanged `Test_TestCase.testAssertRaisesNoExceptionType` exercises five
-invalid calls. Its nested assertions, validation, and catches run in Imre under
-the upstream host fixture runner.
+invalid calls. Its nested assertions, validation, catches and default TestCase
+lifecycle run in Imre.
 
 Nine `TestLongMessage` methods run under the original CPython class and setup.
 Each tests all four combinations of long/short diagnostics and omitted/explicit
@@ -66,13 +66,21 @@ for strings, integer lists, and dictionary keys, with six actual failure
 checks. The [membership control](membership.py) compares complete failure
 text, keyword evaluation order, list contents, and subclass overrides.
 
-At each of O0 and O3: 0 fully native passes, 17 native bodies with host
-fixtures, 9 host-driven native operations (36 calls), 8 compile blockers,
-1,054 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+At each of O0 and O3: **19 fully native passes** (7 TestCase, 4 TestSuite
+and 8 Mock methods), 2 native bodies with host fixtures, 9 host-driven native
+operations (36 calls), 8 compile blockers, 1,050 reference-only and 2 reference
+skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
 
+Each of the 19 runs its complete upstream method under the original module
+name. The native loader discovers one case, the native suite invokes its default
+lifecycle, and the native result verifies that exact ID ran once. CPython
+inventories the package and launches the binary. The [runner interface](../../SUITE_RUNNER.md)
+shows how to use the same path and distinguishes whole-module or package imports.
+
 Three additional complete equality methods are attempted at each level.
-`testAssertMultiLineEqualTruncates` constructs a TestCase with a method name;
+`testAssertMultiLineEqualTruncates` now constructs its TestCase with a method
+name and reaches the unannotated local function `truncate`;
 `testAssertEqual_diffThreshold` and `testAssertEqual_shorten` both reach
 `addCleanup`. Each record retains the original passing reference,
 the native diagnostic, source line, and method hash.
@@ -114,8 +122,8 @@ exercise repeated child lookup, call counts, and positive and negative assertion
 `test_ordered_call_signature` uses the inherited string assertion to verify the
 representation of the recorded call, including keyword order. The [mock control](mock_protocol.py) checks
 call order, keyword order, nested return values, exception side effects, and complete
-failure text. Both the original method and the recording and assertion code execute
-in the native binary; the runner applies the original host fixture lifecycle.
+failure text. The original methods, recording and assertions run under the
+native loader with their default TestCase lifecycle.
 
 `import unittest.mock`, `from unittest import mock`, and
 `from unittest.mock import Mock` expose the same native implementation.
@@ -133,7 +141,7 @@ tree can keep an exception instance as its `side_effect`.
 `test_assert_called_once_with` exercise the callable form of
 `TestCase.assertRaises` on real Mock methods. The last also calls a lambda
 that reads its local mock after a reset. These three complete methods use
-the same host fixture runner as the four above.
+the same native fixture runner as the four above.
 
 `test_assert_called_once_message_not_called` checks that a failure for a
 mock that never ran does not print a call list, using the stock `assertNotIn`.
