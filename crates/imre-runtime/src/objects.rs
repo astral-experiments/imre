@@ -6,6 +6,7 @@
 //! except for compiler-proven readonly loop views; displaced owners are dropped
 //! only after mutable storage access ends.
 
+mod annotations;
 mod argparse;
 mod args;
 mod asyncio;

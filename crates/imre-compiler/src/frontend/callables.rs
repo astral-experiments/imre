@@ -14,7 +14,7 @@ pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
 }
 
 fn invalid_aggregate(ty: Type, types: &Types) -> bool {
-    if matches!(ty, Type::Callable(_))
+    if matches!(ty, Type::Callable(_) | Type::ForwardRef(_))
         || types.is_partial_frame(ty)
         || types.is_dispatch_registry(ty)
     {
