@@ -25,7 +25,7 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The replay of [`7a62075`](https://github.com/astral-sh/imre/commit/7a620758f5e244f26ddc3140eaca4d5b44246dcc)
+The [full replay](https://github.com/astral-sh/imre/actions/runs/40217872938) of [`0a61cac`](https://github.com/astral-sh/imre/commit/0a61cac2583340624698d335c191e8a2d8168f15)
 includes logger hierarchy and handler propagation, the level registry, ordinary
 and timed file handlers, records, formatters, filters and configuration.
 Both levels have the same counts:
@@ -35,8 +35,8 @@ Both levels have the same counts:
 | Imre | Imre | Imre | CPython hooks and native child | 16 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 35 |
-| CPython | CPython | Imre | CPython hooks and native child | 4 |
-| Blocked before execution | | | | 210 |
+| CPython | CPython | Imre | CPython hooks and native child | 5 |
+| Blocked before execution | | | | 209 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -49,6 +49,7 @@ bytes, including the newline, under its original host fixture. The stream replac
 method checks the actual sys.stderr, the previous stream, and the unchanged-stream return. Two [root configuration methods](config.md) check the
 attached formatter, handler replacement and exact output before and after force.
 Four further original configuration bodies run on CPython. They check the native file handler, UTF-8 delivery, error ordering, and ASCII output with explicit ignore or default backslash replacement.
+The [plain-file encoding method](stream-delivery.md#plain-utf-8-file) also drives native logging from its original CPython body and checks the decoded text. A separate read of the same file verifies all six bytes, including the newline.
 Four bodies verify native stderr with the original
 CPython output helper. The 35 host-driven methods exercise named handler registration, the registry, timed
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
