@@ -148,6 +148,7 @@ impl Types {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::PathInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -518,6 +519,7 @@ impl Types {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::PathInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo

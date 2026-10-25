@@ -115,3 +115,9 @@ pub unsafe extern "C" fn imre_path_query(path: *const Object, kind: u32, follow:
         })
     }
 }
+
+/// The POSIX info view's repr is independent of its pathname and cached values.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_path_info_repr(_info: *const Object) -> *const Str {
+    Rc::into_raw(Rc::new(Str::from("<PosixPath.info>")))
+}
