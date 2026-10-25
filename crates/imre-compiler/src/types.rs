@@ -143,6 +143,8 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -500,6 +502,8 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo

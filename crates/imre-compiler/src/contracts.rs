@@ -338,6 +338,9 @@ impl Builtin {
             | Self::CsvLineNumber
             | Self::Sha256Hex
             | Self::Sha256New
+            | Self::StrDescriptor(_)
+            | Self::NewPlainObject
+            | Self::InspectSentinel
             | Self::HashAvailable
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
