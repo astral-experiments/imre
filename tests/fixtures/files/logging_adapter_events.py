@@ -41,6 +41,12 @@ def fields(label: str) -> dict[str, str]:
     return {"foo": label}
 
 
+def caller_field(value: str | None) -> str:
+    if value is None:
+        raise AssertionError("the emitted record lost its caller")
+    return value
+
+
 def invoke(adapter: logging.LoggerAdapter) -> None:
     adapter.info("switch %s", "argument", extra={"foo": "moved"})
 
@@ -77,8 +83,8 @@ def check() -> None:
     first.setLevel(logging.INFO)
     invoke(hooked)
     record = two.records[-1]
-    print(record.name)
-    print(record.funcName)
+    print(caller_field(record.name))
+    print(caller_field(record.funcName))
     print(record.getMessage())
     print(record.foo)
     hooked.warning("no arguments")
