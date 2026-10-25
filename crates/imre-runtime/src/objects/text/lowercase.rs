@@ -79,7 +79,9 @@ fn convert(source: &str, case: Case) -> Result<Str, ReserveError> {
             ascii.make_ascii_uppercase();
         } else {
             ascii.make_ascii_lowercase();
-            if case == Case::Capitalize && let Some(first) = ascii.get_mut(..1) {
+            if case == Case::Capitalize
+                && let Some(first) = ascii.get_mut(..1)
+            {
                 first.make_ascii_uppercase();
             }
         }
