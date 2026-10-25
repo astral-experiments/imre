@@ -25,7 +25,11 @@ METADATA = """for case in suite:
     for example in found.examples:
         print(example.source)
         print(example.want)
-        print(example.exc_msg)
+        message = example.exc_msg
+        if message is None:
+            print("<no exception>")
+        else:
+            print(message)
         print(example.options)
         print(example.lineno)
         print(example.indent)
