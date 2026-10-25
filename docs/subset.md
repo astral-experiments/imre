@@ -989,6 +989,12 @@ keys, then appends new keys in order. The positional source can be any supported
 dictionary of the same key and value types; keyword entries require string
 keys. A Counter retains its additive update behavior through a dict annotation.
 
+`dict(source, key=value)` constructs a plain dictionary from a typed mapping
+or an iterable of two-field tuples. Entries from the source precede the keyword
+entries; replacing a key keeps its original position. The new dictionary shares
+stored values with its input. A missing key raises `KeyError` even when the
+source was a Counter or defaultdict.
+
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.

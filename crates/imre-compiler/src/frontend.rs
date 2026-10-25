@@ -2288,19 +2288,9 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Call(call)
                 if self.types.mapping(concrete).is_some()
-                    && matches!(&*call.func, ast::Expr::Name(name) if name.id == "dict")
-                    && call.arguments.args.is_empty()
-                    && call.arguments.keywords.is_empty() =>
+                    && self.unshadowed_builtin(&call.func, "dict") =>
             {
-                let (key, value) = self.types.mapping(concrete).unwrap();
-                Expr {
-                    ty: self.types.dict(key, value),
-                    kind: ExprKind::Dict {
-                        key,
-                        value,
-                        entries: Vec::new(),
-                    },
-                }
+                self.dict_constructor(call, self.types.mapping(concrete))?
             }
             ast::Expr::Call(call)
                 if self.types.set_element(concrete).is_some()
@@ -5794,12 +5784,6 @@ impl<'a> Checker<'a> {
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
-        if matches!(&*call.func,ast::Expr::Name(n) if n.id=="dict" && !self.names.contains_key("dict"))
-            && self.resolve(&call.func).is_none()
-            && let Some(mapping) = self.dict_from_zip(call)?
-        {
-            return Ok(mapping);
-        }
         if call.arguments.keywords.iter().any(|kw| kw.arg.is_none()) {
             let mut normalized = call.clone();
             normalized.arguments.keywords.retain(|kw| {
@@ -5823,6 +5807,9 @@ impl<'a> Checker<'a> {
             if normalized.arguments.keywords.len() != call.arguments.keywords.len() {
                 return self.call_on(&normalized, receiver);
             }
+        }
+        if self.unshadowed_builtin(&call.func, "dict") {
+            return self.dict_constructor(call, None);
         }
         if let Some(Binding::Intrinsic(
             kind @ (Intrinsic::TomliLoads
