@@ -4253,11 +4253,12 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
-                Intrinsic::SysExecutable | Intrinsic::SysPlatform => {
+                Intrinsic::SysExecutable | Intrinsic::SysPlatform | Intrinsic::OsName => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
                             Builtin::Process(ir::ProcessOperation::Executable)
                         }
+                        Intrinsic::OsName => Builtin::OsName,
                         _ => Builtin::SysPlatform,
                     };
                     return Ok(Expr {

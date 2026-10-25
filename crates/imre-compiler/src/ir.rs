@@ -476,6 +476,7 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    OsName,
     SystemExitNew {
         omit_none: bool,
     },

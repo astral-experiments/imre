@@ -3907,6 +3907,7 @@ impl Emitter<'_, '_> {
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
+            Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::SysStreamWrite { stderr } => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -6204,6 +6205,7 @@ declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_platform()
+declare ptr @imre_os_name()
 declare i64 @imre_sys_stream_write(i32, ptr)
 declare void @imre_sys_stream_flush(i32)
 declare ptr @imre_system_exit_new(i32, i64)
