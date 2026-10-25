@@ -110,6 +110,7 @@ def main() -> None:
     samples.append(Reading(x=mark(4.0), valid=False))
     print(repr(samples))
     more = [Reading(2.0, True), Reading(1.0, True), Reading(1.0, False)]
+    print(sum(len([row]) for row in more))
     more.sort(key=rank)
     print(repr(more))
     more.extend(more[:2])

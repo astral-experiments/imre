@@ -33,6 +33,7 @@ mod json;
 mod linecache;
 mod logging;
 mod mappings;
+mod module_specs;
 mod namespaces;
 mod os;
 mod paths;

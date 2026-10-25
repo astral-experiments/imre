@@ -92,6 +92,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--result", type=Path, required=True)
+    parser.add_argument("--write-bytecode", action="store_true", help="exercise tests that write bytecode; use a disposable CPython prefix")
     args = parser.parse_args()
     manifest = json.loads(args.manifest.read_text())
     version = ".".join(map(str, sys.version_info[:3]))
@@ -106,7 +107,8 @@ def main():
         ids = id_counts(case.id() for case in cases(load_suite(module)))
     with tempfile.TemporaryDirectory() as work:
         xml = Path(work) / "reference.xml"
-        run = subprocess.run([sys.executable, "-B", "-m", "test", "--single-process",
+        flags = [] if args.write_bytecode else ["-B"]
+        run = subprocess.run([sys.executable, *flags, "-m", "test", "--single-process",
                               "--tempdir", work, "--randseed", "1", "--junit-xml", xml,
                               module.removeprefix("test.")], cwd=work)
         results = reference_results(xml, ids)

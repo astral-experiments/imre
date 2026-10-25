@@ -1,0 +1,142 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "opt_level": 3,
+  "cases": {
+    "test.test_posix.PosixTester.test_pipe2": {
+      "status": "mixed",
+      "method_sha256": "3fd774bd8f56554b2ee66c907a3386f7bef61b1612ce57d093fd476398a21ad9",
+      "host_fixtures": [
+        "PosixTester.setUp and cleanups",
+        "test_posix.tearDownModule"
+      ],
+      "native_calls": [
+        "os.pipe2",
+        "os.pipe2",
+        "os.pipe2",
+        "os.close",
+        "os.close",
+        "os.pipe2",
+        "os.get_inheritable",
+        "os.get_inheritable",
+        "os.get_blocking",
+        "os.get_blocking",
+        "os.close",
+        "os.close"
+      ],
+      "host_calls": [
+        "os.read",
+        "os.write"
+      ],
+      "observation": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "mixed",
+          "fixture": "cpython"
+        },
+        "evidence": {
+          "opt_level": 3,
+          "method_sha256": "3fd774bd8f56554b2ee66c907a3386f7bef61b1612ce57d093fd476398a21ad9",
+          "fixture": "PosixTester.setUp and cleanups; test_posix.tearDownModule",
+          "host_fixture_constants": {
+            "support": {
+              "PIPE_MAX_SIZE": 4194305
+            }
+          },
+          "complete_native_attempts": {
+            "public": {
+              "diagnostic": "case.py:18:9: Imre: unknown class method",
+              "upstream_line": 958,
+              "upstream_statement": "self.addCleanup(os.close, r)"
+            },
+            "cleanup": {
+              "diagnostic": "subject.py:6:12: Imre: name is not a local value; globals and first-class functions are unsupported"
+            }
+          },
+          "operation": "os.pipe2; descriptor checks",
+          "native_calls": [
+            "os.pipe2",
+            "os.pipe2",
+            "os.pipe2",
+            "os.close",
+            "os.close",
+            "os.pipe2",
+            "os.get_inheritable",
+            "os.get_inheritable",
+            "os.get_blocking",
+            "os.get_blocking",
+            "os.close",
+            "os.close"
+          ],
+          "native_driver_entries": [
+            "pipe2_str",
+            "pipe2_two",
+            "pipe2_int",
+            "close",
+            "close",
+            "pipe2_int",
+            "get_inheritable",
+            "get_inheritable",
+            "get_blocking",
+            "get_blocking",
+            "close",
+            "close"
+          ],
+          "host_calls": [
+            "os.read",
+            "os.write"
+          ]
+        }
+      }
+    },
+    "test.test_posix.PosixTester.test_pipe2_c_limits": {
+      "status": "host_driven_native",
+      "method_sha256": "04bb2518cc700bdef40f58eb1bb458e66a0076de961538198d6eafa4e7a4792f",
+      "host_fixtures": [
+        "PosixTester.setUp and cleanups",
+        "test_posix.tearDownModule"
+      ],
+      "native_calls": [
+        "os.pipe2",
+        "os.pipe2"
+      ],
+      "host_calls": [],
+      "observation": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "cpython"
+        },
+        "evidence": {
+          "opt_level": 3,
+          "method_sha256": "04bb2518cc700bdef40f58eb1bb458e66a0076de961538198d6eafa4e7a4792f",
+          "fixture": "PosixTester.setUp and cleanups; test_posix.tearDownModule",
+          "host_fixture_constants": {
+            "_testcapi": {
+              "INT_MAX": 2147483647,
+              "UINT_MAX": 4294967295
+            }
+          },
+          "complete_native_attempts": {
+            "public": {
+              "diagnostic": "case.py:8:9: Imre: unsupported statement in the Imre subset",
+              "upstream_line": 978,
+              "upstream_statement": "import _testcapi"
+            }
+          },
+          "operation": "os.pipe2; descriptor checks",
+          "native_calls": [
+            "os.pipe2",
+            "os.pipe2"
+          ],
+          "native_driver_entries": [
+            "pipe2_int",
+            "pipe2_int"
+          ],
+          "host_calls": []
+        }
+      }
+    }
+  }
+}

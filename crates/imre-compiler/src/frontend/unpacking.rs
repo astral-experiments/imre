@@ -256,7 +256,22 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::BuiltinsSetLast, vec![value]),
                     }));
                 }
+                if let Some(class) = self.class_reference(&attribute.value)
+                    && matches!(
+                        self.classes.declarations.definitions[class]
+                            .static_bindings
+                            .get(attribute.attr.as_str()),
+                        Some(crate::classes::ClassValue::Runtime { .. })
+                    )
+                {
+                    return self.store_class_data(class, attribute, value);
+                }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some(class) =
+                    self.mutable_instance_data(receiver.ty, attribute.attr.as_str())
+                {
+                    return self.store_instance_data(class, attribute, receiver, value);
+                }
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.
@@ -280,6 +295,11 @@ impl Checker<'_> {
                         name,
                         value,
                     ));
+                }
+                if matches!(receiver.ty, Type::ModuleSpec(_))
+                    && attribute.attr.as_str() == "has_location"
+                {
+                    return self.set_module_spec_location(attribute, receiver, value);
                 }
                 if receiver.ty == Type::LogRecord {
                     let value = self.check_record_value(value, target)?;
@@ -762,9 +782,9 @@ impl Checker<'_> {
 }
 
 impl Checker<'_> {
-    /// A struct sequence's result shape is known for constant slice bounds. Capture
+    /// A fixed tuple's result shape is known for constant slice bounds. Capture
     /// the receiver once, even when the selected fields are empty or out of order.
-    pub(super) fn struct_sequence_slice(
+    pub(super) fn fixed_tuple_slice(
         &mut self,
         receiver: Expr,
         fields: &[Type],
