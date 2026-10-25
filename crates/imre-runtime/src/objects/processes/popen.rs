@@ -268,24 +268,22 @@ unsafe fn spawn(config: &LaunchConfig) -> Result<Popen> {
         ));
     }
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
-    unsafe { prepare_command(&args, config) }
-        .and_then(|(launch, cwd)| launch.spawn(cwd.as_ref(), streams).map_err(os_error))
-        .map(|mut child| {
-            let text = streams & (1 << 16) != 0;
-            let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
-            let pipes = [
-                child.stdin.take().map(|fd| pipe(fd.into(), false)),
-                child.stdout.take().map(|fd| pipe(fd.into(), true)),
-                child.stderr.take().map(|fd| pipe(fd.into(), true)),
-            ];
-            Popen {
-                pipes,
-                args,
-                child: Some(child),
-                status: None,
-                communication: Default::default(),
-            }
-        })
+    unsafe { launch_error::spawn(&args, config, streams) }.map(|mut child| {
+        let text = streams & (1 << 16) != 0;
+        let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
+        let pipes = [
+            child.stdin.take().map(|fd| pipe(fd.into(), false)),
+            child.stdout.take().map(|fd| pipe(fd.into(), true)),
+            child.stderr.take().map(|fd| pipe(fd.into(), true)),
+        ];
+        Popen {
+            pipes,
+            args,
+            child: Some(child),
+            status: None,
+            communication: Default::default(),
+        }
+    })
 }
 
 /// Wait without draining pipes, as call() does. A failed or expired wait

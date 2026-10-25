@@ -7,6 +7,7 @@ use std::rc::Rc;
 pub(in crate::objects) enum Filename {
     Str(Rc<Str>),
     Bytes(Rc<Bytes>),
+    Path(Rc<Object>),
 }
 
 impl Filename {
@@ -14,6 +15,16 @@ impl Filename {
         match self {
             Self::Str(s) => push_string_repr(s, output),
             Self::Bytes(b) => crate::objects::bytes::write_repr(output, b),
+            Self::Path(p) => {
+                // SAFETY: the exception roots this immutable path while rendering it.
+                unsafe {
+                    crate::objects::values::write_repr(
+                        output,
+                        Rc::as_ptr(p) as usize,
+                        crate::objects::words::WordKind::new(5),
+                    );
+                }
+            }
         }
     }
 
@@ -21,6 +32,7 @@ impl Filename {
         match self {
             Self::Str(s) => Rc::into_raw(Rc::clone(s)) as usize,
             Self::Bytes(b) => Rc::into_raw(Rc::clone(b)) as usize | 1,
+            Self::Path(p) => Rc::into_raw(Rc::clone(p)) as usize | 6,
         }
     }
 }
@@ -38,6 +50,28 @@ impl Filenames {
         if let Some(path) = &self.second {
             output.push_str(" -> ");
             path.append_repr(output);
+        }
+    }
+}
+
+impl Error {
+    /// Assign a filename after constructing a one-argument OSError, as rmtree's
+    /// safe descriptor walker does when it detects a symlink.
+    pub(in crate::objects) fn os_message_with_filename(arg: &str, filename: Filename) -> Self {
+        let paths = Box::new(Filenames {
+            first: filename,
+            second: None,
+        });
+        let mut message = String::from("[Errno None] None");
+        paths.append_message(&mut message);
+        Self {
+            kind: Kind::OSError,
+            payload: Some(Payload::Arguments(Box::new(super::BuiltinArguments {
+                message: Rc::new(message.into()),
+                args: std::iter::once(Self::string_arg(arg)).collect(),
+                os_paths: Some(paths),
+            }))),
+            cause: None,
         }
     }
 }
@@ -65,7 +99,10 @@ pub unsafe extern "C" fn imre_os_error_field(value: *const Object, field: u32) -
             // errno and strerror are exactly the two arguments used for repr.
             // A filename is a separate original path owner, never a parsed message.
             Ok(match field {
-                0 | 1 => arguments.args[field as usize].clone().into_word(),
+                0 | 1 if arguments.args.len() == 2 => {
+                    arguments.args[field as usize].clone().into_word()
+                }
+                0 | 1 => 0,
                 2 => arguments
                     .os_paths
                     .as_ref()
