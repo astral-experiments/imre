@@ -1,0 +1,38 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "execution": "native-body-and-operations",
+  "passed_at_opt_levels": [
+    0,
+    3
+  ],
+  "passed": {
+    "test.test_pathlib.test_join.PathJoinTest.test_full_match": {
+      "assertions": 55,
+      "method_sha256": "75d710d6349f0a7932160566757914f65f10ce2b058fcb6590b471488be71e32"
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_full_match_case_sensitive": {
+      "assertions": 4,
+      "method_sha256": "8cd584dc194e236f5c3597fc702b0b4b684f49d0b8f0883013169a3c1a491987"
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_full_match_case_sensitive": {
+      "assertions": 4,
+      "method_sha256": "8cd584dc194e236f5c3597fc702b0b4b684f49d0b8f0883013169a3c1a491987"
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_match_common": {
+      "assertions": 34,
+      "method_sha256": "980164f5188d3bc3ab98127c250aef973d95f0450a8474ed1d4455f58cc61b1d"
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_match_common": {
+      "assertions": 34,
+      "method_sha256": "980164f5188d3bc3ab98127c250aef973d95f0450a8474ed1d4455f58cc61b1d"
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_match_posix": {
+      "assertions": 1,
+      "method_sha256": "a64c99576f0c68954d8ac5faf76af68ee40225f992348ef659ec20a4ec53925e"
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_match_posix": {
+      "assertions": 1,
+      "method_sha256": "a64c99576f0c68954d8ac5faf76af68ee40225f992348ef659ec20a4ec53925e"
+    }
+  }
+}

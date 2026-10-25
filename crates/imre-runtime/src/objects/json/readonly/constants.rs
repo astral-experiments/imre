@@ -2,14 +2,13 @@
 //! On a serde error at such a token, substitute same-width number spellings so
 //! every raw value still points to the corresponding span of the original text.
 
-pub(super) fn normalize(
-    text: &str,
-    error: &serde_json::Error,
-) -> Result<Option<String>, super::Error> {
+use super::Error;
+
+pub(super) fn normalize(text: &str, error: &serde_json::Error) -> Result<Option<String>, Error> {
     let Some(line) = error
         .line()
         .checked_sub(1)
-        .and_then(|i| text.split('\n').nth(i))
+        .and_then(|n| text.split('\n').nth(n))
     else {
         return Ok(None);
     };
@@ -67,15 +66,16 @@ pub(super) fn normalize(
                 at += token.len();
                 continue;
             }
-            if output.is_none() {
-                let mut patched = Vec::new();
-                patched
-                    .try_reserve_exact(bytes.len())
-                    .map_err(|_| super::Error::allocation())?;
-                patched.extend_from_slice(bytes);
-                output = Some(patched);
-            }
-            let output = output.as_mut().unwrap();
+            let output = match &mut output {
+                Some(output) => output,
+                None => {
+                    let mut copy = Vec::new();
+                    copy.try_reserve_exact(bytes.len())
+                        .map_err(|_| Error::allocation())?;
+                    copy.extend_from_slice(bytes);
+                    output.insert(copy)
+                }
+            };
             output[at..at + token.len()].copy_from_slice(token);
             at += token.len();
         }

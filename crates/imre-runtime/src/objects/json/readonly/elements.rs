@@ -1,20 +1,26 @@
 //! Decode materialized arrays of records without reparsing each field as raw JSON.
+use crate::StrOwner;
 use std::cell::Cell;
 use std::fmt;
-use std::rc::Rc;
 
 use serde::Deserializer;
 use serde::de::{DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor};
 
-use super::{Int, Key, Node, Str, allocation_error, push};
+use super::{Int, Key, KeyMemo, Node, Str, allocation_error, push};
 
 /// Nested arrays retain their lazy source spans. Floating-point callbacks also
 /// fall back because Serde can report an out-of-range integer as a float.
-pub(super) fn parse(text: &str, nodes: &mut Vec<Node>, refused: &Cell<bool>) -> Option<Node> {
+pub(super) fn parse(
+    text: &str,
+    nodes: &mut Vec<Node>,
+    keys: &KeyMemo,
+    refused: &Cell<bool>,
+) -> Option<Node> {
     let start = nodes.len();
     let value = serde_json::Deserializer::from_str(text).deserialize_seq(&mut Elements {
         nodes,
         entered: false,
+        keys,
         refused,
     });
     if let Ok(array) = value {
@@ -28,6 +34,7 @@ pub(super) fn parse(text: &str, nodes: &mut Vec<Node>, refused: &Cell<bool>) -> 
 struct Elements<'a> {
     nodes: &'a mut Vec<Node>,
     entered: bool,
+    keys: &'a KeyMemo,
     refused: &'a Cell<bool>,
 }
 
@@ -67,7 +74,9 @@ impl<'de> Visitor<'de> for &mut Elements<'_> {
     }
     fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Node, E> {
         let value = Str::try_new(value).map_err(|_| allocation_error::<E>(self.refused))?;
-        Ok(Node::String(Rc::new(value)))
+        Ok(Node::String(
+            StrOwner::try_new(value).map_err(|_| allocation_error::<E>(self.refused))?,
+        ))
     }
     fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Node, A::Error> {
         if std::mem::replace(&mut self.entered, true) {
@@ -87,7 +96,7 @@ impl<'de> Visitor<'de> for &mut Elements<'_> {
             let value = map.next_value_seed(&mut *self)?;
             push(&mut fields, (key, value), self.refused)?;
         }
-        Ok(Node::Object(fields))
+        Ok(Node::Object(self.keys.fields(fields)))
     }
 }
 
@@ -98,16 +107,18 @@ mod tests {
     #[test]
     fn exact_integer_rows_do_not_confuse_string_brackets_with_nested_arrays() {
         let mut nodes = vec![Node::Null];
+        let keys = KeyMemo::default();
         let row = parse(
             r#"[{"v":18446744073709551615,"name":"[row]"}]"#,
             &mut nodes,
+            &keys,
             &Cell::new(false),
         );
         assert!(matches!(row, Some(Node::Array(items)) if items.len() == 1));
         assert!(matches!(&nodes[1], Node::Integer(n) if n.big().as_ref() == &u64::MAX.into()));
         let before = nodes.len();
         for raw in ["[0,[1]]", "[0,0.5]", "[0,18446744073709551616]", "[0,NaN]"] {
-            assert!(parse(raw, &mut nodes, &Cell::new(false)).is_none());
+            assert!(parse(raw, &mut nodes, &keys, &Cell::new(false)).is_none());
             assert_eq!(nodes.len(), before);
         }
     }

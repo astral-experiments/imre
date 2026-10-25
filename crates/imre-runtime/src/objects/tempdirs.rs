@@ -1,6 +1,7 @@
 //! Direct-with temporary workspaces. Creation is exclusive and private; cleanup
 //! walks held directory descriptors and never follows a descendant symlink.
 
+use crate::StrOwner;
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::fs::{self, OpenOptions};
@@ -13,7 +14,6 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use rustix::fs::{self as rfs, AtFlags, Dir, FileType, Mode, OFlags};
 use rustix::io::Errno;
@@ -247,9 +247,9 @@ fn open_directory(parent: &OwnedFd, name: &CStr) -> io::Result<OwnedFd> {
     }
 }
 
-struct Entry {
-    name: CString,
-    directory: bool,
+pub(super) struct Entry {
+    pub(super) name: CString,
+    pub(super) directory: bool,
 }
 
 fn file_type_at(parent: &OwnedFd, name: &CStr) -> rustix::io::Result<FileType> {
@@ -288,22 +288,31 @@ fn reset_entry_permissions(parent: &OwnedFd, name: &CStr) -> io::Result<()> {
 /// Snapshot names as native bytes; cleanup must remove undecodable filenames too.
 /// Close the scan descriptor before descending, while retaining the directory fd.
 fn entries(descriptor: &OwnedFd) -> io::Result<std::vec::IntoIter<Entry>> {
+    scan_entries(descriptor, Dir::read_from(descriptor)?)
+}
+
+pub(super) fn scan_entries(
+    descriptor: &OwnedFd,
+    scan: Dir,
+) -> io::Result<std::vec::IntoIter<Entry>> {
     let mut result = Vec::new();
-    for entry in Dir::read_from(descriptor)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        if matches!(name.to_bytes(), b"." | b"..") {
-            continue;
-        }
-        let directory = entry.file_type() == FileType::Directory
-            || entry.file_type() == FileType::Unknown
-                && file_type_at(descriptor, name) == Ok(FileType::Directory);
-        result.push(Entry {
-            name: name.to_owned(),
-            directory,
-        });
+    for item in scan_names(scan) {
+        let (name, kind) = item?;
+        let directory = kind == FileType::Directory
+            || kind == FileType::Unknown
+                && file_type_at(descriptor, &name) == Ok(FileType::Directory);
+        result.push(Entry { name, directory });
     }
     Ok(result.into_iter())
+}
+
+/// Yield the kernel's names and type hints without resolving unknown entries.
+pub(super) fn scan_names(scan: Dir) -> impl Iterator<Item = io::Result<(CString, FileType)>> {
+    scan.filter_map(|entry| match entry {
+        Err(error) => Some(Err(error.into())),
+        Ok(entry) if matches!(entry.file_name().to_bytes(), b"." | b"..") => None,
+        Ok(entry) => Some(Ok((entry.file_name().to_owned(), entry.file_type()))),
+    })
 }
 
 fn remove_at(parent: &OwnedFd, name: &CStr, flags: AtFlags) -> io::Result<()> {
@@ -447,7 +456,7 @@ pub unsafe extern "C" fn imre_tempdir_new(
         )
     };
     finish(
-        result.map(|name| Rc::into_raw(Rc::new(name))),
+        result.map(|name| StrOwner::into_raw(StrOwner::new(name))),
         std::ptr::null(),
     )
 }
@@ -511,9 +520,9 @@ pub unsafe extern "C" fn imre_directory_context_new(
         temporary,
         armed: std::cell::Cell::new(temporary),
     };
-    Rc::into_raw(Rc::new(super::Object(super::StorageCell::new(
-        super::Storage::DirectoryContext(manager),
-    ))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(super::Object(
+        super::StorageCell::new(super::Storage::DirectoryContext(manager)),
+    )))
 }
 
 /// # Safety

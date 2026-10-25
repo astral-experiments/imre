@@ -54,6 +54,9 @@ impl View {
         name: &str,
         output: &mut String,
     ) -> Result<(), Error> {
+        if self.nodes.deep() {
+            super::deep_values::check_toml_depth(self)?;
+        }
         self.table(self.index, &key(name), false, output)
     }
 
@@ -143,6 +146,7 @@ impl View {
                 }
             }
             Node::Float(f) => out.push_str(&crate::floats::render(*f)),
+            Node::ConstantNan => out.push_str("nan"),
             Node::String(s) => out.push_str(&quoted(s)),
             Node::Datetime(date) => out.push_str(date),
             Node::Array(items) => {
@@ -202,6 +206,7 @@ mod tests {
                 text: json,
                 original: None,
                 shared: None,
+                keys: &super::super::KeyMemo::default(),
             },
         )
         .unwrap();

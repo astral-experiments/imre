@@ -1,35 +1,111 @@
 //! POSIX executable lookup shares the caller's credentials and current working directory.
+use crate::StrOwner;
+mod copy;
+mod rmtree;
+
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStringExt;
-use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
-use super::exceptions::{Error, Kind, finish, sequence_allocation_failed};
+use super::exceptions::{
+    Error, Kind, finish, imre_exception_matches, replace_pending, sequence_allocation_failed,
+    take_pending,
+};
 use super::{Bytes, Int, Str};
 
-/// POSIX provides the default executable search path even when PATH is unset.
-fn default_path() -> Vec<u8> {
-    // SAFETY: a null output with length zero queries the size including the terminator.
-    let size = unsafe { libc::confstr(libc::_CS_PATH, std::ptr::null_mut(), 0) };
-    if size > 0 {
-        let mut path = vec![0u8; size];
-        // SAFETY: the vector has size writable bytes, and confstr bounds its output.
-        let written = unsafe { libc::confstr(libc::_CS_PATH, path.as_mut_ptr().cast(), size) };
-        if written > 0 && written <= size {
-            path.truncate(written - 1);
-            return path;
+/// os.confstr("CS_PATH") returns None for an indeterminate value, or raises
+/// OSError for a failed POSIX query. os.defpath is consulted only when the
+/// Python attribute or configuration name is unavailable.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_shutil_confstr_cs_path() -> *const Bytes {
+    let mut small = [0; 255];
+    let mut large = Vec::new();
+    let mut buffer: &mut [u8] = &mut small;
+    loop {
+        // SAFETY: this is the calling thread's errno; confstr borrows the
+        // writable buffer only until return. Zero distinguishes None from error.
+        let len = unsafe {
+            #[cfg(target_os = "linux")]
+            {
+                *libc::__errno_location() = 0;
+            }
+            #[cfg(target_os = "macos")]
+            {
+                *libc::__error() = 0;
+            }
+            libc::confstr(libc::_CS_PATH, buffer.as_mut_ptr().cast(), buffer.len())
+        };
+        if len == 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(0) {
+                super::files::errno_error(error).raise();
+            }
+            return std::ptr::null();
+        }
+        if len <= buffer.len() {
+            return crate::BytesOwner::into_raw(crate::BytesOwner::new(buffer[..len - 1].to_vec()));
+        }
+        if large.try_reserve(len - large.len()).is_err() {
+            sequence_allocation_failed();
+            return std::ptr::null();
+        }
+        large.resize(len, 0);
+        buffer = &mut large;
+    }
+}
+
+/// The POSIX os.defpath attribute is independent of the confstr result.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_shutil_os_defpath() -> *const Bytes {
+    crate::BytesOwner::into_raw(crate::BytesOwner::new(b"/bin:/usr/bin".to_vec()))
+}
+
+type PathProvider = extern "C" fn() -> *const Bytes;
+
+fn default_path(
+    confstr: PathProvider,
+    defpath: PathProvider,
+) -> Result<Option<Vec<u8>>, LookupError> {
+    let mut value = confstr();
+    if let Some(error) = take_pending() {
+        // SAFETY: take_pending transfers ownership of the exception through both checks.
+        let unavailable = unsafe {
+            imre_exception_matches(
+                crate::ObjectOwner::as_ptr(&error),
+                Kind::AttributeError as u32,
+            ) != 0
+                || imre_exception_matches(
+                    crate::ObjectOwner::as_ptr(&error),
+                    Kind::ValueError as u32,
+                ) != 0
+        };
+        if !unavailable {
+            replace_pending(Some(error));
+            return Err(LookupError::Pending);
+        }
+        value = defpath();
+        if super::exceptions::imre_error_pending() != 0 {
+            return Err(LookupError::Pending);
         }
     }
-    b"/bin:/usr/bin".to_vec()
+    if value.is_null() {
+        Ok(None)
+    } else {
+        // SAFETY: a present provider result transfers an exact Bytes owner.
+        Ok(Some(crate::BytesOwner::unwrap_or_clone(unsafe {
+            crate::BytesOwner::from_raw(value)
+        })))
+    }
 }
 
 enum LookupError {
     Allocation,
     ModeOverflow,
+    Pending,
 }
 
 type LookupResult = Result<Option<Vec<u8>>, LookupError>;
@@ -78,7 +154,13 @@ fn candidate(dir: &[u8], cmd: &[u8], mode: &Int) -> LookupResult {
     Ok(Some(name))
 }
 
-fn which(cmd: &[u8], mode: &Int, path: Option<&[u8]>) -> LookupResult {
+fn which(
+    cmd: &[u8],
+    mode: &Int,
+    path: Option<&[u8]>,
+    confstr: PathProvider,
+    defpath: PathProvider,
+) -> LookupResult {
     if let Some(last) = cmd.iter().rposition(|&b| b == b'/') {
         // posixpath.split removes trailing separators from the head except when
         // every character is a slash. Joining it again preserves that root.
@@ -89,10 +171,16 @@ fn which(cmd: &[u8], mode: &Int, path: Option<&[u8]>) -> LookupResult {
             .map_or(head.len(), |i| i + 1);
         return candidate(&head[..len], &cmd[last + 1..], mode);
     }
-    let path = path.map_or_else(
-        || Cow::Owned(std::env::var_os("PATH").map_or_else(default_path, OsStringExt::into_vec)),
-        Cow::Borrowed,
-    );
+    let path = match path {
+        Some(path) => Cow::Borrowed(path),
+        None => match std::env::var_os("PATH") {
+            Some(path) => Cow::Owned(path.into_vec()),
+            None => match default_path(confstr, defpath)? {
+                Some(path) => Cow::Owned(path),
+                None => return Ok(None),
+            },
+        },
+    };
     if path.is_empty() {
         return Ok(None);
     }
@@ -127,6 +215,8 @@ unsafe fn spelling<'a>(handle: *const (), bytes: u32) -> &'a [u8] {
 /// # Safety
 /// The tagged cmd and non-null search path are rooted Str/Bytes handles and mode is a
 /// rooted Python integer. A null search path means PATH. A null result can mean no match.
+/// Each OS provider transfers an owned Bytes handle or returns null for None or a
+/// pending Python exception. Both are called only after the environment lookup misses.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_shutil_which(
     cmd: *const (),
@@ -134,13 +224,22 @@ pub unsafe extern "C" fn imre_shutil_which(
     path: *const (),
     cmd_bytes: u32,
     path_bytes: u32,
+    confstr: PathProvider,
+    defpath: PathProvider,
 ) -> *const () {
     // SAFETY: the compiler supplies both tags and keeps every input rooted across the lookup.
     let result = unsafe {
         let path = (!path.is_null()).then(|| spelling(path, path_bytes));
-        which(spelling(cmd, cmd_bytes), &Int::borrow(mode), path)
+        which(
+            spelling(cmd, cmd_bytes),
+            &Int::borrow(mode),
+            path,
+            confstr,
+            defpath,
+        )
     };
     let result = match result {
+        Err(LookupError::Pending) => return std::ptr::null(),
         Err(LookupError::Allocation) => {
             sequence_allocation_failed();
             return std::ptr::null();
@@ -150,9 +249,11 @@ pub unsafe extern "C" fn imre_shutil_which(
             "Python int too large to convert to C int",
         )),
         Ok(None) => Ok(std::ptr::null()),
-        Ok(Some(name)) if cmd_bytes != 0 => Ok(Rc::into_raw(Rc::new(name)).cast()),
+        Ok(Some(name)) if cmd_bytes != 0 => {
+            Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(name)).cast())
+        }
         Ok(Some(name)) => super::paths::path_utf8(OsString::from_vec(name))
-            .map(|text| Rc::into_raw(Rc::new(text)).cast()),
+            .map(|text| StrOwner::into_raw(StrOwner::new(text)).cast()),
     };
     finish(result, std::ptr::null())
 }

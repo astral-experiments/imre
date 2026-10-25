@@ -2,8 +2,12 @@
 use super::*;
 
 impl Checker<'_> {
-    pub(super) fn sha256_constructor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let params = [
+    pub(super) fn sha256_constructor(
+        &mut self,
+        call: &ast::ExprCall,
+        named: bool,
+    ) -> Result<Expr, String> {
+        let mut params = vec![
             Parameter {
                 name: "data".into(),
                 ty: Type::Bytes,
@@ -27,8 +31,23 @@ impl Checker<'_> {
         ];
         // Both boolean values select SHA-256 here; still evaluate an explicit
         // flag and the input bytes in the caller's order.
+        let op = if named {
+            params.insert(
+                0,
+                Parameter {
+                    name: "name".into(),
+                    ty: Type::Str,
+                    kind: ParameterKind::PositionalOrKeyword,
+                    default: None,
+                    sign_only: false,
+                },
+            );
+            Builtin::HashNew
+        } else {
+            Builtin::Sha256New
+        };
         let args = self.arguments(call, &params, None)?;
-        Ok(self.ordered_builtin(Builtin::Sha256New, Type::Sha256, args))
+        Ok(self.ordered_builtin(op, Type::Sha256, args))
     }
 
     pub(super) fn sha256_method(

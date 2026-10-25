@@ -1,0 +1,443 @@
+{
+  "module": "test.test_subprocess",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 353,
+  "reference": {
+    "test.test_subprocess.CommandsWithSpaces.test_noshell_sequence_with_spaces": {
+      "skipped": "Windows-specific tests"
+    },
+    "test.test_subprocess.CommandsWithSpaces.test_noshell_string_with_spaces": {
+      "skipped": "Windows-specific tests"
+    },
+    "test.test_subprocess.CommandsWithSpaces.test_shell_sequence_with_spaces": {
+      "skipped": "Windows-specific tests"
+    },
+    "test.test_subprocess.CommandsWithSpaces.test_shell_string_with_spaces": {
+      "skipped": "Windows-specific tests"
+    },
+    "test.test_subprocess.ContextManagerTests.test_broken_pipe_cleanup": "pass",
+    "test.test_subprocess.ContextManagerTests.test_communicate_stdin": "pass",
+    "test.test_subprocess.ContextManagerTests.test_invalid_args": "pass",
+    "test.test_subprocess.ContextManagerTests.test_pipe": "pass",
+    "test.test_subprocess.ContextManagerTests.test_returncode": "pass",
+    "test.test_subprocess.MiscTests.test__all__": "pass",
+    "test.test_subprocess.MiscTests.test_call_keyboardinterrupt_no_kill": "pass",
+    "test.test_subprocess.MiscTests.test_context_manager_keyboardinterrupt_no_kill": "pass",
+    "test.test_subprocess.MiscTests.test_getoutput": "pass",
+    "test.test_subprocess.MiscTests.test_run_keyboardinterrupt_no_kill": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_CalledProcessError_str_non_zero": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_CalledProcessError_str_signal": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_CalledProcessError_str_unknown_signal": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_args_string": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_bytes_program": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_call_string": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fd_0": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fd_1": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fd_2": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_0_1": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_0_1_2": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_0_2": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_1_2": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_after_preexec": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_when_max_fd_is_lowered": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close_with_timeout": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_flush": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_write": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_communicate_repeated_call_after_stdout_close": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_exception_bad_args_0": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_exception_bad_executable": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_exception_cwd": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_bad_data": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_normal": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_extra_groups": {
+      "skipped": "setgroup() EPERM; this test may require root."
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_extra_groups_empty_list": {
+      "skipped": "setgroup() EPERM; this test may require root."
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_extra_groups_invalid_gid_t_values": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_fork_exec": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_fork_exec_sorted_fd_sanity_check": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_group": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_group_error": {
+      "skipped": "setregid() available on platform"
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_invalid_args": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_kill": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_kill_dead": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_leak_fast_process_del_killed": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_pass_fds": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_inheritable": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_pipe_cloexec": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_pipe_cloexec_real_tools": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec_at_exit": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec_errpipe_does_not_double_close_pipes": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec_exception": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec_fork_failure": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec_gc_module_failure": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_process_group_0": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_remapping_std_fds": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_restore_signals": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_run_abort": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_send_signal": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_send_signal_dead": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race2": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_shell_sequence": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_shell_string": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_small_errpipe_write_fd": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_specific_shell": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_stderr_stdin_are_single_inout_fd": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_stdout_stderr_are_single_inout_fd": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_stdout_stdin_are_single_inout_fd": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_stopped": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_surrogates_error_message": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_swap_fds": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_swap_std_fds_with_one_closed": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_terminate": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_terminate_dead": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_umask": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_undecodable_env": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_user": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_user_error": {
+      "skipped": "setreuid() available on platform"
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_wait_when_sigchild_ignored": "pass",
+    "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del": "pass",
+    "test.test_subprocess.ProcessTestCase.test_bufsize_equal_one_binary_mode": "pass",
+    "test.test_subprocess.ProcessTestCase.test_bufsize_equal_one_text_mode": "pass",
+    "test.test_subprocess.ProcessTestCase.test_bufsize_is_none": "pass",
+    "test.test_subprocess.ProcessTestCase.test_bytes_executable": "pass",
+    "test.test_subprocess.ProcessTestCase.test_bytes_executable_replaces_shell": "pass",
+    "test.test_subprocess.ProcessTestCase.test_call_kwargs": "pass",
+    "test.test_subprocess.ProcessTestCase.test_call_seq": "pass",
+    "test.test_subprocess.ProcessTestCase.test_call_timeout": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_call_nonzero": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_call_zero": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output_input_arg": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output_input_none": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output_input_none_encoding_errors": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output_input_none_text": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output_input_none_universal_newlines": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output_nonzero": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output_stderr": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output_stdin_arg": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output_stdin_with_input_arg": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output_stdout_arg": "pass",
+    "test.test_subprocess.ProcessTestCase.test_check_output_timeout": "pass",
+    "test.test_subprocess.ProcessTestCase.test_class_getitems": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_eintr": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_epipe": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_epipe_only_stdin": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_errors": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input_nonbyte": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_pipe_buf": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_pipe_fd_leak": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_returns": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_stderr": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_stdin": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_stdin_closed_before_call": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_stdout": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_timeout": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_input": "pass",
+    "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_output": "pass",
+    "test.test_subprocess.ProcessTestCase.test_cwd": "pass",
+    "test.test_subprocess.ProcessTestCase.test_cwd_with_absolute_arg": "pass",
+    "test.test_subprocess.ProcessTestCase.test_cwd_with_bytes": "pass",
+    "test.test_subprocess.ProcessTestCase.test_cwd_with_pathlike": "pass",
+    "test.test_subprocess.ProcessTestCase.test_cwd_with_relative_arg": "pass",
+    "test.test_subprocess.ProcessTestCase.test_cwd_with_relative_executable": "pass",
+    "test.test_subprocess.ProcessTestCase.test_double_close_on_error": "pass",
+    "test.test_subprocess.ProcessTestCase.test_empty_env": "pass",
+    "test.test_subprocess.ProcessTestCase.test_env": "pass",
+    "test.test_subprocess.ProcessTestCase.test_executable": "pass",
+    "test.test_subprocess.ProcessTestCase.test_executable_replaces_shell": "pass",
+    "test.test_subprocess.ProcessTestCase.test_executable_takes_precedence": "pass",
+    "test.test_subprocess.ProcessTestCase.test_executable_with_cwd": "pass",
+    "test.test_subprocess.ProcessTestCase.test_executable_without_cwd": {
+      "skipped": "need an installed Python. See #7774"
+    },
+    "test.test_subprocess.ProcessTestCase.test_failed_child_execute_fd_leak": "pass",
+    "test.test_subprocess.ProcessTestCase.test_file_not_found_includes_filename": "pass",
+    "test.test_subprocess.ProcessTestCase.test_file_not_found_with_bad_cwd": "pass",
+    "test.test_subprocess.ProcessTestCase.test_handles_closed_on_exception": "pass",
+    "test.test_subprocess.ProcessTestCase.test_invalid_args": "pass",
+    "test.test_subprocess.ProcessTestCase.test_invalid_bufsize": "pass",
+    "test.test_subprocess.ProcessTestCase.test_invalid_cmd": "pass",
+    "test.test_subprocess.ProcessTestCase.test_invalid_env": "pass",
+    "test.test_subprocess.ProcessTestCase.test_io_buffered_by_default": "pass",
+    "test.test_subprocess.ProcessTestCase.test_io_unbuffered_works": "pass",
+    "test.test_subprocess.ProcessTestCase.test_issue8780": "pass",
+    "test.test_subprocess.ProcessTestCase.test_leaking_fds_on_error": {
+      "skipped": "resource 'cpu' is not enabled"
+    },
+    "test.test_subprocess.ProcessTestCase.test_list2cmdline": "pass",
+    "test.test_subprocess.ProcessTestCase.test_no_leaking": "pass",
+    "test.test_subprocess.ProcessTestCase.test_nonexisting_with_pipes": {
+      "skipped": "need msvcrt.CrtSetReportMode"
+    },
+    "test.test_subprocess.ProcessTestCase.test_one_environment_variable": "pass",
+    "test.test_subprocess.ProcessTestCase.test_pathlike_executable": "pass",
+    "test.test_subprocess.ProcessTestCase.test_pathlike_executable_replaces_shell": "pass",
+    "test.test_subprocess.ProcessTestCase.test_pipesize_default": "pass",
+    "test.test_subprocess.ProcessTestCase.test_pipesizes": "pass",
+    "test.test_subprocess.ProcessTestCase.test_poll": "pass",
+    "test.test_subprocess.ProcessTestCase.test_post_timeout_communicate_sends_input": "pass",
+    "test.test_subprocess.ProcessTestCase.test_repr": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stderr_devnull": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stderr_filedes": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stderr_fileobj": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stderr_none": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stderr_pipe": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stderr_redirect_with_no_stdout_redirect": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdin_devnull": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdin_filedes": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdin_fileobj": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdin_none": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdin_pipe": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdout_devnull": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdout_filedes": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdout_filedes_of_stdout": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdout_fileobj": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdout_none": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdout_pipe": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdout_stderr_file": "pass",
+    "test.test_subprocess.ProcessTestCase.test_stdout_stderr_pipe": "pass",
+    "test.test_subprocess.ProcessTestCase.test_threadsafe_wait": "pass",
+    "test.test_subprocess.ProcessTestCase.test_timeout_exception": "pass",
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_and_text": "pass",
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate": "pass",
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_encodings": "pass",
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_input_none": "pass",
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_stdin": "pass",
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_stdin_stdout_stderr": "pass",
+    "test.test_subprocess.ProcessTestCase.test_wait": "pass",
+    "test.test_subprocess.ProcessTestCase.test_wait_negative_timeout": {
+      "skipped": "need subprocess._winapi"
+    },
+    "test.test_subprocess.ProcessTestCase.test_wait_timeout": "pass",
+    "test.test_subprocess.ProcessTestCase.test_win32_duplicate_envs": {
+      "skipped": "Windows only issue"
+    },
+    "test.test_subprocess.ProcessTestCase.test_win32_invalid_env": {
+      "skipped": "Windows only issue"
+    },
+    "test.test_subprocess.ProcessTestCase.test_writes_before_communicate": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_bufsize_equal_one_binary_mode": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_bufsize_equal_one_text_mode": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_bufsize_is_none": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_bytes_executable": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_bytes_executable_replaces_shell": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_call_kwargs": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_call_seq": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_call_timeout": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_call_nonzero": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_call_zero": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_arg": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_encoding_errors": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_text": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_universal_newlines": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_nonzero": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stderr": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdin_arg": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdin_with_input_arg": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdout_arg": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_timeout": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_class_getitems": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_eintr": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_epipe": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_epipe_only_stdin": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_errors": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_memoryview_input": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_memoryview_input_nonbyte": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_pipe_buf": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_pipe_fd_leak": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_returns": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stderr": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stdin": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stdin_closed_before_call": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stdout": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_timeout": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_timeout_large_input": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_timeout_large_output": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd_with_absolute_arg": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd_with_bytes": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd_with_pathlike": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd_with_relative_arg": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd_with_relative_executable": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_double_close_on_error": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_empty_env": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_env": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_executable": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_replaces_shell": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_takes_precedence": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_with_cwd": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_without_cwd": {
+      "skipped": "need an installed Python. See #7774"
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_failed_child_execute_fd_leak": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_file_not_found_includes_filename": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_file_not_found_with_bad_cwd": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_handles_closed_on_exception": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_args": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_bufsize": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_cmd": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_env": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_io_buffered_by_default": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_io_unbuffered_works": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_issue8780": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_leaking_fds_on_error": {
+      "skipped": "resource 'cpu' is not enabled"
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_list2cmdline": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_no_leaking": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_nonexisting_with_pipes": {
+      "skipped": "need msvcrt.CrtSetReportMode"
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_one_environment_variable": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_pathlike_executable": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_pathlike_executable_replaces_shell": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_pipesize_default": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_pipesizes": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_poll": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_post_timeout_communicate_sends_input": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_repr": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_devnull": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_filedes": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_fileobj": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_none": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_pipe": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_redirect_with_no_stdout_redirect": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_devnull": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_filedes": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_fileobj": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_none": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_pipe": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_devnull": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_filedes": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_filedes_of_stdout": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_fileobj": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_none": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_pipe": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_stderr_file": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_stderr_pipe": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_threadsafe_wait": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_timeout_exception": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_and_text": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_encodings": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_input_none": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_stdin": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_stdin_stdout_stderr": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_wait": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_negative_timeout": {
+      "skipped": "need subprocess._winapi"
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_timeout": "pass",
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_duplicate_envs": {
+      "skipped": "Windows only issue"
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_invalid_env": {
+      "skipped": "Windows only issue"
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_writes_before_communicate": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_capture_output": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_capture_stderr": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_capture_stdout": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_check": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_check_output_input_arg": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_check_output_stdin_arg": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_check_output_stdin_with_input_arg": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_check_output_timeout": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_check_zero": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_encoding_warning": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_returncode": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_run_kwargs": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_run_with_an_empty_env": {
+      "skipped": "Maybe test trigger a leak on Ubuntu"
+    },
+    "test.test_subprocess.RunFuncTestCase.test_run_with_bytes_path_and_arguments": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_run_with_pathlike_path": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_run_with_pathlike_path_and_arguments": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_run_with_shell_timeout_and_capture_output": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_stderr_with_capture_output_arg": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_stdout_stdout": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_stdout_with_capture_output_arg": "pass",
+    "test.test_subprocess.RunFuncTestCase.test_timeout": "pass",
+    "test.test_subprocess.Win32ProcessTestCase.test_call_string": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_close_fds": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_close_fds_with_stdio": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_creationflags": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_empty_attribute_list": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_empty_handle_list": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_invalid_args": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_issue31471": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_kill": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_kill_dead": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_send_signal": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_send_signal_dead": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_shell_encodings": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_shell_sequence": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_shell_string": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_startupinfo": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_copy": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_keywords": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_terminate": {
+      "skipped": "Windows specific tests"
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_terminate_dead": {
+      "skipped": "Windows specific tests"
+    }
+  }
+}

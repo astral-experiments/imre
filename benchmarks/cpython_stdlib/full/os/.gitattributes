@@ -1,0 +1,4 @@
+upstream/** linguist-vendored=true -text whitespace=-blank-at-eol
+reference-*.json linguist-generated=true
+evidence-*.json linguist-generated=true
+method-preflight-*.json linguist-generated=true

@@ -1,16 +1,69 @@
 //! SHA-256 handles share a mutable hash state; digest reads finalize a snapshot.
 
-use std::rc::Rc;
+use crate::StrOwner;
+use std::cell::RefCell;
 
 use sha2::digest::Output;
 use sha2::{Digest, Sha256};
 
 use super::{Bytes, Object, Storage, StorageCell, Str, object};
 
+/// Return a hash for a runtime name; aliases select the same SHA-256 provider.
+///
+/// # Safety
+/// The caller roots the exact str and bytes until the constructor returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_hash_new(name: *const Str, data: *const Bytes) -> *const Object {
+    use super::exceptions::{Error, Kind, finish};
+    // SAFETY: both operands remain owned for this operation.
+    let (name, data) = unsafe { (&*name, &*data) };
+    let known = ["sha256", "sha-256", "sha2-256", "2.16.840.1.101.3.4.2.1"]
+        .iter()
+        .any(|alias| name.eq_ignore_ascii_case(alias));
+    let result = if known {
+        Ok(handle(Sha256::new_with_prefix(data)))
+    } else {
+        Err(Error::new(
+            Kind::ValueError,
+            format!("unsupported hash type {name}"),
+        ))
+    };
+    finish(result, std::ptr::null())
+}
+
+thread_local! { static AVAILABLE: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) }; }
+
+/// The public algorithms set has a stable identity; changing it does not enable a provider.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_hash_algorithms_available() -> *const Object {
+    use super::mappings::{imre_set_add, imre_set_new};
+    AVAILABLE.with_borrow_mut(|slot| {
+        let set = slot.get_or_insert_with(|| {
+            // SAFETY: the fresh string-keyed set transfers one reference to this slot.
+            let set = unsafe { crate::ObjectOwner::from_raw(imre_set_new(3)) };
+            let name = StrOwner::new(Str::from("sha256"));
+            // SAFETY: both exact inputs are rooted; the set acquires its own key.
+            unsafe {
+                imre_set_add(
+                    crate::ObjectOwner::as_ptr(&set),
+                    StrOwner::as_ptr(&name) as usize,
+                )
+            };
+            set
+        });
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(set))
+    })
+}
+
+/// Drop the process's module root so another program starts with a fresh set.
+pub(super) fn clear_algorithms() {
+    AVAILABLE.with(RefCell::take);
+}
+
 fn handle(state: Sha256) -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sha256(
-        Box::new(state),
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::Sha256(Box::new(state)),
+    ))))
 }
 
 #[inline]
@@ -21,7 +74,7 @@ fn hex(digest: Output<Sha256>) -> *const Str {
         result.push(char::from(HEX[(byte >> 4) as usize]));
         result.push(char::from(HEX[(byte & 15) as usize]));
     }
-    Rc::into_raw(Rc::new(result))
+    StrOwner::into_raw(StrOwner::new(result))
 }
 
 /// # Safety
@@ -83,7 +136,7 @@ pub unsafe extern "C" fn imre_sha256_copy(hash: *const Object) -> *const Object 
 pub unsafe extern "C" fn imre_sha256_digest(hash: *const Object) -> *const Bytes {
     // SAFETY: only the copied state is consumed by finalize.
     let digest = unsafe { snapshot(hash) }.finalize();
-    Rc::into_raw(Rc::new(digest.to_vec()))
+    crate::BytesOwner::into_raw(crate::BytesOwner::new(digest.to_vec()))
 }
 
 /// # Safety

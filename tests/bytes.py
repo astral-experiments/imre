@@ -35,6 +35,12 @@ REJECTED = {
     "bytes_assignment": 'value = b"abc"\nvalue[0] = 1\n',
     "bytes_deletion": 'value = b"abc"\ndel value[0]\n',
     "bytes_slice_assignment": 'value = b"abc"\nvalue[:] = b"x"\n',
+    "bytes_contains_memoryview": 'print(memoryview(b"a") in b"abc")\n',
+    "bytes_contains_array": 'from array import array\nprint(array("B", [97]) in b"abc")\n',
+    "bytes_contains_user_index": (
+        "class Index:\n    def __index__(self) -> int:\n        return 97\n"
+        'print(Index() in b"abc")\n'
+    ),
     "bytes_mutable": 'value = bytearray(b"abc")\n',
     "encode_codec": 'print("text".encode("ascii"))\n',
     "encode_keyword": 'print("text".encode(encoding="utf-8"))\n',
@@ -47,7 +53,7 @@ REJECTED = {
     "binary_encoding": 'value = open("out", "wb", encoding="utf-8")\n',
     "binary_update": 'value = open("out", "wb+")\n',
     "binary_bool_size": 'with open("input", "rb") as stream:\n    stream.read(True)\n',
-    "binary_seek": 'with open("input", "rb") as stream:\n    stream.seek(0)\n',
+    "binary_seek_text_offset": 'with open("input", "rb") as stream:\n    stream.seek("start")\n',
     "binary_closed_write": 'with open("out", "wb") as stream:\n    stream.closed = False\n',
 }
 

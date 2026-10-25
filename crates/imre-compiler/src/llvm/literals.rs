@@ -81,36 +81,43 @@ impl Emitter<'_, '_> {
         }
     }
 
-    pub(super) fn tuple(&mut self, ty: Type, values: &[Expr]) -> Value {
-        let cache = if values.iter().all(immutable_literal) {
+    pub(super) fn tuple(&mut self, ty: Type, values: &[Expr], named_root: Option<&str>) -> Value {
+        let root = if let Some(name) = named_root {
+            // Imports and default arguments can read the same module object in
+            // different codegen units. Define and clear its root exactly once.
+            let root = self.output.global_ref(name.to_owned());
+            let roots = self.tuple_literals.entry(self.output.entry).or_default();
+            if !roots.contains(&root) {
+                roots.push(root.clone());
+            }
+            root
+        } else if matches!(ty, Type::Tuple(_)) && values.iter().all(immutable_literal) {
             let unit = self.output.current;
             let roots = self.tuple_literals.entry(unit).or_default();
             let root = self
                 .output
                 .global_ref(format!("tuple_literal_{unit}_{}", roots.len()));
             roots.push(root.clone());
-            let prior = self.instruction(format!("load ptr, ptr @{root}"));
-            let missing = self.instruction(format!("icmp eq ptr {prior}, null"));
-            let build = self.label();
-            let ready = self.label();
-            self.branch(&missing, &build, &ready);
-            self.start(&build);
-            Some((root, ready))
+            root
         } else {
-            None
+            return self.record_from_fields(ty, values);
         };
+        self.rooted_record(ty, &root, |emitter| emitter.record_from_fields(ty, values))
+    }
 
-        let object = self.record(ty);
-        for (field, value) in values.iter().enumerate() {
-            let value = self.operand(value);
-            self.set_field(&object, field, &value.value);
-            self.release_operand(&value);
-        }
-        let Some((root, ready)) = cache else {
-            return object;
-        };
-        // Transfer the constructor's owner to the root. Each evaluation takes
-        // its own reference, just as it would for a freshly allocated tuple.
+    /// Give the root the constructor's owner. Each read receives its own reference.
+    pub(super) fn rooted_record(
+        &mut self,
+        ty: Type,
+        root: &str,
+        build: impl FnOnce(&mut Self) -> Value,
+    ) -> Value {
+        let prior = self.instruction(format!("load ptr, ptr @{root}"));
+        let missing = self.instruction(format!("icmp eq ptr {prior}, null"));
+        let (construct, ready) = (self.label(), self.label());
+        self.branch(&missing, &construct, &ready);
+        self.start(&construct);
+        let object = build(self);
         self.line(format!("store ptr {}, ptr @{root}", object.operand));
         self.forget(&object);
         self.jump(&ready);
@@ -122,6 +129,17 @@ impl Emitter<'_, '_> {
         };
         self.retain(&value);
         value
+    }
+
+    /// Construct a new owner, even when all field values are literals.
+    pub(super) fn record_from_fields(&mut self, ty: Type, values: &[Expr]) -> Value {
+        let object = self.record(ty);
+        for (field, value) in values.iter().enumerate() {
+            let value = self.operand(value);
+            self.set_field(&object, field, &value.value);
+            self.release_operand(&value);
+        }
+        object
     }
 
     /// Main releases the literal roots after locals/globals on either exit.
@@ -167,7 +185,12 @@ impl Emitter<'_, '_> {
             )
             .unwrap();
         }
-        for root in self.tuple_literals.values().flatten() {
+        for root in self
+            .tuple_literals
+            .values()
+            .flatten()
+            .chain(&self.static_functions)
+        {
             self.output
                 .global(self.output.entry, root, "global", "ptr")
                 .push_str("null\n");
@@ -213,6 +236,19 @@ ready:
             if lazy_constructor(ty).is_some() {
                 continue;
             }
+            // Stock CPython interns ASCII name characters and its Latin-1
+            // character singletons. Distinct equal dynamic strings stay distinct.
+            let init = if ty == Type::Str
+                && self.uses_string_interning
+                && (bytes
+                    .iter()
+                    .all(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                    || matches!(bytes.as_slice(), [_] | [0xc2..=0xc3, 0x80..=0xbf]))
+            {
+                "imre_str_interned_literal"
+            } else {
+                init
+            };
             let bytes_name = self.output.string_name(*id, "str");
             let root = self.output.string_name(*id, "literal");
             writeln!(
@@ -252,7 +288,12 @@ ready:
             )
             .unwrap();
         }
-        for root in self.tuple_literals.values().flatten() {
+        for root in self
+            .tuple_literals
+            .values()
+            .flatten()
+            .chain(&self.static_functions)
+        {
             writeln!(
                 self.output.entry_buffer(),
                 "  %{root} = load ptr, ptr @{root}\n  store ptr null, ptr @{root}\n  call void @imre_record_release(ptr %{root})"
