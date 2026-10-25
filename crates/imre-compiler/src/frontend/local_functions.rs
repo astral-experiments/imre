@@ -186,8 +186,17 @@ impl Checker<'_> {
             self.local_functions.get_mut(name).unwrap().generic = Some(Rc::new(definition.clone()));
             return Ok(None);
         }
+        let decorator = self.local_dispatch_decorator(definition)?;
+        let mut raw;
+        let signature_def = if decorator.is_some() {
+            raw = definition.clone();
+            raw.decorator_list.clear();
+            &raw
+        } else {
+            definition
+        };
         let signature = signature(
-            definition,
+            signature_def,
             self.graph,
             self.module,
             &self.classes.declarations,
@@ -196,19 +205,20 @@ impl Checker<'_> {
             &inference::Inference::default(),
         )?;
         let function = self.lift_local(definition, signature)?;
-        let object = if self.local_functions[name].value_read {
-            function
-                .callback(self.types, self.source, definition)
-                .ok()
-                .map(|value| {
-                    let slot = self.hidden(value.ty);
-                    self.assigned.insert(slot);
-                    self.calls.insert(function.signature.id);
-                    (slot, value)
-                })
+        let value = if let Some(decorator) = decorator {
+            let target = function.callback(self.types, self.source, definition)?;
+            Some(self.decorate_dispatch(decorator, target, definition)?)
+        } else if self.local_functions[name].value_read {
+            function.callback(self.types, self.source, definition).ok()
         } else {
             None
         };
+        let object = value.map(|value| {
+            let slot = self.hidden(value.ty);
+            self.assigned.insert(slot);
+            self.calls.insert(function.signature.id);
+            (slot, value)
+        });
         let binding = self.local_functions.get_mut(name).unwrap();
         binding.function = Some(function);
         binding.value_slot = object.as_ref().map(|(slot, _)| *slot);

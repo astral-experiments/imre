@@ -5782,6 +5782,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(registration) = self.immediate_registration(call)? {
+            return Ok(registration);
+        }
         if call
             .func
             .as_name_expr()
@@ -6020,6 +6023,11 @@ impl<'a> Checker<'a> {
             });
         }
         if let Some(binding) = self.local_function_binding(&call.func) {
+            if let Some(slot) = binding.value_slot
+                && self.types.dispatcher(self.locals[slot]).is_some()
+            {
+                return self.invoke(call, self.local(slot));
+            }
             if let Some(definition) = binding.generic.clone() {
                 return self.call_generic_awaitable(call, &definition);
             }

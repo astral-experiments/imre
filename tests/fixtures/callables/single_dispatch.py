@@ -55,6 +55,34 @@ def local_registry() -> None:
     print(registry("item"))
 
 
+def selected_class() -> type:
+    print("select str")
+    return str
+
+
+def decorated() -> None:
+    @singledispatch
+    def choose(value: str | bytes) -> str:
+        return "unregistered"
+
+    print(choose("before"))
+
+    @choose.register(selected_class())
+    def handle_text(value: str | bytes) -> str:
+        return "decorated text"
+
+    print(choose.dispatch(str) is handle_text)
+    print(choose("after"))
+    print(choose(b"bytes"))
+    saved = choose.dispatch(str)
+    print(choose.register(selected_class())(replacement) is replacement)
+    print(choose("replaced"))
+    print(saved("saved"))
+    print(choose.__wrapped__("original"))
+
+
 exercise(True)
 exercise(False)
 local_registry()
+decorated()
+decorated()
