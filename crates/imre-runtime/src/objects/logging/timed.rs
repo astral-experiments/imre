@@ -4,16 +4,13 @@ use std::fs;
 use std::mem::MaybeUninit;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
-use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
 use super::super::exceptions::{Error, Kind, Result, finish};
-use super::super::{
-    Int, Object, Storage, StorageCell, Str, Words, acquire_rc, fail, files, object, posixpath,
-};
+use super::super::{Int, Object, Storage, StorageCell, Str, Words, fail, files, object, posixpath};
 
 const DAY: i64 = 86_400;
 
@@ -138,7 +135,7 @@ pub(super) fn float_seconds(value: f64) -> Result<i64> {
 
 pub(in crate::objects) struct Handler {
     filename: StrOwner,
-    stream: Option<Rc<Object>>,
+    stream: Option<crate::ObjectOwner>,
     when: StrOwner,
     period: Period,
     interval: Int,
@@ -146,7 +143,7 @@ pub(in crate::objects) struct Handler {
     rollover_at: Int,
     utc: bool,
     delay: bool,
-    clock: Option<Rc<Object>>,
+    clock: Option<crate::ObjectOwner>,
 }
 
 impl Handler {
@@ -282,8 +279,9 @@ impl Handler {
         }
         if !self.delay {
             // SAFETY: open transfers a fresh text stream owner on success.
-            self.stream =
-                Some(unsafe { Rc::from_raw(files::open(&self.filename, 2, false, false)?) });
+            self.stream = Some(unsafe {
+                crate::ObjectOwner::from_raw(files::open(&self.filename, 2, false, false)?)
+            });
         }
         self.rollover_at = self.compute_int(&now)?;
         Ok(())
@@ -319,7 +317,7 @@ impl Handler {
         Ok(files)
     }
 
-    fn files_to_delete(&self) -> Result<Rc<Object>> {
+    fn files_to_delete(&self) -> Result<crate::ObjectOwner> {
         let files = self.expired_paths()?;
         let mut names = Words::new(3);
         names
@@ -405,9 +403,9 @@ pub unsafe extern "C" fn imre_log_clock_new(
             }
             parts[i] = i64::from(n);
         }
-        Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
-            Storage::ClockTime(Clock(parts)),
-        )))))
+        Ok(crate::ObjectOwner::into_raw(crate::ObjectOwner::new(
+            Object(StorageCell::new(Storage::ClockTime(Clock(parts)))),
+        )))
     })();
     finish(result, std::ptr::null())
 }
@@ -471,7 +469,7 @@ pub unsafe extern "C" fn imre_log_file_new(
             (&*when).to_uppercase(),
             Int::borrow(interval),
             (*Int::borrow(count)).clone(),
-            (clock != 0).then(|| acquire_rc::<Object>(clock)),
+            (clock != 0).then(|| crate::ObjectOwner::acquire_word(clock)),
         )
     };
     let result = (|| {
@@ -479,7 +477,7 @@ pub unsafe extern "C" fn imre_log_file_new(
             None
         } else {
             // SAFETY: opening an exact text stream transfers its owner on success.
-            Some(unsafe { Rc::from_raw(files::open(&filename, 2, false, false)?) })
+            Some(unsafe { crate::ObjectOwner::from_raw(files::open(&filename, 2, false, false)?) })
         };
         let period = Period::parse(&when)?;
         let interval = Int::new(interval.big().as_ref() * period.seconds());
@@ -508,9 +506,11 @@ pub unsafe extern "C" fn imre_log_file_new(
                 )
             });
         handler.rollover_at = handler.compute_int(&Int::new(BigInt::from(now)))?;
-        Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
-            Storage::TimedFileHandler(Box::new(handler)),
-        )))))
+        Ok(crate::ObjectOwner::into_raw(crate::ObjectOwner::new(
+            Object(StorageCell::new(Storage::TimedFileHandler(Box::new(
+                handler,
+            )))),
+        )))
     })();
     finish(result, std::ptr::null())
 }
@@ -552,15 +552,15 @@ read!(imre_log_file_rollover_at, usize, |h| h
 read!(imre_log_file_stream, usize, |h| h
     .stream
     .clone()
-    .map_or(0, |s| Rc::into_raw(s) as usize));
+    .map_or(0, |s| crate::ObjectOwner::into_raw(s) as usize));
 read!(imre_log_file_at_time, usize, |h| h
     .clock
     .clone()
-    .map_or(0, |c| Rc::into_raw(c) as usize));
+    .map_or(0, |c| crate::ObjectOwner::into_raw(c) as usize));
 read!(imre_log_file_utc, bool, |h| h.utc);
 read!(imre_log_file_delay, bool, |h| h.delay);
 read!(imre_log_file_deletions, *const Object, |h| finish(
-    h.files_to_delete().map(Rc::into_raw),
+    h.files_to_delete().map(crate::ObjectOwner::into_raw),
     std::ptr::null()
 ));
 
@@ -598,7 +598,7 @@ pub unsafe extern "C" fn imre_log_file_close(handler: *const Object) {
     // SAFETY: the removed stream owns the descriptor while close updates any external aliases.
     unsafe {
         if let Some(stream) = object(handler).0.with_mut(|s| s.timed_mut().stream.take()) {
-            files::imre_text_close(Rc::as_ptr(&stream));
+            files::imre_text_close(crate::ObjectOwner::as_ptr(&stream));
         }
     }
 }
@@ -611,7 +611,7 @@ pub unsafe extern "C" fn imre_log_file_flush(handler: *const Object) {
     unsafe {
         object(handler).0.with(|s| {
             if let Some(stream) = &s.timed().stream {
-                files::imre_text_flush(Rc::as_ptr(stream));
+                files::imre_text_flush(crate::ObjectOwner::as_ptr(stream));
             }
         });
     }

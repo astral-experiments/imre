@@ -53,12 +53,20 @@ pub(crate) struct Session {
     files: Vec<File>,
     tuple_spreads: Vec<HashMap<TextSize, usize>>,
     rules: Arc<RuleSelection>,
-    root: PathBuf,
+    pub(crate) root: PathBuf,
     extension_roots: Vec<PathBuf>,
-    used_hints: Cell<bool>,
+    hint_reads: Cell<usize>,
 }
 
 impl Session {
+    pub(crate) fn has_extension_roots(&self) -> bool {
+        !self.extension_roots.is_empty()
+    }
+
+    pub(crate) fn hint_reads(&self) -> usize {
+        self.hint_reads.get()
+    }
+
     pub(crate) fn new(root: &Path, extension_roots: &[PathBuf]) -> Result<Self, String> {
         let root = root.to_str().ok_or("module paths must be valid UTF-8")?;
         let system = InMemorySystem::default();
@@ -258,7 +266,7 @@ impl Session {
             rules: Arc::new(rules),
             root: PathBuf::from(root),
             extension_roots: extension_roots.to_vec(),
-            used_hints: Cell::new(false),
+            hint_reads: Cell::new(0),
         })
     }
 
@@ -363,7 +371,7 @@ impl Session {
 
     pub(crate) fn data_attribute(&self, module: usize, expression: &ruff_python_ast::Expr) -> bool {
         use ty_python_semantic::types::Type as Ty;
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         matches!(
             expression.inferred_type(&model),
@@ -381,7 +389,7 @@ impl Session {
         attr: &ruff_python_ast::ExprAttribute,
     ) -> bool {
         use ty_python_semantic::types::{ProgramEnvironment, Type as Ty};
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let program = self.db.program_file(self.files[module]);
         let model = SemanticModel::new(&self.db, program);
         if !matches!(attr.inferred_type(&model), Some(Ty::BoundMethod(_))) {
@@ -416,7 +424,7 @@ impl Session {
     /// a source-level narrowing. The backend must still guard mutable rereads.
     pub(crate) fn narrowed_instance(&self, module: usize, expression: &Expr) -> bool {
         use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let program = self.db.program_file(self.files[module]);
         let model = SemanticModel::new(&self.db, program);
         let Some(ty @ Ty::NominalInstance(_)) = expression.inferred_type(&model) else {
@@ -434,7 +442,7 @@ impl Session {
         use crate::ir::Type;
         use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
 
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let file = self.db.program_file(self.files[module]);
         let ty = value.inferred_type(&SemanticModel::new(&self.db, file))?;
         if !matches!(
@@ -473,7 +481,7 @@ impl Session {
     /// as declared for sys.argv in ty's vendored standard library. Equality
     /// (not assignability) rules out Any and lists with a different field ABI.
     pub(crate) fn is_string_list(&self, module: usize, value: &Expr) -> bool {
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         let Some(actual) = value.inferred_type(&model) else {
             return false;
@@ -489,7 +497,7 @@ impl Session {
     }
 
     pub(crate) fn is_never(&self, module: usize, value: &ruff_python_ast::Expr) -> bool {
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         matches!(
             value.inferred_type(&model),
@@ -813,7 +821,7 @@ impl AnalysisCache {
         graph: &crate::modules::SourceGraph,
         lowering_succeeded: bool,
     ) {
-        if graph.session.used_hints.take() {
+        if graph.session.hint_reads.take() != 0 {
             self.hints
                 .get_or_insert_with(|| CachedSession::new(graph.session.clone(), &graph.inputs));
         } else if lowering_succeeded {

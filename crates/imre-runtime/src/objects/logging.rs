@@ -13,7 +13,6 @@ pub(super) mod record;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::exceptions::Result;
@@ -21,7 +20,7 @@ use super::mappings::IntKey;
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object};
 
 struct Entry {
-    handle: Rc<Object>,
+    handle: crate::ObjectOwner,
     level: Int,
     creation_order: usize,
     enabled: cache::EnabledCache,
@@ -30,9 +29,9 @@ struct Entry {
 impl Entry {
     fn new(name: &str, level: i64, creation_order: usize) -> Self {
         Self {
-            handle: Rc::new(Object(StorageCell::new(Storage::Logger(StrOwner::new(
-                Str::from(name),
-            ))))),
+            handle: crate::ObjectOwner::new(Object(StorageCell::new(Storage::Logger(
+                StrOwner::new(Str::from(name)),
+            )))),
             level: Int::small(level).unwrap(),
             creation_order,
             enabled: cache::EnabledCache::new(),
@@ -241,10 +240,10 @@ pub unsafe extern "C" fn imre_log_get(word: usize) -> *const Object {
     let name = if name.is_empty() { "root" } else { name };
     LOGGERS.with_borrow_mut(|logs| {
         if let Some(entry) = logs.entries.get(name) {
-            return Rc::into_raw(entry.handle.clone());
+            return crate::ObjectOwner::into_raw(entry.handle.clone());
         }
         let entry = Entry::new(name, 0, logs.entries.len());
-        let result = Rc::into_raw(entry.handle.clone());
+        let result = crate::ObjectOwner::into_raw(entry.handle.clone());
         logs.entries.insert(name.into(), entry);
         result
     })
@@ -294,7 +293,7 @@ pub unsafe extern "C" fn imre_log_name(logger: *const Object) -> *const Str {
 /// A receiver has already been evaluated and rooted by the caller.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_log_root(_logger: *const Object) -> *const Object {
-    LOGGERS.with_borrow(|logs| Rc::into_raw(logs.entries["root"].handle.clone()))
+    LOGGERS.with_borrow(|logs| crate::ObjectOwner::into_raw(logs.entries["root"].handle.clone()))
 }
 
 /// # Safety
@@ -305,7 +304,7 @@ pub unsafe extern "C" fn imre_log_parent(logger: *const Object) -> usize {
     let name = unsafe { name(logger) };
     LOGGERS.with_borrow(|logs| {
         logs.parent_name(&name).map_or(0, |parent| {
-            Rc::into_raw(logs.entries[parent].handle.clone()) as usize
+            crate::ObjectOwner::into_raw(logs.entries[parent].handle.clone()) as usize
         })
     })
 }

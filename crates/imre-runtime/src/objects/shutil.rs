@@ -8,7 +8,6 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStringExt;
-use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
@@ -75,8 +74,14 @@ fn default_path(
     if let Some(error) = take_pending() {
         // SAFETY: take_pending transfers ownership of the exception through both checks.
         let unavailable = unsafe {
-            imre_exception_matches(Rc::as_ptr(&error), Kind::AttributeError as u32) != 0
-                || imre_exception_matches(Rc::as_ptr(&error), Kind::ValueError as u32) != 0
+            imre_exception_matches(
+                crate::ObjectOwner::as_ptr(&error),
+                Kind::AttributeError as u32,
+            ) != 0
+                || imre_exception_matches(
+                    crate::ObjectOwner::as_ptr(&error),
+                    Kind::ValueError as u32,
+                ) != 0
         };
         if !unavailable {
             replace_pending(Some(error));

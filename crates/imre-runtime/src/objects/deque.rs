@@ -96,9 +96,9 @@ pub unsafe extern "C" fn imre_deque_new(kind: u32, limit: usize) -> *const Objec
         maxlen,
         state: 0,
     };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Deque(Box::new(
-        deque,
-    ))))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::Deque(Box::new(deque)),
+    ))))
 }
 
 /// # Safety
@@ -170,9 +170,9 @@ pub unsafe extern "C" fn imre_deque_copy(value: *const Object) -> *const Object 
     };
     finish(
         copy.map(|deque| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Deque(Box::new(
-                deque,
-            ))))))
+            crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                Storage::Deque(Box::new(deque)),
+            ))))
         }),
         std::ptr::null(),
     )
@@ -191,7 +191,7 @@ pub unsafe extern "C" fn imre_deque_extend_source(
         if target == source {
             imre_deque_copy(source)
         } else {
-            Rc::into_raw(acquire_rc::<Object>(source as usize))
+            crate::ObjectOwner::into_raw(crate::ObjectOwner::acquire_word(source as usize))
         }
     }
 }
@@ -285,7 +285,7 @@ pub unsafe extern "C" fn imre_deque_maxlen(value: *const Object) -> usize {
 }
 
 pub(super) struct DequeIterator {
-    owner: Rc<Object>,
+    owner: crate::ObjectOwner,
     state: usize,
     remaining: usize,
     reverse: bool,
@@ -328,7 +328,7 @@ impl DequeIterator {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_deque_iter(value: *const Object, reverse: u32) -> *const Object {
     // SAFETY: the caller roots the exact deque throughout acquisition.
-    let owner = unsafe { acquire_rc::<Object>(value as usize) };
+    let owner = unsafe { crate::ObjectOwner::acquire_word(value as usize) };
     // SAFETY: neither scalar snapshot can refer back into storage.
     let (state, remaining) = unsafe { owner.0.with(|s| (s.deque().state, s.deque().items.len())) };
     let iterator = DequeIterator {
@@ -337,7 +337,7 @@ pub unsafe extern "C" fn imre_deque_iter(value: *const Object, reverse: u32) -> 
         remaining,
         reverse: reverse != 0,
     };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::DequeIterator(
-        iterator,
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::DequeIterator(iterator),
+    ))))
 }
