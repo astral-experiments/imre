@@ -48,6 +48,7 @@ mod record_inputs;
 mod records;
 mod regex;
 mod sequences;
+mod shutil;
 mod sign_parameters;
 mod sorted_rows;
 mod stdlib;
@@ -344,6 +345,7 @@ const RESERVED: &[&str] = &[
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
     match name {
         "NotImplementedError" => return Some(37),
+        "UnicodeEncodeError" => return Some(38),
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
         _ => {}
@@ -3702,7 +3704,7 @@ impl<'a> Checker<'a> {
         }
         let stored = self.types.directory_value(manager.ty);
         let archive = manager.ty == Type::ZipFile;
-        let popen = matches!(manager.ty, Type::Popen(_));
+        let popen = matches!(manager.ty, Type::Popen(..));
         if temporary.is_none()
             && stored.is_none()
             && !archive
@@ -3889,6 +3891,9 @@ impl<'a> Checker<'a> {
             {
                 Some(self.classes.declarations.exceptions[&def])
             }
+            Some(Binding::Intrinsic(Intrinsic::ShutilError)) => Some(64),
+            Some(Binding::Intrinsic(Intrinsic::SameFileError)) => Some(65),
+            Some(Binding::Intrinsic(Intrinsic::SpecialFileError)) => Some(66),
             Some(Binding::Intrinsic(Intrinsic::CancelledError)) => Some(33),
             Some(Binding::Intrinsic(Intrinsic::UnsupportedOperation)) => Some(19),
             Some(Binding::Intrinsic(Intrinsic::SubprocessError)) => Some(25),
@@ -5170,7 +5175,7 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::AsyncProcess(_)) {
                     return self.async_returncode(receiver, attribute);
                 }
-                if matches!(receiver.ty, Type::Popen(_)) {
+                if matches!(receiver.ty, Type::Popen(..)) {
                     return self.popen_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::CompletedProcess(_)) {
@@ -5604,6 +5609,7 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call),
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
+            Some(Binding::Intrinsic(Intrinsic::CopyFile)) => return self.shutil_copyfile(call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;
                 let [path] = call.arguments.args.as_ref() else {
@@ -5819,7 +5825,7 @@ impl<'a> Checker<'a> {
             if receiver.ty.is_path() {
                 return self.path_method(receiver, attribute, call);
             }
-            if matches!(receiver.ty, Type::Popen(_)) {
+            if matches!(receiver.ty, Type::Popen(..)) {
                 return self.popen_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::CompletedProcess(_)) {
@@ -5854,6 +5860,11 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
+            }
+            if attribute.attr.as_str() == "lower"
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.text_method(Self::string_value(receiver), "lower", call);
             }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -5962,6 +5973,7 @@ impl<'a> Checker<'a> {
                     ),
                     ("flush", 0) => (Builtin::TextFlush, Type::None),
                     ("close", 0) => (Builtin::TextClose, Type::None),
+                    ("fileno", 0) => (Builtin::FileFileno, Type::Int),
                     _ => {
                         return Err(error(
                             self.source,
