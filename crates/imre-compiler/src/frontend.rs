@@ -7096,8 +7096,15 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(builtin, args),
             });
         }
-        if args.len() == 1 && args[0].ty.is_path() && matches!(name.id.as_str(), "str" | "print") {
-            let text = paths::operation(ir::PathOperation::Text, Type::Str, args);
+        if args.len() == 1
+            && matches!(name.id.as_str(), "str" | "print")
+            && (args[0].ty.is_path() || self.types.payload(args[0].ty) == Some(Type::Str))
+        {
+            let text = if args[0].ty.is_path() {
+                paths::operation(ir::PathOperation::Text, Type::Str, args)
+            } else {
+                self.optional_text(args.into_iter().next().unwrap())
+            };
             return Ok(if name.id == "str" {
                 text
             } else {

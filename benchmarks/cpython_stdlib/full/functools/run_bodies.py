@@ -26,6 +26,17 @@ EQUALITY = """    def assertEqual(self, first: OPERAND, second: OPERAND, msg: st
             raise AssertionError(unittest.TestCase()._formatMessage(msg, f"{first!r} != {second!r}"))
 """
 
+# The expectation is an exact str literal. TestCase dispatches a str pair to
+# assertMultiLineEqual; None takes the ordinary comparison and shortened reprs.
+STRING_EXPECTATION = """    def assertEqual(self, first: str | None, second: str, msg: str | None = None) -> None:
+        case = unittest.TestCase()
+        if first is None:
+            sides = unittest._short_reprs("None", repr(second))
+            case.fail(case._formatMessage(msg, sides[0] + " != " + sides[1]))
+        else:
+            case.assertMultiLineEqual(first, second, msg)
+"""
+
 
 def only_string_assertions(method):
     """Every use of self is an assertEqual call with an exact string expectation."""
@@ -152,13 +163,15 @@ class Fixtures:
         equality = ({"test_with_bound_and_unbound_methods": "str",
                      "test_get_annotations": "dict[str, type]"}.get(method))
         if equality is None and only_string_assertions(node):
-            equality = "str"
+            equality = "string expectation"
         fixture = "\n".join(sorted(imports)) + "\n\n"
         fixture += "\n".join(external + [declarations[k] for k in sorted(declarations)])
         fixture += "\nclass NativeCase" + (":\n" if equality else "(unittest.TestCase):\n")
         fixture += "".join(member_texts.values())
         fixture += "".join(helper_nodes[k] for k in sorted(helper_nodes))
-        if equality:
+        if equality == "string expectation":
+            fixture += STRING_EXPECTATION
+        elif equality:
             fixture += EQUALITY.replace("OPERAND", equality)
         return owner.__name__, node, fixture
 
