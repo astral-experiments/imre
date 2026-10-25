@@ -6419,9 +6419,13 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "reverse"
-            && self.unshadowed_builtin(&method.value, "list")
         {
-            return self.list_reverse(None, call);
+            if self.unshadowed_builtin(&method.value, "list") {
+                return self.sequence_reverse(stdlib::ReverseSequence::List, None, call);
+            }
+            if self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Deque)) {
+                return self.sequence_reverse(stdlib::ReverseSequence::Deque, None, call);
+            }
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "clear"
@@ -7242,7 +7246,7 @@ impl<'a> Checker<'a> {
                 }
             }
             if attribute.attr.as_str() == "reverse" && self.types.element(receiver.ty).is_some() {
-                return self.list_reverse(Some(receiver), call);
+                return self.sequence_reverse(stdlib::ReverseSequence::List, Some(receiver), call);
             }
             if attribute.attr.as_str() == "sort" && self.types.element(receiver.ty).is_some() {
                 return self.list_sort(receiver, call);

@@ -5656,6 +5656,10 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_deque_clear", &[&args[0].value]);
                 none()
             }
+            Builtin::DequeReverse => {
+                self.void_call("imre_deque_reverse", &[&args[0].value]);
+                none()
+            }
             Builtin::DequeMaxlen => self.call("imre_deque_maxlen", returns, &[&args[0].value]),
             Builtin::DequeIter { reverse } => Value {
                 ty: Type::Iterator,
@@ -7635,6 +7639,7 @@ declare ptr @imre_deque_extend_source(ptr, ptr)
 declare ptr @imre_deque_copy(ptr)
 declare i64 @imre_deque_pop(ptr, i32)
 declare void @imre_deque_clear(ptr)
+declare void @imre_deque_reverse(ptr)
 declare i64 @imre_deque_len(ptr)
 declare i64 @imre_deque_maxlen(ptr)
 declare ptr @imre_deque_iter(ptr, i32)

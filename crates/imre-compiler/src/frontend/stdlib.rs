@@ -2,6 +2,12 @@
 
 use super::*;
 
+#[derive(Clone, Copy)]
+pub(super) enum ReverseSequence {
+    List,
+    Deque,
+}
+
 /// All leaves must be plain local reads so no later operand can change the
 /// keys captured by an earlier union. Bound the number of membership probes.
 fn local_key_union(expr: &Expr, dictionaries: &mut Vec<Expr>) -> bool {
@@ -92,10 +98,11 @@ impl Checker<'_> {
         })
     }
 
-    /// Bind list.reverse on an instance or as a descriptor. The receiver and
+    /// Bind reverse on an instance or as a descriptor. The receiver and
     /// every argument are evaluated before a rejected call raises TypeError.
-    pub(super) fn list_reverse(
+    pub(super) fn sequence_reverse(
         &mut self,
+        sequence: ReverseSequence,
         receiver: Option<Expr>,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
@@ -110,20 +117,32 @@ impl Checker<'_> {
                 .map(|arg| self.evaluated_argument(arg))
                 .transpose()?
         };
-        if let Some(value) = receiver.take() {
-            receiver = Some(self.json_mutation_receiver(value, call)?);
-        }
+        let (owner, descriptor, builtin) = match sequence {
+            ReverseSequence::List => {
+                if let Some(value) = receiver.take() {
+                    receiver = Some(self.json_mutation_receiver(value, call)?);
+                }
+                ("list", "list", Builtin::ListReverse)
+            }
+            ReverseSequence::Deque => ("deque", "collections.deque", Builtin::DequeReverse),
+        };
+        let accepts = |ty| match sequence {
+            ReverseSequence::List => self.types.element(ty).is_some(),
+            ReverseSequence::Deque => self.types.deque_element(ty).is_some(),
+        };
         let extra = args.args.len().saturating_sub(skip);
         let message = match receiver.as_ref() {
             None => {
                 self.graph
                     .checked_missing_argument(self.module, call.range());
-                "unbound method list.reverse() needs an argument".to_owned()
+                format!("unbound method {owner}.reverse() needs an argument")
             }
-            Some(value) if self.types.element(value.ty).is_none() => {
+            Some(value) if !accepts(value.ty) => {
                 let name = match value.ty {
                     Type::None => "NoneType".to_owned(),
                     Type::PlainObject => "object".to_owned(),
+                    Type::Deque(_) => "collections.deque".to_owned(),
+                    Type::ListInt | Type::List(_) => "list".to_owned(),
                     Type::StrLiteral(_) => "str".to_owned(),
                     Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes => {
                         self.type_name(value.ty)
@@ -142,22 +161,26 @@ impl Checker<'_> {
                         return Err(error(
                             self.source,
                             call,
-                            "list.reverse requires an exact native list or known descriptor receiver",
+                            &format!(
+                                "{owner}.reverse requires an exact native {owner} or known descriptor receiver"
+                            ),
                         ));
                     }
                 };
                 format!(
-                    "descriptor 'reverse' for 'list' objects doesn't apply to a '{name}' object"
+                    "descriptor 'reverse' for '{descriptor}' objects doesn't apply to a '{name}' object"
                 )
             }
             Some(_) if !args.keywords.is_empty() => {
-                "list.reverse() takes no keyword arguments".to_owned()
+                format!("{owner}.reverse() takes no keyword arguments")
             }
-            Some(_) if extra != 0 => format!("list.reverse() takes no arguments ({extra} given)"),
+            Some(_) if extra != 0 => {
+                format!("{owner}.reverse() takes no arguments ({extra} given)")
+            }
             Some(_) => {
                 return Ok(Expr {
                     ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::ListReverse, vec![receiver.unwrap()]),
+                    kind: ExprKind::Builtin(builtin, vec![receiver.unwrap()]),
                 });
             }
         };

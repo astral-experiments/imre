@@ -1023,8 +1023,9 @@ An empty tuple or a fixed tuple of homogeneous `str`, `bytes`, `int`, or `bool` 
 `collections.deque[T]` stores one concrete element type in a native ring. Its
 constructor accepts an iterable and an optional nonnegative `maxlen`. It supports
 append, pop, and extend at either end, clear, shallow copy, equality, length,
-truth testing, and forward or reverse iteration. A saved append or pop method
-keeps its receiver alive. An unannotated empty deque defaults to integer elements.
+truth testing, and forward or reverse iteration. In-place reversal preserves
+the bound and the positions of active iterators. A saved append, pop, or reverse
+method keeps its receiver alive. An unannotated empty deque defaults to integer elements.
 Calling `d.__init__(iterable, maxlen)` validates the new bound, clears the
 same deque, and consumes the iterable. If iteration raises, items already
 appended remain visible through aliases. Omitting `maxlen` removes the old bound.
