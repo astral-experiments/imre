@@ -18,6 +18,12 @@ from suite_native import (NativeCompileError, NativeDefaultMethod, Toolchain, co
                           method_bytes, native_method, run_evidence, testcase_fixture)
 
 PREFIX = "test.test_unittest."
+DEFAULT_LOADER_METHODS = {
+    "test___init__": "unittest.TestLoader construction and its errors list",
+    **dict.fromkeys(("test_getTestCaseNames", "test_getTestCaseNames__no_tests",
+                     "test_getTestCaseNames__inheritance", "test_getTestCaseNames__testNamePatterns",
+                     "test_sortTestMethodsUsing__default_value"), "unittest.TestLoader.getTestCaseNames"),
+}
 ASSERTIONS = {
     "testAssertTrue": "assertTrue", "testAssertFalse": "assertFalse",
     "testAssertLess": "assertLess", "testAssertLessEqual": "assertLessEqual",
@@ -107,9 +113,11 @@ def run(args, level, root):
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
+    from loader_class_boundaries import verify as verify_local_class_boundaries
+    verify_local_class_boundaries(lang, root)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
     for name in ["equality_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
-                 "callable_binding", "context_regex", "loader_names", *("context_" + family for family in families)]:
+                 "callable_binding", "context_regex", "loader_names", "loader_local_classes", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
         if name == "loader_names":
@@ -132,7 +140,7 @@ def run(args, level, root):
     else:
         executions.update({name: check_assertion(binary, op, level) for name, op in host.items()})
     for module, owner, method, operation in (
-        ("test_loader", "Test_TestLoader", "test___init__", "unittest.TestLoader construction and its errors list"),
+        *(("test_loader", "Test_TestLoader", method, operation) for method, operation in DEFAULT_LOADER_METHODS.items()),
         ("test_result", "Test_TestResult", "test_stop", "unittest.TestResult.stop"),
         ("test_result", "Test_TestResult", "test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun"),
         ("test_case", "Test_TestCase", "testAssertRaisesNoExceptionType", "unittest.TestCase.assertRaises"),
@@ -154,7 +162,7 @@ def run(args, level, root):
         directory = root / method
         directory.mkdir()
         default_fixture = ((module == "testmock.testmock" and method in DEFAULT_MOCK_METHODS)
-                           or (module, owner, method) == ("test_loader", "Test_TestLoader", "test___init__"))
+                           or (module == "test_loader" and method in DEFAULT_LOADER_METHODS))
         if default_fixture:
             blob = manifest["files"][path.relative_to(HERE / "upstream").as_posix()]
             native_defaults[case_id, 1] = NativeDefaultMethod(lang, directory, path, blob, ("imre", operation))

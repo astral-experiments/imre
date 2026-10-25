@@ -51,6 +51,7 @@ mod json;
 mod keyword_forwarding;
 mod linecache;
 mod literals;
+mod local_classes;
 mod local_functions;
 mod logging;
 mod logging_formatters;
@@ -1949,6 +1950,7 @@ struct Checker<'a> {
     bound_flags: HashMap<String, usize>,
     names: HashMap<String, usize>,
     local_functions: HashMap<String, local_functions::Binding>,
+    local_classes: HashMap<String, local_classes::Binding>,
     locals: Vec<Type>,
     assigned: assignments::Assigned,
     calls: HashSet<usize>,
@@ -2010,6 +2012,7 @@ impl<'a> Checker<'a> {
             bound_flags: HashMap::new(),
             names: HashMap::new(),
             local_functions: HashMap::new(),
+            local_classes: HashMap::new(),
             locals: Vec::new(),
             assigned: assignments::Assigned::default(),
             calls: HashSet::new(),
@@ -2033,6 +2036,7 @@ impl<'a> Checker<'a> {
         if (name != "__doc__" && reserved(name))
             || self.graph.modules[self.module].bindings.contains_key(name)
             || self.local_functions.contains_key(name)
+            || self.local_classes.contains_key(name)
             || self.class_receiver.as_deref() == Some(name)
         {
             return Err(error(
@@ -3728,6 +3732,10 @@ impl<'a> Checker<'a> {
             return Ok((Vec::new(), true));
         }
         let result = match statement {
+            ast::Stmt::ClassDef(class) if !self.module_scope => {
+                self.define_local_class(class)?;
+                None
+            }
             ast::Stmt::FunctionDef(function) => {
                 self.define_local_function(function)?;
                 None
@@ -5886,6 +5894,21 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if let Some(class) = self.local_class(&attribute.value)? {
+                    let value = match attribute.attr.as_str() {
+                        "__name__" => class.name.as_str(),
+                        "__qualname__" => class.qualname.as_str(),
+                        "__module__" => self.runtime_module_name(self.module),
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                attribute,
+                                "local class attribute requires supported native metadata",
+                            ));
+                        }
+                    };
+                    return Ok(unpacking::string(value));
+                }
                 if let Some(flag) = self.command_flag(attribute)? {
                     return Ok(flag);
                 }

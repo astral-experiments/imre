@@ -90,24 +90,40 @@ impl Checker<'_> {
 
     /// Only an unconditional definition in the enclosing function's suite can
     /// introduce a fixed call target. Reserve its spelling throughout the suite.
-    pub(super) fn collect_local_functions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
+    pub(super) fn collect_local_definitions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
         for (index, statement) in stmts.iter().enumerate() {
-            let Some(function) = statement.as_function_def_stmt() else {
-                continue;
+            let name = match statement {
+                ast::Stmt::ClassDef(class) => class.name.as_str(),
+                ast::Stmt::FunctionDef(function) => function.name.as_str(),
+                _ => continue,
             };
-            let name = function.name.as_str();
             if reserved(name)
                 || self.names.contains_key(name)
                 || self.graph.modules[self.module].bindings.contains_key(name)
                 || self.class_receiver.as_deref() == Some(name)
                 || self.local_functions.contains_key(name)
+                || self.local_classes.contains_key(name)
             {
                 return Err(error(
                     self.source,
-                    function,
-                    "local functions require a unique unshadowed name",
+                    statement,
+                    if statement.is_class_def_stmt() {
+                        "local classes require a unique unshadowed name"
+                    } else {
+                        "local functions require a unique unshadowed name"
+                    },
                 ));
             }
+            let Some(function) = statement.as_function_def_stmt() else {
+                self.local_classes.insert(
+                    name.to_owned(),
+                    local_classes::Binding {
+                        site: statement.range(),
+                        value: None,
+                    },
+                );
+                continue;
+            };
             self.local_functions.insert(
                 name.to_owned(),
                 Binding {
