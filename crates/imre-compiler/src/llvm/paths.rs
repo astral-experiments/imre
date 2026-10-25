@@ -11,9 +11,40 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            PathOperation::Drive | PathOperation::Root | PathOperation::Anchor => {
+                let part = match operation {
+                    PathOperation::Drive => 0,
+                    PathOperation::Root => 1,
+                    _ => 2,
+                };
+                let operand = self.instruction(format!(
+                    "call ptr @imre_path_prefix(ptr {}, i32 {part})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            PathOperation::PureNew(flavor) => {
+                let windows = u32::from(flavor == crate::ir::PathFlavor::Windows);
+                let operand =
+                    self.instruction(format!("call ptr @imre_pure_path_new(i32 {windows})"));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             PathOperation::Match { full } => {
+                let name = if args[1].value.ty.is_path() {
+                    "imre_path_match_object"
+                } else {
+                    "imre_path_match"
+                };
                 let matched = self.checked_instruction(format!(
-                    "call i32 @imre_path_match(ptr {}, ptr {}, i64 {}, i32 {})",
+                    "call i32 @{name}(ptr {}, ptr {}, i64 {}, i32 {})",
                     args[0].value.operand,
                     args[1].value.operand,
                     args[2].value.operand,
@@ -172,6 +203,8 @@ impl Emitter<'_, '_> {
                     PathOperation::Absolute => "imre_path_absolute",
                     PathOperation::New => "imre_path_new",
                     PathOperation::Join => "imre_path_join",
+                    PathOperation::JoinObject => "imre_path_join_object",
+                    PathOperation::AsPosix => "imre_path_as_posix",
                     PathOperation::WithName => "imre_path_with_name",
                     PathOperation::Text => "imre_path_text",
                     PathOperation::Name => "imre_path_name",

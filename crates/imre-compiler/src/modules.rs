@@ -129,6 +129,7 @@ pub(crate) enum Intrinsic {
     ContextManager,
     FunctionCache,
     NewType,
+    Reduce,
     TomlDumps,
     TomliLoads,
     TomliLoad,
@@ -214,6 +215,7 @@ pub(crate) enum Intrinsic {
     AssertNever,
     Cast,
     Path,
+    PurePath(crate::ir::PathFlavor),
     Which,
     TemporaryDirectory,
     SubprocessRun,
@@ -328,6 +330,7 @@ impl IntrinsicModule {
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
+            (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
             (Self::Tomli, "load") => Intrinsic::TomliLoad,
@@ -421,6 +424,12 @@ impl IntrinsicModule {
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
             (Self::Pathlib, "Path" | "PosixPath") => Intrinsic::Path,
+            (Self::Pathlib, "PurePath" | "PurePosixPath") => {
+                Intrinsic::PurePath(crate::ir::PathFlavor::Posix)
+            }
+            (Self::Pathlib, "PureWindowsPath") => {
+                Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
+            }
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
