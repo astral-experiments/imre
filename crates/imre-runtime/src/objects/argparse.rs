@@ -41,6 +41,7 @@ enum Kind {
     Str,
     Path,
     Bool,
+    Class,
 }
 
 #[derive(Deserialize, Copy, Clone, PartialEq)]

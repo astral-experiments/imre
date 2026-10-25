@@ -762,6 +762,7 @@ A subcommand is optional by default. With `add_subparsers(dest="command")`, the 
 Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()` or `parse_known_args()`. The latter returns the namespace and a list of unrecognized arguments in order. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested subcommands are outside this grammar.
 
 The `store_true`, `store_false`, and `store_const` actions store a value without consuming the next argument. A `count` action increments once for each occurrence, including each letter in a cluster such as `-vvv`.
+An unshadowed builtin class such as `object` or `int` can be a `store_const` value or its default. The namespace field contains the class itself.
 
 ## Standard logging
 
