@@ -1167,8 +1167,9 @@ An empty tuple or a fixed tuple of homogeneous `str`, `bytes`, `int`, or `bool` 
 `collections.deque[T]` stores one concrete element type in a native ring. Its
 constructor accepts an iterable and an optional nonnegative `maxlen`. It supports
 append, pop, and extend at either end, clear, shallow copy, equality, length,
-truth testing, and forward or reverse iteration. A saved append or pop method
-keeps its receiver alive. An unannotated empty deque defaults to integer elements.
+truth testing, and forward or reverse iteration. In-place reversal preserves
+the bound and the positions of active iterators. A saved append, pop, or reverse
+method keeps its receiver alive. An unannotated empty deque defaults to integer elements.
 Calling `d.__init__(iterable, maxlen)` validates the new bound, clears the
 same deque, and consumes the iterable. If iteration raises, items already
 appended remain visible through aliases. Omitting `maxlen` removes the old bound.
@@ -1598,6 +1599,20 @@ python3 tests/bytes.py --compiler target/release/imre --runtime target/release/l
 ```
 
 A profile can select a named arm of a simple `match`, or exclude the true arm of a named Boolean condition. The executable evaluates the original test. Entering an excluded arm raises a `ValueError` with the required value. A missing function or unmatched selector is a build error.
+
+### Context variables
+
+`contextvars.ContextVar[T]` stores bindings by variable identity. The native
+scheduler copies the current context when scheduling a task and restores it at
+every resume; directly awaiting a cold coroutine shares the caller's context.
+`ContextVar.get`, `set`, `reset`, token context managers, `copy_context`,
+and `Context.run` support nested and exceptional execution.
+
+Contexts support shallow copies, lookup, membership and size. Callback arguments
+in `Context.run` currently need an exact positional signature. Thread startup,
+explicit task `context=`, context iteration and mapping equality remain outside
+the subset. See the [contextvars scope and CPython evidence](../benchmarks/cpython_stdlib/full/contextvars/README.md)
+for value layouts and test roles.
 
 ### Native asyncio subprocesses
 

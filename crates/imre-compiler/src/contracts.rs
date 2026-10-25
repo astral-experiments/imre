@@ -530,6 +530,7 @@ impl Builtin {
             | Self::GzipOpen
             | Self::BytesIo
             | Self::StringIo(_)
+            | Self::ContextVar(_)
             | Self::BinarySeek
             | Self::BinaryTell
             | Self::ZipOpenFile
@@ -618,6 +619,7 @@ impl Builtin {
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::DequeClear
+            | Self::DequeReverse
             | Self::SetIter
             | Self::SortDetach
             | Self::SplitLinesIter

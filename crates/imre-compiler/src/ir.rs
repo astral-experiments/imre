@@ -87,6 +87,10 @@ pub(crate) enum Type {
     Task(usize),
     TaskGroup,
     GeneratorContext,
+    Context,
+    ContextMissing,
+    ContextVar(usize),
+    ContextToken(usize),
     /// A native temporary-directory or null context with a known enter result.
     DirectoryContext(usize),
     Semaphore,
@@ -317,6 +321,10 @@ impl std::fmt::Display for Type {
             Self::Task(_) => "asyncio.Task",
             Self::TaskGroup => "asyncio.TaskGroup",
             Self::GeneratorContext => "@contextmanager",
+            Self::Context => "contextvars.Context",
+            Self::ContextMissing => "Token.MISSING",
+            Self::ContextVar(_) => "contextvars.ContextVar",
+            Self::ContextToken(_) => "contextvars.Token",
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
@@ -381,6 +389,8 @@ pub(crate) struct Module {
     pub class_fields: Vec<Vec<Type>>,
     /// Static names and generated value behavior; instance layouts stay unchanged.
     pub class_metadata: Vec<ClassMetadata>,
+    /// Single-generator list builds, keyed by the outlined helper they describe.
+    pub list_builds: std::collections::HashMap<usize, ListBuild>,
     /// Concrete JSON field schemas; decoding additionally checks constructors.
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
@@ -400,7 +410,17 @@ pub(crate) struct ClassMetadata {
     pub dataclass_eq: bool,
     pub dataclass_repr: bool,
     pub toml_hash: bool,
+    /// Field index for each parameter of a generated, field-only initializer.
+    pub initializer_fields: Option<Vec<usize>>,
     pub fields: Vec<ClassFieldMetadata>,
+}
+
+/// A helper appends one element to its private result for each item of the
+/// iterable parameter. The element stays in the checked append expression.
+pub(crate) struct ListBuild {
+    pub iterable: usize,
+    pub item: usize,
+    pub result: usize,
 }
 
 pub(crate) struct ClassFieldMetadata {
@@ -1011,6 +1031,7 @@ pub(crate) enum Builtin {
     Sha256Copy,
     BytesIo,
     StringIo(StringIoOperation),
+    ContextVar(ContextOperation),
     BinarySeek,
     BinaryTell,
     ZipOpenFile,
@@ -1201,6 +1222,7 @@ pub(crate) enum Builtin {
         left: bool,
     },
     DequeClear,
+    DequeReverse,
     DequeMaxlen,
     DequeIter {
         reverse: bool,
@@ -1285,8 +1307,32 @@ impl Builtin {
 
 pub(crate) const TUPLE_PROBE_ARITY: std::ops::RangeInclusive<usize> = 1..=16;
 
-/// Operations specific to Unicode text held in native memory.
+/// Reads from the active context or an explicit shallow snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ContextOperation {
+    New,
+    CopyCurrent,
+    Copy,
+    Var,
+    Set,
+    Reset,
+    ExitToken,
+    Read,
+    Contains,
+    ContextRead,
+    ContextContains,
+    Name,
+    TokenVar,
+    Old,
+    Missing,
+    WasMissing,
+    Enter,
+    Leave,
+    Len,
+}
+
+/// Operations specific to Unicode text held in native memory.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum StringIoOperation {
     New,
     Newlines,
@@ -1835,6 +1881,8 @@ impl IoBase {
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceType {
     Exact(Type),
+    ContextVar,
+    ContextToken,
     IoBase(IoBase),
     ForwardRef,
     SimpleNamespace,
@@ -1852,6 +1900,8 @@ impl InstanceType {
         match self {
             Self::IoBase(base) => base.matches(ty) != Some(false),
             Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
+            Self::ContextVar => matches!(ty, Type::ContextVar(_)),
+            Self::ContextToken => matches!(ty, Type::ContextToken(_)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
@@ -1940,8 +1990,8 @@ pub(crate) enum Statement {
 
 /// Visits expression trees, including statements embedded in eager expressions.
 /// Analyses must include every checked branch, even when it never executes.
-pub(crate) fn walk_expressions(body: &[Statement], visit: &mut impl FnMut(&Expr)) {
-    fn expression(value: &Expr, visit: &mut impl FnMut(&Expr)) {
+pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
+    fn expression<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
         visit(value);
         match &value.kind {
             ExprKind::List(values)

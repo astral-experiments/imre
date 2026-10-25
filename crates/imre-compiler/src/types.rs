@@ -40,6 +40,7 @@ enum Shape {
     DispatchCallable(DispatchFunction),
     DispatchRegistry(Type),
     Awaitable(Type),
+    ContextValue(Type),
     DirectoryContext(Type),
     ProcessArgs(Type),
     Optional(Type),
@@ -197,6 +198,9 @@ impl Types {
             Type::DirectoryContext(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::DirectoryContext(_)))
             }
+            Type::ContextVar(id) | Type::ContextToken(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::ContextValue(_)))
+            }
             Type::AsyncProcess(bits) => bits <= 3,
             Type::Popen(_, _, id) | Type::CompletedProcess(_, Some(id)) => {
                 matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_)))
@@ -230,6 +234,8 @@ impl Types {
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
+            | Type::Context
+            | Type::ContextMissing
             | Type::Semaphore
             | Type::Document(_)
             | Type::NativeModule
@@ -282,6 +288,7 @@ impl Types {
                 | Shape::Counter(ty)
                 | Shape::DispatchRegistry(ty)
                 | Shape::Awaitable(ty)
+                | Shape::ContextValue(ty)
                 | Shape::DirectoryContext(ty)
                 | Shape::ProcessArgs(ty)
                 | Shape::Optional(ty) => vec![*ty],
@@ -319,6 +326,8 @@ impl Types {
                 | Type::Task(child_id)
                 | Type::SimpleNamespace(child_id)
                 | Type::DirectoryContext(child_id)
+                | Type::ContextVar(child_id)
+                | Type::ContextToken(child_id)
                 | Type::Popen(_, _, child_id)
                 | Type::Union(child_id) = child
                     && child_id >= id
@@ -707,6 +716,9 @@ impl Types {
             | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
+            | Type::ContextVar(_)
+            | Type::ContextToken(_)
+            | Type::ContextMissing
             | Type::SourceModule
             | Type::BinaryIO => Some(true),
             Type::Optional(_) if self.truthiness(self.payload(ty).unwrap()) == Some(false) => {
@@ -1008,6 +1020,20 @@ impl Types {
 
     pub(crate) fn directory_context(&self, result: Type) -> Type {
         Type::DirectoryContext(self.intern(Shape::DirectoryContext(result)))
+    }
+
+    pub(crate) fn context_var(&self, value: Type) -> Type {
+        Type::ContextVar(self.intern(Shape::ContextValue(value)))
+    }
+
+    pub(crate) fn context_value(&self, ty: Type) -> Option<Type> {
+        let (Type::ContextVar(id) | Type::ContextToken(id)) = ty else {
+            return None;
+        };
+        match self.0.borrow().shapes[id] {
+            Shape::ContextValue(value) => Some(value),
+            _ => unreachable!("context value shape"),
+        }
     }
 
     pub(crate) fn directory_value(&self, ty: Type) -> Option<Type> {
@@ -1325,6 +1351,8 @@ impl Types {
                 | Type::ActivePopen
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
+                | Type::Context
+                | Type::ContextToken(_)
                 | Type::GeneratorContext
                 | Type::EventLoop
                 | Type::Coroutine(_)
@@ -1364,6 +1392,7 @@ impl Types {
             .or_else(|| self.set_element(ty))
             .or_else(|| self.deque_element(ty))
             .or_else(|| self.cursor_element(ty))
+            .or_else(|| self.context_value(ty))
             .or_else(|| self.var_tuple_element(ty))
         {
             vec![element]
@@ -1431,6 +1460,8 @@ impl TypeDescription<'_> {
             | Type::VarTuple(id)
             | Type::Tuple(id)
             | Type::Callable(id)
+            | Type::ContextVar(id)
+            | Type::ContextToken(id)
             | Type::Dict(id)
             | Type::ChainMap(id)
             | Type::Deque(id)
@@ -1455,6 +1486,14 @@ impl TypeDescription<'_> {
             }
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
             Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
+            Shape::ContextValue(value) => {
+                self.write_str(if matches!(ty, Type::ContextVar(_)) {
+                    "ContextVar["
+                } else {
+                    "Token["
+                })?;
+                self.write_type(*value)?;
+            }
             Shape::CachedCallable(c) => return self.write_type(c.callable),
             Shape::DispatchCallable(d) => return self.write_type(d.callable),
             Shape::Callable(params, returns) => {

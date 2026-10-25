@@ -49,6 +49,7 @@ impl Checker<'_> {
                 element,
             ),
             "clear" => (Builtin::DequeClear, vec![], Type::None),
+            "reverse" => (Builtin::DequeReverse, vec![], Type::None),
             "copy" | "__copy__" => (Builtin::DequeCopy, vec![], receiver.ty),
             _ => return Err(error(self.source, attribute, "unsupported deque attribute")),
         };
@@ -306,6 +307,9 @@ impl Checker<'_> {
         let name = attribute.attr.as_str();
         if name == "__init__" {
             return self.deque_initialize(call, Some(element), Some(receiver));
+        }
+        if name == "reverse" {
+            return self.sequence_reverse(stdlib::ReverseSequence::Deque, Some(receiver), call);
         }
         self.reject_builtin_keywords(call)?;
         let mut args = vec![receiver];

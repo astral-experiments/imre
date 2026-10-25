@@ -16,9 +16,9 @@ In the four host-driven poll and select IDs, CPython owns the assertions and fix
 
 For the two host-driven reuse IDs, the unchanged CPython method directs one persistent Imre selector. Both processes close the registered numbers and reuse them with `dup2`. Imre verifies the original pair was idle, the replacement pair has a byte queued, and neither registration survives unregister. Dropping a `dup2` or unregistering the same fd twice fails the test.
 
-Additional differential scenarios cover independent pollers, backpressure and recovery, EOF and fd reuse, timeouts, key identity and data replacement, mask translation, and selector cleanup. They do not increase the upstream method count.
+Additional differential scenarios cover independent pollers, backpressure and recovery, EOF and fd reuse, timeouts, key identity and data replacement, mask translation, and selector cleanup. The [two-client socket check](selector_sockets.py) keeps one connection idle while the other switches from read to write, then verifies readable EOF when the idle peer closes. The [subprocess backend check](../../../../tests/fixtures/processes/select_backend.py) uses the selector classes to choose how `Popen.communicate` waits for pipes. These observations do not increase the upstream method count.
 
-The Linux reference uses default regrtest resources. One poll case needs `walltime`; the selector ledger records 42 unavailable kqueue/devpoll backend cases and two `cpu` resource skips. Other unobserved IDs remain reference-only. The unchanged modules do not start under the ordinary or reachable-only native compiler: the poll and selector suites import `random`, and the select suite performs a module-level call before its test class declaration. These boundaries were checked against the staged test tree in both compiler modes.
+The Linux reference uses default regrtest resources. One poll case needs `walltime`; the selector ledger records 42 unavailable kqueue/devpoll backend cases and two `cpu` resource skips. Other unobserved IDs remain reference-only. The native evidence covers the individual methods and operations listed above; the complete suite inventory comes from the unchanged CPython modules.
 
 To reproduce with a test-enabled CPython 3.14.5:
 

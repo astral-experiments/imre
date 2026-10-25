@@ -96,11 +96,11 @@ impl Owned {
         Self(Py::integer(value.into_raw()))
     }
 
-    pub(super) fn bytes(value: Bytes) -> Self {
-        let ptr = Rc::into_raw(Rc::new(value))
+    pub(super) fn try_bytes(value: Bytes) -> Option<Self> {
+        let ptr = crate::BytesOwner::into_raw(crate::BytesOwner::try_new(value).ok()?)
             .cast_mut()
             .cast::<std::ffi::c_void>();
-        Self(Py(ptr.map_addr(|address| address | BYTES)))
+        Some(Self(Py(ptr.map_addr(|address| address | BYTES))))
     }
 
     pub(super) fn as_py(&self) -> Py {
@@ -161,7 +161,7 @@ impl Owned {
                     Some(word)
                 }
                 2 if let Some(bytes) = value.bytes() => {
-                    Rc::increment_strong_count(bytes);
+                    crate::retain_bytes(bytes);
                     Some(bytes as usize)
                 }
                 3 if let Some(list) = value.list() => {
@@ -198,7 +198,7 @@ impl Drop for Owned {
 }
 
 impl Py {
-    // All non-null pointers with this tag carry an aligned Rc<Bytes> address.
+    // All non-null pointers with this tag carry an aligned crate::BytesOwner address.
     pub(super) const NONE: Self = Self(std::ptr::without_provenance_mut(BYTES));
 
     pub(super) fn bits(word: usize) -> Self {
@@ -253,7 +253,7 @@ impl Py {
             unsafe { imre_int_retain(word) };
         } else if let Some(bytes) = self.bytes() {
             // SAFETY: the caller roots the immutable byte allocation.
-            unsafe { Rc::increment_strong_count(bytes) };
+            unsafe { crate::retain_bytes(bytes) };
         } else if let Some(list) = self.list() {
             // SAFETY: this tag carries the original list, with no copied backing storage.
             unsafe { imre_list_retain(list) };
@@ -269,7 +269,7 @@ impl Py {
             unsafe { imre_int_release(word) };
         } else if let Some(bytes) = self.bytes() {
             // SAFETY: the caller transfers one immutable bytes reference.
-            unsafe { Rc::decrement_strong_count(bytes) };
+            unsafe { crate::release_bytes(bytes) };
         } else if let Some(list) = self.list() {
             // SAFETY: the caller transfers a reference to this exact native list.
             unsafe { imre_list_release(list) };

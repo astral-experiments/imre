@@ -35,6 +35,7 @@ toml = { version = "=1.1.8", default-features = false, features = ["std", "parse
 toml_datetime = "=1.1.2"
 toml_parser = "=1.1.5"
 hashbrown = { version = "=0.17.1", default-features = false, features = ["inline-more"] }
+triomphe = { version = "=0.1.17", default-features = false }
 glidesort = "=0.1.2"
 smallvec = { version = "=1.16.3", features = ["union"] }
 sha2 = { version = "=0.11.1", default-features = false }
