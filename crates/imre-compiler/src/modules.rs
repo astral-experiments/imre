@@ -609,7 +609,7 @@ impl SourceModule {
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
-    deferred_names: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    inert_returns: std::cell::RefCell<Vec<Vec<(TextRange, bool)>>>,
     checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
@@ -739,8 +739,9 @@ impl SourceGraph {
         self.checked_calls.borrow_mut()[module].push(call);
     }
 
-    pub(crate) fn deferred_name(&self, module: ModuleId, name: TextRange) {
-        self.deferred_names.borrow_mut()[module].push(name);
+    pub(crate) fn inert_return(&self, module: ModuleId, annotation: &ast::Expr) {
+        self.inert_returns.borrow_mut()[module]
+            .push((annotation.range(), annotation.is_name_expr()));
     }
 
     pub(crate) fn checked_keywords(
@@ -797,10 +798,12 @@ impl SourceGraph {
                         keywords.into_iter().map(CheckedDiagnostic::Keyword)
                     })
                     .chain({
-                        let mut names = self.deferred_names.borrow()[id].clone();
-                        names.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        names.dedup();
-                        names.into_iter().map(CheckedDiagnostic::DeferredName)
+                        let mut returns = self.inert_returns.borrow()[id].clone();
+                        returns.sort_unstable_by_key(|(range, _)| (range.start(), range.end()));
+                        returns.dedup();
+                        returns
+                            .into_iter()
+                            .map(|(range, bare)| CheckedDiagnostic::InertReturn(range, bare))
                     })
                     .collect()
             })
@@ -1146,7 +1149,7 @@ impl<'a> Loader<'a> {
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
-            deferred_names: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            inert_returns: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))

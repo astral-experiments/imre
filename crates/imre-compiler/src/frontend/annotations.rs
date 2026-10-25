@@ -263,19 +263,28 @@ impl Checker<'_> {
         // object expression just because the selected format will raise.
         let binding = self.resolve(obj);
         let wrapped = if !matches!(binding, Some(Binding::Definition(_) | Binding::Module(_)))
-            && self.local_function_binding(obj).is_none() {
+            && self.local_function_binding(obj).is_none()
+        {
             let target = self.expr(obj)?;
             let layout = self.types.cached_function(target.ty).ok_or_else(|| error(self.source, obj,
                 "get_annotations requires a known native function, class, module, or cache wrapper"))?;
-            let origin = layout.annotations.ok_or_else(|| error(self.source, obj,
-                "the cached callback's annotation declaration is not statically known"))?;
+            let origin = layout.annotations.ok_or_else(|| {
+                error(
+                    self.source,
+                    obj,
+                    "the cached callback's annotation declaration is not statically known",
+                )
+            })?;
             Some((self.hidden(target.ty), target, origin))
         } else {
             None
         };
-        let wrapped_local = if let Some((_, _, crate::types::AnnotationOrigin::Local(id))) = &wrapped {
-            self.helpers.local_annotations.borrow().get(id).cloned()
-        } else { None };
+        let wrapped_local =
+            if let Some((_, _, crate::types::AnnotationOrigin::Local(id))) = &wrapped {
+                self.helpers.local_annotations.borrow().get(id).cloned()
+            } else {
+                None
+            };
         let local_owner = self
             .local_function_binding(obj)
             .and_then(|b| b.value_slot)
@@ -285,8 +294,12 @@ impl Checker<'_> {
             _ => None,
         };
         let scope = if let Some((_, _, crate::types::AnnotationOrigin::Local(id))) = &wrapped {
-            if wrapped_local.as_ref().is_some_and(|(_, f)| self.local_functions.get(f.name.as_str())
-                .and_then(|b| b.target(self.source, obj).ok()).is_some_and(|f| f.signature.id == *id)) {
+            if wrapped_local.as_ref().is_some_and(|(_, f)| {
+                self.local_functions
+                    .get(f.name.as_str())
+                    .and_then(|b| b.target(self.source, obj).ok())
+                    .is_some_and(|f| f.signature.id == *id)
+            }) {
                 AnnotationScope::LocalFunction
             } else {
                 AnnotationScope::UnavailableLocal
@@ -310,7 +323,9 @@ impl Checker<'_> {
             local_owner
         };
         let declaration = match &wrapped {
-            Some((_, _, crate::types::AnnotationOrigin::Module(d))) => Some(Binding::Definition(*d)),
+            Some((_, _, crate::types::AnnotationOrigin::Module(d))) => {
+                Some(Binding::Definition(*d))
+            }
             _ => binding,
         };
         let (id, entries) = match declaration {
@@ -361,13 +376,31 @@ impl Checker<'_> {
                 (self.module, function_entries(f))
             }
         };
-        let result = self.declared_annotations(obj, id, entries, (format, eval_str), scope, owner)?;
+        let result =
+            self.declared_annotations(obj, id, entries, (format, eval_str), scope, owner)?;
         Ok(if let Some((slot, target, _)) = wrapped {
-            Expr { ty: result.ty, kind: ExprKind::Scope { body: vec![Statement::Assign(slot, target)], value: Box::new(result), clear: vec![slot] } }
-        } else { result })
+            Expr {
+                ty: result.ty,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Assign(slot, target)],
+                    value: Box::new(result),
+                    clear: vec![slot],
+                },
+            }
+        } else {
+            result
+        })
     }
 
-    fn declared_annotations(&self, obj: &ast::Expr, id: ModuleId, entries: Vec<(&str, &ast::Expr)>, options: (i64, bool), scope: AnnotationScope, owner: Option<Expr>) -> Result<Expr, String> {
+    fn declared_annotations(
+        &self,
+        obj: &ast::Expr,
+        id: ModuleId,
+        entries: Vec<(&str, &ast::Expr)>,
+        options: (i64, bool),
+        scope: AnnotationScope,
+        owner: Option<Expr>,
+    ) -> Result<Expr, String> {
         let (format, eval_str) = options;
         let dict = |types: &Types, value: Type, entries| Expr {
             ty: types.dict(Type::Str, value),
@@ -456,7 +489,11 @@ impl Checker<'_> {
                             && scope != AnnotationScope::Namespace =>
                     {
                         if scope == AnnotationScope::UnavailableLocal {
-                            return Err(error(&module.source, a, "deferred annotation requires the original enclosing scope"));
+                            return Err(error(
+                                &module.source,
+                                a,
+                                "deferred annotation requires the original enclosing scope",
+                            ));
                         }
                         if scope == AnnotationScope::LocalFunction
                             && let Some(&slot) = self.names.get(n.id.as_str())
