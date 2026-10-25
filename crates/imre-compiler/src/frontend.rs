@@ -301,6 +301,7 @@ const RESERVED: &[&str] = &[
     "set",
     "len",
     "abs",
+    "chr",
     "sorted",
     "divmod",
     "isinstance",
@@ -6172,6 +6173,21 @@ impl<'a> Checker<'a> {
         }
         let (builtin, ty) = match name.id.as_str() {
             "input" if args.is_empty() => (Builtin::Input, Type::Str),
+            "chr" if args.len() == 1 && matches!(args[0].ty, Type::Int | Type::Bool) => {
+                let value = args.into_iter().next().unwrap();
+                let integer = if value.ty == Type::Int {
+                    value
+                } else {
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                    }
+                };
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Chr, vec![integer]),
+                });
+            }
             "str" if args.is_empty() => {
                 return Ok(Expr {
                     ty: Type::Str,

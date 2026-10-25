@@ -24,3 +24,7 @@ python -B benchmarks/cpython_stdlib/full/json/native.py \
 ```
 
 The [native report](native-linux.json) records both `-O0` and `-O3`. The original unittest methods run on CPython; each JSON call runs in the compiled Imre driver. The host transports operands and reconstructs native values for the assertions. Both backend fixtures use the same executable. Each level ran 54 IDs (27 source methods; 256 native calls). Twenty-one additional binary stream controls check native `json.load` across encodings, doubled byte order marks and malformed code units; these do not increase the upstream test count.
+
+## Compiled upstream methods
+
+Run `bodies.py` with the same options as `native.py`. It copies complete verified method definitions, including all input expressions and loops, into a typed native unittest fixture. The fixture forwards calls to standard `json` and compares the actual native operands. The [body report](bodies-linux.json) records each source hash, inherited fixture IDs, and observed assertion counts at both levels. The Unicode escape sweep runs all 55,295 iterations natively. These 11 methods run once per source per level; ten also appear in the host-driven results above.
