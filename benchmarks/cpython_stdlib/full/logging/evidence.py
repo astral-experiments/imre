@@ -19,6 +19,7 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 sys.path[:0] = [str(HERE), str(STDLIB)]
+import native_config
 import native_filters
 import native_formatters
 import native_hierarchy
@@ -148,6 +149,7 @@ def known_cases(toolchain, work, original):
         return native_method(toolchain, directory("native-daily"), SOURCE, owner, daily, fixture,
             operation=("imre", "Native handler construction, calendar rollover and close"))(case, method)
     executions[daily] = native_daily
+    executions.update(native_config.config_cases(toolchain, directory("config"), original))
     executions.update(native_filters.filter_cases(toolchain, directory("name-filter")))
     executions.update(native_hierarchy.hierarchy_cases(toolchain, directory("children")))
     formatter = toolchain.build((HERE / "formatter_driver.py").read_bytes(), directory("formatters"))

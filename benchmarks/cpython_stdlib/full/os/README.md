@@ -22,18 +22,24 @@ A user namespace mapping only the caller's UID/GID can cause `ChownFileTests.tes
 
 ## Descriptor execution
 
-[Linux results](descriptors-linux.json) report 15 distinct methods at both `-O0` and `-O3`:
+[Linux results](descriptors-linux.json) report 23 distinct methods at both `-O0` and `-O3`:
 
 | Suite | Native body, assertions and OS operations; CPython fixtures | Host body and assertions; native OS operations |
 | --- | ---: | ---: |
-| `test_os` | 9 | 3 |
-| `test_posix` | 1 | 2 |
+| `test_os` | 9 | 9 |
+| `test_posix` | 3 | 2 |
 
 The [shared runner](../../SUITE_RUNNER.md) runs each original module and instance fixture. In particular, `FileTests` removes its test file, `PosixTester` creates one and installs warning filters, and both modules have teardown hooks. The native child inherits this working directory and uses the same test filename. It registers descriptors for reverse-order cleanup and closes them in a `finally` block; the adapter accepts only `os.close` registrations. The invalid-descriptor fixture opens and closes a real descriptor inside Imre. Every row names the CPython hooks; none is counted as an entirely native fixture.
 
-For the five host-driven methods, compiled Imre code shares the host process's descriptor table with upstream `fcntl` and file objects. The host supplies an independent check; the operations under test execute in Imre. The older `native_os.py` getcwd/fspath results are separate.
+For the eleven host-driven methods, compiled Imre code shares the host process's descriptor table with upstream `fcntl` and file objects. The host supplies an independent check; the operations under test execute in Imre. The older `native_os.py` getcwd/fspath results are separate.
 
 Run `native_descriptors.py` and `host_descriptors.py` here with the pinned reference interpreter. Both accept `--imre`, `--runtime`, `--clang`, `--opt-level 0|3`, `--result`, and an optional `--cpython-source`. Each run uses temporary fixtures. Host-driven calls expose only explicitly routed operations. An absent bridge operation fails the test.
+
+## Structured OS errors
+
+For a failed descriptor operation, the compiled entry returns the caught OS exception subclass, errno and strerror. The host checks the class before it raises the transported error for the upstream assertions. File errors retain the original str or bytes object; the runtime ownership test covers a second filename and a bytes path containing 0xff.
+
+The four public fields use the same stored errno and strerror arguments as exception repr. The error-fields probe compares both display forms and all fields with the pinned interpreter for missing str/bytes filenames, a bad descriptor, and a message-only error. It contributes no upstream test ID.
 
 ## Environment and path values
 
@@ -66,8 +72,9 @@ native calls and host setup details for auditing. A supplemental configuration
 does not replace a canonical skip.
 
 [Method preflight](method-preflight-linux.json) records a separate native build
-at each level for every other reference-passing public occurrence: 295 OS, 143
-POSIX and 25 genericpath. Each build takes the complete verified definition, its
+at each level for the initial 295 OS, 143 POSIX and 25 genericpath reference-passing
+occurrences outstanding after #506. Later successful executions take precedence over
+the earlier diagnostics in the versioned reports. Each build takes the complete verified definition, its
 actual imported names, and the shared native TestCase fixture. Eight generated
 invalid-descriptor methods receive the operation name from their original closure.
 Two outer methods now compile: the unchanged subprocess requests for
@@ -84,13 +91,13 @@ work](https://github.com/astral-sh/imre/pull/587#issuecomment-6392803799) covers
 that fixture requirement. Other first errors belong to upstream case helpers,
 such as `WalkTests.walk`, or to a product import such as `posix`. A compiler
 diagnostic describes the first failed build step, not the result of running the
-method. The [canonical rollup](../native_report.py) counts 13 native bodies with
-host fixtures, six host-driven native operations, one mixed body, two host operations, 461 blockers,
+method. The [canonical rollup](../native_report.py) counts 15 native bodies with
+host fixtures, 12 host-driven native operations, one mixed body, two host operations, 453 blockers,
 five private reference-only cases, and 91 upstream skips at each level.
 
 To refresh these diagnostics, run `method_preflight.py` twice with the same
 `--imre`, `--runtime`, `--clang` and `--cpython-source`, once with each
 `--opt-level 0|3` and a distinct `--result`. Pass both files to
 `evidence.py --method-results O0.json O3.json --compiler-commit FULL_SHA`.
-CI independently reruns the 22 exercised methods at both levels and
+CI independently reruns the 30 exercised methods at both levels and
 compares their results with the denominator reports.

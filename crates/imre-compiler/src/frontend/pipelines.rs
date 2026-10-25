@@ -112,9 +112,10 @@ pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Ex
             || checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
             || checker.is_builtin_iter(call)
             || matches!(&*call.func, ast::Expr::Name(name)
-                if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
+                if checker.resolve(&call.func).is_none()
+                    && matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
             || matches!(&*call.func, ast::Expr::Attribute(attribute)
-                if matches!(attribute.attr.as_str(), "iterdir" | "glob")))
+                if matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob")))
 }
 
 pub(super) fn integer(value: i64) -> Expr {
@@ -298,15 +299,14 @@ impl Checker<'_> {
             return Ok(Some(Iteration::Prepared(input)));
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && matches!(attribute.attr.as_str(), "iterdir" | "glob")
+            && matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob")
             && self.class_reference(&attribute.value).is_none()
         {
             let receiver = self.expr(&attribute.value)?;
             if receiver.ty == Type::Path {
-                let iterator =
-                    self.path_iterator(receiver, call, attribute.attr.as_str() == "glob")?;
+                let iterator = self.path_iterator(receiver, call, attribute.attr.as_str())?;
                 return Ok(Some(Iteration::Prepared(
-                    self.prepare_path_iterator(iterator),
+                    self.prepare_cursor(iterator, Type::Path),
                 )));
             }
             if let Type::Class(class) = receiver.ty {
@@ -687,17 +687,6 @@ impl Checker<'_> {
         }
     }
 
-    /// Method evaluation creates the iterator at Python's observable point.
-    /// Runtime iterdir snapshots eagerly; glob waits for the first pull. Private
-    /// nullable results own every yielded path until the consumer acquires it.
-    fn prepare_path_iterator(&mut self, expression: Expr) -> Prepared {
-        self.prepare_pull_iterator(
-            expression,
-            Type::Path,
-            Builtin::Path(ir::PathOperation::Next),
-        )
-    }
-
     pub(super) fn prepare_csv_reader(&mut self, reader: Expr) -> Prepared {
         self.prepare_pull_iterator(
             reader,
@@ -765,6 +754,52 @@ impl Checker<'_> {
             writes: HashSet::new(),
             clear: vec![iterator, optional, value, ready, done],
         }
+    }
+
+    /// Consume the cursor from its current position. Acquire the operand before
+    /// allocating the result, and release both owners if a later pull fails.
+    pub(super) fn collect_cursor_set(
+        &mut self,
+        cursor: Expr,
+        element: Type,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        if !self.types.hashable_key(element) {
+            return Err(error(
+                self.source,
+                node,
+                "set() requires hashable cursor elements",
+            ));
+        }
+        let ty = self.types.set(element);
+        let result = self.hidden(ty);
+        let input = Iteration::Prepared(self.prepare_cursor(cursor, element));
+        let empty = Expr {
+            ty,
+            kind: ExprKind::Set {
+                element,
+                values: Vec::new(),
+            },
+        };
+        let body = self.expand_items_after(
+            input,
+            node,
+            vec![Statement::Assign(result, empty)],
+            |checker, value| {
+                Ok(vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::SetAdd, vec![checker.local(result), value]),
+                })])
+            },
+        )?;
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(self.local(result)),
+                clear: vec![result],
+            },
+        })
     }
 
     fn may_own_file(&self, ty: Type, opaque_callables: bool) -> bool {

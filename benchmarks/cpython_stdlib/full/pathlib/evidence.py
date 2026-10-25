@@ -16,6 +16,7 @@ from suite_inventory import load_suite, verify_interpreter_tests
 from suite_native import Toolchain, run_evidence
 from upstream import verify_upstream
 import native_lexical
+from native_traversal import traversal_adapters
 
 
 def skip_source(case_id, reason):
@@ -112,11 +113,12 @@ def file_adapters(tools, work):
 
 
 def main():
+    cohorts = {'lexical': lexical_adapters, 'files': file_adapters, 'traversal': traversal_adapters}
     parser = argparse.ArgumentParser(description=__doc__)
     for option in ('imre', 'runtime', 'clang', 'result'):
         parser.add_argument('--' + option, required=True, type=Path)
     parser.add_argument('--cpython-source', type=Path)
-    parser.add_argument('--cohort', choices=('lexical', 'files'), action='append')
+    parser.add_argument('--cohort', choices=cohorts, action='append')
     args = parser.parse_args()
     if sys.version_info[:3] != (3, 14, 5) or sys.platform != 'linux':
         parser.error('use the test-enabled CPython 3.14.5 on Linux')
@@ -134,10 +136,13 @@ def main():
         for level in (0, 3):
             tools = Toolchain(imre, runtime, clang, level)
             adapters = {}
-            for cohort in (args.cohort or ('lexical', 'files')):
+            for cohort in (args.cohort or cohorts):
                 work = Path(tmp) / f'{cohort}-{level}'
                 work.mkdir()
-                adapters.update({'lexical': lexical_adapters, 'files': file_adapters}[cohort](tools, work))
+                selected = cohorts[cohort](tools, work)
+                if adapters.keys() & selected.keys():
+                    raise ValueError(f'duplicate method in {cohort} cohort')
+                adapters.update(selected)
             report = run_evidence(load_suite('test.test_pathlib'), adapters, reference, level,
                                   exceptions=exceptions(reference, level))
             print(f"O{level}: {report['counts']}", flush=True)

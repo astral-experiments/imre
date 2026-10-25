@@ -104,6 +104,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ContextExit
@@ -124,7 +125,7 @@ impl Builtin {
                     | PathOperation::TemporaryDirectory
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
-                    | PathOperation::Next => true,
+                    | PathOperation::Glob { .. } => true,
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
                     | PathOperation::UnionText
@@ -136,6 +137,7 @@ impl Builtin {
                     | PathOperation::Drive
                     | PathOperation::Root
                     | PathOperation::Anchor
+                    | PathOperation::CountPart
                     | PathOperation::AsPosix
                     | PathOperation::Join
                     | PathOperation::Text
@@ -146,8 +148,7 @@ impl Builtin {
                     | PathOperation::IsAbsolute
                     | PathOperation::Exists
                     | PathOperation::IsFile
-                    | PathOperation::IsDir
-                    | PathOperation::Glob => false,
+                    | PathOperation::IsDir => false,
                 },
                 PreservesLists,
             ),
@@ -174,6 +175,9 @@ impl Builtin {
                     operation,
                     crate::ir::LogOperation::Configure
                         | crate::ir::LogOperation::ConfigureName
+                        | crate::ir::LogOperation::DictConfig
+                        | crate::ir::LogOperation::DictConfigTyped
+                        | crate::ir::LogOperation::FileConfig
                         | crate::ir::LogOperation::CheckLevel
                 ),
                 PreservesLists,
@@ -192,7 +196,7 @@ impl Builtin {
                 | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire => Contract::new(true, Unknown),
                 ProcessOperation::Executable
-                | ProcessOperation::CheckOutput
+                | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
@@ -233,6 +237,8 @@ impl Builtin {
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
+                | ProcessOperation::OsErrorField(_)
+                | ProcessOperation::Strerror
                 | ProcessOperation::Which
                 | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
@@ -276,6 +282,7 @@ impl Builtin {
             | Self::RegexGroupDict
             | Self::DictGet
             | Self::DictCopy
+            | Self::RecordCopy
             | Self::JsonDecode(_)
             | Self::CsvReader { .. }
             | Self::CsvNext { .. }
@@ -354,7 +361,6 @@ impl Builtin {
             | Self::SequenceGetInBounds
             | Self::SetContains
             | Self::Split
-            | Self::Ndiff
             | Self::StringListCopy
             | Self::StringListFilter(_)
             | Self::StringListSortSuffix(_)
@@ -375,6 +381,7 @@ impl Builtin {
             Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
+            | Self::Ndiff
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::DictDelete
@@ -401,6 +408,7 @@ impl Builtin {
             | Self::ZipClose
             | Self::Input
             | Self::ParseArgs { .. }
+            | Self::ArgparseText { .. }
             | Self::Pop
             | Self::Print
             | Self::SortRestore
@@ -450,6 +458,7 @@ impl Builtin {
             | Self::StringReverseIter
             | Self::TextClosed => Contract::new(false, Unknown),
             Self::CounterMath { .. }
+            | Self::CounterMostCommon
             | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::TupleCacheNew
@@ -480,6 +489,7 @@ impl Builtin {
             _ => false,
         };
         let valid = match self {
+            Self::RecordCopy => matches!(result, Type::Class(_)) && signature(&[result], result),
             Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
@@ -699,6 +709,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_formatter_message"
                 | "imre_logrecord_message"
                 | "imre_log_config"
+                | "imre_log_dict_config"
+                | "imre_log_typed_dict_config"
+                | "imre_log_file_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
                 | "imre_stderr_line"
@@ -729,6 +742,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
+                | "imre_fnmatch_translate"
+                | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
                 | "imre_hash_new"
                 | "imre_toml_keys"
@@ -806,10 +821,12 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_repeat"
                 | "imre_str_repeat"
                 | "imre_seq_slice"
+                | "imre_record_shallow_copy"
                 | "imre_dict_copy"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
+                | "imre_ndiff_deferred"
                 | "imre_dict_delete"
                 | "imre_dict_pop"
                 | "imre_cursor_length_hint"

@@ -8,6 +8,7 @@ use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
 mod counters;
+mod ranking;
 mod record_hash;
 mod sorted_rows;
 
@@ -292,10 +293,15 @@ struct Entry<K, V> {
     key: K,
     value: V,
 }
+enum Cursors {
+    Iterators(Vec<Weak<Cell<usize>>>),
+    Oldest(usize),
+}
+
 struct Table<K, V> {
     index: HashTable<usize>,
     entries: Vec<Option<Entry<K, V>>>,
-    iterators: Vec<Weak<Cell<usize>>>,
+    cursors: Cursors,
 }
 
 // Every live entry needs at least eight bytes, including key-only set entries.
@@ -308,7 +314,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         Self {
             index: HashTable::new(),
             entries: Vec::new(),
-            iterators: Vec::new(),
+            cursors: Cursors::Iterators(Vec::new()),
         }
     }
 
@@ -379,13 +385,17 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         }
         // Each cursor points just past the last entry it examined. After
         // compaction only the occupied slots in that prefix remain before it.
-        self.iterators.retain(|iterator| {
-            let Some(position) = iterator.upgrade() else {
-                return false;
-            };
-            position.set(self.entries[..position.get()].iter().flatten().count());
-            true
-        });
+        match &mut self.cursors {
+            Cursors::Iterators(iterators) => iterators.retain(|iterator| {
+                let Some(position) = iterator.upgrade() else {
+                    return false;
+                };
+                position.set(self.entries[..position.get()].iter().flatten().count());
+                true
+            }),
+            // Eviction leaves only empty slots before the private cache cursor.
+            Cursors::Oldest(position) => *position = 0,
+        }
         self.entries.retain(Option::is_some);
         self.index.clear();
         let entries = &self.entries;
@@ -409,11 +419,26 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     }
 
     fn iterator_position(&mut self) -> Rc<Cell<usize>> {
-        self.iterators
-            .retain(|iterator| iterator.strong_count() != 0);
+        let Cursors::Iterators(iterators) = &mut self.cursors else {
+            unreachable!("function cache tables are private");
+        };
+        iterators.retain(|iterator| iterator.strong_count() != 0);
         let position = Rc::new(Cell::new(0));
-        self.iterators.push(Rc::downgrade(&position));
+        iterators.push(Rc::downgrade(&position));
         position
+    }
+
+    fn eviction_key(&mut self) -> OwnedWord {
+        let start = match &self.cursors {
+            Cursors::Iterators(iterators) => {
+                debug_assert!(iterators.is_empty());
+                0
+            }
+            Cursors::Oldest(position) => *position,
+        };
+        let (next, key, _) = self.next(start).expect("nonempty bounded cache");
+        self.cursors = Cursors::Oldest(next);
+        key
     }
 
     unsafe fn lookup(&self, word: usize) -> Option<&Entry<K, V>> {
@@ -1180,7 +1205,6 @@ impl Storage {
 
 struct FunctionCache {
     table: Rc<Object>,
-    oldest: Option<Rc<Cell<usize>>>,
     hits: usize,
     misses: usize,
 }
@@ -1201,7 +1225,6 @@ pub extern "C" fn imre_function_cache(id: usize, key: u32, value: u32) -> *const
                 .or_insert_with(|| FunctionCache {
                     // SAFETY: imre_dict_new returns an independent strong owner.
                     table: unsafe { Rc::from_raw(imre_dict_new(key, value)) },
-                    oldest: None,
                     hits: 0,
                     misses: 0,
                 })
@@ -1279,11 +1302,7 @@ pub unsafe extern "C" fn imre_function_cache_insert(
 
                 // Reserve and insert first: an allocation error must not evict the oldest entry.
                 let table = &mut mapping.tables;
-                let cursor = cache
-                    .oldest
-                    .get_or_insert_with(|| table.iterator_position());
-                let (next, oldest, _) = table.next(cursor.get()).expect("nonempty bounded cache");
-                cursor.set(next);
+                let oldest = table!(table, table => table.eviction_key());
                 let (key, word) = table.remove(oldest.word).unwrap();
                 mapping.update_ascii_int(key.word, 0);
                 Ok(Some((key, OwnedWord::from_owned(word, mapping.value_kind))))
@@ -2073,13 +2092,20 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
                 Ok(None)
             }
             Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
+            Storage::PathIterator(iterator) => iterator.next().map(|path| {
+                // A non-null path transfers its owner to the caller of pull().
+                (!path.is_null())
+                    .then(|| (OwnedWord::from_owned(path as usize, WordKind::new(5)), None))
+            }),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
-            _ => storage.mapping_iterator_mut().next(),
+            _ => storage
+                .mapping_iterator_mut()
+                .next()
+                .map_err(|error| Error::new(Kind::RuntimeError, error.message())),
         })
-    }
-    .map_err(|error| Error::new(Kind::RuntimeError, error.message()))?;
+    }?;
     match adapter {
         Some(adapter) => adapter.next().map(|item| item.map(|item| (item, None))),
         None => Ok(next),
@@ -2184,6 +2210,22 @@ mod tests {
         assert_eq!(table.position(HASHER.hash_one(7_usize), &7), Some(0));
         assert!(table.insert(8, ()).is_ok());
         assert_eq!(table.index.len(), 2);
+    }
+
+    #[test]
+    fn cache_eviction_keeps_lru_order_across_compaction() {
+        let mut table = Table::<usize, ()>::new();
+        for key in 0..2 {
+            assert!(table.insert_absent(HASHER.hash_one(key), key, ()).is_ok());
+        }
+        for key in 2..256 {
+            // SAFETY: enum tags are immediate scalar keys.
+            assert!(matches!(unsafe { table.promote(0) }, Ok(true)));
+            assert!(table.insert_absent(HASHER.hash_one(key), key, ()).is_ok());
+            let oldest = table.eviction_key();
+            assert_eq!(oldest.word, key - 1);
+            assert!(table.remove(&oldest.word).is_some());
+        }
     }
 
     #[test]
