@@ -41,6 +41,7 @@ mod os;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
+mod random;
 mod readiness;
 pub(crate) mod records;
 mod regexes;
@@ -111,6 +112,7 @@ enum Storage {
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
+    TupleBuffer(Vec<OwnedWord>),
     SimpleNamespace(Rc<Object>),
     SourceModule {
         name: crate::StrOwner,
@@ -128,6 +130,7 @@ enum Storage {
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),
     Popen(Box<processes::Popen>),
+    ProcessSelectorClass(bool),
     AsyncProcess(Box<processes::AsyncProcess>),
     AsyncCoroutine(Rc<asyncio::Task>),
     AsyncTask(Rc<asyncio::Task>),
@@ -1263,23 +1266,25 @@ struct LineIterator {
     offsets: LineOffsets,
 }
 
-fn owned_line(source: &StrOwner, range: std::ops::Range<usize>) -> StrOwner {
+fn owned_line(source: &StrOwner, range: std::ops::Range<usize>) -> Result<StrOwner, Error> {
     if range == (0..source.len()) {
-        StrOwner::clone(source)
+        Ok(StrOwner::clone(source))
     } else {
-        text::owned_string(&source[range])
+        text::try_owned_string(&source[range])
     }
 }
 
 impl LineIterator {
-    fn next(&mut self) -> Option<(OwnedWord, Option<OwnedWord>)> {
-        let range = self.offsets.next(&self.owner)?;
-        let line = owned_line(&self.owner, range);
+    fn next(&mut self) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, Error> {
+        let Some(range) = self.offsets.next(&self.owner) else {
+            return Ok(None);
+        };
+        let line = owned_line(&self.owner, range)?;
         // SAFETY: the new string transfers one owner of the exact element kind.
         let line = unsafe {
             OwnedWord::from_owned(StrOwner::into_raw(line) as usize, words::WordKind::new(3))
         };
-        Some((line, None))
+        Ok(Some((line, None)))
     }
 }
 
@@ -1353,7 +1358,7 @@ unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Obje
 
 fn split_lines(
     value: &str,
-    own: impl Fn(std::ops::Range<usize>) -> StrOwner,
+    own: impl Fn(std::ops::Range<usize>) -> Result<StrOwner, Error>,
 ) -> Result<*const Object, Error> {
     let mut offsets = LineOffsets::new(value);
     let mut result = Words::new(3);
@@ -1362,7 +1367,7 @@ fn split_lines(
             .values
             .try_reserve(1)
             .map_err(|_| Error::allocation())?;
-        result.values.push(StrOwner::into_raw(own(range)) as usize);
+        result.values.push(StrOwner::into_raw(own(range)?) as usize);
     }
     Ok(Rc::into_raw(result.into_object()))
 }
@@ -1370,6 +1375,20 @@ fn split_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_split_releases_earlier_string_owners() {
+        let first = StrOwner::new(Str::new("first"));
+        let result = split_lines("first\nsecond", |range| {
+            if range.start == 0 {
+                Ok(first.clone())
+            } else {
+                Err(Error::allocation())
+            }
+        });
+        assert!(result.is_err());
+        assert_eq!(StrOwner::strong_count(&first), 1);
+    }
 
     #[test]
     fn concatenation_retains_the_only_nonempty_string_handle() {
@@ -2272,7 +2291,9 @@ mod tests {
             offsets: LineOffsets::new(&source),
             owner: StrOwner::clone(&source),
         };
-        let (word, _) = cursor.next().unwrap();
+        let Ok(Some((word, _))) = cursor.next() else {
+            panic!("expected an owned line");
+        };
         // SAFETY: the iterator transfers a Str owner, and source roots the eager split.
         unsafe {
             let streamed = StrOwner::from_raw(word.into_word() as *const Str);
