@@ -77,6 +77,8 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 `left + right` evaluates both lists before copying their elements into a fresh list. Both inputs have the same element type. If an element is a nested list or a record, the result shares that object with the input lists.
 
+`in` and `not in` support integer and string lists. An integer needle may be optional: a subprocess return code of `None` is absent from `[0, 1]`. Integer membership uses value equality, including for integers too large to fit in a machine word.
+
 `sorted(source, key=callback, reverse=condition)` returns a fresh list. Both keywords are optional. `key=None` compares the elements themselves, and `reverse` defaults to false and requires an exact `bool`. Keys may be exact integers, booleans, strings, string enums, bytes, or fixed tuples recursively containing those scalar types. Tuple fields whose exact type is `None` are also allowed; nullable fields, floats, mutable containers, and records are not. Every key has the same concrete shape, and tuples compare lexicographically. Input and keyword expressions evaluate in source order, then the source is fully materialized before any key callback runs. Each key is evaluated once in input order. Sorting is stable in both directions, so equal keys retain their input order even with `reverse=True`. A callback may mutate the original source or its elements and may raise. The copy already contains all input elements when the first callback runs.
 
 `values.sort(key=callback, reverse=condition)` accepts the same keys and updates the list in place. It returns `None`. Aliases observe the new order. During key evaluation the list appears empty until a callback adds elements. If a key raises, the list regains its original membership and order and the exception propagates. If keys succeed after a callback appends to the list, the sorted original elements are restored and the sort raises `ValueError`.
@@ -127,6 +129,15 @@ The list snapshots both inputs. Changing an input or a shallow copy afterward
 preserves ordinary list semantics. A program that selects added or removed rows
 and sorts by the text after the two-character tag can skip intraline comparisons.
 Reading the raw rows yields the original ordering and `? ` guides.
+
+`unidiff.PatchSet(text)` reads unified text patches, including Git file metadata.
+Iterating a patch set yields files; iterating a file yields hunks. The supported
+projections are `patch_set.modified_files` (a fresh list), `file.path`,
+`hunk.source_start`, and `str(hunk)`. The hunk string includes its canonical
+header and preserves the line endings and no-newline markers in the patch.
+Invalid hunk boundaries raise `unidiff.UnidiffParseError`. These patch objects
+are read-only; mutation, per-line objects, byte inputs, and metadata-only parsing
+are outside this surface.
 
 `itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
 `for key, group` loop, the first statement must assign `list(group)` to a separate
@@ -1191,6 +1202,10 @@ A function returning `Sequence[T]` can return an exact `list[T]`.
 
 Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the counts for every key of either counter. An absent key contributes zero.
 
+`Counter.elements()` returns an iterator over the stored keys in insertion
+order. Each positive integer count repeats its key; a change to a later entry
+is visible when the iterator reaches it.
+
 `mapping.clear()` removes every entry in place and returns `None`. Aliases see
 the empty dictionary; a `Counter` still returns zero for a missing key, and a
 `defaultdict` keeps its factory. `dict.clear(mapping)` and the inherited class
@@ -1222,6 +1237,14 @@ It evaluates the value once, defaults it to `None`, and shares that object
 among all keys. A bound call uses the receiver's class without copying its
 entries. A native defaultdict produces a new mapping with no default factory;
 a native Counter raises `NotImplementedError`.
+
+`collections.OrderedDict[K, V]` accepts the same typed mappings, pairs and
+keyword entries as `dict`. Replacing a value preserves its position; deleting
+and reinserting the key moves it to the end. Two ordered dictionaries compare
+both their keys' order and their values. When one operand is a plain dictionary
+of the same key and value types, equality ignores order. The bound `copy()`
+retains the concrete mapping type and shares its values. Changing keys during
+iteration raises `RuntimeError` if another key remained to be yielded.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
 

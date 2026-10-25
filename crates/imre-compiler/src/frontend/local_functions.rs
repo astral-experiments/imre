@@ -326,14 +326,21 @@ impl Checker<'_> {
             old.overload_stub = overload;
             old.later_writes = site.later_writes;
         }
-        if self.generic_awaitable_wrapper(definition) {
+        let wraps = match definition.decorator_list.as_slice() {
+            [decorator] => decorator.expression.as_call_expr().filter(|call| {
+                self.resolve(&call.func)
+                    == Some(crate::modules::Binding::Intrinsic(Intrinsic::Wraps))
+            }),
+            _ => None,
+        };
+        if wraps.is_none() && self.generic_awaitable_wrapper(definition) {
             self.local_functions.get_mut(name).unwrap().generic = Some(Rc::new(definition.clone()));
             return Ok(None);
         }
         let policy = self.local_cache_policy(definition)?;
         let decorator = self.local_dispatch_decorator(definition)?;
         let mut raw;
-        let signature_def = if policy.is_some() || decorator.is_some() {
+        let signature_def = if policy.is_some() || decorator.is_some() || wraps.is_some() {
             raw = definition.clone();
             raw.decorator_list.clear();
             &raw
@@ -352,8 +359,19 @@ impl Checker<'_> {
         if unread {
             signature.params[0].ty = self.types.unread_argument();
         }
-        let function = self.lift_local(definition, signature)?;
-        let value = if let Some(policy) = policy {
+        let function = self.lift_local(
+            if wraps.is_some() {
+                signature_def
+            } else {
+                definition
+            },
+            signature,
+        )?;
+        let value = if let Some(config) = wraps {
+            let (scope, wrapped) = self.wraps_config(config)?;
+            let wrapper = function.callback(self.types, self.source, definition)?;
+            Some(scope.finish(self.attach_wrapped(wrapper, wrapped, config)?))
+        } else if let Some(policy) = policy {
             let raw = function.callback(self.types, self.source, definition)?;
             let origin = self.local_annotation_origin(&function);
             Some(self.owned_cache(raw, policy, Some(origin), definition)?)

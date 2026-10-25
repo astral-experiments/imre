@@ -25,7 +25,7 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The local replay of `449f10c8657d3e67230e080c2ce006501a4d0a5e` includes logger hierarchy, handler registration,
+The local replay of `303e9fb05462f91c53b4a7c7736876024e988cfe` includes logger hierarchy, handler registration,
 formatters, and ordinary, timed and [size-based rotation](rotation.md).
 Both levels have the same counts:
 
@@ -33,8 +33,8 @@ Both levels have the same counts:
 | --- | --- | --- | --- | ---: |
 | Imre | Imre | Imre | CPython hooks and native child | 16 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
-| CPython | CPython | Imre | CPython | 38 |
-| Blocked before execution | | | | 211 |
+| CPython | CPython | Imre | CPython | 39 |
+| Blocked before execution | | | | 210 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -44,7 +44,7 @@ an empty name filter, both buffering formatters, and [FileHandler](files.md)
 delayed creation and emission after closing a file opened in write mode.
 Four additional unchanged rotation bodies check actual files and rollover decisions.
 Four bodies verify native stderr with the original
-CPython output helper. The 38 host-driven methods exercise named handler registration, the registry, timed and rotating
+CPython output helper. The 39 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
 compiler or adapter blockers, and the three pinned skip conditions. It

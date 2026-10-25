@@ -82,6 +82,29 @@ except TypeError as e:
 
 print(repr(Child("nested", "forwarded").args))
 """,
+    "ordinary_forwarding_fields": """
+class Ordinary(Exception):
+    def __init__(self, value, *rest):
+        self.value = value
+        self.name = value
+        self.obj = value
+        self.errno = value
+        self.strerror = value
+        self.filename = value
+        self.filename2 = value
+        self.characters_written = value
+        super().__init__(value, *rest)
+
+error = Ordinary("ordinary")
+print(repr(error.value))
+print(repr(error.name))
+print(repr(error.obj))
+print(repr(error.errno))
+print(repr(error.strerror))
+print(repr(error.filename))
+print(repr(error.filename2))
+print(repr(error.characters_written))
+""",
     "classvar_exception_constructor": """
 from typing import ClassVar
 
@@ -958,6 +981,51 @@ except KeyError:
 }
 
 REJECTED = {
+    "exception_descriptor_annotated_field": """
+class Problem(StopIteration):
+    value: str
+    def __init__(self, before: str, after: str):
+        self.value = before
+        super().__init__(after)
+Problem("before", "after")
+""",
+    **{
+        f"exception_descriptor_inherited_field_{base}": f"""
+class Ordinary(Exception):
+    def __init__(self, before, after, *rest):
+        self.{field} = before
+        super().__init__(after, *rest)
+class Mixed(Ordinary, {base}):
+    pass
+Mixed({arguments})
+"""
+        for base, field, arguments in [
+            ("StopIteration", "value", '"before", "after"'),
+            ("ImportError", "msg", '"before", "after"'),
+            ("UnicodeEncodeError", "reason", '"before", "ascii", "x", 0, 1, "after"'),
+        ]
+    },
+    **{
+        f"forwarding_exception_{base}_{name}": f"""
+class Parent({base}):
+    pass
+class Problem(Parent):
+    def __init__(self, before, after, *rest):
+        self.{name} = before
+        super().__init__(after, *rest)
+Problem("before", "after")
+"""
+        for base, fields in {
+            "StopIteration": ("value",),
+            "NameError": ("name",),
+            "UnboundLocalError": ("name",),
+            "AttributeError": ("name", "obj"),
+            "OSError": ("errno", "strerror", "filename", "filename2", "characters_written"),
+            "FileNotFoundError": ("filename",),
+        }.items()
+        for name in fields
+    },
+
     **{
         f"forwarding_exception_descriptor_{name}": f"""
 class Problem(Exception):

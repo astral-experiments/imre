@@ -19,8 +19,8 @@ from suite_native import Toolchain, native_method, run_in_fixtures
 SOURCE = HERE / "upstream/Lib/test/test_functools.py"
 MODULE = "test.test_functools"
 
-# The shared TestCase accepts integers. These methods compare homogeneous native
-# operands using ordinary equality and unittest's failure formatting.
+# These native fixtures compare the actual operands, using ordinary equality
+# and unittest's failure formatting. The method source is copied unchanged.
 EQUALITY = """    def assertEqual(self, first: OPERAND, second: OPERAND, msg: str | None = None) -> None:
         if first != second:
             raise AssertionError(unittest.TestCase()._formatMessage(msg, f"{first!r} != {second!r}"))
@@ -161,18 +161,19 @@ class Fixtures:
                 # Conditional global declarations are dedented to module scope.
                 declarations[source_node.lineno] = dedent(self.source(source_node))
         equality = ({"test_with_bound_and_unbound_methods": "str",
-                     "test_get_annotations": "dict[str, type]"}.get(method))
+                     "test_get_annotations": "dict[str, type]",
+                     "test_lru_cache_parameters": ""}.get(method))
         if equality is None and only_string_assertions(node):
             equality = "string expectation"
         fixture = "\n".join(sorted(imports)) + "\n\n"
         fixture += "\n".join(external + [declarations[k] for k in sorted(declarations)])
-        fixture += "\nclass NativeCase" + (":\n" if equality else "(unittest.TestCase):\n")
+        fixture += "\nclass NativeCase" + (":\n" if equality is not None else "(unittest.TestCase):\n")
         fixture += "".join(member_texts.values())
         fixture += "".join(helper_nodes[k] for k in sorted(helper_nodes))
         if equality == "string expectation":
             fixture += STRING_EXPECTATION
-        elif equality:
-            fixture += EQUALITY.replace("OPERAND", equality)
+        elif equality is not None:
+            fixture += EQUALITY.replace(": OPERAND", f": {equality}" if equality else "")
         return owner.__name__, node, fixture
 
 

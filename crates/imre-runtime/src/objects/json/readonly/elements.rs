@@ -1,20 +1,27 @@
 //! Decode materialized arrays of records without reparsing each field as raw JSON.
 use crate::StrOwner;
+use std::cell::Cell;
 use std::fmt;
 
 use serde::Deserializer;
 use serde::de::{DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor};
 
-use super::{Int, Key, KeyMemo, Node, Str};
+use super::{Int, Key, KeyMemo, Node, Str, allocation_error, push};
 
 /// Nested arrays retain their lazy source spans. Floating-point callbacks also
 /// fall back because Serde can report an out-of-range integer as a float.
-pub(super) fn parse(text: &str, nodes: &mut Vec<Node>, keys: &KeyMemo) -> Option<Node> {
+pub(super) fn parse(
+    text: &str,
+    nodes: &mut Vec<Node>,
+    keys: &KeyMemo,
+    refused: &Cell<bool>,
+) -> Option<Node> {
     let start = nodes.len();
     let value = serde_json::Deserializer::from_str(text).deserialize_seq(&mut Elements {
         nodes,
         entered: false,
         keys,
+        refused,
     });
     if let Ok(array) = value {
         Some(array)
@@ -28,6 +35,7 @@ struct Elements<'a> {
     nodes: &'a mut Vec<Node>,
     entered: bool,
     keys: &'a KeyMemo,
+    refused: &'a Cell<bool>,
 }
 
 impl<'de> DeserializeSeed<'de> for &mut Elements<'_> {
@@ -35,7 +43,7 @@ impl<'de> DeserializeSeed<'de> for &mut Elements<'_> {
     fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<usize, D::Error> {
         let node = d.deserialize_any(&mut *self)?;
         let index = self.nodes.len();
-        self.nodes.push(node);
+        push(self.nodes, node, self.refused)?;
         Ok(index)
     }
 }
@@ -64,8 +72,11 @@ impl<'de> Visitor<'de> for &mut Elements<'_> {
                 .unwrap_or_else(|| Int::new(value.into())),
         ))
     }
-    fn visit_str<E>(self, value: &str) -> Result<Node, E> {
-        Ok(Node::String(StrOwner::new(Str::new(value))))
+    fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Node, E> {
+        let value = Str::try_new(value).map_err(|_| allocation_error::<E>(self.refused))?;
+        Ok(Node::String(
+            StrOwner::try_new(value).map_err(|_| allocation_error::<E>(self.refused))?,
+        ))
     }
     fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Node, A::Error> {
         if std::mem::replace(&mut self.entered, true) {
@@ -73,14 +84,17 @@ impl<'de> Visitor<'de> for &mut Elements<'_> {
         }
         let mut items = Vec::new();
         while let Some(index) = sequence.next_element_seed(&mut *self)? {
-            items.push(index);
+            push(&mut items, index, self.refused)?;
         }
         Ok(Node::Array(items))
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Node, A::Error> {
         let mut fields = Vec::new();
         while let Some(key) = map.next_key_seed(Key)? {
-            fields.push((Str::new(key.as_ref()), map.next_value_seed(&mut *self)?));
+            let key = Str::try_new(key.as_ref())
+                .map_err(|_| allocation_error::<A::Error>(self.refused))?;
+            let value = map.next_value_seed(&mut *self)?;
+            push(&mut fields, (key, value), self.refused)?;
         }
         Ok(Node::Object(self.keys.fields(fields)))
     }
@@ -98,12 +112,13 @@ mod tests {
             r#"[{"v":18446744073709551615,"name":"[row]"}]"#,
             &mut nodes,
             &keys,
+            &Cell::new(false),
         );
         assert!(matches!(row, Some(Node::Array(items)) if items.len() == 1));
         assert!(matches!(&nodes[1], Node::Integer(n) if n.big().as_ref() == &u64::MAX.into()));
         let before = nodes.len();
         for raw in ["[0,[1]]", "[0,0.5]", "[0,18446744073709551616]", "[0,NaN]"] {
-            assert!(parse(raw, &mut nodes, &keys).is_none());
+            assert!(parse(raw, &mut nodes, &keys, &Cell::new(false)).is_none());
             assert_eq!(nodes.len(), before);
         }
     }
