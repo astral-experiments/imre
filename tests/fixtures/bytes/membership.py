@@ -1,5 +1,7 @@
 """Byte values, subsequences, and evaluation order in bytes containment."""
 
+from collections import Counter, defaultdict
+
 
 def search(needle: bytes, data: bytes) -> None:
     print(needle in data)
@@ -36,6 +38,17 @@ def invalid() -> int:
 def failed(label: str) -> bytes:
     print(label)
     raise RuntimeError(label)
+
+
+def replace_needle(values: list[bytes]) -> bytes:
+    values[0] = b"new"
+    return b"old"
+
+
+def keep_needle(data: list[int]) -> None:
+    values = [bytes(data)]
+    print(values[0] in replace_needle(values))
+    print(values[0])
 
 
 for needle in [b"", b"a", b"b", b"c", b"ab", b"bc", b"abc", b"ac", b"d", b"dab", b"abd"]:
@@ -94,3 +107,16 @@ try:
     print(wrong() not in failed("right before TypeError"))
 except RuntimeError as error:
     print(error)
+
+try:
+    print(Counter([1]) in b"")
+except TypeError as error:
+    print(error)
+try:
+    values: defaultdict[str, list[int]] = defaultdict(list)
+    print(values in b"")
+except TypeError as error:
+    print(error)
+
+
+keep_needle([111, 108, 100])

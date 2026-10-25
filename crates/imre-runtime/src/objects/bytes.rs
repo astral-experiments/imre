@@ -282,6 +282,7 @@ pub unsafe extern "C" fn imre_bytes_contains(needle: *const Bytes, haystack: *co
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_contains_int(needle: usize, haystack: *const Bytes) -> u32 {
     // Canonical integers outside the tagged small range cannot represent a byte.
+    // SAFETY: the caller roots the exact canonical integer until this call returns.
     let byte = unsafe { Int::borrow(needle) }
         .as_small()
         .and_then(|n| u8::try_from(n).ok());
