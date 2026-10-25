@@ -54,7 +54,7 @@ fn replacement(table: &Mapping, ch: char) -> Result<Piece<'_>> {
 }
 
 fn translate(source: &str, table: &Mapping) -> Result<*const Str> {
-    let mut result = Str::try_with_capacity(source.len()).map_err(|_| Error::allocation())?;
+    let mut result = Str::try_with_capacity(source.len()).map_err(|_| Error::memory_error())?;
     let mut ascii = [None; 128];
     for ch in source.chars() {
         let piece = if ch.is_ascii() {
@@ -73,7 +73,7 @@ fn translate(source: &str, table: &Mapping) -> Result<*const Str> {
         };
         result
             .try_reserve(text.len())
-            .map_err(|_| Error::allocation())?;
+            .map_err(|_| Error::memory_error())?;
         result.push_str(text);
     }
     let owner = if result.len() <= 2 {
