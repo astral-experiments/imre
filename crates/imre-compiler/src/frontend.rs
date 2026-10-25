@@ -4271,6 +4271,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ShutilError)) => Some(64),
             Some(Binding::Intrinsic(Intrinsic::SameFileError)) => Some(65),
             Some(Binding::Intrinsic(Intrinsic::SpecialFileError)) => Some(66),
+            Some(Binding::Intrinsic(Intrinsic::ShutilReadError)) => Some(68),
+            Some(Binding::Intrinsic(Intrinsic::ShutilRegistryError)) => Some(70),
+            Some(Binding::Intrinsic(Intrinsic::TarException(id))) => Some(id),
             Some(Binding::Intrinsic(Intrinsic::CancelledError)) => Some(33),
             Some(Binding::Intrinsic(Intrinsic::UnsupportedOperation)) => Some(19),
             Some(Binding::Intrinsic(Intrinsic::SubprocessError)) => Some(25),
@@ -6597,6 +6600,36 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
+            Some(Binding::Intrinsic(Intrinsic::MakeArchive)) => {
+                return self.shutil_archive(call, true);
+            }
+            Some(Binding::Intrinsic(Intrinsic::UnpackArchive)) => {
+                return self.shutil_archive(call, false);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ArchiveFormats(unpack))) => {
+                return self.shutil_archive_formats(call, unpack);
+            }
+            Some(Binding::Intrinsic(Intrinsic::RegisterUnpack)) => {
+                return self.shutil_register_unpack(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::UnregisterArchive(unpack))) => {
+                let args = self.arguments(
+                    call,
+                    &[Parameter {
+                        name: "name".into(),
+                        ty: Type::Str,
+                        kind: ParameterKind::PositionalOrKeyword,
+                        default: None,
+                        sign_only: false,
+                    }],
+                    None,
+                )?;
+                return Ok(self.ordered_builtin(
+                    Builtin::Process(ir::ProcessOperation::UnregisterArchive(unpack)),
+                    Type::None,
+                    args,
+                ));
+            }
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
             Some(Binding::Intrinsic(Intrinsic::Move)) => return self.shutil_move(call, false),
             Some(Binding::Intrinsic(Intrinsic::DestInSrc)) => return self.shutil_move(call, true),

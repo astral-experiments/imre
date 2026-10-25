@@ -1506,6 +1506,14 @@ pub(crate) enum ProcessOperation {
     DestInSrc,
     IgnorePatterns,
     TreeErrorArgs,
+    MakeArchive,
+    UnpackArchive,
+    ArchiveFormats {
+        unpack: bool,
+        row: Type,
+    },
+    UnregisterArchive(bool),
+    RegisterUnpack(Option<Type>),
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

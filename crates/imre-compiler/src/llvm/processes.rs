@@ -550,6 +550,97 @@ impl Emitter<'_, '_> {
             ProcessOperation::DescriptorConstant(name) => self.os_descriptor_constant(name),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
+            ProcessOperation::ArchiveFormats { unpack, row } => {
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(row)));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_shutil_archive_formats(i32 {}, ptr @{layout})",
+                    u32::from(unpack)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::UnregisterArchive(unpack) => {
+                self.checked_line(format!(
+                    "call void @imre_shutil_unregister_archive(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(unpack)
+                ));
+                none()
+            }
+            ProcessOperation::RegisterUnpack(frame) => {
+                let [name, exts, function, extras, description, adapter, metadata] = args else {
+                    unreachable!()
+                };
+                let (target, function, layout, metadata) = if let Some(frame) = frame {
+                    let target =
+                        self.instruction(format!("load ptr, ptr {}", adapter.value.operand));
+                    let layout = self
+                        .output
+                        .global_ref(format!("layout_{}", record_name(frame)));
+                    (
+                        target,
+                        function.value.operand.as_str(),
+                        format!("@{layout}"),
+                        metadata.value.operand.as_str(),
+                    )
+                } else {
+                    ("null".into(), "null", "null".into(), "null")
+                };
+                let word = self.word(&extras.value);
+                let kind = representation_kind(extras.value.ty, &self.module.types)
+                    | if self
+                        .module
+                        .types
+                        .mapping(extras.value.ty)
+                        .is_some_and(|(key, _)| key != Type::Str)
+                    {
+                        0x10000
+                    } else {
+                        0
+                    };
+                self.checked_line(format!("call void @imre_shutil_register_unpack(ptr {}, ptr {}, ptr {function}, i64 {word}, i32 {kind}, ptr {}, ptr {target}, ptr {layout}, ptr {metadata})", name.value.operand, exts.value.operand, description.value.operand));
+                none()
+            }
+            ProcessOperation::MakeArchive => {
+                let root_ty = self
+                    .module
+                    .types
+                    .payload(args[2].value.ty)
+                    .unwrap_or(args[2].value.ty);
+                let root_kind = if root_ty.is_path() {
+                    1
+                } else if matches!(root_ty, Type::Union(_)) {
+                    2
+                } else {
+                    0
+                };
+                let flags = u8::from(args[0].value.ty != Type::Str) | (root_kind << 1);
+                let root = self.word(&args[2].value);
+                let val = |i: usize| &args[i].value.operand;
+                let dry = self.instruction(format!("zext i1 {} to i32", val(5)));
+                let operand = self.checked_instruction(format!("call ptr @imre_shutil_make_archive(ptr {}, i32 {flags}, ptr {}, i64 {root}, i64 {}, i32 {dry}, i64 {}, i64 {})", val(0), val(1), val(3), val(6), val(7)));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::UnpackArchive => {
+                let val = |i: usize| &args[i].value.operand;
+                self.checked_line(format!(
+                    "call void @imre_shutil_unpack_archive(ptr {}, i64 {}, i64 {}, i64 {})",
+                    val(0),
+                    val(1),
+                    val(2),
+                    val(3)
+                ));
+                none()
+            }
             ProcessOperation::RmTree => {
                 let [path, ignore, _, _, fd] = args else {
                     unreachable!()
