@@ -329,12 +329,17 @@ impl Member {
             out.extend_from_slice(&self.buffer[self.pos..self.pos + n]);
             self.pos += n;
         }
+        if self.pos == self.buffer.len() {
+            self.buffer.clear();
+            self.pos = 0;
+        }
         Ok(out)
     }
 
     pub(in crate::objects) fn readline(&mut self) -> Result<Bytes> {
         let mut out = Vec::new();
         loop {
+            let cached = out.is_empty() && self.pos < self.buffer.len();
             if self.pos == self.buffer.len() {
                 if self.eof {
                     break;
@@ -347,6 +352,12 @@ impl Member {
             out.try_reserve(n).map_err(|_| Error::allocation())?;
             out.extend_from_slice(&data[..n]);
             self.pos += n;
+            // ZipExtFile's newline shortcut retains its existing read buffer.
+            // The buffered readline fallback consumes chunks through read().
+            if self.pos == self.buffer.len() && !(cached && line.is_some()) {
+                self.buffer.clear();
+                self.pos = 0;
+            }
             if line.is_some() || n == 0 {
                 break;
             }
@@ -375,16 +386,18 @@ impl Member {
             return Ok(to);
         }
         if self.info.method == 0 {
+            // Seeking a stored member skips data: its full CRC cannot be checked.
+            self.crc = None;
+            self.source.position(self.start + to)?;
             self.packed_at = self.start + to;
             self.left = self.info.file_size - to;
             self.packed_left = self.info.compress_size.saturating_sub(to);
             self.buffer.clear();
             self.pos = 0;
             self.eof = self.left == 0;
-            // Seeking a stored member skips data: its full CRC cannot be checked.
-            self.crc = None;
         } else {
             if to < now {
+                self.source.position(self.start)?;
                 self.packed_at = self.start;
                 self.packed_left = self.info.compress_size;
                 self.left = self.info.file_size;
