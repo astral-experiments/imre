@@ -52,6 +52,14 @@ impl Emitter<'_, '_> {
     /// Local flow proves the member before projection. An integer may need to
     /// recover its immediate representation; other owners transfer unchanged.
     pub(super) fn union_project(&mut self, value: Value, returns: Type) -> Value {
+        if matches!(
+            self.module.types.payload(returns).unwrap_or(returns),
+            Type::Union(_)
+        ) {
+            // A narrowed union still uses the original member tags and optional zero.
+            self.forget(&value);
+            return self.decode_word(value.operand, returns);
+        }
         let word = if returns == Type::Int {
             self.instruction(format!(
                 "call i64 @imre_union_into_int(i64 {})",
@@ -146,15 +154,15 @@ impl Emitter<'_, '_> {
                             (InstanceType::Exact(Type::Class(_)), Type::Class(_))
                         )
                 };
-                match (accepts_tag(members[0]), accepts_tag(members[1])) {
-                    (true, true) => "true".to_owned(),
-                    (false, false) => "false".to_owned(),
-                    (first, _) => {
-                        let selected = members[usize::from(!first)];
-                        let bits = self.instruction(format!("and i64 {}, 7", value.operand));
+                if members.iter().copied().all(accepts_tag) {
+                    "true".to_owned()
+                } else {
+                    let mut matched = None;
+                    let bits = self.instruction(format!("and i64 {}, 7", value.operand));
+                    for selected in members.into_iter().filter(|&ty| accepts_tag(ty)) {
                         let found =
                             self.instruction(format!("icmp eq i64 {bits}, {}", tag(selected)));
-                        if matches!(
+                        let current = if matches!(
                             (class, selected),
                             (InstanceType::Exception(1..), Type::Exception)
                                 | (InstanceType::Exact(Type::Class(_)), Type::Class(_))
@@ -174,8 +182,13 @@ impl Emitter<'_, '_> {
                             ))
                         } else {
                             found
-                        }
+                        };
+                        matched = Some(match matched {
+                            None => current,
+                            Some(prior) => self.instruction(format!("or i1 {prior}, {current}")),
+                        });
                     }
+                    matched.unwrap_or_else(|| "false".to_owned())
                 }
             } else if let (InstanceType::Exact(Type::Class(class)), Type::Class(_)) =
                 (class, value.ty)

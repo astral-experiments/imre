@@ -253,6 +253,7 @@ impl Builtin {
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
+                | ProcessOperation::RmTree
                 | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
@@ -296,6 +297,7 @@ impl Builtin {
             | Self::RegexFindIter
             | Self::DictGet
             | Self::DictCopy
+            | Self::DeepCopy
             | Self::RecordCopy
             | Self::JsonDecode(_)
             | Self::CsvReader { .. }
