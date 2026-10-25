@@ -20,6 +20,11 @@ def enter_optional(handler: logging.Handler) -> None:
         print("entered")
 
 
+def exit_argument() -> str:
+    print("exit argument")
+    return "unused"
+
+
 handler = logging.Handler()
 old = handler.lock
 if old is not None:
@@ -34,7 +39,6 @@ if old is not None:
     print(old.locked())
     print(replace_in_context(handler))
     print(old.locked())
-
 lock = handler.lock
 if lock is not None:
     try:
@@ -63,7 +67,6 @@ if lock is not None:
         lock.acquire(timeout=1000000000000.0)
     except OverflowError as error:
         print(str(error))
-
 if lock is not None:
     try:
         lock.acquire(timeout=1000000000000)
@@ -71,20 +74,12 @@ if lock is not None:
         print(str(error))
     print(lock.acquire(timeout=0))
     lock.release()
-
-def exit_argument() -> str:
-    print("exit argument")
-    return "unused"
-
-
 if lock is not None:
     print(lock.__enter__(False))
     print(lock.__exit__(None, exit_argument(), None) is None)
     print(lock._is_owned())
     print(lock.acquire(0))
     lock.__exit__()
-
-
 null = logging.NullHandler()
 print(null.lock is None)
 print(null.acquire() is None)
