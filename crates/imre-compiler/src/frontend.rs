@@ -33,6 +33,7 @@ mod local_functions;
 mod logging;
 mod matching;
 mod module_values;
+mod partials;
 mod paths;
 mod pipelines;
 mod posixpath;
@@ -4790,6 +4791,13 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "join"
+                    && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
+                    && !self.names.contains_key("str")
+                    && self.resolve(&attribute.value).is_none()
+                {
+                    return Ok(self.string_join_value(None, attribute));
+                }
                 if attribute.attr.as_str() == "encoding"
                     && matches!(
                         self.resolve(&attribute.value),
@@ -4807,6 +4815,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
+                    return Ok(self.string_join_value(Some(receiver), attribute));
+                }
                 if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
                     match attribute.attr.as_str() {
                         "name" => {
@@ -5156,6 +5167,7 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
                 let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
