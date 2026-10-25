@@ -61,7 +61,7 @@ impl Eq for PathKey {}
 impl Hash for PathKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // SAFETY: the key roots immutable path storage for this nonreentrant hash.
-        unsafe { self.0.0.with(|path| path.path().hash(state)) };
+        unsafe { self.0.0.with(|path| path.path_key().hash(state)) };
     }
 }
 
@@ -1189,7 +1189,7 @@ pub unsafe extern "C" fn imre_dict_contains(value: *const Object, key: usize) ->
             .with(|s| s.dictionary().tables.lookup(key).is_some())
     })
 }
-unsafe fn lookup(value: *const Object, key: usize) -> Option<OwnedWord> {
+pub(super) unsafe fn lookup(value: *const Object, key: usize) -> Option<OwnedWord> {
     // SAFETY: only an independently acquired value leaves storage.
     unsafe {
         object(value).0.with(|s| {

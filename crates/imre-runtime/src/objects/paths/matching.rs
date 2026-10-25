@@ -3,7 +3,9 @@
 use regex_automata::meta::Regex;
 use regex_syntax::hir::{Class, ClassUnicode, ClassUnicodeRange, Dot, Hir, Look, Repetition};
 
-use super::{Error, Kind, Object, Pattern, Result, Str, Token, finish, normalize, object};
+use super::{
+    Error, Kind, Object, Pattern, PurePath, Result, Storage, Str, Token, finish, normalize, object,
+};
 
 fn repeat(sub: Hir, min: u32, max: Option<u32>) -> Hir {
     Hir::repetition(Repetition {
@@ -52,15 +54,15 @@ fn literal(text: &str, sensitive: bool) -> Hir {
     }
 }
 
-fn component(pattern: &str, sensitive: bool) -> Hir {
+fn component(pattern: &str, sensitive: bool, sep: char) -> Hir {
     match Pattern::component(pattern) {
         Pattern::Literal(text) => literal(&text, sensitive),
         Pattern::Wildcard(tokens) => Hir::concat(
             tokens
                 .into_iter()
                 .map(|token| match token {
-                    Token::Any => Hir::dot(Dot::AnyCharExcept('/')),
-                    Token::Star => repeat(Hir::dot(Dot::AnyCharExcept('/')), 0, None),
+                    Token::Any => Hir::dot(Dot::AnyCharExcept(sep)),
+                    Token::Star => repeat(Hir::dot(Dot::AnyCharExcept(sep)), 0, None),
                     Token::Class { negated, ranges } => {
                         character_class(&ranges, negated, sensitive)
                     }
@@ -74,12 +76,18 @@ fn component(pattern: &str, sensitive: bool) -> Hir {
 /// Compile literal components, separators and recursive wildcards separately.
 /// In particular, "a/**" still requires the slash after "a"; an intermediate
 /// "**/" may consume zero components, including its own trailing separator.
-fn glob_matches(path: &str, pattern: &str, sensitive: bool, recursive: bool) -> Result<bool> {
+fn glob_matches(
+    path: &str,
+    pattern: &str,
+    sensitive: bool,
+    recursive: bool,
+    sep: char,
+) -> Result<bool> {
     if sensitive && !pattern.contains(['*', '?', '[']) {
         return Ok(path == pattern);
     }
-    let slash = || Hir::literal(*b"/");
-    let mut parts = pattern.split('/').peekable();
+    let slash = || Hir::literal([sep as u8]);
+    let mut parts = pattern.split(sep).peekable();
     let mut expression = vec![Hir::look(Look::Start)];
     while let Some(part) = parts.next() {
         let next = parts.peek().copied();
@@ -95,9 +103,9 @@ fn glob_matches(path: &str, pattern: &str, sensitive: bool, recursive: bool) -> 
             }
         } else {
             expression.push(if part == "*" {
-                repeat(Hir::dot(Dot::AnyCharExcept('/')), 1, None)
+                repeat(Hir::dot(Dot::AnyCharExcept(sep)), 1, None)
             } else {
-                component(part, sensitive)
+                component(part, sensitive, sep)
             });
             if next.is_some() {
                 expression.push(slash());
@@ -111,43 +119,68 @@ fn glob_matches(path: &str, pattern: &str, sensitive: bool, recursive: bool) -> 
     Ok(regex.is_match(path))
 }
 
-/// The normalized POSIX anchor, including the distinct // root, is one part.
-fn parts(path: &str) -> impl DoubleEndedIterator<Item = &str> {
-    let (root, tail) = path.split_at(path.bytes().take_while(|&b| b == b'/').count());
-    (!root.is_empty())
-        .then_some(root)
-        .into_iter()
-        .chain(tail.split('/').filter(|p| !p.is_empty() && *p != "."))
+/// A normalized anchor is a single part, even for a Windows UNC share. A
+/// pattern supplied as a path keeps its own flavor when enumerating its parts.
+#[derive(Clone, Copy)]
+struct Spelling<'a> {
+    text: &'a str,
+    anchor: usize,
+    sep: char,
 }
 
-fn matches(path: &str, pattern: &str, sensitive: bool, full: bool) -> Result<bool> {
-    let pattern = normalize(pattern);
-    if full {
-        return glob_matches(
-            if path == "." { "" } else { path },
-            if pattern == "." { "" } else { &pattern },
-            sensitive,
-            true,
-        );
-    }
-    if pattern == "." {
-        return Err(Error::new(Kind::ValueError, "empty pattern"));
-    }
-    let mut actual = parts(path).rev();
-    for expected in parts(&pattern).rev() {
-        let Some(part) = actual.next() else {
-            return Ok(false);
-        };
-        if !glob_matches(part, expected, sensitive, false)? {
-            return Ok(false);
+impl<'a> Spelling<'a> {
+    fn of(path: &'a Storage) -> Self {
+        let (drive, root) = path.drive_root();
+        Self {
+            text: path.path(),
+            anchor: drive.len() + root.len(),
+            sep: if path.windows_path() { '\\' } else { '/' },
         }
     }
-    Ok(!pattern.starts_with('/') || actual.next().is_none())
+    fn of_pure(path: &'a PurePath) -> Self {
+        Self {
+            text: &path.text,
+            anchor: path.drive.len() + path.root.len(),
+            sep: if path.windows { '\\' } else { '/' },
+        }
+    }
+    fn parts(self) -> impl DoubleEndedIterator<Item = &'a str> {
+        let (anchor, tail) = self.text.split_at(self.anchor);
+        (!anchor.is_empty())
+            .then_some(anchor)
+            .into_iter()
+            .chain(tail.split(self.sep).filter(|p| !p.is_empty() && *p != "."))
+    }
+    fn text(self) -> &'a str {
+        if self.text == "." { "" } else { self.text }
+    }
+    fn matches(self, q: Self, case: u64, full: bool) -> Result<bool> {
+        let sensitive = if case == 0 {
+            self.sep == '/'
+        } else {
+            case == 2
+        };
+        if full {
+            return glob_matches(self.text(), q.text(), sensitive, true, self.sep);
+        }
+        if q.text().is_empty() {
+            return Err(Error::new(Kind::ValueError, "empty pattern"));
+        }
+        let mut actual = self.parts().rev();
+        for pattern in q.parts().rev() {
+            let Some(part) = actual.next() else {
+                return Ok(false);
+            };
+            if !glob_matches(part, pattern, sensitive, false, self.sep)? {
+                return Ok(false);
+            }
+        }
+        Ok(q.anchor == 0 || actual.next().is_none())
+    }
 }
 
 /// # Safety
-/// Both inputs are rooted through this callback-free operation. The optional
-/// boolean uses Imre's 0=None, 1=False, 2=True representation.
+/// Both inputs are rooted. The optional boolean uses 0=None, 1=False, 2=True.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_match(
     path: *const Object,
@@ -155,11 +188,50 @@ pub unsafe extern "C" fn imre_path_match(
     case: u64,
     full: u32,
 ) -> u32 {
-    // SAFETY: the caller holds the immutable path and pattern until matching returns.
+    // SAFETY: both immutable inputs remain live until matching returns.
     let result = unsafe {
-        object(path)
-            .0
-            .with(|p| matches(p.path(), &*pattern, case != 1, full != 0))
+        object(path).0.with(|p| {
+            let receiver = Spelling::of(p);
+            if p.windows_path() {
+                let pattern = PurePath::new(
+                    true,
+                    vec![super::super::acquire_rc::<Str>(pattern as usize)],
+                );
+                receiver.matches(Spelling::of_pure(&pattern), case, full != 0)
+            } else {
+                let text = normalize(&*pattern);
+                let anchor = text.len() - text.trim_start_matches('/').len();
+                receiver.matches(
+                    Spelling {
+                        text: &text,
+                        anchor,
+                        sep: '/',
+                    },
+                    case,
+                    full != 0,
+                )
+            }
+        })
+    };
+    finish(result.map(u32::from), 0)
+}
+
+/// # Safety
+/// The caller roots both path objects; neither can run callbacks during matching.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_match_object(
+    path: *const Object,
+    pattern: *const Object,
+    case: u64,
+    full: u32,
+) -> u32 {
+    // SAFETY: immutable inputs can alias and no borrowed spelling escapes.
+    let result = unsafe {
+        object(path).0.with(|p| {
+            object(pattern)
+                .0
+                .with(|q| Spelling::of(p).matches(Spelling::of(q), case, full != 0))
+        })
     };
     finish(result.map(u32::from), 0)
 }

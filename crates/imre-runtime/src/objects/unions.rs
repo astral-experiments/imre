@@ -1,8 +1,11 @@
-//! Closed text unions reuse two alignment bits of their exact Rc payload.
+//! Closed unions use three alignment bits of their exact Rc payload.
 //! Zero is reserved for absent optionals and partially initialized storage.
 
 use super::words::WordKind;
-use super::{Bytes, Object, Str, object};
+use super::{Bytes, Int, Object, Str, object};
+use num_bigint::BigInt;
+use num_traits::{ToPrimitive, Zero};
+use std::rc::Rc;
 
 const _: () = assert!(
     align_of::<Str>() >= 8
@@ -21,9 +24,41 @@ pub(super) fn member(value: usize) -> (usize, WordKind) {
         4 => 6,                                      // fixed record
         6 => 5,                                      // pathlib.Path
         5 => return (value >> 3, WordKind::new(10)), // ordinary Enum tag
-        _ => unreachable!("invalid text union tag"),
+        7 => 2, // aligned Rc<BigInt>, even for an ordinary immediate integer
+        _ => unreachable!(),
     };
     (value & !7, WordKind::new(kind))
+}
+
+/// An immediate integer already uses its low bit. Give it aligned storage
+/// inside the union; an existing large integer transfers its allocation.
+pub(super) fn integer(value: Int) -> usize {
+    let word = match value.as_small() {
+        Some(small) => Rc::into_raw(Rc::new(BigInt::from(small))) as usize,
+        None => value.into_raw(),
+    };
+    word | 7
+}
+
+/// # Safety
+/// Takes ownership of an exact integer word, or zero for an absent optional.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_union_from_int(word: usize) -> usize {
+    if word == 0 { 0 } else { integer(Int(word)) }
+}
+
+/// # Safety
+/// Takes ownership of a present integer member; restores the canonical
+/// immediate representation before it is used as an integer or dictionary key.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_union_into_int(word: usize) -> usize {
+    let value = Int(word & !7);
+    value
+        .big()
+        .to_i64()
+        .and_then(Int::small)
+        .unwrap_or(value)
+        .into_raw()
 }
 
 /// # Safety
@@ -60,6 +95,7 @@ pub unsafe extern "C" fn imre_union_truthy(value: usize) -> u32 {
             2 => object(word as *const Object)
                 .0
                 .with(|s| !s.sequence().values.is_empty()),
+            7 => !(*(word as *const BigInt)).is_zero(),
             _ => true,
         })
     }
