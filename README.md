@@ -88,6 +88,10 @@ Other projects make different trade-offs:
   [mypyc](https://mypyc.readthedocs.io/) use types to optimize code running
   within CPython, so compiled modules can interact with ordinary Python code.
 
+Use [`@imre.struct`](docs/subset.md#immutable-value-structs) for immutable scalar
+records: a `list[Point]` can store the fields of each point inline. The same source
+runs on CPython with Imre’s standard library.
+
 For more, see the [design](docs/design.md) and [supported subset](docs/subset.md).
 
 ## Benchmarks
