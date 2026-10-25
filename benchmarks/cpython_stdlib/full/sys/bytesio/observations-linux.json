@@ -1,0 +1,59 @@
+{
+  "blob": "482b183da23ffa259664e52592021d5c3c12d34d",
+  "case": "test.test_memoryio.CBytesIOTest.test_getvalue",
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "discovered_in_module": 182,
+  "observations": {
+    "O0": {
+      "complete_native_compile_blocker": "Compiling <tmp>/method/case.py (-O0)\n<tmp>/method/case.py:6:16: Imre: supported value methods are typed-list append/pop, dict.get, set.add/discard, and str.split()",
+      "ordinary_binary_file": "Compiling <tmp>/ordinary-file/case.py (-O0)\n<tmp>/ordinary-file/case.py:6:12: Imre: supported file methods are read(), binary read(size), readline(), write(data), flush(), and close()",
+      "original_method": {
+        "evidence": {
+          "method_sha256": "23b3657562151499bfd699eefc1e5a571aad53b213f173940fd85f135c634849",
+          "native_calls": {
+            "BytesIO": 3,
+            "close": 1,
+            "getvalue": 5,
+            "read": 1
+          }
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "snapshots": {
+        "stdout_bytes": 156,
+        "stdout_sha256": "972b7b937a829c87057de7578ea606d7f69af15acb644284aeb2100534bbf9c5"
+      }
+    },
+    "O3": {
+      "complete_native_compile_blocker": "Compiling <tmp>/method/case.py (-O3)\n<tmp>/method/case.py:6:16: Imre: supported value methods are typed-list append/pop, dict.get, set.add/discard, and str.split()",
+      "ordinary_binary_file": "Compiling <tmp>/ordinary-file/case.py (-O3)\n<tmp>/ordinary-file/case.py:6:12: Imre: supported file methods are read(), binary read(size), readline(), write(data), flush(), and close()",
+      "original_method": {
+        "evidence": {
+          "method_sha256": "23b3657562151499bfd699eefc1e5a571aad53b213f173940fd85f135c634849",
+          "native_calls": {
+            "BytesIO": 3,
+            "close": 1,
+            "getvalue": 5,
+            "read": 1
+          }
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "snapshots": {
+        "stdout_bytes": 156,
+        "stdout_sha256": "972b7b937a829c87057de7578ea606d7f69af15acb644284aeb2100534bbf9c5"
+      }
+    }
+  },
+  "source": "Lib/test/test_memoryio.py"
+}
