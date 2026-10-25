@@ -1146,41 +1146,29 @@ unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Obje
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
     finish(
-        split_lines(
-            LineRanges {
-                text: &value,
-                keep: KEEP,
-            },
-            |range| owned_line(&value, range),
-        ),
+        split_lines(&value, |mut range| {
+            // The shared scanner has already found the boundary. Its first
+            // scalar supplies the width; only CRLF has two scalars. This
+            // branch disappears from the legacy no-argument specialization.
+            if KEEP && let Some(ending) = value[range.end..].chars().next() {
+                range.end += ending.len_utf8();
+                if ending == '\r' && value.as_bytes().get(range.end) == Some(&b'\n') {
+                    range.end += 1;
+                }
+            }
+            owned_line(&value, range)
+        }),
         std::ptr::null(),
     )
 }
 
-/// A plain string (including a bytes.decode() view) uses the default boundaries.
-struct LineRanges<'a> {
-    text: &'a str,
-    keep: bool,
-}
-
-impl<'a> From<&'a str> for LineRanges<'a> {
-    fn from(text: &'a str) -> Self {
-        Self { text, keep: false }
-    }
-}
-
-fn split_lines<'a>(
-    source: impl Into<LineRanges<'a>>,
+fn split_lines(
+    value: &str,
     own: impl Fn(std::ops::Range<usize>) -> Rc<Str>,
 ) -> Result<*const Object, Error> {
-    let LineRanges { text: value, keep } = source.into();
     let mut offsets = LineOffsets::new(value);
     let mut result = Words::new(3);
-    while let Some(mut range) = offsets.next(value) {
-        if keep {
-            // The scanner has already consumed the complete boundary, including CRLF.
-            range.end = offsets.start;
-        }
+    while let Some(range) = offsets.next(value) {
         result
             .values
             .try_reserve(1)
