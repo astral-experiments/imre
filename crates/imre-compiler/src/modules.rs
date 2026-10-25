@@ -92,6 +92,7 @@ pub(crate) enum IntrinsicModule {
     Tomli,
     TomliW,
     Shutil,
+    Random,
     Sysconfig,
     Signal,
     Opcode,
@@ -100,6 +101,7 @@ pub(crate) enum IntrinsicModule {
     Shlex,
     Tempfile,
     Subprocess,
+    Selectors,
     Os,
     Posix,
     PosixPath,
@@ -224,6 +226,7 @@ pub(crate) enum Intrinsic {
     SysPycachePrefix,
     SysPlatform,
     SysVersionInfo,
+    SysThreadInfo,
     SysVersion,
     SysHexversion,
     SysEncoding(&'static str),
@@ -345,12 +348,16 @@ pub(crate) enum Intrinsic {
     DestInSrc,
     IgnorePatterns,
     ShutilError,
+    RandomChoice,
+    Random(crate::ir::RandomOperation),
     SameFileError,
     SpecialFileError,
     TemporaryDirectory,
     Popen,
     PopenActive,
     PopenCleanup,
+    PopenSelector,
+    SelectorClass(bool),
     SubprocessRun,
     SubprocessCall,
     SubprocessCheckCall,
@@ -412,6 +419,7 @@ impl IntrinsicModule {
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
+            "random" => Some(Self::Random),
             "sysconfig" => Some(Self::Sysconfig),
             "signal" => Some(Self::Signal),
             "_opcode" => Some(Self::Opcode),
@@ -429,6 +437,7 @@ impl IntrinsicModule {
             "shlex" => Some(Self::Shlex),
             "tempfile" => Some(Self::Tempfile),
             "subprocess" => Some(Self::Subprocess),
+            "selectors" => Some(Self::Selectors),
             "os" => Some(Self::Os),
             "posix" if cfg!(unix) => Some(Self::Posix),
             "os.path" | "posixpath" => Some(Self::PosixPath),
@@ -635,6 +644,7 @@ impl IntrinsicModule {
             (Self::Sys, "pycache_prefix") => Intrinsic::SysPycachePrefix,
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
             (Self::Sys, "version_info") => Intrinsic::SysVersionInfo,
+            (Self::Sys, "thread_info") => Intrinsic::SysThreadInfo,
             (Self::Sys, "version") => Intrinsic::SysVersion,
             (Self::Sys, "hexversion") => Intrinsic::SysHexversion,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
@@ -798,6 +808,12 @@ impl IntrinsicModule {
             (Self::Pathlib, "PureWindowsPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
+            (Self::Random, "choice") => Intrinsic::RandomChoice,
+            (Self::Random, "seed") => Intrinsic::Random(crate::ir::RandomOperation::Seed),
+            (Self::Random, "random") => Intrinsic::Random(crate::ir::RandomOperation::Float),
+            (Self::Random, "getrandbits") => Intrinsic::Random(crate::ir::RandomOperation::Bits),
+            (Self::Random, "randint") => Intrinsic::Random(crate::ir::RandomOperation::Randint),
+            (Self::Random, "randrange") => Intrinsic::Random(crate::ir::RandomOperation::Randrange),
             (Self::Shutil, "rmtree") => Intrinsic::RmTree,
             (Self::Shutil, "copytree") => Intrinsic::CopyTree,
             (Self::Shutil, "move") => Intrinsic::Move,
@@ -818,6 +834,9 @@ impl IntrinsicModule {
             (Self::Subprocess, "Popen") => Intrinsic::Popen,
             (Self::Subprocess, "_active") => Intrinsic::PopenActive,
             (Self::Subprocess, "_cleanup") => Intrinsic::PopenCleanup,
+            (Self::Subprocess, "_PopenSelector") => Intrinsic::PopenSelector,
+            (Self::Selectors, "SelectSelector") => Intrinsic::SelectorClass(true),
+            (Self::Selectors, "PollSelector") => Intrinsic::SelectorClass(false),
             (Self::Subprocess, "run") => Intrinsic::SubprocessRun,
             (Self::Subprocess, "call") => Intrinsic::SubprocessCall,
             (Self::Subprocess, "check_call") => Intrinsic::SubprocessCheckCall,
@@ -1078,6 +1097,12 @@ impl SourceGraph {
     pub(crate) fn checked_optional_lock_context(&self, module: ModuleId, expr: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::OptionalLockContext(expr));
+    }
+
+    /// This operand is evaluated by a tuple display that raises a native TypeError.
+    pub(crate) fn checked_non_iterable_spread(&self, module: ModuleId, value: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::NonIterableSpread(value));
     }
 
     pub(crate) fn checked_keywords(

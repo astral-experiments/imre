@@ -640,7 +640,9 @@ pub unsafe extern "C" fn imre_bytes_decode_splitlines(value: *const Bytes) -> *c
     let result = std::str::from_utf8(bytes)
         // SAFETY: this caller still roots the exact byte object passed to the failing decode.
         .map_err(|error| decode_owned_error(unsafe { super::acquire_rc(value as usize) }, error))
-        .and_then(|text| super::split_lines(text, |range| super::text::owned_string(&text[range])));
+        .and_then(|text| {
+            super::split_lines(text, |range| super::text::try_owned_string(&text[range]))
+        });
     finish(result, std::ptr::null())
 }
 
@@ -794,6 +796,30 @@ mod tests {
             assert_eq!(imre_bytes_get_index(&Bytes::new(), 0), 0);
             assert_index_error("index out of range");
         }
+    }
+
+    #[test]
+    fn ascii_decode_error_retains_its_input_and_offsets() {
+        let input = Rc::new(b"a\xffb".to_vec());
+        let original = Rc::downgrade(&input);
+        // SAFETY: input roots the bytes until the decoder returns.
+        assert!(unsafe { imre_bytes_decode_ascii(Rc::as_ptr(&input)) }.is_null());
+        drop(input);
+        // SAFETY: taking the pending error transfers its owner.
+        let error = unsafe { Rc::from_raw(imre_error_take()) };
+        // SAFETY: error roots the exception, and repr transfers a new string owner.
+        let repr = unsafe {
+            Rc::from_raw(crate::objects::exceptions::imre_exception_repr(Rc::as_ptr(
+                &error,
+            )))
+        };
+        assert_eq!(
+            repr.as_str(),
+            r"UnicodeDecodeError('ascii', b'a\xffb', 1, 2, 'ordinal not in range(128)')"
+        );
+        assert!(original.upgrade().is_some());
+        drop(error);
+        assert!(original.upgrade().is_none());
     }
 
     #[test]
