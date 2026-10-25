@@ -36,6 +36,11 @@ fn chmod(dst: &Name, st: &Metadata, follow: bool) -> Result<()> {
 
 pub(super) fn copymode(src: &Name, dst: &Name, follow: bool) -> Result<()> {
     let follow = follow_links(src, dst, follow);
+    // Linux has no lchmod. Once both paths are known to be links, CPython
+    // returns without another stat, even if a link disappears in the meantime.
+    if !follow && cfg!(target_os = "linux") {
+        return Ok(());
+    }
     chmod(dst, &stat(src, follow)?, follow)
 }
 
