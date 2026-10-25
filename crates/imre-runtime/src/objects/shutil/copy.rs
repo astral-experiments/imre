@@ -9,15 +9,80 @@ use std::path::Path;
 use std::rc::Rc;
 
 use super::super::exceptions::{Error, Kind, finish, push_string_repr};
-use super::super::files::names::Name;
 use super::super::files::{close_file, errno_error, errno_with_paths};
-use super::super::{Bytes, Object, Str, bytes};
+use super::super::{Bytes, Object, Str, bytes, paths};
 
 type Result<T> = std::result::Result<T, Error>;
 
+enum Name<'a> {
+    Text(&'a str),
+    Bytes(&'a [u8]),
+    Path(Rc<Str>),
+}
+
+impl<'a> Name<'a> {
+    /// The call retains all three possible handle kinds until the operation finishes.
+    unsafe fn from_handle(value: *const (), tag: u32) -> Self {
+        // SAFETY: the compiler supplies the tag for the exact live allocation.
+        unsafe {
+            match tag {
+                0 => Self::Text(&*value.cast::<Str>()),
+                1 => Self::Bytes(&*value.cast::<Bytes>()),
+                2 => Self::Path(Rc::from_raw(paths::imre_path_text(value.cast()))),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn path(&self) -> &Path {
+        match self {
+            Self::Text(text) => Path::new(text),
+            Self::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
+            Self::Path(text) => Path::new(text.as_str()),
+        }
+    }
+
+    /// Convert the name when the copy operation reaches its filesystem lookup.
+    fn checked_path(&self) -> Result<&Path> {
+        let path = self.path();
+        if path.as_os_str().as_bytes().contains(&0) {
+            return Err(Error::new(Kind::ValueError, "embedded null byte"));
+        }
+        Ok(path)
+    }
+
+    fn repr(&self, original: bool) -> String {
+        let mut result = String::new();
+        match self {
+            Self::Bytes(value) => bytes::write_repr(&mut result, value),
+            Self::Path(text) if original => {
+                result.push_str("PosixPath(");
+                push_string_repr(text, &mut result);
+                result.push(')');
+            }
+            _ => push_string_repr(self.path().to_str().unwrap(), &mut result),
+        }
+        result
+    }
+
+    fn display(&self) -> String {
+        match self {
+            Self::Bytes(_) => self.repr(false),
+            _ => self.path().display().to_string(),
+        }
+    }
+
+    fn error(&self, error: io::Error) -> Error {
+        errno_with_paths(error, |out| {
+            out.push_str(": ");
+            out.push_str(&self.repr(false));
+        })
+    }
+}
+
 /// Match nested Python file context managers: open the source first, close the
 /// destination first, and let an explicit close error supersede the copy error.
-fn copy_data(src: &Name, dst: &Name) -> Result<()> {
+fn copy_data(src: &Name<'_>, dst: &Name<'_>) -> Result<()> {
     let mut input = File::open(src.path()).map_err(|e| src.error(e))?;
     let result = (|| {
         if input.metadata().map_err(errno_error)?.is_dir() {
@@ -43,9 +108,9 @@ fn copy_data(src: &Name, dst: &Name) -> Result<()> {
     close_file(input).map_err(errno_error).and(result)
 }
 
-fn copyfile(src: &Name, dst: &Name, follow: bool) -> Result<()> {
-    let source = fs::metadata(src.path()).ok();
-    let target = fs::metadata(dst.path()).ok();
+fn copyfile(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<()> {
+    let source = fs::metadata(src.checked_path()?).ok();
+    let target = fs::metadata(dst.checked_path()?).ok();
     if let (Some(source), Some(target)) = (&source, &target)
         && source.dev() == target.dev()
         && source.ino() == target.ino()
@@ -86,7 +151,7 @@ fn copyfile(src: &Name, dst: &Name, follow: bool) -> Result<()> {
 }
 
 /// Keep os.path.basename's empty final component for sources ending in a slash.
-fn destination(src: &Name, dst: &Name) -> Result<std::path::PathBuf> {
+fn destination(src: &Name<'_>, dst: &Name<'_>) -> Result<std::path::PathBuf> {
     if matches!(src, Name::Bytes(_)) != matches!(dst, Name::Bytes(_)) {
         return Err(Error::new(
             Kind::TypeError,
@@ -103,30 +168,27 @@ fn destination(src: &Name, dst: &Name) -> Result<std::path::PathBuf> {
     Ok(dst.path().join(OsStr::from_bytes(name)))
 }
 
-impl Name {
-    fn joined(&self, path: &Path) -> Result<Name> {
+impl Name<'_> {
+    fn joined<'a>(&self, path: &'a Path) -> Result<Name<'a>> {
         if matches!(self, Name::Bytes(_)) {
-            Ok(Name::Bytes(Rc::new(path.as_os_str().as_bytes().to_vec())))
+            Ok(Name::Bytes(path.as_os_str().as_bytes()))
         } else {
-            path.to_str()
-                .map(|s| Name::Text(Rc::new(Str::from(s))))
-                .ok_or_else(|| {
-                    Error::new(
-                        Kind::UnicodeDecodeError,
-                        "filesystem path is not valid UTF-8",
-                    )
-                })
+            path.to_str().map(Name::Text).ok_or_else(|| {
+                Error::new(
+                    Kind::UnicodeDecodeError,
+                    "filesystem path is not valid UTF-8",
+                )
+            })
         }
     }
 }
 
-fn run(op: u32, src: &Name, dst: &Name, follow: bool) -> Result<Option<std::path::PathBuf>> {
-    if [src, dst]
-        .iter()
-        .any(|n| n.path().as_os_str().as_bytes().contains(&0))
-    {
-        return Err(Error::new(Kind::ValueError, "embedded null byte"));
-    }
+fn run(
+    op: u32,
+    src: &Name<'_>,
+    dst: &Name<'_>,
+    follow: bool,
+) -> Result<Option<std::path::PathBuf>> {
     match op {
         0 => copyfile(src, dst, follow)?,
         1 => metadata::copymode(src, dst, follow)?,

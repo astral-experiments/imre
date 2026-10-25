@@ -165,6 +165,8 @@ jobs:
           python3 "$dir/coverage.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --baseline "$dir/evidence-linux.json" --result "$RUNNER_TEMP/itertools-evidence-linux.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-linux.json" "$RUNNER_TEMP/itertools-evidence-linux.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-free-threading-linux.json" "$dir/evidence-free-threading-linux.json"
+      - name: Run every CPython fnmatch case with native operations at O0 and O3
+        run: python3 benchmarks/cpython_stdlib/full/fnmatch/run_operations.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-fnmatch.json"
       - name: Check subprocess.run with vendored CPython methods
         run: python3 benchmarks/cpython_stdlib/native_subprocess.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Run vendored CPython methods against native Imre
@@ -185,6 +187,9 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_os.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/native_os_path.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-os-path.json"
           python3 benchmarks/cpython_stdlib/full/logging/native_timed.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
+          for opt in 0 3; do
+            python3 benchmarks/cpython_stdlib/full/logging/native_config.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/cpython-logging-config-O$opt.json"
+          done
           python3 benchmarks/cpython_stdlib/native_logging.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/full/logging/native_levels.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
       - name: Run CPython logging record and formatter methods at O0 and O3

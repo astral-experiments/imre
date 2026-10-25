@@ -1,13 +1,12 @@
 //! POSIX descriptors are integers in the program's descriptor table. A call
 //! can observe a closed number or a number subsequently reused by the kernel.
 
-use super::exceptions::{Error, Kind, Result, finish};
-use super::files::{errno_error, names::Name};
+use super::exceptions::{Error, Filename, Kind, Result, finish};
+use super::files::{errno_error, errno_with_filenames};
 use super::{Int, Str};
 use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
 use std::rc::Rc;
 
 macro_rules! open_flags {
@@ -23,6 +22,38 @@ open_flags! {
     imre_os_o_nofollow = O_NOFOLLOW, imre_os_o_nonblock = O_NONBLOCK,
 }
 
+impl Filename {
+    /// Retain the same filesystem spelling for the syscall and its OSError.
+    ///
+    /// # Safety
+    /// `value` is the rooted native str, bytes or Path selected by `tag`.
+    unsafe fn from_syscall_handle(value: *const (), tag: u32) -> Self {
+        // SAFETY: str and bytes handles are borrowed; Path supplies an owned str.
+        unsafe {
+            match tag {
+                0 => Self::Str(super::acquire_rc(value as usize)),
+                1 => Self::Bytes(super::acquire_rc(value as usize)),
+                2 => Self::Str(Rc::from_raw(super::paths::imre_path_text(value.cast()))),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    /// Validate the original bytes before converting any optional directory fd.
+    fn terminated(&self, function: &str) -> Result<CString> {
+        let bytes = match self {
+            Self::Str(s) => s.as_bytes(),
+            Self::Bytes(b) => b.as_slice(),
+        };
+        CString::new(bytes).map_err(|_| {
+            Error::new(
+                Kind::ValueError,
+                format!("{function}: embedded null character in path"),
+            )
+        })
+    }
+}
+
 /// Open relative to an optional directory fd. Set close-on-exec atomically.
 ///
 /// # Safety
@@ -36,12 +67,10 @@ pub unsafe extern "C" fn imre_os_open(
     dir_fd: usize,
 ) -> usize {
     // SAFETY: the caller's representation tag describes this rooted path.
-    let path = unsafe { Name::from_handle(path, bytes) };
+    let path = unsafe { Filename::from_syscall_handle(path, bytes) };
     finish(
         (|| {
-            let name = CString::new(path.path().as_os_str().as_bytes()).map_err(|_| {
-                Error::new(Kind::ValueError, "open: embedded null character in path")
-            })?;
+            let name = path.terminated("open")?;
             let flags = c_int(flags)? | libc::O_CLOEXEC;
             let mode = c_int(mode)?;
             // SAFETY: dir_fd is a rooted optional integer according to the ABI.
@@ -54,7 +83,7 @@ pub unsafe extern "C" fn imre_os_open(
                 }
                 let error = io::Error::last_os_error();
                 if error.kind() != io::ErrorKind::Interrupted {
-                    return Err(path.error(error));
+                    return Err(errno_with_filenames(error, Some(path), None));
                 }
             }
         })(),
@@ -70,20 +99,18 @@ pub unsafe extern "C" fn imre_os_open(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_os_unlink(value: *const (), tag: u32, fd: usize, remove: u32) {
     // SAFETY: the path's owner stays live through the syscall and error rendering.
-    let name = unsafe { Name::from_handle(value, tag) };
+    let name = unsafe { Filename::from_syscall_handle(value, tag) };
     let result = (|| {
-        let path = CString::new(name.path().as_os_str().as_bytes()).map_err(|_| {
-            let function = if remove == 0 { "unlink" } else { "remove" };
-            Error::new(
-                Kind::ValueError,
-                format!("{function}: embedded null character in path"),
-            )
-        })?;
+        let path = name.terminated(if remove == 0 { "unlink" } else { "remove" })?;
         // SAFETY: fd is a rooted optional integer.
         let dir_fd = unsafe { directory_fd(fd) }?;
         // SAFETY: the zero-terminated path is owned until unlinkat returns.
         if unsafe { libc::unlinkat(dir_fd, path.as_ptr(), 0) } == -1 {
-            return Err(name.error(io::Error::last_os_error()));
+            return Err(errno_with_filenames(
+                io::Error::last_os_error(),
+                Some(name),
+                None,
+            ));
         }
         Ok(())
     })();

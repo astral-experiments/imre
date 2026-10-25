@@ -63,11 +63,11 @@ impl Value {
         }
         Ok(Self::Table(dict))
     }
-    fn items(source: &Object) -> Vec<(Rc<Str>, Rc<Object>)> {
+    pub(in crate::objects) fn items(source: &Object) -> Vec<(Rc<Str>, Rc<Object>)> {
         // SAFETY: this operation copies all owners before traversing child values.
         unsafe { source.0.with(|v| v.dictionary().document_pairs()) }
     }
-    fn elements(source: &Object) -> Vec<Rc<Object>> {
+    pub(in crate::objects) fn elements(source: &Object) -> Vec<Rc<Object>> {
         // SAFETY: only native list[document value] owners enter this path.
         unsafe {
             source.0.with(|s| {
@@ -241,7 +241,7 @@ impl Value {
             }))?,
         })
     }
-    fn read(obj: &Object) -> Self {
+    pub(in crate::objects) fn read(obj: &Object) -> Self {
         // SAFETY: callers hold a typed document owner. No storage borrow escapes.
         unsafe {
             obj.0.with(|storage| match storage {
@@ -267,7 +267,7 @@ impl Value {
             ))
         }
     }
-    fn truth(&self) -> bool {
+    pub(in crate::objects) fn truth(&self) -> bool {
         match self {
             Self::Null => false,
             Self::Bool(b) => *b,
