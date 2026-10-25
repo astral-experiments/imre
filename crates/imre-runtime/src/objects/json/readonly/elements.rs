@@ -1,6 +1,6 @@
 //! Decode materialized arrays of records without reparsing each field as raw JSON.
+use crate::StrOwner;
 use std::fmt;
-use std::rc::Rc;
 
 use serde::Deserializer;
 use serde::de::{DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor};
@@ -65,7 +65,7 @@ impl<'de> Visitor<'de> for &mut Elements<'_> {
         ))
     }
     fn visit_str<E>(self, value: &str) -> Result<Node, E> {
-        Ok(Node::String(Rc::new(Str::new(value))))
+        Ok(Node::String(StrOwner::new(Str::new(value))))
     }
     fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Node, A::Error> {
         if std::mem::replace(&mut self.entered, true) {

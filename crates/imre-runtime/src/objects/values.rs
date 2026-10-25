@@ -2,6 +2,7 @@
 //! Structural traversal uses explicit cursors. Exception repr may call Python;
 //! it roots outstanding cursors before releasing control to the callback.
 
+use crate::StrOwner;
 use std::cmp::Ordering;
 use std::fmt::Write;
 use std::rc::Rc;
@@ -373,6 +374,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                 (Storage::Deque(left), Storage::Deque(right)) => {
                     left.compare_entry(right, position)
                 }
+                (Storage::Calendar(left), Storage::Calendar(right)) => {
+                    Comparison::Done(super::calendar::equal(left, right))
+                }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Document(left), Storage::Document(right)) => {
@@ -405,7 +409,7 @@ pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
     if super::exceptions::imre_error_pending() != 0 {
         return std::ptr::null();
     }
-    Rc::into_raw(Rc::new(Str::from(output)))
+    StrOwner::into_raw(StrOwner::new(Str::from(output)))
 }
 
 /// # Safety
@@ -450,15 +454,27 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
                         Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
+                        Storage::Calendar(value) => {
+                            super::calendar::write_repr(value, output);
+                            None
+                        }
                         Storage::ModuleMember(member) => {
                             let text = member.text(1);
                             if !text.is_null() {
                                 // SAFETY: the metadata formatter returns an independently owned string.
-                                output.push_str(Rc::from_raw(text).as_str());
+                                output.push_str(crate::StrOwner::from_raw(text).as_str());
                             }
                             None
                         }
                         Storage::Exception(_) => Some(ReprTask::Exception(owner)),
+                        Storage::SourceModule { name, filename } => {
+                            output.push_str("<module ");
+                            super::exceptions::push_string_repr(name, output);
+                            output.push_str(" from ");
+                            super::exceptions::push_string_repr(filename, output);
+                            output.push('>');
+                            None
+                        }
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
@@ -607,7 +623,7 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                     if text.is_null() {
                         return;
                     }
-                    let text = Rc::from_raw(text);
+                    let text = crate::StrOwner::from_raw(text);
                     if super::exceptions::imre_error_pending() != 0 {
                         return;
                     }
@@ -946,7 +962,7 @@ mod tests {
             right.cast::<f64>().write(f64::NAN);
             assert_eq!(imre_record_equal(left, left), 1);
             assert_eq!(imre_record_equal(left, right), 0);
-            let rendered = Rc::from_raw(imre_value_repr(left as usize, 6));
+            let rendered = StrOwner::from_raw(imre_value_repr(left as usize, 6));
             assert_eq!(rendered.as_str(), "Reading(value=nan)");
             left.cast::<f64>().write(-0.0);
             right.cast::<f64>().write(0.0);

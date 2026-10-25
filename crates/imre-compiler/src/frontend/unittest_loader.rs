@@ -39,20 +39,67 @@ impl Checker<'_> {
                 ));
             }
         };
-        let id = self.class_reference(target).ok_or_else(|| {
-            error(
-                self.source,
-                target,
-                "native getTestCaseNames requires a resolved class",
+        let (owner, attributes) = if let Some(class) = self.local_class(target)? {
+            (
+                format!(
+                    "{}.{}",
+                    self.runtime_module_name(self.module),
+                    class.qualname
+                ),
+                class.attributes.clone(),
             )
-        })?;
-        let target = &classes[id];
-        let origin = if target.definition.module == self.graph.entry {
-            "__main__"
         } else {
-            &self.graph.modules[target.definition.module].name
+            let id = self.class_reference(target).ok_or_else(|| {
+                error(
+                    self.source,
+                    target,
+                    "native getTestCaseNames requires a resolved class",
+                )
+            })?;
+            let class = &classes[id];
+            (
+                format!(
+                    "{}.{}",
+                    self.runtime_module_name(class.definition.module),
+                    class.name
+                ),
+                self.fixed_class_attributes(id),
+            )
         };
-        let owner = unpacking::string(format!("{origin}.{}", target.name));
+        let owner = unpacking::string(owner);
+        let signature = self.classes.methods[loader]
+            .get("_getTestCaseNames")
+            .cloned()
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    call,
+                    "native TestLoader name filtering is unavailable",
+                )
+            })?;
+        let items = |status| Expr {
+            ty: signature.params[2].ty,
+            kind: ExprKind::List(
+                attributes
+                    .iter()
+                    .filter(|(_, v)| **v == status)
+                    .map(|(n, _)| unpacking::string(n.as_str()))
+                    .collect(),
+            ),
+        };
+        let args = vec![receiver.clone(), owner, items(Some(true)), items(None)];
+        Ok(Some(self.call_value(
+            &signature,
+            signature.returns,
+            ir::CallArgs::positional(args),
+        )))
+    }
+
+    /// Gather inherited callable and shadowed names from original declarations,
+    /// even when reachable compilation prunes the method bodies.
+    pub(super) fn fixed_class_attributes(&self, id: usize) -> local_classes::Attributes {
+        let classes = &self.classes.declarations.definitions;
+        let target = &classes[id];
         let mut attributes = BTreeMap::new();
         // The callable table can omit an uncalled method in reachable mode.
         // Collect bindings from original declarations in base-to-derived order.
@@ -111,31 +158,6 @@ impl Checker<'_> {
                 attributes.insert(name.to_owned(), callable);
             }
         }
-        let signature = self.classes.methods[loader]
-            .get("_getTestCaseNames")
-            .cloned()
-            .ok_or_else(|| {
-                error(
-                    self.source,
-                    call,
-                    "native TestLoader name filtering is unavailable",
-                )
-            })?;
-        let items = |status| Expr {
-            ty: signature.params[2].ty,
-            kind: ExprKind::List(
-                attributes
-                    .iter()
-                    .filter(|(_, v)| **v == status)
-                    .map(|(n, _)| unpacking::string(n.as_str()))
-                    .collect(),
-            ),
-        };
-        let args = vec![receiver.clone(), owner, items(Some(true)), items(None)];
-        Ok(Some(self.call_value(
-            &signature,
-            signature.returns,
-            ir::CallArgs::positional(args),
-        )))
+        attributes
     }
 }
