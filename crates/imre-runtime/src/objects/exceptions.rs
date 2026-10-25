@@ -6,6 +6,8 @@
 //! attributes can introduce ownership cycles.
 
 mod imports;
+mod tree;
+pub(super) use tree::append_tree_entries;
 
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
@@ -301,6 +303,7 @@ enum Payload {
     /// Some builtins render a human message that differs from their original arguments.
     Arguments(Box<BuiltinArguments>),
     Json(Rc<JsonError>),
+    Tree(Rc<tree::Errors>),
     Key(OwnedWord),
     Exit(Option<OwnedWord>),
     Import(Box<imports::Import>),
@@ -487,15 +490,6 @@ impl Error {
         Self::errno_arguments(kind, errno, description, message, os_paths)
     }
 
-    pub(super) fn from_errno_message(
-        kind: Kind,
-        errno: i32,
-        description: &str,
-        message: String,
-    ) -> Self {
-        Self::errno_arguments(kind, errno, description, message, None)
-    }
-
     fn errno_arguments(
         kind: Kind,
         errno: i32,
@@ -579,6 +573,15 @@ impl Error {
         }
     }
 
+    /// Use Python's argument-free MemoryError when an operation exhausts memory.
+    pub(super) fn memory_error() -> Self {
+        Self {
+            kind: Kind::MemoryError,
+            payload: Some(Payload::Empty),
+            cause: None,
+        }
+    }
+
     pub(super) fn key(key: OwnedWord) -> Self {
         Self {
             kind: Kind::KeyError,
@@ -597,6 +600,16 @@ impl Error {
         Self::new(Kind::IndexError, "list index out of range")
     }
 
+    /// Copytree aggregates only OS failures; language errors still escape intact.
+    pub(super) fn into_os_message(self) -> Result<Rc<Str>> {
+        if !self.kind.matches(Kind::OSError) {
+            return Err(self);
+        }
+        let error = self.into_object();
+        // SAFETY: this fresh exception owns its payload throughout the read.
+        Ok(unsafe { error.0.with(Storage::exception_message) })
+    }
+
     /// Retain the original exception when a native operation translates an error.
     pub(super) fn with_cause(mut self, cause: Self) -> Self {
         self.cause = Some(cause.into_object());
@@ -605,6 +618,9 @@ impl Error {
 
     fn into_object(self) -> Rc<Object> {
         match self.payload {
+            Some(Payload::Empty) if self.kind == Kind::MemoryError && self.cause.is_none() => {
+                MEMORY_ERROR.with_borrow(Rc::clone)
+            }
             Some(payload) => exception_with_cause(self.kind, payload, self.cause),
             None => SEQUENCE_ALLOCATION_ERROR.with_borrow(Rc::clone),
         }
@@ -635,6 +651,8 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 }
 
 thread_local! {
+    static MEMORY_ERROR: RefCell<Rc<Object>> =
+        RefCell::new(new_exception(Kind::MemoryError, Payload::Empty));
     static RECORD_ALLOCATION_ERROR: RefCell<Rc<Object>> = RefCell::new(new_exception(
         Kind::MemoryError, Rc::new(Str::new("record allocation failed")),
     ));
@@ -654,6 +672,7 @@ thread_local! {
 /// Prepare allocation errors and exception state before generated code starts.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_record_error_init() {
+    MEMORY_ERROR.with(|_| ());
     RECORD_ALLOCATION_ERROR.with(|_| ());
     SEQUENCE_ALLOCATION_ERROR.with(|_| ());
     PENDING.with(|_| ());
@@ -754,9 +773,13 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
     }
     PENDING.with_borrow(|slot| {
         let Some(pending) = slot.as_ref() else { return };
-        if let Some(template) = [&RECORD_ALLOCATION_ERROR, &SEQUENCE_ALLOCATION_ERROR]
-            .into_iter()
-            .find(|template| template.with_borrow(|cached| Rc::ptr_eq(cached, pending)))
+        if let Some(template) = [
+            &RECORD_ALLOCATION_ERROR,
+            &SEQUENCE_ALLOCATION_ERROR,
+            &MEMORY_ERROR,
+        ]
+        .into_iter()
+        .find(|template| template.with_borrow(|cached| Rc::ptr_eq(cached, pending)))
         {
             // Move the spare into the cache. Existing aliases keep the exact pending
             // exception and its traceback, including an alias saved before a re-raise.
@@ -987,6 +1010,45 @@ pub(crate) fn write_string_repr(value: &str, out: &mut impl std::fmt::Write) -> 
     write_escaped_string(&UnicodeEscape::new_repr(value), out, !value.is_ascii())
 }
 
+/// Render the portable spelling into a container repr without first copying the whole path.
+/// A literal backslash is the only character whose quoted spelling starts with two backslashes.
+pub(super) fn push_windows_path_repr(value: &str, out: &mut String) {
+    struct PosixSeparators<'a> {
+        out: &'a mut String,
+        escape: bool,
+    }
+
+    impl std::fmt::Write for PosixSeparators<'_> {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            for ch in text.chars() {
+                if self.escape {
+                    if ch == '\\' {
+                        self.out.push('/');
+                    } else {
+                        self.out.push('\\');
+                        self.out.push(ch);
+                    }
+                    self.escape = false;
+                } else if ch == '\\' {
+                    self.escape = true;
+                } else {
+                    self.out.push(ch);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    let mut writer = PosixSeparators { out, escape: false };
+    write_escaped_string(
+        &UnicodeEscape::new_repr(value),
+        &mut writer,
+        !value.is_ascii(),
+    )
+    .unwrap();
+    debug_assert!(!writer.escape);
+}
+
 fn write_escaped_string(
     escaped: &UnicodeEscape<'_>,
     out: &mut impl std::fmt::Write,
@@ -1068,6 +1130,7 @@ impl Storage {
                 // SAFETY: this owned kind-3 word is a live string.
                 Rc::new(string_repr(unsafe { &*(key.word as *const Str) }))
             }
+            Payload::Tree(errors) => errors.message(),
             Payload::Key(key) => {
                 let mut message = String::new();
                 // SAFETY: the exception owns the immutable key and its exact kind.
@@ -1492,6 +1555,7 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
             let arg = match &e.payload {
                 Payload::Import(err) => err.args.repr_args(),
                 Payload::Positional(args) => args.repr_args(),
+                Payload::Tree(errors) => errors.message().as_ref().clone(),
                 Payload::Empty => Str::new(""),
                 Payload::Arguments(arguments) => {
                     let mut result = String::new();
@@ -2226,6 +2290,23 @@ mod tests {
             );
             drop(take_error(Kind::RuntimeError));
             assert_eq!((key, value), (17, 19));
+        }
+    }
+
+    #[test]
+    fn windows_path_repr_preserves_other_escapes() {
+        for raw in [
+            r"\\server\share\folder",
+            "C:\\one'\t\\two\"\n",
+            "C:\\'\0\\\r\\𐐀\\\u{1faea}",
+            r"C:\x00\next",
+        ] {
+            let mut rendered = String::from("prefix ");
+            push_windows_path_repr(raw, &mut rendered);
+            assert_eq!(
+                &rendered[7..],
+                string_repr(&raw.replace('\\', "/")).as_str()
+            );
         }
     }
 

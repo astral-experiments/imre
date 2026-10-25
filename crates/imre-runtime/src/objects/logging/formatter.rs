@@ -242,9 +242,7 @@ impl Formatter {
                     let rest = rest
                         .strip_prefix('(')
                         .ok_or_else(|| Error::new(Kind::TypeError, "format requires a mapping"))?;
-                    let (key, rest) = rest
-                        .split_once(')')
-                        .ok_or_else(|| error("incomplete format key"))?;
+                    let (key, rest) = record::mapping_key(rest)?;
                     let (text, rest) = record::percent_value(rest, &self.get(r, key)?)?;
                     out.push_str(&text);
                     tail = rest;

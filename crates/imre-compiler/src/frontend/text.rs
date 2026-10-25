@@ -165,6 +165,102 @@ impl Checker<'_> {
         })
     }
 
+    /// Bind splitlines/isspace after evaluating the receiver; an explicit
+    /// keepends uses Python truth, including its fallible source-class protocol.
+    pub(super) fn line_method(
+        &mut self,
+        receiver: Expr,
+        name: &str,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let split = name == "splitlines";
+        let returns = if split {
+            self.types.list(Type::Str)
+        } else {
+            Type::Bool
+        };
+        let args = &call.arguments;
+        let count = args.args.len() + args.keywords.len();
+        if count == 0 {
+            let kind = if split {
+                // Preserve the existing bytes.decode().splitlines() path and
+                // direct-iteration fusion for the no-argument method.
+                match receiver.kind {
+                    ExprKind::Builtin(Builtin::Decode, bytes) => {
+                        ExprKind::Builtin(Builtin::DecodeSplitLines, bytes)
+                    }
+                    _ => ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
+                }
+            } else {
+                ExprKind::Builtin(Builtin::Text(TextOperation::IsSpace), vec![receiver])
+            };
+            return Ok(Expr { ty: returns, kind });
+        }
+        // Typeshed limits keepends to bool; the runtime truth-tests any
+        // represented value. Defer only this resolved method's overload.
+        if split {
+            self.graph.checked_overload(self.module, call.range());
+        } else {
+            for arg in &args.args {
+                self.graph.checked_excess_argument(self.module, arg.range());
+            }
+            self.graph
+                .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+        }
+        if split && count == 1 {
+            let flag = match (args.args.as_ref(), args.keywords.as_ref()) {
+                ([flag], []) => Some(flag),
+                ([], [kw]) if kw.arg.as_deref() == Some("keepends") => Some(&kw.value),
+                _ => None,
+            };
+            if let Some(flag) = flag {
+                let value = self.expr(flag)?;
+                let keep = self.truth_value(value);
+                return Ok(Expr {
+                    ty: returns,
+                    kind: ExprKind::Builtin(
+                        Builtin::Text(TextOperation::SplitLineEnds),
+                        vec![receiver, keep],
+                    ),
+                });
+            }
+        }
+        // Invalid signatures are checked after evaluating all operands, but do
+        // not truth-test the would-be option.
+        let mut values = vec![receiver];
+        for arg in &args.args {
+            values.push(self.expr(arg)?);
+        }
+        for kw in &args.keywords {
+            values.push(self.expr(&kw.value)?);
+        }
+        let message = if !split && !args.keywords.is_empty() {
+            "str.isspace() takes no keyword arguments".to_owned()
+        } else if !split {
+            format!("str.isspace() takes no arguments ({count} given)")
+        } else if count > 1 {
+            let qualifier = if args.args.is_empty() { "keyword " } else { "" };
+            format!("splitlines() takes at most 1 {qualifier}argument ({count} given)")
+        } else {
+            format!(
+                "splitlines() got an unexpected keyword argument '{}'",
+                args.keywords[0].arg.as_deref().unwrap()
+            )
+        };
+        values.push(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(message))),
+            },
+        });
+        Ok(Expr {
+            ty: returns,
+            kind: ExprKind::Builtin(Builtin::RaiseException, values),
+        })
+    }
+
     /// Checks the bounded native signatures while retaining source evaluation order.
     pub(super) fn text_method(
         &mut self,
@@ -347,6 +443,50 @@ impl Checker<'_> {
         };
         let arguments = self.arguments(call, &parameters, Some(receiver))?;
         Ok(self.ordered_builtin(Builtin::Text(operation), returns, arguments))
+    }
+
+    /// CPython turns a missing or incompatible split('\n') into a catchable TypeError.
+    pub(super) fn dedent_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let source = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([arg], []) => arg,
+            ([], [kw]) if kw.arg.as_deref() == Some("text") => &kw.value,
+            _ => return self.text_function(call, "text", TextOperation::Dedent),
+        };
+        let value = self.expr(source)?;
+        let name = match value.ty {
+            Type::None => "NoneType",
+            Type::Int => "int",
+            Type::Bool => "bool",
+            Type::Float => "float",
+            Type::Bytes => "bytes",
+            Type::List(_) | Type::ListInt | Type::ByteOutput => "list",
+            Type::Dict(_) => "dict",
+            Type::Set(_) => "set",
+            Type::Tuple(_) => "tuple",
+            _ => {
+                let value = self.coerce(value, Type::Str, source)?;
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Text(TextOperation::Dedent), vec![value]),
+                });
+            }
+        };
+        let exception = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(format!(
+                    "expected str object, not '{name}'"
+                )))),
+            },
+        };
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::RaiseException, vec![value, exception]),
+        })
     }
 
     /// Binds standard-library functions taking one positional or named string.

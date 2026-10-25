@@ -1,6 +1,12 @@
 //! Preserve OS error fields as values; a rendered error is not a source of errno.
-use super::{Error, Kind, Object, Payload, Str, finish, object, push_string_repr};
+use super::{
+    Error, Kind, Object, Payload, Result, Str, Unicode16Repr, finish, object, push_string_repr,
+};
 use crate::Bytes;
+use ruff_python_literal::escape::{Escape, UnicodeEscape};
+use std::ffi::OsString;
+use std::fmt::Write;
+use std::os::unix::ffi::OsStringExt;
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -8,13 +14,23 @@ pub(in crate::objects) enum Filename {
     Str(Rc<Str>),
     Bytes(Rc<Bytes>),
     Path(Rc<Object>),
+    /// A POSIX name decoded with surrogateescape, outside Imre's scalar str domain.
+    SurrogateEscaped(Rc<Bytes>),
 }
 
 impl Filename {
+    pub(in crate::objects) fn from_fs_text(path: OsString) -> Self {
+        match path.into_string() {
+            Ok(s) => Self::Str(Rc::new(Str::from(s))),
+            Err(raw) => Self::SurrogateEscaped(Rc::new(raw.into_vec())),
+        }
+    }
+
     fn append_repr(&self, output: &mut String) {
         match self {
             Self::Str(s) => push_string_repr(s, output),
             Self::Bytes(b) => crate::objects::bytes::write_repr(output, b),
+            Self::SurrogateEscaped(raw) => push_fs_repr(raw, output),
             Self::Path(p) => {
                 // SAFETY: the exception roots this immutable path while rendering it.
                 unsafe {
@@ -28,13 +44,52 @@ impl Filename {
         }
     }
 
-    fn union_word(&self) -> usize {
-        match self {
+    fn union_word(&self) -> Result<usize> {
+        Ok(match self {
             Self::Str(s) => Rc::into_raw(Rc::clone(s)) as usize,
             Self::Bytes(b) => Rc::into_raw(Rc::clone(b)) as usize | 1,
             Self::Path(p) => Rc::into_raw(Rc::clone(p)) as usize | 6,
+            Self::SurrogateEscaped(_) => {
+                return Err(Error::new(
+                    Kind::UnicodeDecodeError,
+                    "filesystem path contains surrogate-escaped bytes",
+                ));
+            }
+        })
+    }
+}
+
+/// Render POSIX surrogateescape without replacing a failed syscall with a decoding error.
+fn push_fs_repr(raw: &[u8], out: &mut String) {
+    let quote = if raw.contains(&b'\'') && !raw.contains(&b'"') {
+        '"'
+    } else {
+        '\''
+    };
+    out.push(quote);
+    for chunk in raw.utf8_chunks() {
+        let mut text = chunk.valid();
+        // Escape both delimiters according to the choice for the complete filename.
+        // Quote-free spans use the same Unicode printability table as ordinary str repr.
+        while let Some(index) = text.find(['\'', '"']) {
+            UnicodeEscape::new_repr(&text[..index])
+                .write_body(&mut Unicode16Repr(out))
+                .unwrap();
+            let ch = char::from(text.as_bytes()[index]);
+            if ch == quote {
+                out.push('\\');
+            }
+            out.push(ch);
+            text = &text[index + 1..];
+        }
+        UnicodeEscape::new_repr(text)
+            .write_body(&mut Unicode16Repr(out))
+            .unwrap();
+        for byte in chunk.invalid() {
+            write!(out, "\\udc{byte:02x}").unwrap();
         }
     }
+    out.push(quote);
 }
 
 #[derive(Clone)]
@@ -106,12 +161,12 @@ pub unsafe extern "C" fn imre_os_error_field(value: *const Object, field: u32) -
                 2 => arguments
                     .os_paths
                     .as_ref()
-                    .map_or(0, |p| p.first.union_word()),
+                    .map_or(Ok(0), |p| p.first.union_word())?,
                 3 => arguments
                     .os_paths
                     .as_ref()
                     .and_then(|p| p.second.as_ref())
-                    .map_or(0, Filename::union_word),
+                    .map_or(Ok(0), Filename::union_word)?,
                 _ => unreachable!(),
             })
         })

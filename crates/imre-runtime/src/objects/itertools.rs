@@ -93,9 +93,10 @@ pub(super) enum Adapter {
     Slice(Slice),
     Tee(tee::Fork),
     Cycle(Cycle),
+    PathWalk(paths::Walker),
 }
 
-fn adapter(state: Adapter) -> Rc<Object> {
+pub(super) fn adapter(state: Adapter) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::IteratorAdapter(Rc::new(
         state,
     )))))
@@ -173,6 +174,10 @@ impl Adapter {
             Self::Tee(_) => "itertools._tee",
             Self::Slice(_) => "itertools.islice",
             Self::Cycle(_) => "itertools.cycle",
+            Self::PathWalk(_) => {
+                write!(output, "<generator object Path.walk at {owner:p}>").unwrap();
+                return;
+            }
         };
         write!(output, "<{name} object at {owner:p}>").unwrap();
     }
@@ -248,6 +253,7 @@ impl Adapter {
                 }
             }
             Self::Tee(_) | Self::Slice(_) | Self::Cycle(_) => self.next_composed(),
+            Self::PathWalk(walk) => walk.next(),
         }
     }
 }

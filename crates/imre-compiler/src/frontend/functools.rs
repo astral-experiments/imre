@@ -1,6 +1,13 @@
-//! Left folds over an immediate iterable, preserving the order of Python calls.
+//! Function tools, including left folds and the public decorator defaults.
 
 use super::*;
+
+pub(super) fn wrapper_attributes(fields: ir::WrapperAttributes, types: &Types) -> Expr {
+    Expr {
+        ty: types.tuple(vec![Type::Str; fields.names().len()]),
+        kind: ExprKind::Builtin(Builtin::WrapperAttributes(fields), vec![]),
+    }
+}
 
 fn type_error(message: &str) -> Statement {
     Statement::Raise(Some(Expr {
