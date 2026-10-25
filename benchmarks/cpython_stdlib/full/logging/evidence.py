@@ -238,9 +238,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for arg in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + arg, type=Path, required=True)
+    parser.add_argument("--cpython-source", type=Path)
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5) or not __debug__:
         parser.error("use a test-enabled CPython 3.14.5 with assertions enabled")
+    if args.cpython_source:
+        sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     import test
     from test import test_logging
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
