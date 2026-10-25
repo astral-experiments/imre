@@ -229,6 +229,9 @@ pub(crate) enum Intrinsic {
     WarningReset,
     WarningDisplay { show: bool },
     PatchSet,
+    PatchedFile,
+    Hunk,
+    UnidiffParseError,
     Awaitable,
     TypeVar,
     Stderr,
@@ -609,6 +612,9 @@ impl IntrinsicModule {
                 Intrinsic::IntConstant(0)
             }
             (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
+            (Self::Unidiff, "PatchedFile") => Intrinsic::PatchedFile,
+            (Self::Unidiff, "Hunk") => Intrinsic::Hunk,
+            (Self::Unidiff, "UnidiffParseError") => Intrinsic::UnidiffParseError,
             (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
             (Self::Typing, "overload") => Intrinsic::Overload,
             (Self::Typing, "get_overloads") => Intrinsic::GetOverloads,
