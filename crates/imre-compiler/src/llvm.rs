@@ -8462,10 +8462,14 @@ declare ptr @imre_inspect_str_descriptor(i32)
 @imre_socket_so_rcvbuf = external constant i64
 @imre_socket_so_linger = external constant i64
 @imre_socket_msg_peek = external constant i64
+@imre_socket_shut_rd = external constant i64
+@imre_socket_shut_wr = external constant i64
+@imre_socket_shut_rdwr = external constant i64
 @imre_socket_default_backlog = external constant i64
 declare ptr @imre_socket_new(i64, i64, i64)
 declare void @imre_socket_bind(ptr, ptr)
 declare void @imre_socket_listen(ptr, i64)
+declare void @imre_socket_shutdown(ptr, i64)
 declare ptr @imre_socket_accept(ptr, ptr, ptr)
 declare void @imre_socket_connect(ptr, ptr)
 declare ptr @imre_socket_sockname(ptr, ptr)
@@ -8592,6 +8596,7 @@ declare void @imre_record_error_init()
 declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)
 declare ptr @imre_record_try_new(ptr)
+declare ptr @imre_record_class_factory(ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
