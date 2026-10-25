@@ -106,37 +106,13 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let mut fields = Vec::with_capacity(declaration.fields.len());
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        // As in Python calls, evaluate the positional arguments (including each
-        // starred iterable exactly once), then the keyword values in source order.
+        let mut scope = calls::ArgumentScope::default();
         for arg in &call.arguments.args {
-            let star = if let ast::Expr::Starred(star) = arg {
-                Some(&*star.value)
+            if let ast::Expr::Starred(star) = arg {
+                fields.extend(scope.spread(self, star)?.into_iter().map(Some));
             } else {
-                None
-            };
-            let value = self.expr(star.unwrap_or(arg))?;
-            let ty = value.ty;
-            let slot = self.hidden(ty);
-            body.push(Statement::Assign(slot, value));
-            clear.push(slot);
-            if star.is_some() {
-                let members = self.types.fields(ty).ok_or_else(|| {
-                    error(
-                        self.source,
-                        arg,
-                        "namedtuple starred argument requires a fixed tuple",
-                    )
-                })?;
-                for (index, member) in members.into_iter().enumerate() {
-                    fields.push(Some(Expr {
-                        ty: member,
-                        kind: ExprKind::Field(Box::new(self.local(slot)), index),
-                    }));
-                }
-            } else {
-                fields.push(Some(self.local(slot)));
+                let value = self.expr(arg)?;
+                fields.push(Some(scope.hold(self, value)));
             }
         }
         if fields.len() > declaration.fields.len() {
@@ -164,10 +140,7 @@ impl Checker<'_> {
                 ));
             }
             let value = self.expr(&keyword.value)?;
-            let slot = self.hidden(value.ty);
-            body.push(Statement::Assign(slot, value));
-            clear.push(slot);
-            fields[index] = Some(self.local(slot));
+            fields[index] = Some(scope.hold(self, value));
         }
         let fields = fields
             .into_iter()
@@ -176,16 +149,9 @@ impl Checker<'_> {
         let ty = self
             .types
             .namedtuple_layout(definition, fields.iter().map(|field| field.ty).collect());
-        Ok(Expr {
+        Ok(scope.finish(Expr {
             ty,
-            kind: ExprKind::Scope {
-                body,
-                clear,
-                value: Box::new(Expr {
-                    ty,
-                    kind: ExprKind::Tuple(fields),
-                }),
-            },
-        })
+            kind: ExprKind::Tuple(fields),
+        }))
     }
 }
