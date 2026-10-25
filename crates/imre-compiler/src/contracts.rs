@@ -57,6 +57,7 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
                 if args
                     .first()
@@ -416,7 +417,6 @@ impl Builtin {
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
-            | Self::Repr
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
