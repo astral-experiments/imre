@@ -15,6 +15,8 @@ import time
 HERE = Path(__file__).resolve().parents[1] / "benchmarks/cpython_stdlib/full/select"
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import verify_files
+sys.path.insert(0, str(HERE))
+import selector_methods
 
 # Specialize only the assertion operands. The original method body, fd operation
 # and asserted values are copied byte-for-byte from the unmodified test module.
@@ -134,7 +136,7 @@ def main():
     manifest = json.loads((HERE / "UPSTREAM.json").read_bytes())
     verify_files(HERE / "upstream", manifest["files"])
     probe([sys.executable, HERE / "operations.py"])
-    reports = {"select": [], "poll": []}
+    reports = {"select": [], "poll": [], "selectors": []}
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         def build(source, level):
@@ -147,12 +149,19 @@ def main():
             exe = build(HERE / "operations.py", level)
             probe([exe])
             if args.host_original:
-                for flags in ([], ["--drop-write"]):
+                for flags in ([], ["--controls"]):
                     print(require([sys.executable, "-B", HERE / "host_poll.py", exe, *flags]).strip())
                 observations["test.test_poll.PollTests.test_poll1"] = (
                     {"body": "cpython", "assertions": "cpython", "operation": "imre", "fixture": "mixed"},
                     {"operation": "native poll(2) waits on inherited descriptors; registration state is replayed into each child",
                      "fixture": "CPython runs unchanged test_poll1, including random choices, pipe I/O, assertions and the original unittest lifecycle; dropping writable events fails it"})
+                for name, operation, fixture in (
+                    ("test.test_poll.PollTests.test_poll_blocks_with_negative_ms", "native poll with None, integer and float negative timeouts", "CPython owns the thread, pipe writes and timing assertions; forcing zero fails the original test"),
+                    ("test.test_poll.PollTests.test_poll_c_limits", "native register, modify and poll validate actual C bounds", "CPython imports _testcapi, translates native exceptions and runs assertRaises; suppressing overflow fails the original test"),
+                    ("test.test_select.SelectTestCase.test_select", "native select returns integer read fds for the subprocess pipe", "CPython makes the subprocess, converts file objects, reads and asserts; adding a spurious writer fails the original test"),
+                ):
+                    observations[name] = ({"body": "cpython", "assertions": "cpython", "operation": "imre", "fixture": "mixed"},
+                                          {"operation": operation, "fixture": fixture})
             for suite, owner, method, fixture, before, after, failure in CASES:
                 case, body, source = method_source(suite, owner, method, fixture)
                 file = work / "method.py"
@@ -173,6 +182,9 @@ def main():
                                 (" with a typed assertion for the original operands" if fixture else " with callable assertRaises"),
                      "method_sha256": hashlib.sha256(body).hexdigest(), "negative_control": failure})
                 print(f"O{level} {case}: passed; control detected", flush=True)
+            source = HERE / "selector_operations.py"
+            assert require([build(source, level)]) == require([sys.executable, source]) == "selector passed\n"
+            observations.update(selector_methods.exercise(HERE, work, level, build, require, run))
             if args.evidence_dir:
                 record_level(reports, observations, level)
     if args.evidence_dir:

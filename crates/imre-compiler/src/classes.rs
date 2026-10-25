@@ -378,9 +378,13 @@ fn collect_class(
                     name,
                     "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__" | "__fspath__"
                 );
+                let selector_context = module.is_bundled("selectors")
+                    && node.name.as_str() == "PollSelector"
+                    && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
                     && name != "__init__"
                     && !unary_protocol
+                    && !selector_context
                     && !(name == "__post_init__" && dataclass.is_some())
                     && !(name == "__repr__" && exception_layout)
                 {

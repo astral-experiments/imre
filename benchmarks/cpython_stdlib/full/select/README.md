@@ -1,18 +1,20 @@
 # POSIX readiness
 
-The native product surface is `select.poll()` and `select.select()` for POSIX integer descriptors. A poller remembers its own interests between waits; no process-global table or socket implementation is involved. The six portable event constants come from the target's headers.
+The native product surface is `select.poll()` and `select.select()` for POSIX integer descriptors. A poller remembers its own interests between waits; no process-global table or socket implementation is involved. The six portable event constants come from the target's headers. `selectors.PollSelector` builds on that poller; `DefaultSelector` selects the same backend because Imre does not currently expose epoll, kqueue or devpoll.
 
 [UPSTREAM.json](UPSTREAM.json) pins the original CPython 3.14.5 C implementation, Python selector layer, three full test modules, and license by Git blob. The two companion manifests select the corresponding upstream test entry point for the existing reference runner.
 
 | Complete Linux reference | Discovered | Passed | Skipped | Native observation at O0 and O3 |
 |---|---:|---:|---:|---|
-| [test_select](reference-select-linux.json) | 6 | 6 | 0 | [Two original bodies](evidence-select-linux.json): `test_errno` and `test_returned_list_identity` |
-| [test_poll](reference-poll-linux.json) | 7 | 6 | 1 | [One original body](evidence-poll-linux.json), `test_poll3`; one host-driven original, `test_poll1` |
-| [test_selectors](reference-selectors-linux.json) | 121 | 77 | 44 | Reference only |
+| [test_select](reference-select-linux.json) | 6 | 6 | 0 | [Two native bodies](evidence-select-linux.json): `test_errno`, `test_returned_list_identity`; one host-driven: `test_select` |
+| [test_poll](reference-poll-linux.json) | 7 | 6 | 1 | [One native body](evidence-poll-linux.json): `test_poll3`; three host-driven: `test_poll1`, `test_poll_c_limits`, `test_poll_blocks_with_negative_ms` |
+| [test_selectors](reference-selectors-linux.json) | 121 | 77 | 44 | [Four native IDs](evidence-selectors-linux.json): `test_empty_select` and `test_unregister_after_fd_close` from both `PollSelectorTestCase` and `DefaultSelectorTestCase` |
 
-Each native original runs its complete original method bytes, with native readiness operations and assertions. The host extracts and schedules the method. The two select assertion fixtures specialize list identity and optional errno; the poll overflow method uses Imre's native `TestCase.assertRaises`. In host-driven `test_poll1`, CPython executes the original 12-pipe test, including random choice, reads/writes, interest bookkeeping and assertions. A native executable registers those interests and waits on inherited fds at each call.
+The seven native IDs execute their unchanged method bytes with native assertions and fd operations. The host extracts the method and supplies a typed fixture. The select fixtures specialize list identity and optional errno; the poll overflow method uses Imre's `TestCase.assertRaises`. The two selector classes inherit the same two method bodies. A native fixture defers selector cleanup and receives a real host socketpair; the original method closes and unregisters the integer fds itself.
 
-The negative controls leave the fd open, pass the same list twice, register a valid mask in place of the invalid one, or suppress writable events in the host bridge. Each must cause the relevant original assertion or readiness check to fail. Additional differential cases cover independent pollers, replacing masks, multiple idle/readable/writable fds, pipe backpressure and recovery, EOF, closed/reused numbers, and bounded and indefinite waits. None of these extra cases increments the original-method count.
+In the four host-driven IDs, CPython owns the assertions and fixtures. Imre waits on the original 12 pipes, blocks on negative timeouts until a host thread writes, validates `_testcapi` boundary values, or selects the subprocess output pipe. Controls suppress writable events, force a zero timeout, hide an overflow, or add a spurious writer; each fails the original test. Native controls also leave a bad fd open, alias the same list, make an invalid mask valid, replace an empty result, or unregister the same fd twice.
+
+Additional differential scenarios cover independent pollers, backpressure and recovery, EOF and fd reuse, timeouts, key identity and data replacement, mask translation, and selector cleanup. They do not increase the upstream method count.
 
 The Linux reference uses default regrtest resources. One poll case needs `walltime`; the selector ledger records 42 unavailable kqueue/devpoll backend cases and two `cpu` resource skips. Other unobserved IDs remain reference-only. The unchanged modules do not start under the ordinary or reachable-only native compiler: the poll and selector suites import `random`, and the select suite performs a module-level call before its test class declaration. These boundaries were checked against the staged test tree in both compiler modes.
 
@@ -27,4 +29,4 @@ python3.14 tests/posix_readiness.py --compiler target/release/imre --runtime tar
     --clang clang --host-original --evidence-dir /tmp/readiness-evidence
 ```
 
-Linux CI checks both optimization levels; Apple Silicon checks O3. The higher-level selector suite is retained as an inventory for the next interface.
+Linux CI checks both optimization levels; Apple Silicon checks O3.

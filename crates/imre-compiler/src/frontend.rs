@@ -1496,6 +1496,19 @@ fn annotation_with_aliases(
     }
     match graph.resolve_type(module, expression) {
         Some(Binding::Definition(definition)) => {
+            // The integer-fd selector keeps its immutable key in both the mapping
+            // and the ready list. The data field contains a boxed Python value.
+            let owner = &graph.modules[definition.module];
+            if owner.is_bundled("selectors")
+                && types
+                    .namedtuple(definition)
+                    .is_some_and(|ty| ty.name == "SelectorKey")
+            {
+                return Ok(types.namedtuple_layout(
+                    definition,
+                    vec![Type::Int, Type::Int, Type::Int, Type::ObjectValue],
+                ));
+            }
             if classes.exceptions.contains_key(&definition) {
                 return Ok(classes
                     .ids
@@ -4185,10 +4198,19 @@ impl<'a> Checker<'a> {
         let stored = self.types.directory_value(manager.ty);
         let archive = manager.ty == Type::ZipFile;
         let popen = matches!(manager.ty, Type::Popen(..));
+        let selector_close = if let Type::Class(class) = manager.ty {
+            let owner = &self.classes.declarations.definitions[class];
+            (self.graph.modules[owner.definition.module].is_bundled("selectors")
+                && owner.name == "PollSelector")
+                .then(|| self.classes.methods[class]["close"].id)
+        } else {
+            None
+        };
         if temporary.is_none()
             && stored.is_none()
             && !archive
             && !popen
+            && selector_close.is_none()
             && !matches!(manager.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
         {
             return Err(error(
@@ -4221,7 +4243,8 @@ impl<'a> Checker<'a> {
         let (nested, falls) = self.with_items(remaining, body)?;
         protected.extend(nested);
         let mut statements = vec![Statement::Assign(captured, manager)];
-        if temporary.is_none() && stored.is_none() && !archive && !popen {
+        if temporary.is_none() && stored.is_none() && !archive && !popen && selector_close.is_none()
+        {
             statements.push(Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
@@ -4238,13 +4261,19 @@ impl<'a> Checker<'a> {
         } else {
             Builtin::TextClose
         };
+        let cleanup = if let Some(id) = selector_close {
+            self.calls.insert(id);
+            ExprKind::Call(id, ir::CallArgs::positional(vec![self.local(captured)]))
+        } else {
+            ExprKind::Builtin(cleanup, vec![self.local(captured)])
+        };
         statements.push(Statement::Try {
             body: protected,
             handlers: Vec::new(),
             orelse: Vec::new(),
             finalbody: vec![Statement::Expr(Expr {
                 ty: Type::None,
-                kind: ExprKind::Builtin(cleanup, vec![self.local(captured)]),
+                kind: cleanup,
             })],
         });
         Ok((

@@ -313,6 +313,9 @@ impl Reachable {
                                 || unittest_method
                                 || assertion_exit
                                 || mock_dispatch
+                                || (source.is_bundled("selectors")
+                                    && class.name.as_str() == "PollSelector"
+                                    && name == "close")
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,
