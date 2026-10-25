@@ -104,25 +104,27 @@ def main():
     for index, (text, params) in enumerate(queries):
         if len(params) == 1 and isinstance(params[0], dict):
             descriptor = annotation(params[0])
-            if not descriptor:
-                continue
-            var = f"table_{index}"
-            lines.append(f"{var}: {descriptor} = {params[0]!r}")
-            values = var
+            if descriptor:
+                var = f"table_{index}"
+                lines.append(f"{var}: {descriptor} = {params[0]!r}")
+                values = var
+            else:
+                # The original inline table mixes str, int and None. No variable
+                # annotation is needed; the operation determines its exact layout.
+                assert set(map(type, params[0].values())) == {str, int, type(None)}
+                values = repr(params[0])
         else:
             values = ", ".join(map(repr, params))
         native.append(index)
         lines.extend((f"try: print('S' + repr({text!r}.translate({values})))",
                       "except TypeError as e: print('T' + str(e))",
                       "except ValueError as e: print('V' + str(e))"))
-    assert indirect == 14 and len(queries) == 26 and len(native) == 25
+    assert indirect == 14 and len(queries) == 26 and len(native) == 26
     def replay(answers):
         current = iter(enumerate(queries[:indirect]))
         def lookup(text, params):
             index, expected = next(current)
             assert (text, params) == expected
-            if index not in answers:
-                return text.translate(*params)
             value = answers[index]
             if value[0] == "T": raise TypeError(value[1:])
             if value[0] == "V": raise ValueError(value[1:])
@@ -144,9 +146,9 @@ def main():
                 assert result.wasSuccessful(), (result.errors, result.failures)
                 assert replay({**results, native[0]: "S'wrong native result'"}).failures
                 assert replay({**results, indirect: "S'wrong native literal lookup'"}).failures
-                print(f"{'reachable' if mode else 'whole'} O{level}: 13 native helper/error calls "
+                print(f"{'reachable' if mode else 'whole'} O{level}: 14 native helper/error calls "
                       "+ 12 native results supplied to unchanged direct assertions; "
-                      "one heterogeneous table and all maketrans work on the host")
+                      "all maketrans construction and errors remain on the host")
                 bounded_expansion(args, binary, mode, level)
 
 

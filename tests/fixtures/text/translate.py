@@ -35,6 +35,21 @@ def source(text: str) -> str:
     return text
 
 
+def key(n: int) -> int:
+    print("key " + str(n))
+    return n
+
+
+def number(n: int) -> int:
+    print("number " + str(n))
+    return n
+
+
+def replacement(text: str) -> str:
+    print("replacement " + text)
+    return text
+
+
 def make_table() -> dict[int, int]:
     print("table")
     return {97: 98}
@@ -68,6 +83,10 @@ mixed("aaabbc", {97: None, 98: 105})
 print(repr("abababc".translate({97: None, 98: 105})))
 print(repr("abababc".translate({97: "", 98: None})))
 print(repr("a".translate({97: None})))
+print(repr("abababc".translate({97: None, 98: 105, 99: "x"})))
+print(repr("cba".translate({97: "xy", 98: 0x10ffff})))
+print(repr("cba".translate({98: 0x10ffff, 97: "xy"})))
+print(repr("aba".translate({key(97): number(100), key(97): replacement("xy"), key(98): None})))
 print(repr("b".translate({98: False})))
 print(repr("b".translate({98: True})))
 print(repr("cab".translate({"a": "z"})))

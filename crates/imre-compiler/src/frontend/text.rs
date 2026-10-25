@@ -267,38 +267,50 @@ impl Checker<'_> {
                 // The empty literal has no observable key/value layout.
                 return self.dictionary(dict, Some((Type::Int, Type::Int)));
             }
-            // In a translation literal, None explicitly means deletion. Determine
-            // its optional scalar layout before emitting any operands; ordinary
-            // dictionary construction then evaluates everything once, in order.
-            if dict
-                .items
-                .iter()
-                .any(|item| matches!(item.value, ast::Expr::NoneLiteral(_)))
-            {
-                let scalar = |e: &ast::Expr| {
-                    if matches!(e, ast::Expr::NoneLiteral(_)) {
-                        Some(Type::None)
-                    } else {
-                        self.graph.session.scalar_type(self.module, e)
-                    }
-                };
-                let shape = (|| {
-                    let key = scalar(dict.items[0].key.as_ref()?)?;
-                    if !self.types.hashable_key(key) {
+            // Choose the storage before lowering any operands. The ordinary dictionary
+            // constructor then still evaluates every key and value once, in source order.
+            let scalar = |e: &ast::Expr| {
+                if matches!(e, ast::Expr::NoneLiteral(_)) {
+                    Some(Type::None)
+                } else {
+                    self.graph.session.scalar_type(self.module, e)
+                }
+            };
+            let shape = (|| {
+                let key = scalar(dict.items[0].key.as_ref()?)?;
+                if !self.types.hashable_key(key) {
+                    return None;
+                }
+                let mut members = Vec::new();
+                let mut nullable = false;
+                for item in &dict.items {
+                    if scalar(item.key.as_ref()?)? != key {
                         return None;
                     }
-                    let mut value = Type::None;
-                    for item in &dict.items {
-                        if scalar(item.key.as_ref()?)? != key {
-                            return None;
-                        }
-                        value = self.types.join(value, scalar(&item.value)?)?;
+                    let value = scalar(&item.value)?;
+                    if value == Type::None {
+                        nullable = true;
+                    } else if !members.contains(&value) {
+                        members.push(value);
                     }
-                    Some((key, value))
-                })();
-                if let Some(shape) = shape {
-                    return self.dictionary(dict, Some(shape));
                 }
+                let value = match members.as_slice() {
+                    [] => Type::None,
+                    [one] => *one,
+                    [Type::Str, Type::Int] | [Type::Int, Type::Str] => self.types.string_or_int(),
+                    members => self.types.union(members)?,
+                };
+                Some((
+                    key,
+                    if nullable {
+                        self.types.optional(value)
+                    } else {
+                        value
+                    },
+                ))
+            })();
+            if let Some(shape) = shape {
+                return self.dictionary(dict, Some(shape));
             }
         }
         self.expr(argument)
