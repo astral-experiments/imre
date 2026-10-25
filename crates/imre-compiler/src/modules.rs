@@ -900,11 +900,6 @@ impl SourceGraph {
             .push(CheckedDiagnostic::ExcessArgument(argument));
     }
 
-    /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
-    pub(crate) fn checked_dict_deletion(&self, module: ModuleId, target: TextRange) {
-        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
-    }
-
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,
@@ -926,6 +921,11 @@ impl SourceGraph {
             self.checked_diagnostics.borrow_mut()[module]
                 .push(CheckedDiagnostic::TupleListRead(read));
         }
+    }
+
+    /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
+    pub(crate) fn checked_dict_deletion(&self, module: ModuleId, target: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
     }
 
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
@@ -1621,6 +1621,22 @@ impl<'a> Loader<'a> {
         Ok(())
     }
 
+    /// Preserve the original spelling of target-dependent symbols even when imported under an alias.
+    fn named_import(&mut self, binding: Binding, name: &str) -> Binding {
+        if binding != Binding::Intrinsic(Intrinsic::ErrnoAttribute) {
+            return binding;
+        }
+        let slot = self
+            .errno_names
+            .iter()
+            .position(|n| n == name)
+            .unwrap_or_else(|| {
+                self.errno_names.push(name.to_owned());
+                self.errno_names.len() - 1
+            });
+        Binding::Intrinsic(Intrinsic::ErrnoFrom(slot))
+    }
+
     fn bind(
         &mut self,
         module: ModuleId,
@@ -1684,37 +1700,25 @@ impl<'a> Loader<'a> {
                     && let Some(module) = self.intrinsic_module(&name, Some(&import.names))?
                 {
                     for alias in &import.names {
-                        let binding = if module == IntrinsicModule::Errno {
-                            let name = alias.name.as_str();
-                            let slot = self
-                                .errno_names
-                                .iter()
-                                .position(|n| n == name)
-                                .unwrap_or_else(|| {
-                                    self.errno_names.push(name.to_owned());
-                                    self.errno_names.len() - 1
-                                });
-                            Binding::Intrinsic(Intrinsic::ErrnoFrom(slot))
-                        } else {
-                            stdlib_symbol(&self.modules, module, alias.name.as_str())
-                                .filter(|binding| {
-                                    self.reachable_only
-                                        || !matches!(
-                                            binding,
-                                            Binding::Intrinsic(Intrinsic::Declaration(_))
-                                                | Binding::IntrinsicModule(
-                                                    IntrinsicModule::Declaration(_)
-                                                )
-                                        )
-                                })
-                                .ok_or_else(|| {
-                                    format!(
-                                        "unsupported sealed standard-library export {name}.{}",
-                                        alias.name
+                        let binding = stdlib_symbol(&self.modules, module, alias.name.as_str())
+                            .filter(|binding| {
+                                self.reachable_only
+                                    || !matches!(
+                                        binding,
+                                        Binding::Intrinsic(Intrinsic::Declaration(_))
+                                            | Binding::IntrinsicModule(
+                                                IntrinsicModule::Declaration(_)
+                                            )
                                     )
-                                })?
-                        };
+                            })
+                            .ok_or_else(|| {
+                                format!(
+                                    "unsupported sealed standard-library export {name}.{}",
+                                    alias.name
+                                )
+                            })?;
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                        let binding = self.named_import(binding, alias.name.as_str());
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
                     if module == IntrinsicModule::Opcode
