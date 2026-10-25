@@ -1,4 +1,4 @@
-name: Argparse 895 prospective runtime
+name: Argparse 926 prospective runtime
 on:
   workflow_dispatch:
 permissions:
@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: b65213dfe9d6fdd4b429bd079ae52cb302530f25
+          ref: 4c68a78174db25c6db1efb6293d6be6dccdd42ef
           fetch-depth: 0
           persist-credentials: true
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           base_checkout="$PWD"
-          pr=b65213dfe9d6fdd4b429bd079ae52cb302530f25
+          pr=4c68a78174db25c6db1efb6293d6be6dccdd42ef
           cat > "$RUNNER_TEMP/argparse-driver" <<'SH'
           #!/bin/sh
           if test "$1" = build; then
@@ -46,13 +46,18 @@ jobs:
           root = Path(os.environ["GITHUB_WORKSPACE"])
           driver = Path(os.environ["RUNNER_TEMP"], "argparse-driver")
           runtime = root / "target/debug/libimre_runtime.a"
-          for name in ("benchmarks/cpython_stdlib/full/types/namespaces.py",
+          required = ("benchmarks/cpython_stdlib/full/types/namespaces.py",
                        "benchmarks/cpython_stdlib/full/inspect/static_attributes.py",
                        "tests/fixtures/paths/walking.py", "tests/fixtures/processes/file_redirects.py",
                        "tests/fixtures/text/line_methods.py",
                        "tests/fixtures/module_values/wrapper_attributes/main.py",
                        "benchmarks/cpython_stdlib/full/logging/hierarchy_values.py",
-                       "tests/fixtures/classes/constant_strings.py"):
+                       "tests/fixtures/classes/constant_strings.py",
+                       "tests/fixtures/files/string_io.py",
+                       "tests/fixtures/primitives/clear_record_buffer.py",
+                       "tests/fixtures/containers/dict_fromkeys.py")
+          optional = ("tests/fixtures/classes/initializer_hook.py",)
+          for name in (*required, *(path for path in optional if (root / path).is_file())):
               source = root / name
               local_imports = name.endswith(("/wrapper_attributes/main.py", "/classes/constant_strings.py"))
               with TemporaryDirectory() as tmp:
@@ -82,7 +87,7 @@ jobs:
             git fetch --no-tags origin refs/heads/main
             base=$(git rev-parse FETCH_HEAD)
             tree=$(git merge-tree --write-tree "$base" "$pr")
-            candidate=$(git -c user.name='Argparse preflight' -c user.email='noreply@github.com' commit-tree "$tree" -p "$base" -p "$pr" -m 'Hosted validation of PR #895')
+            candidate=$(git -c user.name='Argparse preflight' -c user.email='noreply@github.com' commit-tree "$tree" -p "$base" -p "$pr" -m 'Hosted validation of PR #926')
             git checkout --detach "$candidate"
             test "$(git rev-parse HEAD^{tree})" = "$tree"
             echo "Attempt $attempt: base=$base pr=$pr tree=$tree"
@@ -93,7 +98,7 @@ jobs:
             echo "Passed: base=$base pr=$pr tree=$tree (-O0 and -O3 stdout, stderr and exit; runtime ownership)." >> "$GITHUB_STEP_SUMMARY"
             git fetch --no-tags origin refs/heads/main
             latest=$(git rev-parse FETCH_HEAD)
-            if git diff --quiet "$base" "$latest" -- crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py tests/fixtures/classes/constant_strings.py tests/fixtures/classes/_constant_strings.py; then
+            if git diff --quiet "$base" "$latest" -- crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py tests/fixtures/classes/constant_strings.py tests/fixtures/classes/_constant_strings.py tests/fixtures/files/string_io.py tests/fixtures/primitives/clear_record_buffer.py tests/fixtures/containers/dict_fromkeys.py tests/fixtures/classes/initializer_hook.py; then
               echo "Verified product source through main=$latest; tree=$tree (base=$base, pr=$pr)."
               exit 0
             fi
