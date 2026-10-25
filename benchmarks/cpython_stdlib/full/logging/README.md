@@ -25,7 +25,7 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The replay of [`af70d23`](https://github.com/astral-sh/imre/commit/af70d2320644c268031166236ffe32ffe678e0e7)
+The replay of [`7a62075`](https://github.com/astral-sh/imre/commit/7a620758f5e244f26ddc3140eaca4d5b44246dcc)
 includes logger hierarchy and handler propagation, the level registry, ordinary
 and timed file handlers, records, formatters, filters and configuration.
 Both levels have the same counts:
@@ -35,8 +35,8 @@ Both levels have the same counts:
 | Imre | Imre | Imre | CPython hooks and native child | 16 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 35 |
-| CPython | CPython | Imre | CPython hooks and native child | 2 |
-| Blocked before execution | | | | 212 |
+| CPython | CPython | Imre | CPython hooks and native child | 4 |
+| Blocked before execution | | | | 210 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -48,7 +48,7 @@ delayed creation and emission after closing a file opened in write mode. The rea
 bytes, including the newline, under its original host fixture. The stream replacement
 method checks the actual sys.stderr, the previous stream, and the unchanged-stream return. Two [root configuration methods](config.md) check the
 attached formatter, handler replacement and exact output before and after force.
-Two further original configuration bodies run on CPython and check the native file handler, UTF-8 delivery and error ordering.
+Four further original configuration bodies run on CPython. They check the native file handler, UTF-8 delivery, error ordering, and ASCII output with explicit ignore or default backslash replacement.
 Four bodies verify native stderr with the original
 CPython output helper. The 35 host-driven methods exercise named handler registration, the registry, timed
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
