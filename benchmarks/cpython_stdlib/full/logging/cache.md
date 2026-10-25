@@ -21,4 +21,4 @@ fails the replay.
 explicit cache edits, manager suppression at its boundary, registered level
 names, invalid levels, and large integers. It adds no suite occurrences.
 
-The [full suite replay](https://github.com/astral-sh/imre/actions/runs/40185453005) verifies all 272 occurrences at both optimization levels. The LoggerTest.test_caching body and assertions run on CPython; the [per-occurrence report](evidence-linux.json) lists its native operations.
+The full replay at `303e9fb05462f91c53b4a7c7736876024e988cfe` gives the same result at O0 and O3. At upstream line 6220 the shared assertion expects `bool | int` rather than `dict[int, bool]`. The [per-occurrence report](evidence-linux.json) records CPython running the body and assertions, and Imre handling the cache operations.
