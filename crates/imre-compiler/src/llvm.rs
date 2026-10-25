@@ -3835,6 +3835,7 @@ impl Emitter<'_, '_> {
                     ConfigureName => "imre_log_config_named",
                     Name => "imre_log_name",
                     Parent => "imre_log_parent",
+                    Children => "imre_log_children",
                     Root => "imre_log_root",
                     Level => "imre_log_level",
                     EffectiveLevel => "imre_log_effective_level",
@@ -4034,6 +4035,17 @@ impl Emitter<'_, '_> {
             Builtin::JsonAddFields(a, b) => self.json_add_fields(a, b, &args),
             Builtin::JsonGetReceiver => {
                 self.call("imre_json_get_receiver", returns, &[&args[0].value])
+            }
+            Builtin::JsonEqual => {
+                let equal = self.checked_instruction(format!(
+                    "call i32 @imre_json_equal(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {equal}, 0")),
+                    small_integer: false,
+                }
             }
             Builtin::JsonIsInt => {
                 let bit = self.instruction(format!(
@@ -4581,6 +4593,13 @@ impl Emitter<'_, '_> {
             }
             Builtin::ImportErrorReset => {
                 self.void_call("imre_import_error_reset", &[&args[0].value, &args[1].value]);
+                none()
+            }
+            Builtin::ImportErrorRejectReset => {
+                self.void_call(
+                    "imre_import_error_reject_reset",
+                    &[&args[0].value, &args[1].value, &args.last().unwrap().value],
+                );
                 none()
             }
             Builtin::ImportErrorField(field) => Value {
@@ -6489,8 +6508,8 @@ declare i64 @imre_document(i32, i64, i64, i64)
 declare i64 @imre_string_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
 declare i64 @imre_projected_hash(ptr)
-declare ptr @imre_popen_command(ptr, i32, ptr, ptr, i32, i64, i1 zeroext)
-declare i64 @imre_call_command(ptr, i32, ptr, ptr, i32, i64, i1 zeroext, i32, i64, i1 zeroext)
+declare ptr @imre_popen_config(ptr)
+declare i64 @imre_call_config(ptr, i32, i64, i1 zeroext)
 declare ptr @imre_popen_pipe(ptr, i32)
 declare i64 @imre_file_fileno(ptr)
 declare i64 @imre_popen_pid(ptr)
@@ -6536,6 +6555,7 @@ declare ptr @imre_path_new(ptr)
 declare ptr @imre_path_join(ptr, ptr)
 declare ptr @imre_path_text(ptr)
 declare ptr @imre_path_name(ptr)
+declare i64 @imre_path_count_part(ptr, ptr)
 declare ptr @imre_path_with_name(ptr, ptr)
 declare ptr @imre_path_stem(ptr)
 declare ptr @imre_path_suffix(ptr)
@@ -6584,6 +6604,7 @@ declare ptr @imre_path_replace(ptr, ptr)
 declare ptr @imre_tempdir_new(ptr, ptr, ptr)
 declare void @imre_tempdir_cleanup(ptr)
 declare ptr @imre_path_iter(ptr, ptr)
+declare ptr @imre_path_glob(ptr, ptr, i64, i32, i32)
 declare ptr @imre_path_next(ptr)
 declare i64 @imre_float_box(double)
 declare double @imre_float_unbox(i64)
@@ -6680,6 +6701,7 @@ declare ptr @imre_exception_message(ptr)
 declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
 declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
+declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
@@ -6707,6 +6729,7 @@ declare ptr @imre_json_iter(ptr)
 declare i64 @imre_json_len(ptr)
 declare i64 @imre_json_get(ptr, ptr, i64, i32, i32, i64)
 declare ptr @imre_json_add(ptr, ptr)
+declare i32 @imre_json_equal(ptr, ptr)
 declare ptr @imre_json_get_receiver(ptr)
 declare ptr @imre_json_add_fields(ptr, ptr, i64, i64, ptr, i64, i64)
 declare i32 @imre_json_is_int(ptr)
@@ -6966,6 +6989,7 @@ declare i64 @imre_log_parent(ptr)
 declare ptr @imre_log_root(ptr)
 declare i64 @imre_log_level(ptr)
 declare i64 @imre_log_effective_level(ptr)
+declare ptr @imre_log_children(ptr)
 declare void @imre_log_set_level(ptr, i64)
 declare i1 @imre_log_enabled(ptr, i64)
 declare void @imre_log_emit(ptr, i64, ptr)

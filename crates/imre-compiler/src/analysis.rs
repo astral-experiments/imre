@@ -3,8 +3,10 @@
 #[cfg(test)]
 mod incremental_tests;
 mod inferred_shapes;
+mod tuple_displays;
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -49,6 +51,7 @@ struct Database {
 pub(crate) struct Session {
     db: Database,
     files: Vec<File>,
+    tuple_spreads: Vec<HashMap<TextSize, usize>>,
     rules: Arc<RuleSelection>,
     root: PathBuf,
     extension_roots: Vec<PathBuf>,
@@ -118,6 +121,16 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // Popen tests and programs pass shell=0/1. Preserve all of typeshed's
+        // overloads while admitting the integer truth values CPython accepts.
+        let subprocess = vendored
+            .read_to_string("stdlib/subprocess.pyi")
+            .map_err(|error| error.to_string())?
+            .replace("shell: bool =", "shell: bool | int =");
+        system
+            .fs()
+            .write_file_all(SystemPathBuf::from(root).join("subprocess.pyi"), subprocess)
+            .map_err(|error| error.to_string())?;
         // CPython's POSIX which() accepts a byte search path independently of
         // the command's type. The cross-platform typeshed overloads omit it.
         system
@@ -175,6 +188,7 @@ impl Session {
         Ok(Self {
             db,
             files: Vec::new(),
+            tuple_spreads: Vec::new(),
             rules: Arc::new(rules),
             root: PathBuf::from(root),
             extension_roots: extension_roots.to_vec(),
@@ -203,25 +217,33 @@ impl Session {
         if let Some(error) = limits.error {
             return Err(format!("{path}: {error}"));
         }
-        // ty materializes every field of a starred tuple display before lowering.
-        // Imre supports starred assignment targets and list displays.
-        if parsed
+        let spreads = if parsed
             .tokens()
             .iter()
             .any(|token| token.kind() == TokenKind::Star)
-            && ruff_python_ast::helpers::any_over_body(&parsed.syntax().body, |expr| {
-                matches!(expr, Expr::Tuple(tuple) if tuple.ctx == ruff_python_ast::ExprContext::Load
-                    && tuple.elts.iter().any(|elt| matches!(elt, Expr::Starred(_))))
-            })
         {
-            return Err(format!(
-                "{path}: Imre: starred elements in tuple displays are unsupported"
-            ));
-        }
+            tuple_displays::check(&parsed.syntax().body).map_err(|(node, reason)| {
+                format!("{path}:{}", crate::frontend::error(source, node, reason))
+            })?
+        } else {
+            HashMap::new()
+        };
         inferred_shapes::check(&parsed.syntax().body, parsed.tokens().len())
             .map_err(|error| format!("{path}: {error}"))?;
         self.files.push(file);
+        self.tuple_spreads.push(spreads);
         Ok(parsed)
+    }
+
+    /// Width proved before ty expands the display's field types.
+    pub(crate) fn tuple_spread_width(&self, module: usize, start: TextSize) -> Option<usize> {
+        self.tuple_spreads.get(module)?.get(&start).copied()
+    }
+
+    /// Only modules with statically proved starred tuple fields can need the
+    /// corresponding exact list-subscript diagnostic site.
+    pub(crate) fn has_tuple_spreads(&self, module: usize) -> bool {
+        !self.tuple_spreads[module].is_empty()
     }
 
     fn write_file(&self, path: &str, source: &str) -> Result<File, String> {
@@ -426,6 +448,7 @@ pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
     Keyword(TextRange),
+    TupleListRead(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -436,6 +459,7 @@ impl CheckedDiagnostic {
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
+            Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
         }
     }
 }
@@ -557,6 +581,7 @@ impl CachedSession {
     }
 
     fn update(&mut self, fresh: &Session, inputs: &crate::SourceInputs) -> Result<(), String> {
+        self.session.tuple_spreads.clone_from(&fresh.tuple_spreads);
         for (index, (old, new)) in self.inputs.files.iter_mut().zip(&inputs.files).enumerate() {
             if old.2 == new.2 {
                 continue;
