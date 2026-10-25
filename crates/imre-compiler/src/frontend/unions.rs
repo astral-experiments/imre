@@ -210,15 +210,22 @@ impl Checker<'_> {
         members
     }
 
-    /// Exception categories below Exception need a runtime hierarchy test;
-    /// other category checks are exact for every admitted concrete layout.
+    /// Tests for derived records or exception kinds can require runtime inspection.
     /// A stored builtin exception can be either a SystemExit or an Exception.
-    fn instance_member_matches(ty: Type, classes: &[InstanceType]) -> Option<bool> {
+    fn instance_member_matches(&self, ty: Type, classes: &[InstanceType]) -> Option<bool> {
         if ty == Type::ExitCode || ty == Type::StringIterable {
             return None;
         }
         let mut unknown = false;
         for &class in classes {
+            if let (Type::Class(base), InstanceType::Exact(Type::Class(derived))) = (ty, class)
+                && self.classes.declarations.definitions[derived]
+                    .bases
+                    .contains(&base)
+            {
+                // A base view can contain either this derived layout or another one.
+                unknown = true;
+            }
             if let InstanceType::Exception(kind) = class
                 && ty == Type::TimeoutExpired
             {
@@ -246,7 +253,7 @@ impl Checker<'_> {
             ExprKind::Builtin(Builtin::IsInstance(classes), args) => {
                 let mut result = None;
                 for member in self.instance_members(args[0].ty) {
-                    let current = Self::instance_member_matches(member, classes)?;
+                    let current = self.instance_member_matches(member, classes)?;
                     if result.is_some_and(|previous| previous != current) {
                         return None;
                     }
@@ -342,7 +349,7 @@ impl Checker<'_> {
             let mut members = self.instance_members(current);
             for (classes, truth) in &constraints {
                 members.retain(|&ty| {
-                    Self::instance_member_matches(ty, classes)
+                    self.instance_member_matches(ty, classes)
                         .is_none_or(|matches| matches == *truth)
                 });
                 // A positive exact timeout category test establishes the byte
@@ -366,7 +373,7 @@ impl Checker<'_> {
                 members = self.instance_members(self.locals[slot]);
                 for (classes, truth) in &constraints {
                     members.retain(|&ty| {
-                        Self::instance_member_matches(ty, classes)
+                        self.instance_member_matches(ty, classes)
                             .is_none_or(|matches| matches == *truth)
                     });
                 }
