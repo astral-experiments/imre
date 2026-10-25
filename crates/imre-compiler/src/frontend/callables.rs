@@ -379,6 +379,9 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if let Type::StrDescriptor(method) = callable.ty {
+            return self.invoke_descriptor(call, callable, method);
+        }
         if let Type::Class(class) = callable.ty
             && self.native_mock(class)
         {

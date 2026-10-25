@@ -6,10 +6,23 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from discover_staged import early_skips, suite_names
+from run_staged_reference import compare_group
 from stage_tests import stage, verify_prefix
 
 
 class FixtureChecks(unittest.TestCase):
+    def test_incomplete_junit_cannot_supply_reference_counts(self):
+        expected = {"test.suite.C.test_a": ["pass"], "test.suite.C.test_b": ["pass"]}
+        with tempfile.TemporaryDirectory() as temporary:
+            xml = Path(temporary) / "suite.xml"
+            xml.write_text('<testsuite><testcase name="test.suite.C.test_a" status="run" '
+                           'result="completed"/><testcase/></testsuite>')
+            result = compare_group(xml, expected, {}, 0)
+            self.assertIn("unnamed <testcase>", result["incomplete"])
+            self.assertEqual(result["expected_instances"], 2)
+            self.assertIsNone(result["instances"])
+            self.assertEqual(result["outcomes"], {})
+
     def test_mixed_or_modified_test_installation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

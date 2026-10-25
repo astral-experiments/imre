@@ -263,26 +263,25 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
             continue;
         }
         let (value, rest) = if let Some(rest) = rest.strip_prefix('(') {
+            if !is_dict(args) {
+                return Err(Error::new(Kind::TypeError, "format requires a mapping"));
+            }
             let (key, rest) = rest
                 .split_once(')')
                 .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format key"))?;
-            (dict_item(args, key)?, rest)
+            (Some(dict_item(args, key)?), rest)
+        } else if pos >= tuple.unwrap_or(1) {
+            (None, rest)
         } else {
-            if pos >= tuple.unwrap_or(1) {
-                return Err(Error::new(
-                    Kind::TypeError,
-                    "not enough arguments for format string",
-                ));
-            }
             let val = if tuple.is_some() {
                 tuple_item(args, pos)
             } else {
                 args.clone()
             };
             pos += 1;
-            (val, rest)
+            (Some(val), rest)
         };
-        let (piece, tail) = percent_value(rest, &value)?;
+        let (piece, tail) = percent_value_in(rest, value.as_ref(), Some(msg))?;
         out.push_str(&piece);
         input = tail;
     }
@@ -307,6 +306,15 @@ fn padding(n: usize, c: char) -> Result<String> {
 
 /// Formats a single percent conversion and returns the remainder of the original format.
 pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(String, &'a str)> {
+    percent_value_in(fmt, Some(value), None)
+}
+
+/// The full format supplies the Unicode character offset for invalid conversions.
+fn percent_value_in<'a>(
+    fmt: &'a str,
+    value: Option<&OwnedWord>,
+    full: Option<&str>,
+) -> Result<(String, &'a str)> {
     let mut chars = fmt.char_indices().peekable();
     let mut flags = String::new();
     while chars.peek().is_some_and(|(_, c)| "#0-+ ".contains(*c)) {
@@ -316,29 +324,57 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
     while chars.peek().is_some_and(|(_, c)| c.is_ascii_digit()) {
         width.push(chars.next().unwrap().1);
     }
-    let width = width.parse::<usize>().unwrap_or(0);
+    let star_error = || match value {
+        None => Some(Error::new(
+            Kind::TypeError,
+            "not enough arguments for format string",
+        )),
+        Some(v) if v.kind.raw() == 3 => Some(Error::new(Kind::TypeError, "* wants int")),
+        _ => None,
+    };
+    if width.is_empty()
+        && chars.peek().is_some_and(|(_, c)| *c == '*')
+        && let Some(error) = star_error()
+    {
+        return Err(error);
+    }
+    let width = if width.is_empty() {
+        0
+    } else {
+        width
+            .parse::<isize>()
+            .map_err(|_| Error::new(Kind::ValueError, "width too big"))? as usize
+    };
     let precision = if chars.peek().is_some_and(|(_, c)| *c == '.') {
         chars.next();
         let mut n = String::new();
         while chars.peek().is_some_and(|(_, c)| c.is_ascii_digit()) {
             n.push(chars.next().unwrap().1);
         }
-        Some(n.parse::<usize>().unwrap_or(0))
+        if n.is_empty()
+            && chars.peek().is_some_and(|(_, c)| *c == '*')
+            && let Some(error) = star_error()
+        {
+            return Err(error);
+        }
+        Some(if n.is_empty() {
+            0
+        } else {
+            n.parse::<i32>()
+                .map_err(|_| Error::new(Kind::ValueError, "precision too big"))?
+                as usize
+        })
     } else {
         None
     };
-    if width > isize::MAX as usize || precision.is_some_and(|p| p > i32::MAX as usize) {
-        return Err(Error::new(
-            Kind::OverflowError,
-            "formatted string is too long",
-        ));
-    }
     if chars.peek().is_some_and(|(_, c)| "hlL".contains(*c)) {
         chars.next();
     }
     let (i, c) = chars
         .next()
         .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format"))?;
+    let value = value
+        .ok_or_else(|| Error::new(Kind::TypeError, "not enough arguments for format string"))?;
     let mut text = match c {
         's' | 'r' | 'a' => {
             let mut s = display(value, c != 's');
@@ -373,6 +409,17 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
                         .ok_or_else(|| {
                         Error::new(Kind::ValueError, "cannot convert float to integer")
                     })?
+                }
+                3 => {
+                    let required = if "diu".contains(c) {
+                        "a real number"
+                    } else {
+                        "an integer"
+                    };
+                    return Err(Error::new(
+                        Kind::TypeError,
+                        format!("%{c} format: {required} is required, not str"),
+                    ));
                 }
                 _ => return Err(Error::new(Kind::TypeError, "format requires a number")),
             };
@@ -424,8 +471,14 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
             use num_traits::ToPrimitive;
             if value.kind.raw() == 3 {
                 let s = display(value, false);
-                if s.chars().count() != 1 {
-                    return Err(Error::new(Kind::TypeError, "%c requires int or char"));
+                let count = s.chars().count();
+                if count != 1 {
+                    return Err(Error::new(
+                        Kind::TypeError,
+                        format!(
+                            "%c requires an int or a unicode character, not a string of length {count}"
+                        ),
+                    ));
                 }
                 s
             } else if matches!(value.kind.raw(), 1 | 2) {
@@ -456,6 +509,7 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
                         Error::new(Kind::OverflowError, "int too large to convert to float")
                     })?,
                 1 => value.word as f64,
+                3 => return Err(Error::new(Kind::TypeError, "must be real number, not str")),
                 _ => return Err(Error::new(Kind::TypeError, "must be real number")),
             };
             let precision = precision.unwrap_or(6);
@@ -473,10 +527,21 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
             String::from_utf8_lossy(&bytes).into_owned()
         }
         _ => {
-            return Err(Error::new(
-                Kind::ValueError,
-                format!("unsupported format character '{c}'"),
-            ));
+            let message = if let Some(full) = full {
+                let index = full[..full.len() - fmt.len() + i].chars().count();
+                let printable = if c.is_ascii_graphic() || c == ' ' {
+                    c
+                } else {
+                    '?'
+                };
+                format!(
+                    "unsupported format character '{printable}' (0x{:x}) at index {index}",
+                    c as u32
+                )
+            } else {
+                format!("unsupported format character '{c}'")
+            };
+            return Err(Error::new(Kind::ValueError, message));
         }
     };
     let padding = width.saturating_sub(text.chars().count());
@@ -681,9 +746,22 @@ pub extern "C" fn imre_logrecord_set_flag(mask: usize, value: bool) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_percent_int(fmt: *const Str, integer: usize) -> *const Str {
     // SAFETY: the caller roots both precise input representations for the whole operation.
-    let result = unsafe { format_arguments((&*fmt).as_str(), &WordKind::new(2).acquire(integer)) };
+    unsafe { percent_scalar(&*fmt, WordKind::new(2).acquire(integer)) }
+}
+
+/// Format an exact text operand using the same conversions as a log message.
+///
+/// # Safety
+/// Both strings are rooted through the call; the returned string is owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_percent_text(fmt: *const Str, text: *const Str) -> *const Str {
+    // SAFETY: the caller roots the format and the exact string allocation.
+    unsafe { percent_scalar(&*fmt, WordKind::new(3).acquire(text as usize)) }
+}
+
+fn percent_scalar(fmt: &Str, value: OwnedWord) -> *const Str {
     finish(
-        result.map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
+        format_arguments(fmt.as_str(), &value).map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
         std::ptr::null(),
     )
 }

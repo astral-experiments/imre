@@ -73,6 +73,7 @@ pub(crate) enum IntrinsicModule {
     Abc,
     Asyncio,
     Contextlib,
+    Inspect,
     Functools,
     Fnmatch,
     Time,
@@ -151,6 +152,9 @@ pub(crate) enum Intrinsic {
     TaskGroup,
     Semaphore,
     ContextManager,
+    InspectGetattrStatic,
+    InspectIsMethodDescriptor,
+    InspectSentinel,
     FunctionCache,
     LruCache,
     CachedProperty,
@@ -313,6 +317,7 @@ impl IntrinsicModule {
             "datetime" => Some(Self::Datetime),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
+            "inspect" => Some(Self::Inspect),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
             "fnmatch" => Some(Self::Fnmatch),
@@ -429,6 +434,9 @@ impl IntrinsicModule {
             (Self::Asyncio, "gather") => Intrinsic::Gather,
             (Self::Asyncio, "TaskGroup") => Intrinsic::TaskGroup,
             (Self::Asyncio, "Semaphore") => Intrinsic::Semaphore,
+            (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
+            (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
+            (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
@@ -649,6 +657,10 @@ pub(crate) struct SourceModule {
 }
 
 impl SourceModule {
+    pub(crate) fn is_bundled(&self, name: &str) -> bool {
+        self.bundled && self.name == name
+    }
+
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
         let binding = *self.bindings.get(name)?;
@@ -1740,6 +1752,20 @@ impl<'a> Loader<'a> {
             self.modules[id].bundled = true;
             self.scan(id)?;
             self.bind_child(name, id, parent)?;
+            return Ok(id);
+        }
+        if name == "stat" {
+            self.reject_stdlib_shadow(name)?;
+            let prefix = if cfg!(target_os = "macos") {
+                include_str!("../stdlib/stat/darwin.py")
+            } else {
+                include_str!("../stdlib/stat/linux.py")
+            };
+            let source = format!("{prefix}\n{}", include_str!("../stdlib/stat/common.py"));
+            let path = self.root.join("stat.py");
+            let id = self.add(path.clone(), path, name.into(), false, &source)?;
+            self.modules[id].bundled = true;
+            self.scan(id)?;
             return Ok(id);
         }
         if !self.allow_imports {

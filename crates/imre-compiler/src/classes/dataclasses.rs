@@ -15,6 +15,7 @@ pub(crate) struct DataclassOptions {
     pub(crate) repr: bool,
     pub(crate) frozen: bool,
     pub(crate) kw_only: bool,
+    pub(crate) slots: bool,
 }
 
 #[derive(Clone)]
@@ -62,6 +63,7 @@ pub(super) fn options(
         repr: true,
         frozen: false,
         kw_only: false,
+        slots: false,
     };
     if let Some(arguments) = arguments {
         if !arguments.args.is_empty() {
@@ -82,7 +84,8 @@ pub(super) fn options(
                 "kw_only" => options.kw_only = value,
                 // Every Imre record already has a fixed layout. These options
                 // do not opt into dynamic attributes or runtime pattern metadata.
-                "slots" | "match_args" => {}
+                "slots" => options.slots = value,
+                "match_args" => {}
                 "order" | "unsafe_hash" | "weakref_slot" if !value => {}
                 _ => {
                     return Err(

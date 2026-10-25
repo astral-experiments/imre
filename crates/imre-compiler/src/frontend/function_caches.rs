@@ -1,4 +1,4 @@
-//! Native memoization for statically decorated module functions.
+//! Native memoization for module declarations and independently constructed wrappers.
 
 use super::*;
 
@@ -6,6 +6,7 @@ use super::*;
 pub(super) struct Policy {
     // Negative means unbounded; the decorator normalizes negative sizes to zero.
     capacity: i64,
+    typed: bool,
 }
 
 pub(super) fn policy(
@@ -19,9 +20,17 @@ pub(super) fn policy(
     let expression = &decorator.expression;
     match graph.resolve(module, expression) {
         Some(Binding::Intrinsic(Intrinsic::FunctionCache)) => {
-            return Ok(Some(Policy { capacity: -1 }));
+            return Ok(Some(Policy {
+                capacity: -1,
+                typed: false,
+            }));
         }
-        Some(Binding::Intrinsic(Intrinsic::LruCache)) => return Ok(Some(Policy { capacity: 128 })),
+        Some(Binding::Intrinsic(Intrinsic::LruCache)) => {
+            return Ok(Some(Policy {
+                capacity: 128,
+                typed: false,
+            }));
+        }
         _ => {}
     }
     let ast::Expr::Call(call) = expression else {
@@ -30,6 +39,14 @@ pub(super) fn policy(
     if graph.resolve(module, &call.func) != Some(Binding::Intrinsic(Intrinsic::LruCache)) {
         return Ok(None);
     }
+    configuration(graph, module, call).map(Some)
+}
+
+fn configuration(
+    graph: &SourceGraph,
+    module: ModuleId,
+    call: &ast::ExprCall,
+) -> Result<Policy, String> {
     let invalid = || {
         graph.modules[module].error(call, "lru_cache requires a constant maxsize and typed flag")
     };
@@ -66,7 +83,10 @@ pub(super) fn policy(
         }
         _ => return Err(invalid()),
     };
-    Ok(Some(Policy { capacity: size }))
+    Ok(Policy {
+        capacity: size,
+        typed: matches!(typed, Some(ast::Expr::BooleanLiteral(b)) if b.value),
+    })
 }
 
 fn builtin(op: Builtin, ty: Type, args: Vec<Expr>) -> Expr {
@@ -82,25 +102,73 @@ pub(super) fn wrapper(
     types: &Types,
     policy: Policy,
 ) -> ir::Function {
-    let id = signature.id;
-    let value = signature.returns;
-    let mut locals: Vec<_> = signature.params.iter().map(|p| p.ty).collect();
-    let params: Vec<_> = (0..locals.len()).collect();
-    let local = |slot, ty| Expr {
+    build_wrapper(
+        types,
+        &signature.params.iter().map(|p| p.ty).collect::<Vec<_>>(),
+        signature.returns,
+        policy,
+        Backing::Module {
+            id: signature.id,
+            raw,
+        },
+    )
+}
+
+enum Backing {
+    Module { id: usize, raw: usize },
+    Owned(crate::types::CachedFunction),
+}
+
+fn local(slot: usize, ty: Type) -> Expr {
+    Expr {
         ty,
         kind: ExprKind::Local(slot),
+    }
+}
+
+fn field(owner: Expr, slot: usize, ty: Type) -> Expr {
+    Expr {
+        ty,
+        kind: ExprKind::Field(Box::new(owner), slot),
+    }
+}
+
+fn cache_table(types: &Types, params: &[Type], result: Type) -> Type {
+    let key = match params {
+        [] => Type::Int,
+        [key] => *key,
+        _ => types.tuple(params.to_vec()),
     };
-    let args: Vec<_> = locals
+    types.dict(key, result)
+}
+
+fn build_wrapper(
+    types: &Types,
+    parameters: &[Type],
+    value: Type,
+    policy: Policy,
+    backing: Backing,
+) -> ir::Function {
+    let context = match backing {
+        Backing::Module { .. } => None,
+        Backing::Owned(layout) => Some(layout.frame),
+    };
+    let mut locals: Vec<_> = context
+        .into_iter()
+        .chain(parameters.iter().copied())
+        .collect();
+    let params: Vec<_> = (0..locals.len()).collect();
+    let args: Vec<_> = parameters
         .iter()
         .enumerate()
-        .map(|(i, &ty)| local(i, ty))
+        .map(|(i, &ty)| local(i + usize::from(context.is_some()), ty))
         .collect();
     let mut body = Vec::new();
     let key = match args.as_slice() {
         [] => pipelines::integer(0),
         [arg] => arg.clone(),
         _ => {
-            let ty = types.tuple(locals.clone());
+            let ty = types.tuple(parameters.to_vec());
             let slot = locals.len();
             locals.push(ty);
             body.push(Statement::Assign(
@@ -114,17 +182,26 @@ pub(super) fn wrapper(
         }
     };
     let table = types.dict(key.ty, value);
-    let table_slot = locals.len();
+    let state_ty = table.cache_state();
+    let state_slot = locals.len();
+    let table_slot = state_slot + 1;
     let result_slot = table_slot + 1;
-    locals.extend([table, value]);
-    let cache = || builtin(Builtin::FunctionCache(id), table, vec![]);
+    locals.extend([state_ty, table, value]);
+    let captured = match backing {
+        Backing::Module { id, .. } => builtin(Builtin::ModuleCache(id), state_ty, vec![]),
+        Backing::Owned(layout) => field(local(0, layout.frame), 1, state_ty),
+    };
+    body.push(Statement::Assign(state_slot, captured));
+    let state = || local(state_slot, state_ty);
+    let cache = || builtin(Builtin::CacheTable, table, vec![state()]);
+    let probe = builtin(
+        Builtin::CacheProbe(policy.capacity),
+        Type::Bool,
+        vec![state(), key.clone()],
+    );
     body.push(Statement::Assign(table_slot, cache()));
     body.push(Statement::If(
-        builtin(
-            Builtin::FunctionCacheProbe(id, policy.capacity),
-            Type::Bool,
-            vec![key.clone()],
-        ),
+        probe,
         vec![Statement::Return(builtin(
             Builtin::DictGet,
             value,
@@ -137,25 +214,29 @@ pub(super) fn wrapper(
         result_slot,
         Expr {
             ty: value,
-            kind: ExprKind::Call(raw, ir::CallArgs::positional(args)),
+            kind: match backing {
+                Backing::Module { raw, .. } => ExprKind::Call(raw, ir::CallArgs::positional(args)),
+                Backing::Owned(layout) => ExprKind::Invoke {
+                    callable: Box::new(field(local(0, layout.frame), 0, layout.callable)),
+                    args: ir::CallArgs::positional(args),
+                },
+            },
         },
     ));
-    if policy.capacity != 0 {
-        // Reacquire after user code: it may have cleared this cache while running.
+    if policy.capacity < 0 {
+        // A callback can clear its own cache. Use the table installed after it returns.
         body.push(Statement::Assign(table_slot, cache()));
-        if policy.capacity < 0 {
-            body.push(Statement::SetItem(
-                local(table_slot, table),
-                key,
-                local(result_slot, value),
-            ));
-        } else {
-            body.push(Statement::Expr(builtin(
-                Builtin::FunctionCacheInsert(id, policy.capacity),
-                Type::None,
-                vec![key, local(result_slot, value)],
-            )));
-        }
+        body.push(Statement::SetItem(
+            local(table_slot, table),
+            key,
+            local(result_slot, value),
+        ));
+    } else if policy.capacity > 0 {
+        body.push(Statement::Expr(builtin(
+            Builtin::CacheInsert(policy.capacity),
+            Type::None,
+            vec![state(), key, local(result_slot, value)],
+        )));
     }
     body.push(Statement::Return(local(result_slot, value)));
     ir::Function {
@@ -166,22 +247,170 @@ pub(super) fn wrapper(
     }
 }
 
+fn context_field(
+    wrapper: Expr,
+    layout: crate::types::CachedFunction,
+    index: usize,
+    ty: Type,
+) -> Expr {
+    field(
+        builtin(Builtin::CallableContext, layout.frame, vec![wrapper]),
+        index,
+        ty,
+    )
+}
+
 impl Checker<'_> {
-    pub(super) fn cache_control(&self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+    /// A direct decorator or an applied constant configuration captures its actual target once.
+    pub(super) fn cache_constructor(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        let policy = match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::FunctionCache)) => Policy {
+                capacity: -1,
+                typed: false,
+            },
+            Some(Binding::Intrinsic(Intrinsic::LruCache)) => Policy {
+                capacity: 128,
+                typed: false,
+            },
+            _ => {
+                let ast::Expr::Call(config) = &*call.func else {
+                    return Ok(None);
+                };
+                if self.resolve(&config.func) != Some(Binding::Intrinsic(Intrinsic::LruCache)) {
+                    return Ok(None);
+                }
+                configuration(self.graph, self.module, config)?
+            }
+        };
+        let [source] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "a cache decorator needs a callable with a known signature",
+            ));
+        };
+        self.reject_builtin_keywords(call)?;
+        let callable = if let Some(binding) = self.local_function_binding(source) {
+            binding
+                .target(self.source, source)?
+                .callback(self.types, self.source, source)?
+        } else {
+            self.expr(source)?
+        };
+        let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
+            error(
+                self.source,
+                source,
+                "a cache decorator requires a callable with a known signature",
+            )
+        })?;
+        if matches!(returns, Type::Coroutine(_))
+            || !params.iter().all(|&ty| self.types.hashable_key(ty))
+        {
+            return Err(error(
+                self.source,
+                call,
+                "cached functions require exact immutable positional keys and a synchronous result",
+            ));
+        }
+        let table = cache_table(self.types, &params, returns);
+        let frame = self
+            .types
+            .partial_frame(vec![callable.ty, table.cache_state()]);
+        let layout = crate::types::CachedFunction {
+            callable: callable.ty,
+            frame,
+            table,
+            capacity: policy.capacity,
+            typed: policy.typed,
+        };
+        let id = self.helpers.reserve();
+        self.helpers.finish(
+            id,
+            comprehensions::Helper {
+                module: self.module,
+                calls: HashSet::new(),
+                class_reads: HashSet::new(),
+                recursion_error: self.graph.modules[self.module].error(
+                    call,
+                    "recursive indirect cache applications are unsupported",
+                ),
+                function: build_wrapper(
+                    self.types,
+                    &params,
+                    returns,
+                    policy,
+                    Backing::Owned(layout),
+                ),
+            },
+        );
+        let state = builtin(Builtin::CacheNew, table.cache_state(), vec![]);
+        let frame = Expr {
+            ty: frame,
+            kind: ExprKind::Tuple(vec![callable, state]),
+        };
+        Ok(Some(Expr {
+            ty: self.types.cached_callable(layout),
+            kind: ExprKind::Callable {
+                function: id,
+                receiver: Some(Box::new(frame)),
+            },
+        }))
+    }
+
+    pub(super) fn wrapped_function(&self, receiver: &Expr, name: &str) -> Option<Expr> {
+        let layout = self.types.cached_function(receiver.ty)?;
+        (name == "__wrapped__").then(|| context_field(receiver.clone(), layout, 0, layout.callable))
+    }
+
+    pub(super) fn cache_control(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Option<&Expr>,
+    ) -> Result<Option<Expr>, String> {
         let ast::Expr::Attribute(attr) = &*call.func else {
             return Ok(None);
         };
-        if !matches!(attr.attr.as_str(), "cache_info" | "cache_clear") {
+        if !matches!(
+            attr.attr.as_str(),
+            "cache_info" | "cache_clear" | "__wrapped__"
+        ) {
             return Ok(None);
         }
-        let Some(Binding::Definition(def)) = self.resolve(&attr.value) else {
-            return Ok(None);
-        };
-        let Some(sig) = self.functions.get(&def) else {
-            return Ok(None);
-        };
-        let Some(policy) = self.classes.cached.get(&sig.id) else {
-            return Ok(None);
+        let name = attr.attr.as_str();
+        let (state, capacity) = if let Some(Binding::Definition(def)) = self.resolve(&attr.value)
+            && let Some(sig) = self.functions.get(&def)
+            && let Some(policy) = self.classes.cached.get(&sig.id)
+        {
+            if name == "__wrapped__" {
+                return Ok(None);
+            }
+            let params: Vec<_> = sig.params.iter().map(|p| p.ty).collect();
+            let table = cache_table(self.types, &params, sig.returns);
+            (
+                builtin(Builtin::ModuleCache(sig.id), table.cache_state(), vec![]),
+                policy.capacity,
+            )
+        } else {
+            let wrapper = match receiver {
+                Some(v) => v.clone(),
+                None => self.expr(&attr.value)?,
+            };
+            let Some(layout) = self.types.cached_function(wrapper.ty) else {
+                return Ok(None);
+            };
+            if name == "__wrapped__" {
+                return self
+                    .invoke(call, context_field(wrapper, layout, 0, layout.callable))
+                    .map(Some);
+            }
+            (
+                context_field(wrapper, layout, 1, layout.table.cache_state()),
+                layout.capacity,
+            )
         };
         if !call.arguments.is_empty() {
             return Err(error(
@@ -190,26 +419,40 @@ impl Checker<'_> {
                 "cache_info and cache_clear take no arguments",
             ));
         }
-        if attr.attr.as_str() == "cache_clear" {
-            return Ok(Some(builtin(
-                Builtin::FunctionCacheClear(sig.id),
-                Type::None,
-                vec![],
-            )));
+        if name == "cache_clear" {
+            return Ok(Some(builtin(Builtin::CacheClear, Type::None, vec![state])));
         }
-        let stat = |field| builtin(Builtin::FunctionCacheStat(sig.id, field), Type::Int, vec![]);
-        let size = if policy.capacity < 0 {
+        let slot = self.hidden(state.ty);
+        let snapshot = self.cache_snapshot(capacity, |field| {
+            builtin(
+                Builtin::CacheStat(field),
+                Type::Int,
+                vec![local(slot, state.ty)],
+            )
+        });
+        Ok(Some(Expr {
+            ty: snapshot.ty,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, state)],
+                value: Box::new(snapshot),
+                clear: vec![slot],
+            },
+        }))
+    }
+
+    fn cache_snapshot(&self, capacity: i64, stat: impl Fn(u32) -> Expr) -> Expr {
+        let size = if capacity < 0 {
             Expr {
                 ty: Type::None,
                 kind: ExprKind::None,
             }
         } else {
-            pipelines::integer(policy.capacity)
+            pipelines::integer(capacity)
         };
         let fields = vec![stat(0), stat(1), size, stat(3)];
-        Ok(Some(Expr {
+        Expr {
             ty: self.types.tuple(fields.iter().map(|v| v.ty).collect()),
             kind: ExprKind::Tuple(fields),
-        }))
+        }
     }
 }
