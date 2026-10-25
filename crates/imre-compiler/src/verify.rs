@@ -598,6 +598,7 @@ mod tests {
             types: Default::default(),
             class_fields: Vec::new(),
             class_metadata: Vec::new(),
+            stdio_flags: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             functions: Vec::new(),

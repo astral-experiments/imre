@@ -20,6 +20,7 @@ mod cached_properties;
 mod call_binding_errors;
 mod callables;
 mod calls;
+mod codecs;
 mod comprehensions;
 mod contexts;
 mod copying;
@@ -1089,6 +1090,7 @@ pub(crate) fn lower_with_owners(
     }
     Ok((
         ir::Module {
+            stdio_flags: graph.command_startup.as_ref().map(|(flags, _)| *flags),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             class_fields: classes.fields,
@@ -3929,6 +3931,15 @@ impl<'a> Checker<'a> {
             ast::Stmt::Delete(delete) => {
                 let mut statements = Vec::new();
                 for target in &delete.targets {
+                    if matches!(target, ast::Expr::Attribute(_))
+                        && self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast))
+                    {
+                        statements.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(Builtin::BuiltinsDeleteLast, vec![]),
+                        }));
+                        continue;
+                    }
                     if let ast::Expr::Name(name) = target
                         && let Some(&slot) = self.names.get(name.id.as_str())
                         && matches!(
@@ -5040,6 +5051,18 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::CodecBom(bytes) => {
+                    return Ok(Expr {
+                        ty: Type::Bytes,
+                        kind: ExprKind::Bytes(bytes.to_vec()),
+                    });
+                }
+                Intrinsic::BuiltinsLast => {
+                    return Ok(Expr {
+                        ty: Type::ObjectValue,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsLast, vec![]),
+                    });
+                }
                 Intrinsic::DescriptorConstant(name) => {
                     return Ok(Expr {
                         ty: Type::Int,
@@ -5547,6 +5570,7 @@ impl<'a> Checker<'a> {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                         || !values.iter().all(|v| {
                             v.ty == Type::ObjectValue
+                                || v.ty == Type::ListInt
                                 || self.boxable_value(v.ty)
                                 || self.types.mapping(v.ty) == Some((Type::Int, Type::Str))
                         })
@@ -5858,12 +5882,28 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(self.string_join_value(None, attribute));
                 }
+                if let Some(Binding::Intrinsic(stream @ (Intrinsic::Stderr | Intrinsic::Stdout))) =
+                    self.resolve(&attribute.value)
+                {
+                    let kind = match (stream, attribute.attr.as_str()) {
+                        (_, "encoding") => Some(Builtin::SysStreamEncoding),
+                        (Intrinsic::Stdout, "errors") => Some(Builtin::SysStdoutErrors),
+                        (Intrinsic::Stderr, "errors") => {
+                            return Ok(unpacking::string("backslashreplace"));
+                        }
+                        _ => None,
+                    };
+                    if let Some(kind) = kind {
+                        return Ok(Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Builtin(kind, vec![]),
+                        });
+                    }
+                }
                 if attribute.attr.as_str() == "encoding"
                     && matches!(
                         self.resolve(&attribute.value),
-                        Some(Binding::Intrinsic(
-                            Intrinsic::Stdin | Intrinsic::Stdout | Intrinsic::Stderr
-                        ))
+                        Some(Binding::Intrinsic(Intrinsic::Stdin))
                     )
                 {
                     return Ok(unpacking::string("utf-8"));
@@ -5980,6 +6020,12 @@ impl<'a> Checker<'a> {
                     return Ok(Expr {
                         ty: Type::Int,
                         kind: ExprKind::Builtin(Builtin::CsvLineNumber, vec![receiver]),
+                    });
+                }
+                if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "name" {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(Builtin::CodecName, vec![receiver]),
                     });
                 }
                 if receiver.ty == Type::Sha256 {
@@ -6670,6 +6716,7 @@ impl<'a> Checker<'a> {
                 check_string(target, self.source)?;
                 return self.typed_expr(value);
             }
+            Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
             Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
                 return self.sha256_constructor(call, op == Intrinsic::HashNew);
             }
@@ -7121,6 +7168,9 @@ impl<'a> Checker<'a> {
             }
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::CodecInfo {
+                return self.codec_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);
@@ -8005,6 +8055,7 @@ impl<'a> Checker<'a> {
                             | Type::Set(_)
                             | Type::Deque(_)
                             | Type::StringKeys
+                            | Type::CodecInfo
                             | Type::Tuple(_)
                     ) =>
             {

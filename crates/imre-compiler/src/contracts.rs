@@ -306,6 +306,9 @@ impl Builtin {
             | Self::Decode
             | Self::DecodeAscii
             | Self::UrlsafeB64encode
+            | Self::CodecLookup
+            | Self::CodecEncode
+            | Self::CodecDecode
             | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
@@ -371,6 +374,7 @@ impl Builtin {
             | Self::DictTryGet(_)
             | Self::Encode
             | Self::CsvLineNumber
+            | Self::CodecName
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::StrDescriptor(_)
@@ -484,6 +488,11 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
+            | Self::BuiltinsLast
+            | Self::BuiltinsHasLast
+            | Self::BuiltinsSetLast
+            | Self::BuiltinsDeleteLast
+            | Self::SysDisplayHook
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
             | Self::RaiseException
@@ -492,6 +501,8 @@ impl Builtin {
             | Self::SystemExitCodeEqual { .. }
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
+            | Self::SysStreamEncoding
+            | Self::SysStdoutErrors
             | Self::OsName
             | Self::SysOrigArgv
             | Self::DocCaptureStart
@@ -865,6 +876,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_fnmatch_translate"
                 | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
+                | "imre_codec_lookup"
+                | "imre_codec_encode"
+                | "imre_codec_decode"
                 | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
@@ -877,6 +891,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bool"
                 | "imre_print_none"
                 | "imre_input"
+                | "imre_builtins_last"
+                | "imre_builtins_del_last"
+                | "imre_sys_displayhook"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
                 | "imre_path_as_posix"

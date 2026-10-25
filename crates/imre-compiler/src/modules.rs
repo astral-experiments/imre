@@ -63,6 +63,7 @@ pub(crate) enum IntrinsicModule {
     Argparse,
     Errno,
     Future,
+    Builtins,
     Sys,
     SysJit,
     Typing,
@@ -106,6 +107,7 @@ pub(crate) enum IntrinsicModule {
     Textwrap,
     Io,
     Gzip,
+    Codecs,
     Hashlib,
     Types,
     Base64,
@@ -130,6 +132,8 @@ pub(crate) enum Intrinsic {
     AnnotationTypeRepr,
     AnnotationFormat(i64),
     Declaration(&'static str),
+    BuiltinsLast,
+    SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
     BooleanOptionalAction,
@@ -249,6 +253,9 @@ pub(crate) enum Intrinsic {
     GzipOpen,
     UrlsafeB64encode,
     Sha256,
+    CodecInfoClass,
+    CodecLookup,
+    CodecBom(&'static [u8]),
     HashNew,
     SimpleNamespace,
     HashAvailable,
@@ -374,6 +381,7 @@ impl IntrinsicModule {
             "_opcode" => Some(Self::Opcode),
             "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
+            "builtins" => Some(Self::Builtins),
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
@@ -397,6 +405,7 @@ impl IntrinsicModule {
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
             "types" => Some(Self::Types),
+            "codecs" => Some(Self::Codecs),
             "hashlib" => Some(Self::Hashlib),
             "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
@@ -583,11 +592,13 @@ impl IntrinsicModule {
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
                 Intrinsic::RawDescriptionHelpFormatter
             }
+            (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
             (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
             (Self::Sys, "exit") => Intrinsic::SysExit,
+            (Self::Sys, "__displayhook__") => Intrinsic::SysDisplayHook,
             (Self::LoggingHandlers, "TimedRotatingFileHandler") => Intrinsic::TimedFileHandler,
             (Self::Datetime, "time") => Intrinsic::ClockTime,
             (Self::Logging, "Logger") => Intrinsic::Logger,
@@ -632,6 +643,13 @@ impl IntrinsicModule {
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
+            (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Codecs, "lookup") => Intrinsic::CodecLookup,
+            (Self::Codecs, "BOM_UTF8") => Intrinsic::CodecBom(b"\xef\xbb\xbf"),
+            (Self::Codecs, "BOM_UTF16_LE") => Intrinsic::CodecBom(b"\xff\xfe"),
+            (Self::Codecs, "BOM_UTF16_BE") => Intrinsic::CodecBom(b"\xfe\xff"),
+            (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
+            (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
@@ -1797,6 +1815,9 @@ impl<'a> Loader<'a> {
                                     alias.name
                                 )
                             })?;
+                        if binding == Binding::Intrinsic(Intrinsic::BuiltinsLast) {
+                            return Err("from builtins import _ needs an import-time snapshot; use a qualified lookup".into());
+                        }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
                         self.bind(id, local.as_str(), binding, alias)?;

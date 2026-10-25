@@ -31,10 +31,11 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 ```
 
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
-- `test_43581`: the complete method, both stream attributes, equality and assertion execute in the native binary.
-- `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.
+- `test_43581`: the complete method reads both stream attributes and executes the shared native unittest string equality assertion. CPython runs the original fixture.
+- `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations and the filesystem codec lookup execute in the native driver. The original method, helper, unittest assertions and lifecycle run on CPython. Compiling the original method and helper together is currently blocked by inference of the helper’s unannotated `expected=None` parameter.
 - `test_jit_is_available` and `test_jit_is_enabled`: Imre answers the parent capability query and executes both original child assertions under `PYTHON_JIT=0` and `=1`. CPython runs the parent, fixtures and child-status assertions. The fixture builds the original child source directly; its automatic `-X faulthandler` option is outside this check.
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
+- `test_ioencoding`: the [stdout probe](stdout-encoding-linux.json) runs all five unchanged child commands independently. The original method runs under the CPython fixture against both executables. CPython passes all five; on this branch it stops at the first Imre child because the registry does not yet include CP424 ([#1090](https://github.com/astral-sh/imre/pull/1090)). The three ASCII children match. The last requires a native string containing U+DCBD.
 
 The existing [stream and exit smoke runner](../../native_sys.py) exercises four
 `test_subprocess` IDs and additional native program fixtures, including the
@@ -53,7 +54,7 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40173735073) executed source `35158607886bce3fec10dd8e965d891e803e1088` (tree `f80a4bcd512cdb24ff2f279f59adb6d2075bef8a`). Its `sys-evidence-linux` artifact contains both optimization reports, the legacy outcomes, and the tested commit and tree. The checked-in reports match those records. The pinned suite has no companion module; `native-O*.json` describes the same occurrences.
+The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40173735073) executed source `35158607886bce3fec10dd8e965d891e803e1088` (tree `f80a4bcd512cdb24ff2f279f59adb6d2075bef8a`). Its `sys-evidence-linux` artifact contains both optimization reports, the legacy outcomes, and the tested commit and tree. The checked-in reports retain those records with two exceptions. The blocked displayhook method’s native builtin reads and writes were measured at `e1486d3f5ebc54b757c45ea3f4e402e2bdbe4238` ([builtin coverage](BUILTINS.md)). The filesystem codec lookup was measured at `2da99d93a626b6b8d42a81936e86de89ee2c9ddf`. The pinned suite has no companion module; `native-O*.json` describes the same occurrences.
 
 At each level the two JIT capability methods add two mixed results. `test_jit_is_active` made one native availability query in the parent; its first original child stopped at line 2 on `import _testcapi` before any `is_active` call or child assertion. The second child was not reached. Its individual private-API proposal remains unapproved.
 
@@ -61,7 +62,7 @@ The versioned gate loads the original suite and runs its selected methods
 under their CPython fixtures. For every remaining non-skipped method it either
 tries to compile the complete definition or records the original decorator
 that requires an adapter. An unreviewed exception proposal remains a blocker.
-The unchanged `test_exit` runs under its original CPython fixture and assertions: six caught calls and five original child programs complete in Imre, including `2**128` and a pending stderr write. The next unchanged child source contains a lone U+DCFF. Its native compile failure blocks the method before the final Latin-1 check; no partial method receives pass credit.
+The unchanged `test_exit` runs under its original CPython fixture and assertions: six caught calls and five original child programs complete in Imre, including `2**128` and a pending stderr write. The next child contains a lone U+DCFF that Imre cannot compile. Running the final Latin-1 child independently returns status 1, an empty stdout and stderr bytes `68 e9 0a` at both levels. The [stderr encoding probe](STDERR_ENCODING.md) and its [results](stderr-encoding-linux.json) retain the original child hashes and bytes; the complete method remains blocked.
 
 Pass `--evidence /tmp/sys-evidence-O$opt.json` to the command above for each
 optimization level. Combine and validate the two files with:

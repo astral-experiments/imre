@@ -99,6 +99,7 @@ impl Type {
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
+            | Self::CodecInfo
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -168,6 +169,7 @@ impl Type {
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
+            | Self::CodecInfo
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -345,6 +347,7 @@ fn emit_program(
         uses_sys_argv,
         uses_orig_argv,
         uses_linecache,
+        uses_builtins_last: module.uses_builtins_last(),
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -531,6 +534,7 @@ struct Emitter<'a, 'module> {
     uses_sys_argv: bool,
     uses_orig_argv: bool,
     uses_linecache: bool,
+    uses_builtins_last: bool,
     has_extensions: bool,
 }
 
@@ -770,6 +774,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -1744,7 +1749,15 @@ impl Emitter<'_, '_> {
                 "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
             ));
             self.line("call void @imre_record_error_init()");
-            self.line("call void @imre_stdio_init()");
+            if let Some(flags) = self.module.stdio_flags {
+                self.line(format!(
+                    "call void @imre_stdio_command_init(i32 {}, i32 {})",
+                    u32::from(flags.isolated),
+                    u32::from(flags.utf8_mode)
+                ));
+            } else {
+                self.line("call void @imre_stdio_init()");
+            }
             self.line("call void @imre_init_literals()");
         }
         if entry && self.uses_linecache {
@@ -1769,6 +1782,9 @@ impl Emitter<'_, '_> {
             self.cleanup_globals();
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
+            }
+            if self.uses_builtins_last {
+                self.line("call void @imre_builtins_clear()");
             }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
@@ -1804,6 +1820,9 @@ impl Emitter<'_, '_> {
             self.cleanup_globals();
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
+            }
+            if self.uses_builtins_last {
+                self.line("call void @imre_builtins_clear()");
             }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
@@ -3386,6 +3405,7 @@ impl Emitter<'_, '_> {
                 | Type::StrDescriptor(_)
                 | Type::PlainObject
                 | Type::PathInfo
+                | Type::CodecInfo
                 | Type::Sha256
                 | Type::JsonDecoder
                 | Type::ZipFile
@@ -4477,6 +4497,38 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
+            Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
+            Builtin::BuiltinsHasLast => {
+                let bit = self.instruction("call i32 @imre_builtins_has_last()");
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::BuiltinsDeleteLast => {
+                self.void_call("imre_builtins_del_last", &[]);
+                none()
+            }
+            Builtin::BuiltinsSetLast | Builtin::SysDisplayHook => {
+                let value = &args[0].value;
+                let kind = if value.ty == Type::ObjectValue {
+                    u32::MAX
+                } else {
+                    representation_kind(value.ty, &self.module.types)
+                };
+                let word = self.word(value);
+                if matches!(builtin, Builtin::SysDisplayHook) {
+                    self.checked_line(format!(
+                        "call void @imre_sys_displayhook(i32 {kind}, i64 {word})"
+                    ));
+                } else {
+                    self.line(format!(
+                        "call void @imre_builtins_set_last(i32 {kind}, i64 {word})"
+                    ));
+                }
+                none()
+            }
             Builtin::IntegerPower => {
                 self.call("imre_int_pow", Type::Int, &[&args[0].value, &args[1].value])
             }
@@ -4504,6 +4556,8 @@ impl Emitter<'_, '_> {
                     Some(root),
                 )
             }
+            Builtin::SysStreamEncoding => self.call("imre_sys_stream_encoding", returns, &[]),
+            Builtin::SysStdoutErrors => self.call("imre_sys_stdout_errors", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::DocCaptureStart => {
@@ -4768,6 +4822,19 @@ impl Emitter<'_, '_> {
             Builtin::CsvLineNumber => {
                 self.call("imre_csv_line_number", Type::Int, &[&args[0].value])
             }
+            Builtin::CodecLookup => {
+                self.call("imre_codec_lookup", Type::CodecInfo, &[&args[0].value])
+            }
+            Builtin::CodecName => self.call("imre_codec_name", Type::Str, &[&args[0].value]),
+            Builtin::CodecEncode | Builtin::CodecDecode => self.call(
+                if matches!(builtin, Builtin::CodecEncode) {
+                    "imre_codec_encode"
+                } else {
+                    "imre_codec_decode"
+                },
+                returns,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::HashNew => self.call(
                 "imre_hash_new",
@@ -5282,6 +5349,7 @@ impl Emitter<'_, '_> {
                 },
                 _ => unreachable!("float conversion was checked"),
             },
+            Builtin::Len if args[0].value.ty == Type::CodecInfo => small(4),
             Builtin::Len if args[0].value.ty == Type::StringIterable => {
                 self.call("imre_string_iterable_len", Type::Int, &[&args[0].value])
             }
@@ -6135,6 +6203,7 @@ impl Emitter<'_, '_> {
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
                     | Type::PathInfo
+                    | Type::CodecInfo
                     | Type::Sha256
                     | Type::JsonDecoder
                     | Type::ZipFile
@@ -6392,6 +6461,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -6475,6 +6545,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -7071,6 +7142,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::PlainObject
         | Type::SimpleNamespace(_)
         | Type::PathInfo
+        | Type::CodecInfo
         | Type::Sha256
         | Type::JsonDecoder
         | Type::ZipFile
@@ -7441,6 +7513,10 @@ declare ptr @imre_linecache_line_float(ptr, double, ptr)
 declare ptr @imre_inspect_sentinel()
 declare ptr @imre_inspect_str_descriptor(i32)
 declare ptr @imre_sha256_new(ptr)
+declare ptr @imre_codec_lookup(ptr)
+declare ptr @imre_codec_name(ptr)
+declare ptr @imre_codec_encode(ptr, ptr, ptr)
+declare ptr @imre_codec_decode(ptr, ptr, ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()
 declare void @imre_sha256_update(ptr, ptr)
@@ -7523,6 +7599,9 @@ declare void @imre_exception_reraise()
 declare i32 @imre_finish_stdio()
 declare void @imre_record_error_init()
 declare void @imre_stdio_init()
+declare void @imre_stdio_command_init(i32, i32)
+declare ptr @imre_sys_stream_encoding()
+declare ptr @imre_sys_stdout_errors()
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
@@ -7737,6 +7816,12 @@ declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
+declare ptr @imre_builtins_last()
+declare i32 @imre_builtins_has_last()
+declare void @imre_builtins_set_last(i32, i64)
+declare void @imre_builtins_del_last()
+declare void @imre_builtins_clear()
+declare void @imre_sys_displayhook(i32, i64)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()

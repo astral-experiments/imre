@@ -93,6 +93,7 @@ pub(crate) enum Type {
     StrDescriptor(StrDescriptor),
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
     SimpleNamespace(usize),
+    CodecInfo,
     Sha256,
     JsonDecoder,
     /// An open or closed ZIP archive retains its ordered central directory.
@@ -237,6 +238,7 @@ impl std::fmt::Display for Type {
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
+            Self::CodecInfo => "codecs.CodecInfo",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -269,6 +271,8 @@ impl std::fmt::Display for Type {
 }
 
 pub(crate) struct Module {
+    /// Python command flags used to initialize the native process streams.
+    pub stdio_flags: Option<crate::CommandFlags>,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -325,6 +329,20 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
+    /// Only programs that can own a display value need to clear the namespace at shutdown.
+    pub(crate) fn uses_builtins_last(&self) -> bool {
+        let mut used = false;
+        for function in self.functions.iter().chain([&self.entry]) {
+            walk_expressions(&function.body, &mut |value| {
+                used |= matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::BuiltinsSetLast | Builtin::SysDisplayHook, _)
+                );
+            });
+        }
+        used
+    }
+
     /// Capture arguments, the original invocation, and source search paths only
     /// for modules that use them; a bare import needs no runtime state.
     pub(crate) fn startup_usage(&self) -> (bool, bool, bool) {
@@ -591,6 +609,11 @@ pub(crate) enum Builtin {
     Islice,
     Tee,
     Cycle,
+    SysDisplayHook,
+    BuiltinsLast,
+    BuiltinsHasLast,
+    BuiltinsSetLast,
+    BuiltinsDeleteLast,
     DirectoryContextView,
     TextStreamView,
     Document(DocumentOp),
@@ -637,6 +660,8 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysStreamEncoding,
+    SysStdoutErrors,
     SysVersionInfo {
         implementation: bool,
     },
@@ -790,6 +815,10 @@ pub(crate) enum Builtin {
     Decode,
     DecodeAscii,
     UrlsafeB64encode,
+    CodecLookup,
+    CodecName,
+    CodecEncode,
+    CodecDecode,
     Sha256Hex,
     Sha256New,
     HashNew,
@@ -1559,7 +1588,7 @@ impl InstanceType {
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
-            Self::Tuple => matches!(ty, Type::Tuple(_)),
+            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::CodecInfo),
             Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::Exception(_) => matches!(
                 ty,
