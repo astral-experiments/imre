@@ -63,7 +63,7 @@ pub(super) fn write_display_line(text: &str) -> bool {
             Err(error) => error.returning(false),
         };
     }
-    match write_stream(&OUTPUT, text, true) {
+    match write_stream(&OUTPUT, text.as_bytes(), true) {
         Ok(()) => true,
         Err(error) => errno_error(error).returning(false),
     }
