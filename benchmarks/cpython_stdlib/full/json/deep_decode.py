@@ -8,7 +8,6 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from evidence import definition
 from reference import BENCH, COMMIT, routine, verify
 sys.path.insert(0, str(BENCH))
 from suite_inventory import cases, load_suite
@@ -61,11 +60,8 @@ def native(program, work, text, path=""):
     return run.stdout.decode().splitlines()
 
 
-def original_fixtures(program, work):
-    ids = [c.id() for c in cases(load_suite("test.test_json")) if routine(c) == METHOD]
-    if len(ids) != 2:
-        raise ValueError(ids)
-
+def fixture(program, work):
+    """Bind the original loads calls to one implementation and retain each exception."""
     def execute(case, original):
         observed = []
         reference = case.loads
@@ -90,7 +86,14 @@ def original_fixtures(program, work):
         if len(observed) != 3:
             raise ValueError(observed)
         return observed
+    return execute
 
+
+def original_fixtures(program, work):
+    ids = [c.id() for c in cases(load_suite("test.test_json")) if routine(c) == METHOD]
+    if len(ids) != 2:
+        raise ValueError(ids)
+    execute = fixture(program, work)
     complete, failed, skipped = run_in_fixtures(load_suite("test.test_json"), dict.fromkeys(ids, execute))
     if failed or skipped or set(complete) != set(ids):
         raise ValueError((failed, skipped, complete))
@@ -142,6 +145,7 @@ def controls(program, work):
 
 
 def main():
+    from evidence import definition
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("imre", "runtime", "clang", "result"):
         p.add_argument("--"+name, required=True, type=Path)

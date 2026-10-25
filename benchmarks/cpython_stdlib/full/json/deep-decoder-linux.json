@@ -10,19 +10,19 @@
         "input_sha256": "b844fdbcd4a0de755ef3870a9fcaa394473b96533c7f7ddc2ab13a0af644ac82",
         "characters": 3000001,
         "exception": "RecursionError",
-        "message": "Stack overflow (used 8148 kB) while decoding a JSON object from a unicode string"
+        "message": "Stack overflow (used 8152 kB) while decoding a JSON object from a unicode string"
       },
       {
         "input_sha256": "a68775e5651e88195e7b8e55f21c50706f13a7fbd54f4c783642a7b25525c7fc",
         "characters": 3000003,
         "exception": "RecursionError",
-        "message": "Stack overflow (used 8148 kB) while decoding a JSON object from a unicode string"
+        "message": "Stack overflow (used 8152 kB) while decoding a JSON object from a unicode string"
       },
       {
         "input_sha256": "a6674377370d5e021f7a8eb2d8db0311e573bc6a6e26920803ce5c831b2e9e7d",
         "characters": 1000001,
         "exception": "RecursionError",
-        "message": "Stack overflow (used 8148 kB) while decoding a JSON array from a unicode string"
+        "message": "Stack overflow (used 8152 kB) while decoding a JSON array from a unicode string"
       }
     ],
     "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding": [
