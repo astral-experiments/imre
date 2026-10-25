@@ -375,22 +375,22 @@ unsafe fn release_bytes(value: *const Bytes) {
     drop(unsafe { BytesOwner::from_raw(value) });
 }
 
-/// LLVM's C main bypasses Rust's SIGPIPE setup. Ignore it once before publishing
-/// buffered writers, so a disconnected pipe reports an ordinary I/O error. The
-/// closed runtime has no signal API or callbacks that could change this policy.
+/// Generated main installs Python's I/O signal dispositions before user code.
+/// Native callers that enter through a writer use the same initialization.
 fn initialize_io() {
     static INITIALIZED: Once = Once::new();
     INITIALIZED.call_once(|| {
-        // SAFETY: SIG_IGN is a valid process-wide disposition, not a Rust callback.
-        if unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) } == libc::SIG_ERR {
-            // This fixed startup operation cannot be induced by source code.
-            // Avoid fail(), which would recursively initialize OUTPUT here.
-            let error = io::Error::last_os_error();
-            let _ = writeln!(
-                io::stderr().lock(),
-                "OSError: could not initialize I/O signals: {error}"
-            );
-            std::process::exit(1);
+        for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
+            // SAFETY: SIG_IGN is a valid disposition for both fixed signals.
+            if unsafe { libc::signal(signal, libc::SIG_IGN) } == libc::SIG_ERR {
+                // Avoid fail(), which would recursively initialize OUTPUT here.
+                let error = io::Error::last_os_error();
+                let _ = writeln!(
+                    io::stderr().lock(),
+                    "OSError: could not initialize I/O signals: {error}"
+                );
+                std::process::exit(1);
+            }
         }
     });
 }
@@ -1132,6 +1132,26 @@ pub extern "C" fn imre_input() -> *const Str {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_list_new() -> *const List {
     new_list(Vec::new())
+}
+
+/// Test an optional integer against a homogeneous integer list. Small integers
+/// are canonical words; only two distinct heap integers need a value comparison.
+///
+/// # Safety
+/// The caller roots the list and its optional integer (zero represents None).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_list_contains(needle: usize, list: *const List) -> u32 {
+    if needle == 0 {
+        return 0;
+    }
+    // SAFETY: neither the list scan nor integer equality can reenter or mutate it.
+    unsafe {
+        u32::from((&*list).0.with(|values| {
+            values.iter().any(|v| {
+                v.0 == needle || ((v.0 | needle) & 1 == 0 && imre_int_compare(v.0, needle) == 0)
+            })
+        }))
+    }
 }
 
 /// # Safety

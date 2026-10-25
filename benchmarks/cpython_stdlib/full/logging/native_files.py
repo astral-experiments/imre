@@ -20,20 +20,25 @@ import os
 import unittest
 from typing import TextIO
 
-class NativeCase(unittest.TestCase):
+class NativeCase:
     fn: str
+    checks: unittest.TestCase
 
     def __init__(self) -> None:
-        super().__init__()
         self.fn = FILENAME
+        self.checks = unittest.TestCase()
 
-    def assertIsNone(self, value: TextIO | None) -> None:
-        if value is not None:
-            raise AssertionError("stream is open")
+    def assertIsNone(self, stream: TextIO | None) -> None:
+        self.checks.assertTrue(stream is None)
 
-    def assertIsNotNone(self, value: TextIO | None) -> None:
-        if value is None:
-            raise AssertionError("stream is missing")
+    def assertIsNotNone(self, stream: TextIO | None) -> None:
+        self.checks.assertFalse(stream is None)
+
+    def assertTrue(self, value: bool) -> None:
+        self.checks.assertTrue(value)
+
+    def assertFalse(self, value: bool) -> None:
+        self.checks.assertFalse(value)
 """
 
 
@@ -57,9 +62,13 @@ class NativeCase:
 def file_cases(toolchain, work):
     prefix = "test.test_logging.FileHandlerTest."
     def delay(case, method):
-        return native_method(toolchain, work, SOURCE,
+        result = native_method(toolchain, work, SOURCE,
                              "FileHandlerTest", case.id(), FILE_FIXTURE.replace("FILENAME", repr(case.fn)),
                              operation=("imre", "Native delayed file creation, record emission and close"))(case, method)
+        result["observation"]["evidence"]["fixture"] = (
+            "Original CPython FileHandlerTest hooks and filename; the native fixture checks optional "
+            "stream identity and passes the four predicates to native TestCase boolean assertions")
+        return result
     def write_mode(case, method):
         fixture = WRITE_FIXTURE.replace("FILENAME", repr(case.fn)).replace("MESSAGE_NUM", str(case.message_num))
         for owner, helper in (("BaseTest", "next_message"), ("BaseFileTest", "next_rec")):

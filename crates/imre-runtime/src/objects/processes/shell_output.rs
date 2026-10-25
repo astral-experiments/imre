@@ -1,7 +1,7 @@
 //! Shell commands return combined stdout and stderr even after a nonzero exit.
 
 use super::*;
-use crate::objects::files::Codec;
+use crate::objects::codecs::Codec;
 
 /// Run the native shell, retain its signed exit status, and remove one final newline.
 ///
@@ -24,7 +24,7 @@ pub unsafe extern "C" fn imre_subprocess_shell_output(
                 (errors as *const Str).as_ref(),
             )
         };
-        let codec = Codec::lookup(encoding.map(Str::as_str))?;
+        let codec = Codec::for_stream(encoding.map(Str::as_str))?;
         // stdout=PIPE and stderr=STDOUT merge both writes into one kernel pipe.
         let streams = 1 | (5 << 4);
         let mut config = popen::LaunchConfig::basic(

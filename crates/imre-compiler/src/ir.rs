@@ -4,6 +4,8 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
     Document(DocumentShape),
+    /// Read-only nodes from the sealed unified-diff parser.
+    Patch(PatchKind),
     Int,
     Float,
     Bool,
@@ -119,6 +121,7 @@ pub(crate) enum Type {
     SimpleNamespace(usize),
     /// Nominal ModuleSpec backed by a record whose loader and state keep their exact types.
     ModuleSpec(usize),
+    CodecInfo,
     /// A POSIX IPv4 stream socket with shared descriptor ownership.
     Socket,
     Sha256,
@@ -223,6 +226,7 @@ pub(crate) enum SocketOp {
     Listen,
     Accept,
     Connect,
+    Shutdown,
     SockName,
     Recv,
     Send,
@@ -330,6 +334,9 @@ impl std::fmt::Display for Type {
             Self::ContextToken(_) => "contextvars.Token",
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
+            Self::Patch(PatchKind::Set) => "unidiff.PatchSet",
+            Self::Patch(PatchKind::File) => "unidiff.PatchedFile",
+            Self::Patch(PatchKind::Hunk) => "unidiff.Hunk",
             Self::RegexPattern => "re.Pattern[str]",
             Self::NativeModule => "builtin module",
             Self::ModuleNamespace => "module namespace",
@@ -347,6 +354,7 @@ impl std::fmt::Display for Type {
             Self::ProcessSelectorClass => "subprocess selector class",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
+            Self::CodecInfo => "codecs.CodecInfo",
             Self::Poll => "select.poll",
             Self::Socket => "socket.socket",
             Self::Sha256 => "SHA-256 hash",
@@ -359,6 +367,7 @@ impl std::fmt::Display for Type {
             Self::JsonValue => "JSON value",
             Self::JsonObject => "dict[str, Any]",
             Self::Document(DocumentShape::Any) => "TOML or JSON value",
+            Self::Document(DocumentShape::Scalar) => "None, bool, int or str",
             Self::Document(DocumentShape::Map) => "mutable dict[str, Any]",
             Self::Document(DocumentShape::List) => "mutable list[Any]",
             Self::StrLiteral(_)
@@ -800,6 +809,8 @@ pub(crate) enum Builtin {
     AnnotationRef,
     AnnotationIs,
     StaticFunction(usize),
+    FunctionWrappedSet,
+    FunctionWrappedGet,
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
@@ -813,6 +824,7 @@ pub(crate) enum Builtin {
     /// Match an exception against the category list retained by an assertion context.
     ExceptionMatchesAny,
     LiteralStringView,
+    IntListContains,
     StringListContains,
     StructListContains,
     StringContains,
@@ -945,6 +957,9 @@ pub(crate) enum Builtin {
     SortDetach,
     SortRestore,
     StringJoin,
+    JoinBufferNew,
+    JoinBufferAppend,
+    JoinBufferFinish,
     StringFormat,
     StringReplace,
     Text(TextOperation),
@@ -964,6 +979,8 @@ pub(crate) enum Builtin {
     /// bounds, with no intervening mutation or user code. Returns an owned
     /// element of a generic typed list; the index is canonical and nonnegative.
     SequenceGetInBounds,
+    /// Transfers the next slot of a fresh append-only list to its sole consumer.
+    SequenceTakeInBounds,
     /// Reduces an exact integer list after evaluating its source and start.
     /// Integer addition cannot invoke callbacks or raise a recoverable error.
     ListSum,
@@ -1019,6 +1036,10 @@ pub(crate) enum Builtin {
     Decode,
     DecodeAscii,
     UrlsafeB64encode,
+    CodecLookup,
+    CodecName,
+    CodecEncode,
+    CodecDecode,
     Socket(SocketOp),
     Sha256Hex,
     Sha256New,
@@ -1070,6 +1091,8 @@ pub(crate) enum Builtin {
     IsBuiltinSubclass,
     Split,
     SplitLines,
+    /// Only the first line and a joined remainder can be observed.
+    JoinedSplitLines,
     DecodeSplitLines,
     Ndiff,
     /// Copy an exact list of immutable strings into a distinct mutable list.
@@ -1161,6 +1184,7 @@ pub(crate) enum Builtin {
     PosixPath(PosixPathOperation),
     Errno(ErrnoOperation),
     Fnmatch(FnmatchOperation),
+    Patch(PatchOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -1200,6 +1224,7 @@ pub(crate) enum Builtin {
     ModuleParentPrefix,
     ModuleCacheFromOrigin,
     CachePath(CachePathOperation),
+    OrderedDict,
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,
@@ -1226,6 +1251,10 @@ pub(crate) enum Builtin {
     },
     DequeClear,
     DequeReverse,
+    DequeGet,
+    DequeSet,
+    DequeDelete,
+    DequeContains,
     DequeMaxlen,
     DequeIter {
         reverse: bool,
@@ -1239,6 +1268,7 @@ pub(crate) enum Builtin {
     ChainMapContains,
     /// The stored type may be promoted to an optional result on a hit.
     ChainMapGet(Type),
+    CounterElements,
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,
@@ -1350,6 +1380,8 @@ pub(crate) enum StringIoOperation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum DocumentShape {
     Any,
+    /// A tagged Python scalar whose container equality does not depend on object identity.
+    Scalar,
     Map,
     List,
 }
@@ -1428,6 +1460,26 @@ impl StrDescriptor {
             Self::IsAlnum => "isalnum",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PatchKind {
+    Set,
+    File,
+    Hunk,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum PatchOperation {
+    Parse,
+    Len,
+    Files,
+    ModifiedFiles,
+    ModifiedCount,
+    Hunks,
+    Path,
+    SourceStart,
+    HunkText,
 }
 
 /// Closed string operations preserve exact argument and storage types.
@@ -1654,6 +1706,9 @@ pub(crate) enum LogOperation {
     LevelName,
     LevelForName,
     CheckLevel,
+    InvalidLevel,
+    Disable,
+    EnabledCache,
     Names,
     Numbers,
     NamesCopy,
@@ -1772,6 +1827,7 @@ pub(crate) enum ProcessOperation {
     PopenStatus {
         poll: bool,
     },
+    PopenSetStatus,
     PopenWait,
     PopenCommunicate {
         text: bool,
@@ -1915,7 +1971,7 @@ impl InstanceType {
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
-            Self::Tuple => matches!(ty, Type::Tuple(_)),
+            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::CodecInfo),
             Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::ModuleSpec => matches!(ty, Type::ModuleSpec(_)),
             Self::Exception(_) => matches!(

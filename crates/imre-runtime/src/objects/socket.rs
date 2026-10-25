@@ -92,6 +92,9 @@ socket_constants! {
     imre_socket_so_rcvbuf = libc::SO_RCVBUF,
     imre_socket_so_linger = libc::SO_LINGER,
     imre_socket_msg_peek = libc::MSG_PEEK,
+    imre_socket_shut_rd = libc::SHUT_RD,
+    imre_socket_shut_wr = libc::SHUT_WR,
+    imre_socket_shut_rdwr = libc::SHUT_RDWR,
 
     imre_socket_default_backlog = if libc::SOMAXCONN < 128 { libc::SOMAXCONN } else { 128 },
 }
@@ -267,6 +270,17 @@ pub extern "C" fn imre_socket_listen(s: &Object, backlog: usize) {
     );
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_socket_shutdown(s: &Object, how: usize) {
+    finish(
+        c_int(how).and_then(|how| {
+            // SAFETY: shutdown takes scalar values and never relinquishes the descriptor.
+            checked(unsafe { libc::shutdown(fd(s), how) }).map_err(errno_error)
+        }),
+        0,
+    );
+}
+
 fn connect(fd: RawFd, addr: &libc::sockaddr_in, blocking: bool) -> io::Result<()> {
     // SAFETY: the kernel reads the supplied stack IPv4 address.
     let result = checked(unsafe {
@@ -289,23 +303,26 @@ fn connect(fd: RawFd, addr: &libc::sockaddr_in, blocking: bool) -> io::Result<()
     };
     // SAFETY: poll writes one live pollfd in place.
     retry(|| checked(unsafe { libc::poll(&raw mut pfd, 1, -1) }))?;
-    let mut error: i32 = 0;
-    let mut len = size_of_val(&error) as libc::socklen_t;
-    // SAFETY: SO_ERROR fills one int and its initialized capacity.
-    checked(unsafe {
-        libc::getsockopt(
-            fd,
-            libc::SOL_SOCKET,
-            libc::SO_ERROR,
-            (&raw mut error).cast(),
-            &raw mut len,
-        )
-    })?;
-    if error == 0 || error == libc::EISCONN {
-        Ok(())
-    } else {
-        Err(io::Error::from_raw_os_error(error))
-    }
+    // Retry the completion check itself on EINTR, without reconnecting.
+    retry(|| {
+        let mut error: i32 = 0;
+        let mut len = size_of_val(&error) as libc::socklen_t;
+        // SAFETY: SO_ERROR fills one int and its initialized capacity.
+        checked(unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_ERROR,
+                (&raw mut error).cast(),
+                &raw mut len,
+            )
+        })?;
+        if error == 0 || error == libc::EISCONN {
+            Ok(())
+        } else {
+            Err(io::Error::from_raw_os_error(error))
+        }
+    })
 }
 
 /// # Safety
