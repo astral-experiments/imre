@@ -53,3 +53,10 @@ python benchmarks/cpython_stdlib/full/linecache/run.py \
   --cpython-source /path/to/cpython --imre /path/to/imre \
   --runtime /path/to/libimre_runtime.a --clang /path/to/clang --result /tmp/linecache-native.json
 ```
+
+[startup-linux.json](startup-linux.json) compares all 16 import/runner checks
+against the full pinned sources, with and without reachable-only compilation.
+All four warnings cases advanced from linecache to importlib (normal) or
+io.StringIO (reachable-only), and all four linecache cases advanced to threading.
+The eight inspect checks kept their earlier diagnostics. These compiler
+checks execute zero tests.
