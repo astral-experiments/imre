@@ -367,8 +367,20 @@ impl Checker<'_> {
     }
 
     pub(super) fn wrapped_function(&self, receiver: &Expr, name: &str) -> Option<Expr> {
-        let layout = self.types.cached_function(receiver.ty)?;
-        (name == "__wrapped__").then(|| context_field(receiver.clone(), layout, 0, layout.callable))
+        if name != "__wrapped__" || !matches!(receiver.ty, Type::Callable(_)) {
+            return None;
+        }
+        Some(
+            if let Some(layout) = self.types.cached_function(receiver.ty) {
+                context_field(receiver.clone(), layout, 0, layout.callable)
+            } else {
+                builtin(
+                    Builtin::FunctionWrappedGet,
+                    receiver.ty,
+                    vec![receiver.clone()],
+                )
+            },
+        )
     }
 
     pub(super) fn cache_control(
