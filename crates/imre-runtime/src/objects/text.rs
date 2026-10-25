@@ -35,6 +35,53 @@ pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
     finish(result, std::ptr::null())
 }
 
+/// Returns the scalar value of one character or the unsigned value of one byte.
+///
+/// # Safety
+/// The caller roots a concrete string, bytes, or their checked nullable union.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_ord(mut word: usize, mut kind: u32) -> usize {
+    let result = (|| {
+        if word == 0 {
+            return Err(Error::new(
+                Kind::TypeError,
+                "ord() expected string of length 1, but NoneType found",
+            ));
+        }
+        kind &= !super::words::NULLABLE;
+        if kind == 9 {
+            let (payload, member) = super::unions::member(word);
+            word = payload;
+            kind = member.base();
+        }
+        let length = match kind {
+            3 => {
+                // SAFETY: the representation identifies a rooted UTF-8 string.
+                let mut chars = unsafe { &*(word as *const Str) }.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(ch), None) => return Ok(Int::from_usize(ch as usize).into_raw()),
+                    (None, None) => 0,
+                    _ => 2 + chars.count(),
+                }
+            }
+            8 => {
+                // SAFETY: the representation identifies an immutable rooted bytes value.
+                let bytes = unsafe { &*(word as *const crate::Bytes) };
+                if let [byte] = bytes.as_slice() {
+                    return Ok(Int::from_usize(usize::from(*byte)).into_raw());
+                }
+                bytes.len()
+            }
+            _ => unreachable!("ord's checked character layout"),
+        };
+        Err(Error::new(
+            Kind::TypeError,
+            format!("ord() expected a character, but string of length {length} found"),
+        ))
+    })();
+    finish(result, 0)
+}
+
 /// # Safety
 /// The caller roots the integer and supplies a bounded literal width. BigInt's
 /// formatter pads signed magnitudes, including zeroes after a negative sign.
@@ -65,6 +112,29 @@ pub unsafe extern "C" fn imre_str_contains(needle: *const Str, text: *const Str)
     unsafe { u32::from((&*text).contains((&*needle).as_str())) }
 }
 
+/// CPython 3.14's alphanumeric characters are Unicode 16 letters and numbers.
+pub(super) fn python_alnum(text: &str) -> bool {
+    if text.is_ascii() {
+        return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric());
+    }
+    const RANGES: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_alnum.rs"));
+    text.chars().all(|ch| {
+        let cp = u32::from(ch);
+        let index = RANGES.partition_point(|&(_, end)| end < cp);
+        RANGES.get(index).is_some_and(|&(start, _)| start <= cp)
+    })
+}
+
+/// Tests a native string with Python's alphanumeric predicate.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isalnum(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_alnum(unsafe { &*value }))
+}
+
 /// Tests a nonempty Python string against the shared Unicode whitespace table.
 ///
 /// # Safety
@@ -74,6 +144,38 @@ pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
     // SAFETY: the receiver stays alive and no character reference escapes.
     let value = unsafe { &*value };
     u32::from(!value.is_empty() && value.chars().all(python_whitespace))
+}
+
+/// Return true when text contains a cased character and every cased character is uppercase.
+///
+/// # Safety
+/// The caller roots an immutable native string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
+    use icu_properties::{
+        CodePointSetData,
+        props::{Cased, Uppercase},
+    };
+    // SAFETY: the caller supplies a rooted, exact UTF-8 string.
+    let text = unsafe { &*value };
+    let mut seen = false;
+    for c in text.chars() {
+        if c.is_ascii_uppercase() {
+            seen = true;
+        } else if c.is_ascii_lowercase() || c == '\u{295}' {
+            // U+0295 was lowercase in Unicode 16, uncased in newer ICU data.
+            return 0;
+        } else if !c.is_ascii()
+            && CodePointSetData::new::<Cased>().contains(c)
+            && !crate::integer_text::newer_printable(c)
+        {
+            if !CodePointSetData::new::<Uppercase>().contains(c) {
+                return 0;
+            }
+            seen = true;
+        }
+    }
+    u32::from(seen)
 }
 
 /// Removes the common space/tab prefix after the caller has evaluated its text.
@@ -120,16 +222,21 @@ thread_local! {
 
 /// Reuses immutable owners for empty and single Latin-1 strings.
 pub(super) fn owned_string(value: &str) -> Rc<Str> {
+    short_string(value).unwrap_or_else(|| Rc::new(Str::new(value)))
+}
+
+/// Return the shared native owner for empty and single Latin-1 strings.
+pub(crate) fn short_string(value: &str) -> Option<Rc<Str>> {
     let index = match value.as_bytes() {
         [] => 256,
         [byte] => usize::from(*byte),
         // These UTF-8 lead bytes encode U+0080 through U+00FF.
         [0xc2 | 0xc3, _] => value.chars().next().unwrap() as usize,
-        _ => return Rc::new(Str::new(value)),
+        _ => return None,
     };
-    SHORT_STRINGS.with_borrow_mut(|strings| {
+    Some(SHORT_STRINGS.with_borrow_mut(|strings| {
         Rc::clone(strings[index].get_or_insert_with(|| Rc::new(Str::new(value))))
-    })
+    }))
 }
 
 /// Appends an owned slice of source, retaining its allocation for a full slice.

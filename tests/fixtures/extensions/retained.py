@@ -27,6 +27,23 @@ def releasing(value: int) -> int:
 
 
 def main() -> None:
+    assert retainer.buffer_bytes(b"a\x00\xff", 0) == b"a\x00\xff"
+    assert retainer.buffer_bytes(b"", 1) == b""
+    assert len(retainer.buffer_bytes(b"abcd", 1)) == 4
+    assert retainer.buffer_bytes(b"", 4) == b"\x00\xff"
+    try:
+        retainer.buffer_bytes(b"", 2)
+    except SystemError as error:
+        assert str(error) == "Negative size passed to PyBytes_FromStringAndSize"
+    else:
+        raise AssertionError("expected a negative size error")
+    try:
+        retainer.buffer_bytes(b"", 3)
+    except OverflowError as error:
+        assert str(error) == "byte string is too large"
+    else:
+        raise AssertionError("expected a size overflow")
+
     items = [1]
     start(items)
     assert retainer.same(items) == 1

@@ -6,6 +6,7 @@
   "reference_files": {
     "Lib/_colorize.py": "d6673f6692f76151b3b226ebe4d7976456a257e5",
     "Lib/argparse.py": "24f4740562d015927fe41430a17b18646a3fee65",
+    "Lib/dataclasses.py": "f9c1113b1e367f47cd710367c1a2ec3619a94df3",
     "Lib/test/support/i18n_helper.py": "2e304f29e8ba7fdf07c0725ce762ae3118685fe3",
     "Lib/test/test_tools/__init__.py": "c4395c7c0ad0c986d9af82143207f94a35d636a6",
     "Tools/i18n/pygettext.py": "ddf4474d2bce55f7edd0ddd5db132ddea86ba88c"

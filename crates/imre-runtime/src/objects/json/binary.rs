@@ -58,9 +58,8 @@ fn decode(bytes: &Rc<Bytes>) -> Result<Cow<'_, str>, Error> {
         };
         Error::unicode_decode(
             codec,
-            Rc::clone(bytes),
-            start,
-            end,
+            bytes.clone(),
+            start..end,
             reason,
             format!("'{codec}' codec can't decode {location}: {reason}"),
         )
