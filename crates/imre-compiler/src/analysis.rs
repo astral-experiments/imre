@@ -146,10 +146,22 @@ impl Session {
             .map_err(|e| e.to_string())?;
         // Popen tests and programs pass shell=0/1. Preserve all of typeshed's
         // overloads while admitting the integer truth values CPython accepts.
-        let subprocess = vendored
+        let mut subprocess = vendored
             .read_to_string("stdlib/subprocess.pyi")
             .map_err(|error| error.to_string())?
             .replace("shell: bool =", "shell: bool | int =");
+        // CPython also accepts integer text flags. Keep the str/bytes overloads
+        // precise for 1 and 0; other integers use the existing general overload.
+        for flag in ["text", "universal_newlines"] {
+            for (old, new) in [
+                ("Literal[True]", "Literal[True, 1]"),
+                ("Literal[False]", "Literal[False, 0]"),
+                ("bool | None", "bool | int | None"),
+            ] {
+                subprocess =
+                    subprocess.replace(&format!("{flag}: {old}"), &format!("{flag}: {new}"));
+            }
+        }
         // check_output accepts **kwargs and reports these conflicts before
         // launching. Code that catches those ValueErrors must reach the runtime.
         let mut checked = false;

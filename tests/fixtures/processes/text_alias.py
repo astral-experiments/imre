@@ -2,6 +2,11 @@ import subprocess
 import sys
 
 
+def missing() -> list[str]:
+    print("arguments evaluated")
+    return ["missing-text-alias-executable"]
+
+
 echo = [sys.argv[1], "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read()+b'\\rEND\\r\\n'); sys.stderr.buffer.write(b'one\\rtwo\\n')"]
 with subprocess.Popen(echo, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                       universal_newlines=1, text=True, pass_fds=(), umask=0o077) as proc:
@@ -19,12 +24,6 @@ with subprocess.Popen(echo, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stder
 child = [sys.argv[1], "-c", "pass"]
 print(subprocess.call(child, universal_newlines=True, timeout=30))
 print(subprocess.check_call(child, universal_newlines=False))
-
-
-def missing() -> list[str]:
-    print("arguments evaluated")
-    return ["missing-text-alias-executable"]
-
 
 try:
     subprocess.Popen(missing(), text=True, universal_newlines=0, stdout=subprocess.STDOUT)
