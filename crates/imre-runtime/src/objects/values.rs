@@ -456,7 +456,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         Storage::PurePath(path) => {
                             output.push_str(path.class());
                             output.push('(');
-                            super::exceptions::push_string_repr(&storage.posix_spelling(), output);
+                            path.push_posix_repr(output);
                             output.push(')');
                             None
                         }

@@ -65,11 +65,10 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
-            Self::FreezeStrings => Contract::new(true, PreservesLists),
-            Self::Errno(_) => Contract::new(true, PreservesLists),
             Self::Str if args.first().is_some_and(|e| e.ty == Type::ObjectValue) => {
                 Contract::new(true, PreservesOwners)
             }
+            Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -124,6 +123,7 @@ impl Builtin {
                     | PathOperation::JoinObject
                     | PathOperation::Parent
                     | PathOperation::IsRelativeTo
+                    | PathOperation::AsPosix
                     | PathOperation::ReadText
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
@@ -158,7 +158,6 @@ impl Builtin {
                     | PathOperation::Root
                     | PathOperation::Anchor
                     | PathOperation::CountPart
-                    | PathOperation::AsPosix
                     | PathOperation::Text
                     | PathOperation::Name
                     | PathOperation::Stem
@@ -282,6 +281,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::BytesGet
+            | Self::WrapperAttributes(_)
             | Self::Chr
             | Self::IntegerPower
             | Self::ModularPower
@@ -292,6 +292,7 @@ impl Builtin {
             | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
+            | Self::FreezeStrings
             | Self::SetAdd
             | Self::CounterUpdate
             | Self::KeySet
@@ -300,6 +301,7 @@ impl Builtin {
             | Self::KeyDifference
             | Self::RegexGroupDict
             | Self::RegexFindIter
+            | Self::Errno(_)
             | Self::DictGet
             | Self::NamespaceWrap
             | Self::NamespaceDict
@@ -562,6 +564,9 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::WrapperAttributes(fields) => {
+                args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
+            }
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
             }
@@ -833,6 +838,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_input"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
+                | "imre_path_as_posix"
                 | "imre_path_join"
                 | "imre_path_join_object"
                 | "imre_path_parent"

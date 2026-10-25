@@ -24,6 +24,7 @@ mod hashlib;
 mod inspect;
 mod itertools;
 mod json;
+mod linecache;
 mod logging;
 mod mappings;
 mod namespaces;
