@@ -356,7 +356,6 @@ impl Builtin {
             | Self::Split
             | Self::StringListCopy
             | Self::StringListFilter(_)
-            | Self::StringListSortSuffix(_)
             | Self::StringListNonempty
             | Self::Str
             | Self::NominalIdentity
@@ -375,6 +374,7 @@ impl Builtin {
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
+            | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::DictDelete
@@ -811,6 +811,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
                 | "imre_ndiff_deferred"
+                | "imre_str_list_sorted_suffix"
                 | "imre_dict_delete"
                 | "imre_dict_pop"
                 | "imre_cursor_length_hint"
