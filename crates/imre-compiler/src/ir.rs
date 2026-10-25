@@ -29,6 +29,8 @@ pub(crate) enum Type {
     Tuple(usize),
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
+    /// Private state retained by an independently constructed function cache.
+    CacheState(usize),
     Optional(usize),
     /// A closed str/bytes union with one owned tagged-pointer word.
     Union(usize),
@@ -128,6 +130,21 @@ pub(crate) enum PathFlavor {
 }
 
 impl Type {
+    pub(crate) fn cache_state(self) -> Self {
+        let Self::Dict(id) = self else {
+            unreachable!("a function cache has a dictionary layout")
+        };
+        Self::CacheState(id)
+    }
+
+    pub(crate) fn cache_table(self) -> Option<Self> {
+        if let Self::CacheState(id) = self {
+            Some(Self::Dict(id))
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn is_path(self) -> bool {
         matches!(self, Self::Path | Self::PurePath(_))
     }
@@ -162,6 +179,7 @@ impl std::fmt::Display for Type {
             Self::StringKeys => "collections.abc.Set[str]",
             Self::ListInt => "list[int]",
             Self::ByteOutput => "private byte output",
+            Self::CacheState(_) => "private function cache",
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception | Self::NamedException(_) => "Exception",
@@ -758,11 +776,15 @@ pub(crate) enum Builtin {
     JsonDecode(Type),
     JsonLoads,
     JsonEmptyObject,
-    FunctionCache(usize),
-    FunctionCacheProbe(usize, i64),
-    FunctionCacheInsert(usize, i64),
-    FunctionCacheStat(usize, u32),
-    FunctionCacheClear(usize),
+    ModuleCache(usize),
+    /// Capture and access an individual wrapper's independently owned cache.
+    CacheNew,
+    CacheTable,
+    CacheProbe(i64),
+    CacheInsert(i64),
+    CacheStat(u32),
+    CacheClear,
+    CallableContext,
     HashStr,
     HashRecord,
     /// A dictionary with a read-only JSON receiver and a literal string key.

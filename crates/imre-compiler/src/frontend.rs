@@ -5404,6 +5404,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
+                    return Ok(wrapped);
+                }
                 if receiver.ty == Type::BuiltinClass {
                     match attribute.attr.as_str() {
                         "__name__" | "__qualname__" => return Ok(annotations::type_name(receiver)),
@@ -5702,7 +5705,10 @@ impl<'a> Checker<'a> {
         if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
             return Ok(self.materialize_fixed_tuple(tuple));
         }
-        if let Some(value) = self.cache_control(call)? {
+        if let Some(value) = self.cache_constructor(call)? {
+            return Ok(value);
+        }
+        if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
         }
         if let Some(value) = self.sys_call(call)? {

@@ -55,6 +55,7 @@ pub struct Object(StorageCell<Storage>);
 enum Storage {
     Sequence(Words),
     Dictionary(Box<mappings::Mapping>),
+    FunctionCache(Box<mappings::FunctionCache>),
     Set(Box<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
