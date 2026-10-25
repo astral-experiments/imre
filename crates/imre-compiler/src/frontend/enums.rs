@@ -385,6 +385,7 @@ impl Checker<'_> {
                         | Type::Dict(_)
                         | Type::ChainMap(_)
                         | Type::Set(_)
+                        | Type::Deque(_)
                         | Type::Class(_)
                 )
             })
