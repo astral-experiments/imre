@@ -16,9 +16,13 @@ def observe(name, level, body, body_rev, probes):
     proof = {"opt_level": level, "complete_method": {**body, "compiler_commit": body_rev}}
     loc = roles(body="unobserved", assertions="unobserved", operation="unobserved", fixture="unobserved")
     if state == "native_body_host_fixture":
-        operation = ("Native functools.partial constructs and calls both bound and unbound str.join."
-                     if name.endswith(".test_with_bound_and_unbound_methods")
-                     else f"Imre executed the product operations of the complete unchanged {name} method.")
+        if name.endswith(".test_with_bound_and_unbound_methods"):
+            operation = "Native functools.partial constructs and calls both bound and unbound str.join."
+        elif name.endswith(".test_get_annotations"):
+            operation = ("Imre creates an lru_cache wrapper, reads the original and wrapper annotations, "
+                         "and compares both dictionaries with the expected builtin class objects.")
+        else:
+            operation = f"Imre executed the product operations of the complete unchanged {name} method."
         proof.update(operation=operation,
                      fixture=body["fixture_execution"])
         return dict(outcome="pass", roles=roles(body="imre", assertions="imre", operation="imre", fixture="mixed"), evidence=proof)
