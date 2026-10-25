@@ -325,7 +325,8 @@ unsafe fn addr_tuple(layout: *const RecordDescriptor, addr: libc::sockaddr_in) -
     // SAFETY: the descriptor describes (str, int); initialize and transfer both owners.
     unsafe {
         let pair = imre_record_new(layout);
-        pair.cast::<*const Str>().write(crate::StrOwner::into_raw(host));
+        pair.cast::<*const Str>()
+            .write(crate::StrOwner::into_raw(host));
         pair.add(1)
             .write(word(i32::from(u16::from_be(addr.sin_port))));
         pair

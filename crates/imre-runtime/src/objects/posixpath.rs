@@ -110,7 +110,9 @@ pub unsafe extern "C" fn imre_posix_join(
             // of that argument without allocating a copy.
             match final_part {
                 // SAFETY: the spelling tag proves the rooted Rc payload type.
-                Spelling::Text(_) => unsafe { StrOwner::increment_strong_count(last.cast::<Str>()) },
+                Spelling::Text(_) => unsafe {
+                    StrOwner::increment_strong_count(last.cast::<Str>())
+                },
                 // SAFETY: the spelling tag proves the rooted Rc payload type.
                 Spelling::Bytes(_) => unsafe { Rc::increment_strong_count(last.cast::<Bytes>()) },
             }
