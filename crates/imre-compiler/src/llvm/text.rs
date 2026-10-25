@@ -47,8 +47,13 @@ impl Emitter<'_, '_> {
     ) -> Value {
         let source = &args[0].value.operand;
         let operand = match operation {
-            TextOperation::IsSpace => {
-                let bit = self.instruction(format!("call i32 @imre_str_isspace(ptr {source})"));
+            TextOperation::IsSpace | TextOperation::IsUpper => {
+                let symbol = if matches!(operation, TextOperation::IsUpper) {
+                    "imre_str_is_upper"
+                } else {
+                    "imre_str_isspace"
+                };
+                let bit = self.instruction(format!("call i32 @{symbol}(ptr {source})"));
                 self.instruction(format!("icmp ne i32 {bit}, 0"))
             }
             TextOperation::SplitLineEnds => {

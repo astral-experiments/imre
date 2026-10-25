@@ -274,6 +274,9 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
                     }));
                 }
+                if let Some(class) = self.writable_property(receiver.ty, attribute) {
+                    return self.set_property(class, attribute, receiver, value);
+                }
                 let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
                 let value = self.coerce(value, ty, target)?;
                 Ok(Statement::SetField(receiver, field, value))

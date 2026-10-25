@@ -96,6 +96,7 @@ impl Builtin {
                     | TextOperation::ShlexSplit
                     | TextOperation::ShlexQuote => true,
                     TextOperation::IsSpace
+                    | TextOperation::IsUpper
                     | TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -454,9 +455,11 @@ impl Builtin {
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
-            | Self::StrIsUpper
             | Self::OsName
             | Self::SysOrigArgv
+            | Self::DocCaptureStart
+            | Self::DocCaptureTake
+            | Self::DocAscii
             | Self::SysArgv
             | Self::FileFileno
             | Self::TextClose

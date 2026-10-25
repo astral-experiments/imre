@@ -23,6 +23,7 @@ pub(crate) const EXCEPTION_ARGS_SLOT: &str = "<exception arguments>";
 pub(crate) enum MethodKind {
     Instance,
     Property,
+    PropertySetter,
     Class,
     Static,
 }
@@ -221,7 +222,7 @@ fn collect_class(
     {
         return Err(module.error(node, "incompatible base for a fixed-layout class"));
     }
-    let mut methods = Vec::new();
+    let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
     let mut method_kinds = Vec::new();
     let mut initializer = None;
     for statement in &node.body {
@@ -374,7 +375,24 @@ fn collect_class(
                     );
                 }
                 let kind = method_kind(graph, definition.module, method, &class_bindings)?;
-                if !names.insert(name.to_owned()) {
+                if kind == MethodKind::PropertySetter {
+                    let mut accessors = methods
+                        .iter()
+                        .zip(&method_kinds)
+                        .filter(|(m, _)| m.name.as_str() == name);
+                    let getter = accessors.next().is_some_and(|(m, kind)| {
+                        *kind == MethodKind::Property
+                            && !m.decorator_list.iter().any(|d| {
+                                graph.resolve(definition.module, &d.expression)
+                                    == Some(Binding::Intrinsic(Intrinsic::CachedProperty))
+                            })
+                    });
+                    if !getter || accessors.next().is_some() {
+                        return Err(
+                            module.error(method, "a property setter needs its preceding getter")
+                        );
+                    }
+                } else if !names.insert(name.to_owned()) {
                     return Err(module.error(method, &format!("duplicate class member {name:?}")));
                 }
                 let first = method
@@ -383,7 +401,9 @@ fn collect_class(
                     .first()
                     .or_else(|| method.parameters.args.first());
                 let receiver = match kind {
-                    MethodKind::Instance | MethodKind::Property => Some("self"),
+                    MethodKind::Instance | MethodKind::Property | MethodKind::PropertySetter => {
+                        Some("self")
+                    }
                     MethodKind::Class => Some("cls"),
                     MethodKind::Static => None,
                 };
@@ -401,6 +421,14 @@ fn collect_class(
                     && (method.parameters.len() != 1 || first.unwrap().default.is_some())
                 {
                     return Err(module.error(method, "a property getter must take only self"));
+                }
+                if kind == MethodKind::PropertySetter
+                    && (method.parameters.posonlyargs.len() + method.parameters.args.len() != 2
+                        || method.parameters.len() != 2)
+                {
+                    return Err(
+                        module.error(method, "a property setter must take self and a value")
+                    );
                 }
                 if (unary_protocol || matches!(name, "__repr__" | "__post_init__"))
                     && (kind != MethodKind::Instance
@@ -421,6 +449,46 @@ fn collect_class(
                 methods.push(method.clone());
                 method_kinds.push(kind);
                 class_bindings.insert(name.to_owned());
+            }
+            ast::Stmt::Assign(assign)
+                if let [ast::Expr::Name(name)] = assign.targets.as_slice()
+                    && !class_bindings.contains("property")
+                    && let Some((read, write)) =
+                        property_accessors(graph, definition.module, &assign.value) =>
+            {
+                if !names.insert(name.id.to_string()) {
+                    return Err(module.error(name, "duplicate property binding"));
+                }
+                for (accessor, kind, arity) in [
+                    (Some(read), MethodKind::Property, 1),
+                    (write, MethodKind::PropertySetter, 2),
+                ] {
+                    let Some(accessor) = accessor else { continue };
+                    let Some((method, _)) = methods
+                        .iter()
+                        .zip(&method_kinds)
+                        .find(|(m, k)| m.name.as_str() == accessor && **k == MethodKind::Instance)
+                    else {
+                        return Err(module.error(
+                            assign,
+                            "property accessors must be preceding instance methods",
+                        ));
+                    };
+                    if method.parameters.len() != arity
+                        || method.parameters.posonlyargs.len() + method.parameters.args.len()
+                            != arity
+                    {
+                        return Err(module.error(
+                            assign,
+                            "property accessor has the wrong number of positional parameters",
+                        ));
+                    }
+                    let mut alias = method.clone();
+                    alias.name = ast::Identifier::new(name.id.as_str(), name.range);
+                    methods.push(alias);
+                    method_kinds.push(kind);
+                }
+                class_bindings.insert(name.id.to_string());
             }
             ast::Stmt::Assign(assign)
                 if let [ast::Expr::Name(name)] = assign.targets.as_slice()
@@ -578,6 +646,30 @@ fn collect_class(
     })
 }
 
+/// Recognize a fixed property declared from locally named accessors.
+pub(crate) fn property_accessors<'a>(
+    graph: &SourceGraph,
+    module: usize,
+    value: &'a ast::Expr,
+) -> Option<(&'a str, Option<&'a str>)> {
+    let ast::Expr::Call(call) = value else {
+        return None;
+    };
+    if !matches!(&*call.func, ast::Expr::Name(n) if n.id == "property")
+        || graph.resolve(module, &call.func).is_some()
+        || !call.arguments.keywords.is_empty()
+    {
+        return None;
+    }
+    match call.arguments.args.as_ref() {
+        [ast::Expr::Name(get)] => Some((get.id.as_str(), None)),
+        [ast::Expr::Name(get), ast::Expr::Name(set)] => {
+            Some((get.id.as_str(), Some(set.id.as_str())))
+        }
+        _ => None,
+    }
+}
+
 /// Resolve declarations whose descriptor cannot bind an instance: a sealed
 /// module or an explicit staticmethod over a known function.
 fn class_static_binding(
@@ -678,9 +770,17 @@ fn method_kind(
             _ => {}
         }
     }
+    if let ast::Expr::Attribute(attr) = &decorator.expression
+        && attr.attr.as_str() == "setter"
+        && let ast::Expr::Name(name) = &*attr.value
+        && name.id == method.name.id
+        && class_names.contains(name.id.as_str())
+    {
+        return Ok(MethodKind::PropertySetter);
+    }
     Err(module.error(
         decorator,
-        "method decorators must be unshadowed @property, @classmethod, or @staticmethod; properties are read-only",
+        "unsupported method decorator on a fixed-layout class",
     ))
 }
 

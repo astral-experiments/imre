@@ -301,7 +301,7 @@ impl Inference {
             for signature in signatures.values_mut() {
                 self.update(signature);
             }
-            for methods in &mut classes.methods {
+            for methods in classes.methods.iter_mut().chain(&mut classes.setters) {
                 for signature in methods.values_mut() {
                     self.update(signature);
                 }
@@ -450,7 +450,7 @@ impl Inference {
         for signature in signatures.values_mut() {
             self.update(signature);
         }
-        for methods in &mut classes.methods {
+        for methods in classes.methods.iter_mut().chain(&mut classes.setters) {
             for signature in methods.values_mut() {
                 self.update(signature);
             }
