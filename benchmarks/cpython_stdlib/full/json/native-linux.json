@@ -2,14 +2,14 @@
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
   "execution": "host unittest, native JSON calls",
   "sha256": {
-    "imre": "7a93a832c2ef7c309749db1dca882e79054dfc815a5e363e24ba9fbab79f3f0d",
-    "runtime": "e7143cb4fdaee37dcd810f805a9bcf04f73a3472bf8c1535211265d94d2e07f8",
+    "imre": "8f931eefa7160056203dbddc515f971ea217c9309930e47496c57ec8fe066901",
+    "runtime": "1aa00fe1bfd24c91e23384ef22383ca4a595d9570d6e31422afc0ceb332ead21",
     "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
     "driver": "c3478a7d47d9a4c2c2b9938f4cc6545d7f3a814d2934f96c3b8593af268fc5f2"
   },
   "levels": {
     "0": {
-      "binary_stream_controls": 16,
+      "binary_stream_controls": 21,
       "tests": {
         "test.test_json.test_decode.TestCDecode.test_bytes": {
           "source": "test.test_json.test_decode.TestDecode.test_bytes",
@@ -284,7 +284,7 @@
       }
     },
     "3": {
-      "binary_stream_controls": 16,
+      "binary_stream_controls": 21,
       "tests": {
         "test.test_json.test_decode.TestCDecode.test_bytes": {
           "source": "test.test_json.test_decode.TestDecode.test_bytes",

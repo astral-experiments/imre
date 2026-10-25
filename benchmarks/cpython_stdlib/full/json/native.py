@@ -42,6 +42,15 @@ def binary_stream_controls(native):
             value = unpack_native_repr(native.invoke("load", "binary", prefix + data))
             if value != source[1:-1]:
                 raise AssertionError((encoding, prefix, value))
+        # Only the first BOM is an encoding marker. The other is part of the
+        # decoded document and receives the ordinary invalid-token diagnostic.
+        try:
+            native.invoke("load", "binary", bom + bom + "1".encode(encoding))
+        except ValueError as exc:
+            if native.calls[-1]["status"] != "JSONDecodeError" or str(exc) != "Expecting value: line 1 column 1 (char 0)":
+                raise AssertionError((encoding, str(exc))) from exc
+        else:
+            raise AssertionError("native reader accepted a second BOM")
     # Check the codec, byte range and reason on malformed input. UTF-8-sig
     # reports offsets after the BOM, while UTF-16 and UTF-32 include it.
     for data in (b'\xef\xbb\xbf\x80', b'\xff\xfe\x01', b'\xfe\xff\x01',
@@ -110,7 +119,7 @@ def main():
             if {r["source"] for r in results.values()} != expected.keys():
                 raise RuntimeError("some selected upstream routines were not discovered")
             binary_stream_controls(Native(program, directory, ValueError))
-            report["levels"][level] = {"binary_stream_controls": 16, "tests": results}
+            report["levels"][level] = {"binary_stream_controls": 21, "tests": results}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     return int(not ok)
 

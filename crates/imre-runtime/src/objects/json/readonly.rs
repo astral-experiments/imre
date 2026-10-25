@@ -581,7 +581,19 @@ pub(super) fn loads(text: &str) -> Result<*const Object, Error> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_json_loads(text: *const Str) -> *const Object {
     // SAFETY: text is a live immutable string for the entire parse.
-    finish(loads(unsafe { &*text }), std::ptr::null())
+    let text = unsafe { &*text };
+    // The str entry rejects its BOM before scanning. The binary entry already
+    // consumed its encoding marker; a second one is ordinary invalid JSON.
+    let result = if text.starts_with('\u{feff}') {
+        Err(super::syntax::error_at(
+            text,
+            0,
+            "Unexpected UTF-8 BOM (decode using utf-8-sig)",
+        ))
+    } else {
+        loads(text)
+    };
+    finish(result, std::ptr::null())
 }
 
 /// # Safety
