@@ -63,6 +63,7 @@ pub(crate) enum IntrinsicModule {
     Argparse,
     Future,
     Sys,
+    SysJit,
     Typing,
     Dataclasses,
     Difflib,
@@ -189,6 +190,7 @@ pub(crate) enum Intrinsic {
     SysPlatform,
     SysEncoding(&'static str),
     SysException,
+    SysJitPredicate(&'static str),
     Stdin,
     OsName,
     GetSysconfigPath,
@@ -381,6 +383,9 @@ impl IntrinsicModule {
         if self == Self::Logging && name == "config" {
             return Some(Binding::IntrinsicModule(Self::LoggingConfig));
         }
+        if self == Self::Sys && name == "_jit" {
+            return Some(Binding::IntrinsicModule(Self::SysJit));
+        }
         if self == Self::Os {
             if name == "path" {
                 return Some(Binding::IntrinsicModule(Self::PosixPath));
@@ -490,6 +495,9 @@ impl IntrinsicModule {
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
+            (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
+            (Self::SysJit, "is_enabled") => Intrinsic::SysJitPredicate("_jit.is_enabled"),
+            (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
             (Self::Sys, "flags") => Intrinsic::SysFlags,
@@ -831,6 +839,12 @@ impl SourceGraph {
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::MissingArgument(call));
+    }
+
+    /// This exact operand is excessive for a resolved native method that raises TypeError.
+    pub(crate) fn checked_excess_argument(&self, module: ModuleId, argument: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::ExcessArgument(argument));
     }
 
     pub(crate) fn deferred_name(&self, module: ModuleId, name: TextRange) {
