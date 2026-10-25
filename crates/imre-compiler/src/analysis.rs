@@ -511,10 +511,10 @@ pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
     DictDeletion(TextRange),
-    PlatformImport(TextRange),
     Keyword(TextRange),
     TupleListRead(TextRange),
     MissingArgument(TextRange),
+    BuiltinImport(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -525,8 +525,8 @@ impl CheckedDiagnostic {
             Self::Keyword(range) => (range, 2),
             Self::TupleListRead(range) => (range, 3),
             Self::MissingArgument(range) => (range, 4),
-            Self::DictDeletion(range) => (range, 5),
-            Self::PlatformImport(range) => (range, 6),
+            Self::BuiltinImport(range) => (range, 5),
+            Self::DictDeletion(range) => (range, 6),
         };
         (range.start(), range.end(), kind)
     }
@@ -538,10 +538,10 @@ impl CheckedDiagnostic {
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
-            Self::PlatformImport(alias) => diagnostic == "unresolved-import" && alias == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
+            Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
         }
     }
 }

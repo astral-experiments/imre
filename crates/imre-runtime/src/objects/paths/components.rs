@@ -37,7 +37,7 @@ impl Storage {
                 format!("{} has an empty name", self.path_repr()),
             ));
         }
-        Ok(new_path(join(parent(self.path()), replacement)))
+        Ok(new_path(join(parent(self.component_text()), replacement)))
     }
 }
 

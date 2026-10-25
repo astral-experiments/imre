@@ -152,7 +152,7 @@ impl Initialization {
                     body.extend(import.names.iter().map(|alias| {
                         checker
                             .graph
-                            .checked_platform_import(checker.module, alias.range());
+                            .checked_builtin_import(checker.module, alias.range());
                         checker.check_errno_import(alias.name.as_str())
                     }));
                     checkpoints.push(Checkpoint {

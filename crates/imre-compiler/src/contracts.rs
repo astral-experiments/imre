@@ -135,6 +135,7 @@ impl Builtin {
                     | PathOperation::TemporaryDirectory
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
+                    | PathOperation::Walk
                     | PathOperation::Glob { .. } => true,
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
