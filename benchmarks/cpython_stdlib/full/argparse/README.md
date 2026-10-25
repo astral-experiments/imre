@@ -40,14 +40,14 @@ argparse companion test module. The earlier [generated parse](NATIVE.md) and
 | --- | ---: | ---: |
 | Fully native, including fixtures | 0 | 0 |
 | Native body and operation with host fixtures | 4 | 4 |
-| Host body and assertions with native operations | 888 | 888 |
+| Host body and assertions with native operations | 900 | 900 |
 | Completed with no parser operation (empty input table) | 12 | 12 |
-| Blocked | 989 | 989 |
+| Blocked | 977 | 977 |
 | Mixed, reference-only, failed, skipped or excluded | 0 | 0 |
 | **Total** | **1,893** | **1,893** |
 
 The compiler and runtime come from merged main at
-`ffaeacce37443598a47cfae27815f277f509776b`. Each report accounts for all
+`4568c9ddf08b7666251cc718f8c7e9e74d72a57c`. Each report accounts for all
 417 source-defined methods and all 1,476 generated methods (1,236 parsing and
 240 formatting). The four native bodies each call `parse_args` unconditionally
 and have no explicit assertion; CPython runs their fixtures.
@@ -60,14 +60,16 @@ and have no explicit assertion; CPython runs their fixtures.
 | [Optional subparsers and aliases](https://github.com/astral-sh/imre/pull/756) | 788 | 3,024 |
 | [Known arguments and ordered extras](https://github.com/astral-sh/imre/pull/818) | 789 | 3,025 |
 | [Flag constants and counts](https://github.com/astral-sh/imre/pull/873) | 888 | 3,605 |
+| [Builtin classes as constants and defaults](https://github.com/astral-sh/imre/pull/895) | 900 | 3,623 |
 
-The [run on merged #873](https://github.com/astral-sh/imre/actions/runs/40180770414)
-adds 99 complete host-driven routines to the [#818 results](https://github.com/astral-sh/imre/actions/runs/40177794356).
-They cover count and false-valued flags, clustered short options, alternate
-prefixes, and calls to subparsers and `parse_known_args`. The four native bodies
-still use their original CPython fixtures. No other ID changed classification.
+The [run on merged #895](https://github.com/astral-sh/imre/actions/runs/40185282359)
+adds all 12 `TestOptionalsActionStoreConst` routines to the
+[#873 results](https://github.com/astral-sh/imre/actions/runs/40180770414).
+Their original argument tables store and compare builtin class objects.
+The test bodies, assertions, and fixtures run on CPython; their 18 additional
+`parse_args` calls run on Imre at each level. No other ID changed classification.
 
-Of the 3,605 host-driven native calls at each level, 3,544 call
+Of the 3,623 host-driven native calls at each level, 3,562 call
 `parse_args`, 16 call `parse_known_args`, 14 call `format_help`, 11 call
 `format_usage`, and 10 each call `print_help` and `print_usage`.
 The process comparison checks exit status, stdout, and stderr;
@@ -83,7 +85,7 @@ unchanged CPython reference before combining it with other suites.
 ```sh
 python3.14 -B benchmarks/cpython_stdlib/full/argparse/evidence.py \
   --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang clang-18 \
-  --imre-revision ffaeacce37443598a47cfae27815f277f509776b --result /tmp/argparse-evidence.json
+  --imre-revision 4568c9ddf08b7666251cc718f8c7e9e74d72a57c --result /tmp/argparse-evidence.json
 python3 benchmarks/cpython_stdlib/suite_evidence.py \
   benchmarks/cpython_stdlib/full/argparse/reference-linux.json /tmp/argparse-evidence.json
 ```

@@ -316,9 +316,7 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 
 ## Native text operations
 
-String `%` formatting accepts an exact integer, a string, or a fixed tuple of
-integers and strings as positional operands. The entire tuple is evaluated before
-formatting begins. Width and precision arguments (`*`) consume tuple items in order.
+`ord(value)` returns the Unicode code point of one native string character or the unsigned value of a one-byte `bytes` object. Invalid lengths count Unicode scalars for strings and bytes for `bytes`. Direct consumers can also iterate `map(ord, source)`: input evaluation happens at iterator creation and the conversion runs on each pull. A source `StrEnum` contributes its Unicode value. Mutable `bytearray`, native strings containing lone surrogate code points, and storing the builtin as a first-class callback are outside this subset.
 
 `str.lower()` uses Unicode 16 full lowercase mappings, including expanding characters and contextual Greek final sigma. `str.capitalize()` titlecases the first code point and lowercases the remainder in the original string context.
 
@@ -589,6 +587,12 @@ Defaults must be `int`, `float`, `bool`, `str`, `bytes`, or `None` literals. A n
 The receiver of an instance call evaluates first. Supplied arguments then evaluate once in source order, independently of parameter order; a failure prevents later arguments and the callee from running. The compiler applies each parameter's exact type context to its argument, including empty containers and optional values, and retains evaluated values across later mutations and failures. Named arguments lower to ordinary positional native calls.
 
 Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins and methods accept specific keywords. `open` accepts `encoding="utf-8"`, `sum` accepts `start`, `zip` accepts `strict`, and both `sorted` and `list.sort` accept `key` and `reverse`.
+
+## String percent formatting
+
+String `%` formatting accepts an exact integer, a string, or a fixed tuple of
+integers and strings as positional operands. The entire tuple is evaluated before
+formatting begins. Width and precision arguments (`*`) consume tuple items in order.
 
 ## F-strings and repr
 
@@ -1009,6 +1013,12 @@ Fixed classes reserve field names beginning with `__`. A fixed class can extend 
 
 An empty tuple or a fixed tuple of homogeneous `str`, `bytes`, `int`, or `bool` supports `in` and `not in`. The needle and all tuple elements evaluate in Python order before the first comparison.
 
+`collections.deque[T]` stores one concrete element type in a native ring. Its
+constructor accepts an iterable and an optional nonnegative `maxlen`. It supports
+append, pop, and extend at either end, clear, shallow copy, equality, length,
+truth testing, and forward or reverse iteration. A saved append or pop method
+keeps its receiver alive. An unannotated empty deque defaults to integer elements.
+
 `list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition copies references to the same elements, so `[row] * 3` shares `row` across all three positions. `list[int]` retains its specialized tagged-integer storage and runtime calls; other lists use owned runtime slots.
 
 An unquoted `Sequence[T]` parameter from `collections.abc` or `typing` accepts
@@ -1402,3 +1412,20 @@ The [shared suite runner](../benchmarks/cpython_stdlib/SUITE_RUNNER.md) shows
 which parts of a complete pinned test run natively. The full CPython unittest
 API, dynamic method discovery in a native process, traceback reports, and
 arbitrary assertion operand types are not supported by this implementation.
+
+### Native errno registry
+
+`import errno` exposes the target platform's integer constants and one mutable
+`dict[int, str]` at `errno.errorcode`. Forward aliases stay distinct names;
+the reverse dictionary uses the last registered name for each value.
+Module aliases share the same registry and dictionary. `vars(errno)` and
+`errno.__dict__` provide insertion-ordered key iteration, membership, and lookup.
+The module supports dynamic `hasattr` and `getattr`, including scalar defaults.
+Changing the module namespace and calling bound module descriptors are outside
+this subset. The reverse dictionary supports ordinary insertion, replacement,
+and deletion.
+
+Native `TestCase.assertHasAttr` currently accepts a native module and a string;
+`assertIn` accepts a scalar or native module member and a `dict[int, str]`.
+Both use the normal assertion failure and optional test message. The errno
+suite runs every original method; see the [reference and native evidence](../benchmarks/cpython_stdlib/full/errno/README.md).
