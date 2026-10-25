@@ -56,8 +56,8 @@ fn required(name: &str, ty: Type) -> Parameter {
 }
 
 impl Checker<'_> {
-    /// Bind the private weak registry to the public fixed Handler record type.
-    pub(super) fn named_handler(
+    /// Bind the private operations used by the public handler implementation.
+    pub(super) fn handler_operation(
         &mut self,
         symbol: Intrinsic,
         call: &ast::ExprCall,
@@ -87,6 +87,7 @@ impl Checker<'_> {
                 self.types.optional(handler),
                 vec![required("name", Type::Str)],
             ),
+            Intrinsic::PrintActiveException => (Log::PrintActiveException, Type::None, vec![]),
             _ => unreachable!(),
         };
         let args = self.arguments(call, &params, None)?;
