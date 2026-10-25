@@ -65,13 +65,13 @@ impl Type {
             | Self::StringKeys
             | Self::NativeModule
             | Self::ModuleNamespace
-            | Self::ModuleMember
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExceptionField
+            | Self::ObjectValue
+            | Self::ReadOnlyObjectMapping
             | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
@@ -134,13 +134,13 @@ impl Type {
             | Self::StringKeys
             | Self::NativeModule
             | Self::ModuleNamespace
-            | Self::ModuleMember
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExceptionField
+            | Self::ObjectValue
+            | Self::ReadOnlyObjectMapping
             | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
@@ -740,7 +740,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ObjectValue
+            | Type::ReadOnlyObjectMapping
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -759,7 +760,6 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::NativeModule
             | Type::ModuleNamespace
-            | Type::ModuleMember
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -3396,7 +3396,8 @@ impl Emitter<'_, '_> {
                 | Type::CsvReader
                 | Type::Exception
                 | Type::NamedException(_)
-                | Type::ExceptionField
+                | Type::ObjectValue
+                | Type::ReadOnlyObjectMapping
                 | Type::ImportException
                 | Type::TimeoutExpired
                 | Type::TextIO
@@ -3427,7 +3428,6 @@ impl Emitter<'_, '_> {
                 | Type::AsyncProcess(_)
                 | Type::NativeModule
                 | Type::ModuleNamespace
-                | Type::ModuleMember
                 | Type::LogFormatter
                 | Type::LogRecord
                 | Type::Logger
@@ -4013,6 +4013,11 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::RegexFindIter => self.call(
+                "imre_regex_finditer",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::RegexGroupDict => {
                 self.call("imre_regex_groupdict", returns, &[&args[0].value])
             }
@@ -4562,7 +4567,12 @@ impl Emitter<'_, '_> {
             Builtin::SystemExitCodeEqual { reversed } => {
                 let i = usize::from(*reversed);
                 let other = &args[1 - i].value;
-                let kind = representation_kind(other.ty, &self.module.types);
+                // Kind 5 denotes another object view in this ABI.
+                let kind = if self.module.types.mapping(other.ty).is_some() {
+                    17
+                } else {
+                    representation_kind(other.ty, &self.module.types)
+                };
                 let word = self.word(other);
                 let bit = self.instruction(format!(
                     "call i32 @imre_system_exit_code_equal(ptr {}, i32 {kind}, i64 {word})",
@@ -5081,6 +5091,22 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::BoxValue => {
+                let value = &args[0].value;
+                let kind = representation_kind(value.ty, &self.module.types);
+                let word = self.word(value);
+                Value {
+                    ty: returns,
+                    operand: self
+                        .instruction(format!("call ptr @imre_box_value(i32 {kind}, i64 {word})")),
+                    small_integer: false,
+                }
+            }
+            Builtin::MappingObjectGet => self.call(
+                "imre_mapping_object_get",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::ExceptionTupleView => {
                 self.call("imre_exception_tuple_view", returns, &[&args[0].value])
             }
@@ -5210,7 +5236,7 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::None => self.call("imre_none_str", Type::Str, &[]),
-                Type::ExceptionField => {
+                Type::ObjectValue => {
                     self.call("imre_system_exit_code_text", Type::Str, &[&args[0].value])
                 }
                 Type::Exception
@@ -5281,7 +5307,7 @@ impl Emitter<'_, '_> {
                             Type::Bytes => "imre_bytes_len",
                             Type::ListInt => "imre_list_len",
                             Type::List(_) => "imre_seq_len_fast",
-                            Type::Dict(_) => "imre_dict_len",
+                            Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
                             Type::Deque(_) => "imre_deque_len",
                             Type::Set(_) | Type::StringKeys => "imre_set_len",
                             _ => unreachable!("len input was checked"),
@@ -5822,12 +5848,6 @@ impl Emitter<'_, '_> {
             Builtin::Errno(op) => {
                 use crate::ir::ErrnoOperation as Op;
                 let call = match op {
-                    Op::BoxValue => {
-                        let value = &args[0].value;
-                        let kind = representation_kind(value.ty, &self.module.types);
-                        let word = self.word(value);
-                        format!("call ptr @imre_module_value(i32 {kind}, i64 {word})")
-                    }
                     Op::Module => "call ptr @imre_errno_module()".to_string(),
                     Op::Namespace | Op::Keys | Op::Errorcode => {
                         let f = match op {
@@ -5858,29 +5878,10 @@ impl Emitter<'_, '_> {
                         args[1].value.operand,
                         u32::from(matches!(op, Op::Items))
                     ),
-                    Op::ItemRepr | Op::ItemText => format!(
-                        "call ptr @imre_errno_member_text(ptr {}, i32 {})",
-                        args[0].value.operand,
-                        u32::from(matches!(op, Op::ItemRepr))
-                    ),
                     Op::MemberContains => format!(
                         "call i32 @imre_errno_member_contains(ptr {}, ptr {})",
                         args[0].value.operand, args[1].value.operand
                     ),
-                    Op::ItemEq => {
-                        let i = usize::from(args[0].value.ty != Type::ModuleMember);
-                        let other = &args[1 - i].value;
-                        let kind = if other.ty == Type::ModuleMember {
-                            16
-                        } else {
-                            representation_kind(other.ty, &self.module.types)
-                        };
-                        let word = self.word(other);
-                        format!(
-                            "call i32 @imre_errno_member_equal(ptr {}, i32 {kind}, i64 {word})",
-                            args[i].value.operand
-                        )
-                    }
                 };
                 let raw = if matches!(
                     op,
@@ -6047,13 +6048,6 @@ impl Emitter<'_, '_> {
             Builtin::IsNone => Value {
                 ty: Type::Bool,
                 operand: match args[0].value.ty {
-                    Type::ModuleMember => {
-                        let kind = self.instruction(format!(
-                            "call i32 @imre_module_value_kind(ptr {})",
-                            args[0].value.operand
-                        ));
-                        self.instruction(format!("icmp eq i32 {kind}, 0"))
-                    }
                     Type::JsonRoot | Type::JsonValue => {
                         let bit = self.instruction(format!(
                             "call i32 @imre_json_null(ptr {})",
@@ -6065,7 +6059,7 @@ impl Emitter<'_, '_> {
                         self.instruction(format!("icmp eq i64 {}, 0", args[0].value.operand))
                     }
                     Type::None => "true".to_owned(),
-                    Type::ExceptionField => {
+                    Type::ObjectValue => {
                         let bit = self.instruction(format!(
                             "call i32 @imre_system_exit_code_equal(ptr {}, i32 0, i64 0)",
                             args[0].value.operand
@@ -6118,7 +6112,8 @@ impl Emitter<'_, '_> {
                     | Type::ByteOutput
                     | Type::Exception
                     | Type::NamedException(_)
-                    | Type::ExceptionField
+                    | Type::ObjectValue
+                    | Type::ReadOnlyObjectMapping
                     | Type::ImportException
                     | Type::TimeoutExpired
                     | Type::Path
@@ -6137,7 +6132,6 @@ impl Emitter<'_, '_> {
                     | Type::AsyncProcess(_)
                     | Type::NativeModule
                     | Type::ModuleNamespace
-                    | Type::ModuleMember
                     | Type::LogFormatter
                     | Type::LogRecord
                     | Type::Logger
@@ -6374,7 +6368,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ObjectValue
+            | Type::ReadOnlyObjectMapping
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -6394,7 +6389,6 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::NativeModule
             | Type::ModuleNamespace
-            | Type::ModuleMember
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -6457,7 +6451,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ObjectValue
+            | Type::ReadOnlyObjectMapping
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -6477,7 +6472,6 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::NativeModule
             | Type::ModuleNamespace
-            | Type::ModuleMember
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -7054,7 +7048,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ByteOutput
         | Type::Exception
         | Type::NamedException(_)
-        | Type::ExceptionField
+        | Type::ObjectValue
+        | Type::ReadOnlyObjectMapping
         | Type::ImportException
         | Type::TimeoutExpired
         | Type::Path
@@ -7073,7 +7068,6 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::AsyncProcess(_)
         | Type::NativeModule
         | Type::ModuleNamespace
-        | Type::ModuleMember
         | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
@@ -7514,6 +7508,8 @@ declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
 declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
 declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
+declare ptr @imre_box_value(i32, i64)
+declare ptr @imre_mapping_object_get(ptr, ptr)
 declare ptr @imre_exception_tuple_view(ptr)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
@@ -7751,9 +7747,6 @@ declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)
 declare i32 @imre_str_is_upper(ptr)
-declare ptr @imre_module_value(i32, i64)
-declare i32 @imre_module_value_truth(ptr)
-declare i32 @imre_module_value_kind(ptr)
 declare ptr @imre_errno_module()
 declare ptr @imre_errno_namespace(ptr)
 declare ptr @imre_errno_keys(ptr)
@@ -7763,9 +7756,7 @@ declare ptr @imre_errno_text(ptr,ptr)
 declare i32 @imre_errno_has(ptr,ptr)
 declare ptr @imre_errno_lookup(ptr,ptr,i32)
 declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
-declare ptr @imre_errno_member_text(ptr,i32)
 declare i32 @imre_errno_member_contains(ptr,ptr)
-declare i32 @imre_errno_member_equal(ptr,i32,i64)
 declare ptr @imre_os_name()
 declare void @imre_doctest_capture_start()
 declare ptr @imre_doctest_capture_take()
@@ -7869,6 +7860,7 @@ declare i1 @imre_log_enabled(ptr, i64)
 declare void @imre_log_emit(ptr, i64, ptr)
 declare ptr @imre_regex_group(ptr, i64, i32)
 declare ptr @imre_regex_groupdict(ptr)
+declare ptr @imre_regex_finditer(ptr, ptr)
 declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)
