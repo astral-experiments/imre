@@ -1,0 +1,185 @@
+"""Native Codon data types for Ruff's original Markdown renderer."""
+
+import sys
+from pathlib import Path
+
+
+@tuple
+class Repository:
+    fullname: str
+    revision: str
+
+    @property
+    def url(self):
+        return "https://github.com/" + self.fullname
+
+    def url_for(self, path, line):
+        return f"{self.url}/blob/{self.revision}/{path}" + (f"#L{line}" if line else "")
+
+
+@tuple
+class FormatOptions:
+    preview: bool = False
+    exclude: str = ""
+
+    def to_ruff_args(self):
+        args = ["format", "--preview" if self.preview else "--no-preview"]
+        if self.exclude:
+            args.extend(["--exclude", self.exclude])
+        return args
+
+
+@tuple
+class Project:
+    repo: Repository
+    format_options: FormatOptions
+
+
+@tuple
+class Diff:
+    lines: list[str]
+    lines_added: int
+    lines_removed: int
+
+    def __bool__(self):
+        return bool(self.lines_added or self.lines_removed)
+
+
+@tuple
+class Comparison:
+    diff: Diff
+    repo: Repository
+
+
+@tuple
+class Result:
+    errored: list[tuple[Project, str]]
+    completed: list[tuple[Project, Comparison]]
+
+
+@tuple
+class Hunk:
+    source_start: int
+    new_or_removed: bool
+    header: str
+    body: list[str]
+
+    def __str__(self):
+        return self.header + "\n" + "\n".join(self.body)
+
+
+class PatchedFile:
+    source: str
+    target: str
+    hunks: list[Hunk]
+
+    def __init__(self, source: str, target: str):
+        self.source = source
+        self.target = target
+        self.hunks = []
+
+    def __iter__(self):
+        yield from self.hunks
+
+    @property
+    def path(self):
+        raw = self.source if self.target == "/dev/null" else self.target
+        quoted = raw.startswith('"') and raw.endswith('"')
+        raw = raw[1:-1] if quoted else raw
+        raw = raw[2:] if (raw.startswith("a/") or raw.startswith("b/")) else raw
+        return '"' + raw + '"' if quoted else raw
+
+    @property
+    def modified(self):
+        return self.source != "/dev/null" and self.target != "/dev/null" and not (len(self.hunks) == 1 and self.hunks[0].new_or_removed)
+
+
+def span(field: str):
+    parts = field[1:].split(",")
+    return int(parts[0]), int(parts[1]) if len(parts) == 2 else 1
+
+
+class PatchSet:
+    files: list[PatchedFile]
+
+    def __init__(self, text: str):
+        self.files = []
+        rows = text.splitlines()
+        i = 0
+        while i < len(rows):
+            row = rows[i]
+            i += 1
+            if row.startswith("diff --git "):
+                pair = row[11:]
+                sep = pair.rfind(" b/")
+                if sep < 0:
+                    sep = pair.rfind(' "b/')
+                if sep < 0:
+                    sep = pair.rfind(" ")
+                self.files.append(PatchedFile(pair[:sep], pair[sep + 1:]))
+            elif row.startswith("--- "):
+                source = row[4:].split("\t")[0]
+                if not self.files or self.files[-1].source != source:
+                    self.files.append(PatchedFile(source, ""))
+                self.files[-1].source = source
+            elif row.startswith("+++ "):
+                self.files[-1].target = row[4:].split("\t")[0]
+            elif row.startswith("new file mode "):
+                self.files[-1].source = "/dev/null"
+            elif row.startswith("deleted file mode "):
+                self.files[-1].target = "/dev/null"
+            elif row.startswith("@@ "):
+                fields = row[3:].split(" ", 2)
+                src, old = span(fields[0])
+                tgt, new = span(fields[1])
+                body = list[str]()
+                hunk = Hunk(src, (src == 0 and old == 0) or (tgt == 0 and new == 0), row, body)
+                while old or new:
+                    line = rows[i]
+                    i += 1
+                    if line.startswith("-"):
+                        old -= 1
+                    elif line.startswith("+"):
+                        new -= 1
+                    elif not line.startswith("\\"):
+                        old -= 1
+                        new -= 1
+                    body.append(line or " ")
+                while i < len(rows) and (not rows[i] or rows[i].startswith("\\ No newline at end of file")):
+                    body.append(rows[i])
+                    i += 1
+                self.files[-1].hunks.append(hunk)
+
+    @property
+    def modified_files(self):
+        return [file for file in self.files if file.modified]
+
+    def __iter__(self):
+        yield from self.files
+
+
+# UPSTREAM_MARKDOWN
+
+
+def main(directory: Path, copies: int):
+    completed = list[tuple[Project, Comparison]]()
+    errored = list[tuple[Project, str]]()
+    rows = (directory / "projects.tsv").read_text().splitlines()
+    for copy in range(copies):
+        for row in rows:
+            owner, name, revision, preview, exclude, kind, filename = row.split("\t")
+            fullname = f"{owner}/{name}" + (f"-copy-{copy}" if copy else "")
+            repo = Repository(fullname, revision)
+            project = Project(repo, FormatOptions(preview == "1", exclude))
+            text = open(str(directory / filename), "rb").read().decode("utf-8")
+            if kind == "error":
+                errored.append((project, text))
+            else:
+                lines = text.splitlines()
+                diff = Diff(lines, sum(line.startswith("+") and not line.startswith("+++") for line in lines),
+                             sum(line.startswith("-") and not line.startswith("---") for line in lines))
+                completed.append((project, Comparison(diff, repo)))
+    print(markdown_format_result(Result(errored, completed)))
+
+
+main(Path(sys.argv[1]), int(sys.argv[2]))

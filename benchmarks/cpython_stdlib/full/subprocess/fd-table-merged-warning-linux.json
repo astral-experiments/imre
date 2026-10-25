@@ -1,0 +1,1279 @@
+{
+  "schema": "imre.subprocess.fd-table-with-shared-warning/v1",
+  "platform": "linux",
+  "imre_revision": "5c269657cb89d306682ee757041e7ea4ba0ebfd7",
+  "tested_tree": "69eedc91cff10c16d41b986ceb14c70d2cb7564f",
+  "shared_warning_revision": "de3c15d7838814b5982db9971bb3419f7316ca3a",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "toolchain": {
+        "imre": "84229fab2150ab82e1c374577fde827b8c3032d6a3d8ba699d60afd2d4607719",
+        "runtime": "f187ec799b68328a7eb2f497d6951990e9526982070e0c076bfd211277ded36a",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_close_fds": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "315a74bd021ac090331d0541a957791c045f3a8e3ddf50ebbe89bfc0075aadbd",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": null,
+                "kept_descriptors": 0,
+                "kept_numbers": [],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": false,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "f0f937ee4697d4f2de2ef1c47fc4fbdd5ae8d01c1408b0dc8f2e9ab3ab02d69d",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": null,
+                "kept_descriptors": 0,
+                "kept_numbers": [],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "81c1713e0cc251a01cfb576a05dc5aa519006581d425ba1faf7dd3d169b80f52",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "set",
+                "kept_descriptors": 8,
+                "kept_numbers": [
+                  3,
+                  4,
+                  5,
+                  6,
+                  7,
+                  8,
+                  9,
+                  10
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_pass_fds": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_pass_fds needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "67d7ce93e5a34696b60de8b1ce50d174481a6af59d4063c75d8c4f28141c4bfe",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  3
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "a9e9a57e1331b4f91679e698b8cbe296fb6bce600f9f3c77dd44a0379e9214a2",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  3
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "91e39870d648e6f47216f424cbe19b9a33c013494e738ad76cf896c9dbde64fd",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  4
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "7d09b4675d05e81730b265dd47bb6837e6ccb9d82e219c4af0ecf1c39ad82456",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  4
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "66397f7d6624998fb47989060123c7afe38c7bbbab81015e56d3ab05381d4647",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  5
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "00d16745d2686b4e79da060d9135598998e78871094330b50986e82a3c8db7cd",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  5
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "f4a50c2ad1a3281fff85bf2944e961e88d93c88e35788a93b1900099a1825a2f",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  6
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "82c225d147cdc00a3458f14310b2b3b1d15a2e71e5a87aff42d944dc805e7edd",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  6
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "39088d958d141b63383cab2121b7eea2129f92618021d51ecdfc570f76c4cc57",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  7
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "a23bf8a4f702b48d60a1468d64fe5dddcd10e441990d7f154ba35b9f26725bcd",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  7
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "37fd519a436973dfd74cd738fcb3d8234f260038039d983809fb92fd4377f611",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  8
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "ea5cf133dd8d26e502e764e617d2091e759b1f5880778a9260ded8c19a248137",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  8
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "6c0193bfa2f086af7b548532c3bced1f304677f6248f7c387487f82b83db2a90",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  9
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "58a77e76aaebab687a245fa9b842d2641492103d3b1e4ddcf84c7cb5f9144c18",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  9
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "35fe638eaa12a82405c6d252095b7fe1e293a91e75f01c2d3ca4488185109585",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  10
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "69e31e3633af7828eb1899adb79ff4ca83bd6092f5da91911b0f5592baadc924",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  10
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "f0a90db57e51b774c3e0285a3f73fa3114113df77be1e1ccb9a2dec950dfbb62",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  11
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "5c1dbdaff04fab2b6b83793a961bde8a0bd5f4254efbfe2beb1157eea97193ed",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  11
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "2dcbc09c59d16c0c0365345e5e1cf3c18e22e1f95224fd307af8f6265d9d18df",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  12
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "196e4cf7b58e1296c1b0f28517c83090d034108265553c836dc5502e36c8d7e9",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  12
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_inheritable": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "b37f65ac280f0ccf019d23fcf61338b40cfbce1b00a66fa933bcf6c6fc657fcc",
+                "original_open_fds": 2,
+                "original_cloexec_fds": 1,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 2,
+                "kept_numbers": [
+                  3,
+                  4
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "39db9f0e7af094d8f364417828ab1389af17950a2f73d5812b394c0f8b54fec5",
+                "original_open_fds": 4,
+                "original_cloexec_fds": 4,
+                "close_fds": true,
+                "pass_fds_collection": "list",
+                "kept_descriptors": 3,
+                "kept_numbers": [
+                  3,
+                  4,
+                  6
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 3,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ]
+      },
+      "withheld_warning": {
+        "original_failure": "AssertionError: RuntimeWarning not triggered",
+        "native_warning": {
+          "message": "pass_fds overriding close_fds.",
+          "category": "RuntimeWarning",
+          "file": "subprocess.py",
+          "line": 862
+        }
+      },
+      "hierarchy_control": {
+        "native": "7677bbd821b8d23e7bca02ecdcb277676aa7df971f97a2f0bfd9eeebaae9ecce",
+        "source": "84cd7d495f2eaa6c8a2fbe59028a5fc21da7a2b95c9d4eeacbd4a14180208d42",
+        "stdout": [
+          "RuntimeWarning('runtime')",
+          "subclass",
+          "Warning('root')",
+          "ordinary"
+        ]
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "toolchain": {
+        "imre": "84229fab2150ab82e1c374577fde827b8c3032d6a3d8ba699d60afd2d4607719",
+        "runtime": "f187ec799b68328a7eb2f497d6951990e9526982070e0c076bfd211277ded36a",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_close_fds": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "2b236238cd10b6db24e479cf8ea97f4865b6cd23d7359e65bb42b4ca73179436",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": null,
+                "kept_descriptors": 0,
+                "kept_numbers": [],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": false,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "2fdb47d2e6652fc27abcf898e4da2813e9accb5d9cd81ffd3c6d691b05c1553f",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": null,
+                "kept_descriptors": 0,
+                "kept_numbers": [],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "0262802f0c96923beb5b772a7cb455c60c6a14543cd5a23a5c64768b75a83cea",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "set",
+                "kept_descriptors": 8,
+                "kept_numbers": [
+                  3,
+                  4,
+                  5,
+                  6,
+                  7,
+                  8,
+                  9,
+                  10
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_pass_fds": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_pass_fds needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "b485d452b10ec7859d1dd6793a8dc0ce32b8738115b712a9f14e9375e076b215",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  3
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "9f6225012e7b064aaedfe043b16a1d5d3c7b6a26615da56476d2e9af232eb27a",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  3
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "bb5e08fcfccf3b01f4014b7c0e5a88d3676cd62e238b53d7010a3b071697e185",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  4
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "ba0690e07718237b3be6de1faeeb09875e33610e65e6569a347ed1865b285aef",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  4
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "9ca475b8c5ac3586e1dd8e850343c2c95e067f35f941f6b674d1a14951509be8",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  5
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "7755fb9eaaab41b3b08c58b93077b31cdb6bac501b2223ffb590cfa26b3c0c99",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  5
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "db58300957c20520f2199dbbcada7c02a69565a8075b6d5e7a82ce45f7fc6b8f",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  6
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "2729f563cd716e945f309814dd91b1050dbd6cdaf71df151c001a21132a48ae4",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  6
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "0a3396f0f7044b6713595cff168484ba00401fa925ecd92e2858289fff21d55d",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  7
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "a4a9357bb70ece8d55b8f071988414b117364ae3473844d573fe7a75ccf0257f",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  7
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "e1db7df84d3ee992890efa069dce2175e7e5b1e793bd771041b44b764e039e65",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  8
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "b1f010922abed1a66b89b42c5272d047b999b59e17891810586f2862f0ebd285",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  8
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "20690fcff1679fbcd9d750f484c135bc6d310abcb8a857667f174d8f1b225c02",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  9
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "94d4cf23e4fa3b485298c6a3c30bcb6fdc21f372d6de4042f15ccf829d909425",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  9
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "836013aa1387c3a303cf8914bfd4029ab87c238481ffb3fbe12696fabd005257",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  10
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "0420e701fb6034141d2abf4a9deab0f9b0c1805ba792520153899f8f981b1564",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  10
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "a85e9a5f01f92a11051e7a8aa72e3ce51c986d970a3f78b0b7bcb40c3a881cf6",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  11
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "298e4b9ebc1c175b7fe3f3defbc7155459e89bcaee433b27bab6052136115cd9",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  11
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "728150cadc943506b35d11370b11428cf76eeb3b95f744cf2e2aef27e515cc17",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  12
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "d5748b5d97ed370ccae015c5efd6d2f06f95b52cfb7f56c3a76cacf86e69df31",
+                "original_open_fds": 10,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 1,
+                "kept_numbers": [
+                  12
+                ],
+                "data_executable": "/usr/bin/true",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original ZERO_RETURN_CMD",
+                "native_warning": {
+                  "file": "subprocess.py",
+                  "line": 862,
+                  "category": "RuntimeWarning",
+                  "message": "pass_fds overriding close_fds.",
+                  "before_child_creation": true
+                },
+                "argument_type": "tuple",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_inheritable": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "fc76bf1d969e6386ea56856ea72f4867300c68a23fdbc1a1d731e3386b0e1df4",
+                "original_open_fds": 2,
+                "original_cloexec_fds": 1,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 2,
+                "kept_numbers": [
+                  3,
+                  4
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "c0fe522c61025c3731776f943e2de013458b46093a1c90629ddfde879426e212",
+                "original_open_fds": 4,
+                "original_cloexec_fds": 4,
+                "close_fds": true,
+                "pass_fds_collection": "list",
+                "kept_descriptors": 3,
+                "kept_numbers": [
+                  3,
+                  4,
+                  6
+                ],
+                "data_executable": "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                "borrowed_stdio": 3,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_warning": null,
+                "argument_type": "list",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ]
+      },
+      "withheld_warning": {
+        "original_failure": "AssertionError: RuntimeWarning not triggered",
+        "native_warning": {
+          "message": "pass_fds overriding close_fds.",
+          "category": "RuntimeWarning",
+          "file": "subprocess.py",
+          "line": 862
+        }
+      },
+      "hierarchy_control": {
+        "native": "81a207086b7c0907b0b09ab765298e072608f6446194902896143a5748065d42",
+        "source": "84cd7d495f2eaa6c8a2fbe59028a5fc21da7a2b95c9d4eeacbd4a14180208d42",
+        "stdout": [
+          "RuntimeWarning('runtime')",
+          "subclass",
+          "Warning('root')",
+          "ordinary"
+        ]
+      }
+    }
+  ]
+}

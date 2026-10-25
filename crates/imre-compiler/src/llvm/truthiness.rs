@@ -62,6 +62,11 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::Bool => value.operand.clone(),
+                Type::VarTuple(_) => {
+                    let len = self
+                        .instruction(format!("call i64 @imre_tuple_len(ptr {})", value.operand));
+                    self.instruction(format!("icmp ne i64 {len}, 1"))
+                }
                 Type::Int => self.instruction(format!("icmp ne i64 {}, 1", value.operand)),
                 // Unordered-or-not-equal keeps NaN true and both signed zeros false.
                 Type::Float => self.instruction(format!("fcmp une double {}, 0.0", value.operand)),
@@ -77,6 +82,17 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
+                Type::Context => {
+                    let count = self.instruction(format!(
+                        "call i64 @imre_contextvars_len(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i64 {count}, 1"))
+                }
+                Type::Calendar(crate::ir::CalendarType::Delta) => self.instruction(format!(
+                    "call i1 @imre_calendar_truth(ptr {})",
+                    value.operand
+                )),
                 Type::ObjectValue => {
                     let bit = self.instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",
@@ -97,6 +113,18 @@ impl Emitter<'_, '_> {
                         value.operand
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
+                }
+                Type::ChainMap(_) => {
+                    let byte = self.instruction(format!(
+                        "call i32 @imre_chainmap_truth(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i32 {byte}, 0"))
+                }
+                Type::Patch(_) => {
+                    let length = self
+                        .instruction(format!("call i64 @imre_patch_len(ptr {})", value.operand));
+                    self.instruction(format!("icmp ne i64 {length}, 1"))
                 }
                 Type::List(_) => {
                     let length = self

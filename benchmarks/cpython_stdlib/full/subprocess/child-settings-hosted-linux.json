@@ -1,0 +1,189 @@
+{
+  "schema": "imre.subprocess.child-settings/v1",
+  "platform": "linux",
+  "imre_revision": "a865b96572b73418028d4edc98dc299ba936f686",
+  "tested_tree": "f837f7a47b6017c03e25072759ce919193f2e056",
+  "hosted": {
+    "run": 40173497299,
+    "job": 121109165236,
+    "merge_commit": "18de99e3a842b98f32ea5b0acbacc56126acbbef",
+    "artifact": 12591590988,
+    "archive_sha256": "a857a4b80f9fdfa277fa5333dc6a53861a99ed49bb6cc1e0a9a1ee408572b45a"
+  },
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_process_group_0": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_process_group_0 needs its upstream method decorator"
+            },
+            "observed": {
+              "api": "check_output",
+              "option": "process_group",
+              "value": 0,
+              "pre_exec_syscall": "setpgid",
+              "child_observation": "getpgid",
+              "child_id_equals_pid": true,
+              "output_file_mode": null,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+            },
+            "observed": {
+              "api": "check_output",
+              "option": "start_new_session",
+              "value": true,
+              "pre_exec_syscall": "setsid",
+              "child_observation": "getsid",
+              "child_id_equals_pid": true,
+              "output_file_mode": null,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_umask": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_umask needs its upstream method decorator"
+            },
+            "observed": {
+              "api": "check_call",
+              "option": "umask",
+              "value": 43,
+              "pre_exec_syscall": "umask",
+              "child_observation": "openat",
+              "child_id_equals_pid": false,
+              "output_file_mode": 404,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ]
+      },
+      "actor_sha256": "3f2a81bf269be08be6579267a4a194d44829a2bc438958b036e370c057d2d74b",
+      "toolchain": {
+        "imre": "78a680cc0cd1a44ff95028166c417bca5739fc18b5f0e3e0f3fbff64e6baba00",
+        "runtime": "cab6d968d9755264ada5678bbce9b7ee6ee13692bdd7a4c9c5a04f90a78ac28d",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_process_group_0": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_process_group_0 needs its upstream method decorator"
+            },
+            "observed": {
+              "api": "check_output",
+              "option": "process_group",
+              "value": 0,
+              "pre_exec_syscall": "setpgid",
+              "child_observation": "getpgid",
+              "child_id_equals_pid": true,
+              "output_file_mode": null,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+            },
+            "observed": {
+              "api": "check_output",
+              "option": "start_new_session",
+              "value": true,
+              "pre_exec_syscall": "setsid",
+              "child_observation": "getsid",
+              "child_id_equals_pid": true,
+              "output_file_mode": null,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_umask": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_umask needs its upstream method decorator"
+            },
+            "observed": {
+              "api": "check_call",
+              "option": "umask",
+              "value": 43,
+              "pre_exec_syscall": "umask",
+              "child_observation": "openat",
+              "child_id_equals_pid": false,
+              "output_file_mode": 404,
+              "successful_parent_reaps": 1,
+              "data_child": "pinned CPython"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            }
+          }
+        ]
+      },
+      "actor_sha256": "ffad9bb5f85330f5a463aafc2573aff55d1ac46e6ee2f9de1dda9be8cf51982a",
+      "toolchain": {
+        "imre": "78a680cc0cd1a44ff95028166c417bca5739fc18b5f0e3e0f3fbff64e6baba00",
+        "runtime": "cab6d968d9755264ada5678bbce9b7ee6ee13692bdd7a4c9c5a04f90a78ac28d",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      }
+    }
+  ]
+}

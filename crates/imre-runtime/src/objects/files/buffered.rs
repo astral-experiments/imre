@@ -456,10 +456,15 @@ impl TextBuffer {
                 unsafe { str::from_utf8_unchecked(&bytes[..err.valid_up_to()]) }
             }
             Err(err) => {
-                return Err(Error::new(
-                    Kind::UnicodeDecodeError,
-                    format!("invalid UTF-8 at byte {}", err.valid_up_to()),
-                ));
+                // A decoded CR was retained for newline translation, independently
+                // of the UTF-8 decoder's incomplete bytes from the previous chunk.
+                let (source, error) = if self.carry.starts_with(b"\r") {
+                    let source = &bytes[1..];
+                    (source, str::from_utf8(source).unwrap_err())
+                } else {
+                    (bytes, err)
+                };
+                return Err(super::super::bytes::decode_error(source, error));
             }
         };
         let mut text = if eof {
