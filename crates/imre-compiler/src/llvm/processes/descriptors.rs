@@ -3,9 +3,9 @@ use super::*;
 use crate::ir::FdOperation;
 
 impl Emitter<'_, '_> {
-    pub(super) fn os_open_flag(&mut self, name: &str) -> Value {
-        // The runtime stores target-specific open flags as tagged ints.
-        let operand = self.instruction(format!("load i64, ptr @imre_os_o_{name}"));
+    /// Read the target's descriptor constant as a tagged integer.
+    pub(super) fn os_descriptor_constant(&mut self, name: &str) -> Value {
+        let operand = self.instruction(format!("load i64, ptr @imre_os_{name}"));
         Value {
             ty: Type::Int,
             operand,
@@ -54,6 +54,7 @@ impl Emitter<'_, '_> {
                 return tuple;
             }
             FdOperation::Close => "close",
+            FdOperation::Seek => "lseek",
             FdOperation::Dup => "dup",
             FdOperation::Dup2 => "dup2",
             FdOperation::Isatty => "isatty",

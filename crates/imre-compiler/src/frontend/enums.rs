@@ -199,6 +199,14 @@ impl Checker<'_> {
                         | Type::None
                 )
             })
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes))
+            || (types[0] == types[1]
+                && self
+                    .types
+                    .members(types[0])
+                    .is_some_and(|members| members == [Type::Str, Type::Bytes]))
             || types.iter().all(|ty| {
                 matches!(
                     ty,

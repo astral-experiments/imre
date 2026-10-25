@@ -187,6 +187,8 @@ pub(crate) enum Intrinsic {
     OsDevnull,
     SysExit,
     ShlexSplit,
+    ShlexQuote,
+    ShlexJoin,
     Ndiff,
     Final,
     Argv,
@@ -282,8 +284,9 @@ pub(crate) enum Intrinsic {
     GetCwd,
     Strerror,
     Fd(crate::ir::FdOperation),
-    OpenFlag(&'static str),
+    DescriptorConstant(&'static str),
     FsPath,
+    PosixNormcase,
     PosixPath(PosixPathOperation),
     Fnmatch(FnmatchOperation),
     Unquote,
@@ -495,6 +498,8 @@ impl IntrinsicModule {
             (Self::Logging, "ERROR") => Intrinsic::LogLevel(40),
             (Self::Logging, "CRITICAL" | "FATAL") => Intrinsic::LogLevel(50),
             (Self::Shlex, "split") => Intrinsic::ShlexSplit,
+            (Self::Shlex, "quote") => Intrinsic::ShlexQuote,
+            (Self::Shlex, "join") => Intrinsic::ShlexJoin,
             (Self::Difflib, "ndiff") => Intrinsic::Ndiff,
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
@@ -597,6 +602,7 @@ impl IntrinsicModule {
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
             (Self::Os, "fspath") => Intrinsic::FsPath,
+            (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
             (Self::Os, "devnull") => Intrinsic::OsDevnull,
             (Self::PosixPath, "exists") => Intrinsic::OsPathExists,
             (Self::PosixPath, "commonpath") => Intrinsic::PosixPath(PosixPathOperation::Commonpath),
@@ -671,6 +677,13 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    pub(crate) fn is_unittest_main(&self, id: DefinitionId) -> bool {
+        let owner = &self.modules[id.module];
+        owner.bundled
+            && owner.name == "unittest"
+            && owner.bindings.get("main") == Some(&Binding::Definition(id))
+    }
+
     /// Keep module indices stable for the semantic cache. Only after lowering
     /// expose the files a disk build must revalidate and protect from writes.
     pub(crate) fn disk_inputs(
