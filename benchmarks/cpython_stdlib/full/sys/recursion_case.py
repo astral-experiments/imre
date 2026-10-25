@@ -2,6 +2,7 @@
 import ast
 import hashlib
 from pathlib import Path
+import re
 import select
 import subprocess
 import sys
@@ -14,6 +15,56 @@ from suite_native import NativeCompileError, method_bytes, native_method, testca
 HERE = Path(__file__).resolve().parent
 PREFIX = "test.test_sys.SysModuleTest."
 METHODS = ("test_getrecursionlimit", "test_setrecursionlimit")
+
+
+def getter_with_type_assertion(toolchain, folder, source, diagnostic):
+    match = re.search(r"case\.py:(\d+):(\d+): Imre: unknown class method\s*$", diagnostic)
+    if not match:
+        return None
+    line, column = map(int, match.groups())
+    if not (folder / "case.py").read_text().splitlines()[line - 1][column - 1:].startswith("self.assertIsInstance("):
+        return None
+    fixture = "import sys\n" + testcase_fixture() + """
+    def assertIsInstance(self, value: object, cls) -> None:
+        if cls is int:
+            if isinstance(value, int):
+                return
+        elif cls is str:
+            if isinstance(value, str):
+                return
+        else:
+            raise ValueError("unsupported fixture class")
+        raise AssertionError("value has the wrong class")
+"""
+    controls = folder / "type-controls"
+    controls.mkdir()
+    program = fixture + """
+case = NativeCase()
+try:
+    case.assertIsInstance("hello", int)
+except AssertionError:
+    print("wrong value")
+try:
+    case.assertIsInstance(sys.getrecursionlimit(), str)
+except AssertionError:
+    print("wrong class")
+"""
+    binary = toolchain.build(program.encode(), controls)
+    result = subprocess.run([binary], capture_output=True, check=True, timeout=15)
+    if result.stdout != b"wrong value\nwrong class\n" or result.stderr:
+        raise AssertionError((result.stdout, result.stderr))
+    run = native_method(toolchain, folder, source, "SysModuleTest", PREFIX + "test_getrecursionlimit", fixture,
+                        operation=("imre", "read the native recursion limit and reject an extra argument"))
+
+    def execute(case, original):
+        record = run(case, original)
+        record["observation"]["evidence"].update(
+            shared_assertion_blocker="unittest.TestCase.assertIsInstance: unknown class method",
+            assertions="both swapped classes raise AssertionError; inherited native assertGreater and callable assertRaises",
+        )
+        return record
+
+    return execute
 
 
 def observer(module, command, digest, level, diagnostic):
@@ -86,6 +137,11 @@ def cases(module, toolchain, work, source):
                 toolchain, folder, source, "SysModuleTest", case_id, "import sys\n" + testcase_fixture(),
                 operation=("imre", "read and configure the native recursion limit"))
         except NativeCompileError as exc:
+            if method == "test_getrecursionlimit":
+                getter = getter_with_type_assertion(toolchain, folder, source, str(exc))
+                if getter is not None:
+                    sessions[case_id] = getter
+                    continue
             diagnostic = {"stage": "compile", "diagnostic": str(exc).replace(str(folder), "[case]").strip()}
             if driver is None:
                 driver_dir = work / "recursion-session"
