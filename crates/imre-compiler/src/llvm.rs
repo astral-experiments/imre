@@ -84,6 +84,7 @@ impl Type {
             | Self::LogRecord
             | Self::Logger
             | Self::TimedFileHandler
+            | Self::CacheState(_)
             | Self::ClockTime
             | Self::Sha256
             | Self::ZipFile
@@ -137,6 +138,7 @@ impl Type {
             | Self::LogRecord
             | Self::Logger
             | Self::TimedFileHandler
+            | Self::CacheState(_)
             | Self::ClockTime
             | Self::Sha256
             | Self::ZipFile
@@ -721,6 +723,7 @@ impl Emitter<'_, '_> {
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
+            | Type::CacheState(_)
             | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
@@ -3322,6 +3325,7 @@ impl Emitter<'_, '_> {
                 )),
                 Type::ListInt
                 | Type::StringKeys
+                | Type::CacheState(_)
                 | Type::Iterator
                 | Type::Cursor(_)
                 | Type::ByteOutput
@@ -3882,56 +3886,92 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
-            Builtin::FunctionCache(id) => {
-                let (key, value) = self.module.types.mapping(returns).unwrap();
+            Builtin::CacheNew | Builtin::ModuleCache(_) | Builtin::CacheClear => {
+                let state_ty = if matches!(builtin, Builtin::CacheClear) {
+                    args[0].value.ty
+                } else {
+                    returns
+                };
+                let (key, value) = self
+                    .module
+                    .types
+                    .mapping(state_ty.cache_table().unwrap())
+                    .unwrap();
                 let key = representation_kind(key, &self.module.types);
                 let value = representation_kind(value, &self.module.types);
+                if !matches!(builtin, Builtin::CacheClear) {
+                    let create = match builtin {
+                        Builtin::ModuleCache(id) => {
+                            format!("@imre_module_cache(i64 {id}, i32 {key}, i32 {value})")
+                        }
+                        _ => format!("@imre_cache_new(i32 {key}, i32 {value})"),
+                    };
+                    let operand = self.instruction(format!("call ptr {create}"));
+                    self.owned(Value {
+                        ty: returns,
+                        operand,
+                        small_integer: false,
+                    })
+                } else {
+                    self.line(format!(
+                        "call void @imre_cache_clear(ptr {}, i32 {key}, i32 {value})",
+                        args[0].value.operand
+                    ));
+                    Value {
+                        ty: Type::None,
+                        operand: "0".into(),
+                        small_integer: false,
+                    }
+                }
+            }
+            Builtin::CallableContext => {
+                let address = self.instruction(format!(
+                    "getelementptr %callable, ptr {}, i32 0, i32 1",
+                    args[0].value.operand
+                ));
+                let value = Value {
+                    ty: returns,
+                    operand: self.instruction(format!("load ptr, ptr {address}")),
+                    small_integer: false,
+                };
+                self.retain(&value);
+                self.owned(value)
+            }
+            Builtin::CacheTable => self.call("imre_cache_table", returns, &[&args[0].value]),
+            Builtin::CacheProbe(capacity) => {
+                let key = self.key_word(&args[1].value);
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call i1 @imre_cache_probe(ptr {}, i64 {key}, i64 {capacity})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::CacheInsert(capacity) => {
+                let key = self.key_word(&args[1].value);
+                let value = self.word(&args[2].value);
+                self.checked_line(format!(
+                    "call void @imre_cache_insert(ptr {}, i64 {key}, i64 {value}, i64 {capacity})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::None,
+                    operand: "0".into(),
+                    small_integer: false,
+                }
+            }
+            Builtin::CacheStat(field) => {
                 let operand = self.instruction(format!(
-                    "call ptr @imre_function_cache(i64 {id}, i32 {key}, i32 {value})"
+                    "call i64 @imre_cache_stat(ptr {}, i32 {field})",
+                    args[0].value.operand
                 ));
                 self.owned(Value {
                     ty: returns,
                     operand,
                     small_integer: false,
                 })
-            }
-            Builtin::FunctionCacheProbe(id, capacity) => {
-                let key = self.key_word(&args[0].value);
-                Value {
-                    ty: Type::Bool,
-                    operand: self.checked_instruction(format!(
-                        "call i1 @imre_function_cache_probe(i64 {id}, i64 {key}, i64 {capacity})"
-                    )),
-                    small_integer: false,
-                }
-            }
-            Builtin::FunctionCacheInsert(id, capacity) => {
-                let key = self.key_word(&args[0].value);
-                let value = self.word(&args[1].value);
-                self.checked_line(format!("call void @imre_function_cache_insert(i64 {id}, i64 {key}, i64 {value}, i64 {capacity})"));
-                Value {
-                    ty: Type::None,
-                    operand: "0".into(),
-                    small_integer: false,
-                }
-            }
-            Builtin::FunctionCacheStat(id, field) => {
-                let operand = self.instruction(format!(
-                    "call i64 @imre_function_cache_stat(i64 {id}, i32 {field})"
-                ));
-                self.owned(Value {
-                    ty: Type::Int,
-                    operand,
-                    small_integer: false,
-                })
-            }
-            Builtin::FunctionCacheClear(id) => {
-                self.line(format!("call void @imre_function_cache_clear(i64 {id})"));
-                Value {
-                    ty: Type::None,
-                    operand: "0".into(),
-                    small_integer: false,
-                }
             }
             Builtin::HashStr => self.call("imre_string_hash", returns, &[&args[0].value]),
             Builtin::HashRecord => Value {
@@ -5215,6 +5255,7 @@ impl Emitter<'_, '_> {
                     | Type::LogRecord
                     | Type::Logger
                     | Type::TimedFileHandler
+                    | Type::CacheState(_)
                     | Type::ClockTime
                     | Type::Sha256
                     | Type::ZipFile
@@ -5456,6 +5497,7 @@ impl Emitter<'_, '_> {
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
+            | Type::CacheState(_)
             | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
@@ -5523,6 +5565,7 @@ impl Emitter<'_, '_> {
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
+            | Type::CacheState(_)
             | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
@@ -6103,6 +6146,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::LogRecord
         | Type::Logger
         | Type::TimedFileHandler
+        | Type::CacheState(_)
         | Type::ClockTime
         | Type::Sha256
         | Type::ZipFile
@@ -6265,11 +6309,13 @@ declare void @imre_async_join(ptr)
 declare ptr @imre_async_semaphore(i64)
 declare void @imre_async_permit(ptr, i1 zeroext)
 declare ptr @imre_json_empty_object()
-declare ptr @imre_function_cache(i64, i32, i32)
-declare i1 @imre_function_cache_probe(i64, i64, i64)
-declare void @imre_function_cache_insert(i64, i64, i64, i64)
-declare i64 @imre_function_cache_stat(i64, i32)
-declare void @imre_function_cache_clear(i64)
+declare ptr @imre_cache_new(i32, i32)
+declare ptr @imre_cache_table(ptr)
+declare i1 @imre_cache_probe(ptr, i64, i64)
+declare void @imre_cache_insert(ptr, i64, i64, i64)
+declare i64 @imre_cache_stat(ptr, i32)
+declare void @imre_cache_clear(ptr, i32, i32)
+declare ptr @imre_module_cache(i64, i32, i32)
 declare i64 @imre_document(i32, i64, i64, i64)
 declare i64 @imre_string_hash(ptr)
 declare void @imre_prepare_record_key(ptr)

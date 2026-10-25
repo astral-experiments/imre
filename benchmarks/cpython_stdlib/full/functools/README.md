@@ -92,3 +92,17 @@ python3.14 benchmarks/cpython_stdlib/full/functools/run_cache.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /usr/bin/clang \
     --result /tmp/functools-caches.json
 ```
+
+### Independently created wrappers
+
+`cache(f)`, `lru_cache(f)` and `lru_cache(maxsize, typed=...)(f)` allocate a
+native wrapper for synchronous functions with exact positional keys. Its frame
+retains the actual callable and its own cache. A second application starts
+empty even at the same source location. Aliases share entries and counters;
+`__wrapped__` calls bypass the cache. Module decorators use the same cache
+state and eviction operations.
+
+`tests/fixtures/callables/owned_caches.py` compares two independent wrappers,
+nested wrappers, disabled and unbounded caches, exception misses and clearing
+against the reference interpreter. These are native product checks; they do
+not add any unittest occurrences to the table above.

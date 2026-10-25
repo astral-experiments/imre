@@ -280,8 +280,8 @@ impl Builtin {
             | Self::JsonSelect(_)
             | Self::ListGet
             | Self::ListGetBounded { .. }
-            | Self::FunctionCacheProbe(..)
-            | Self::FunctionCacheInsert(..)
+            | Self::CacheProbe(_)
+            | Self::CacheInsert(_)
             | Self::ListGetI32
             | Self::ListSliceSum
             | Self::Slice
@@ -322,9 +322,12 @@ impl Builtin {
             | Self::Len
             | Self::JsonEmptyObject
             | Self::WallTime
-            | Self::FunctionCache(_)
-            | Self::FunctionCacheStat(..)
-            | Self::FunctionCacheClear(_)
+            | Self::CacheNew
+            | Self::CacheTable
+            | Self::CacheStat(_)
+            | Self::CacheClear
+            | Self::CallableContext
+            | Self::ModuleCache(_)
             | Self::HashStr
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
@@ -494,6 +497,31 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::CallableContext => {
+                matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+            }
+            Self::CacheNew | Self::ModuleCache(_) => {
+                args.is_empty() && result.cache_table().is_some()
+            }
+            Self::CacheTable => matches!(args, [state] if state.ty.cache_table() == Some(result)),
+            Self::CacheProbe(capacity) => {
+                *capacity >= -1
+                    && matches!(args, [state, key] if state.ty.cache_table().and_then(|t| types.mapping(t)).is_some_and(|(k, _)| k == key.ty))
+                    && result == Type::Bool
+            }
+            Self::CacheInsert(capacity) => {
+                *capacity > 0
+                    && matches!(args, [state, key, value] if state.ty.cache_table().and_then(|t| types.mapping(t)) == Some((key.ty, value.ty)))
+                    && result == Type::None
+            }
+            Self::CacheStat(field) => {
+                matches!(field, 0 | 1 | 3)
+                    && matches!(args, [state] if state.ty.cache_table().is_some())
+                    && result == Type::Int
+            }
+            Self::CacheClear => {
+                matches!(args, [state] if state.ty.cache_table().is_some()) && result == Type::None
+            }
             Self::TupleCacheNew => args.is_empty() && matches!(result, Type::Tuple(_)),
             Self::TupleCacheResult => matches!(args, [value]
                 if matches!(value.kind, ExprKind::Local(_)) && matches!(result, Type::Tuple(_)) && value.ty == result),
