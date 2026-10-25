@@ -1,40 +1,42 @@
-"""Compile unchanged subprocess test methods with native fixtures and assertions."""
+"""Run unchanged native subprocess methods and assertions under CPython fixtures."""
 
 import argparse
-import ast
-import hashlib
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[1]))
+from suite_inventory import load_suite, verify_files, verify_interpreter_tests
+from suite_native import Toolchain, native_method, run_in_fixtures
+
 # The subprocess operation, method body, and assertions all run in the binary.
 # sys.executable selects a real oracle child for upstream's literal -c programs.
 METHODS = {
     "ContextManagerTests": {
-        "test_returncode": ("int", 1),
-        "test_pipe": ("bytes", 4),
-        "test_communicate_stdin": ("int", 1),
+        "test_returncode": "int",
+        "test_pipe": "bytes",
+        "test_communicate_stdin": "int",
     },
     "ProcessTestCase": {
-        "test_stdin_pipe": ("int", 1),
-        "test_stdout_pipe": ("bytes", 1),
-        "test_stderr_pipe": ("bytes", 1),
-        "test_stdout_stderr_pipe": ("bytes", 1),
-        "test_communicate_stdin": ("int", 1),
-        "test_communicate_stdout": ("bytes", 2),
-        "test_communicate_stderr": ("bytes", 2),
-        "test_communicate_returns": ("bytes", 2),
-        "test_post_timeout_communicate_sends_input": ("int", 3),
+        "test_stdin_pipe": "int",
+        "test_stdout_pipe": "bytes",
+        "test_stderr_pipe": "bytes",
+        "test_stdout_stderr_pipe": "bytes",
+        "test_communicate_stdin": "int",
+        "test_communicate_stdout": "bytes",
+        "test_communicate_stderr": "bytes",
+        "test_communicate_returns": "bytes",
+        "test_post_timeout_communicate_sends_input": "int",
     },
 }
 PREAMBLE = """import subprocess
 import sys
 
-class Case:
+class NativeCase:
     checks: int
 
     def __init__(self) -> None:
@@ -74,39 +76,31 @@ def main():
     args = parser.parse_args()
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
     source = HERE / "upstream/Lib/test/test_subprocess.py"
-    data = source.read_bytes()
-    blob = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
-    if blob != manifest["files"]["Lib/test/test_subprocess.py"]:
-        raise ValueError(f"modified upstream test: {source}")
-    tree = ast.parse(data)
-    lines = data.splitlines(keepends=True)
-    results = {}
-    blocked = {}
+    verify_files(HERE / "upstream", manifest["files"])
+    verify_interpreter_tests(manifest)
+    if sys.version_info[:3] != (3, 14, 5):
+        raise RuntimeError("use the pinned CPython 3.14.5 build")
+    tools = Toolchain(args.imre, args.runtime, args.clang, int(args.opt_level))
+    executions, blocked = {}, {}
     with tempfile.TemporaryDirectory() as tmp:
         for cls, methods in METHODS.items():
-            case = next(c for c in tree.body if isinstance(c, ast.ClassDef) and c.name == cls)
-            for method, (scalar, assertions) in methods.items():
-                node = next(n for n in case.body if isinstance(n, ast.FunctionDef) and n.name == method)
-                if node.decorator_list:
-                    raise ValueError(f"{cls}.{method} requires a decorator fixture")
-                body = b"".join(lines[node.lineno - 1:node.end_lineno])
-                entry = Path(tmp) / (method + ".py")
-                exe = entry.with_suffix("")
-                entry.write_bytes(PREAMBLE.replace("TYPE", scalar).encode() + body + f"\ncase = Case()\ncase.{method}()\nprint(case.checks)\n".encode())
-                build = subprocess.run([args.imre.resolve(), "build", entry, "--opt-level", args.opt_level,
-                                        "--clang", args.clang.resolve(), "--runtime", args.runtime.resolve(),
-                                        "-o", exe], capture_output=True, text=True, timeout=120)
+            for method, scalar in methods.items():
                 key = f"test.test_subprocess.{cls}.{method}"
-                if build.returncode and method == "test_post_timeout_communicate_sends_input" and "local may be uninitialized on this path" in build.stderr:
+                directory = Path(tmp, key)
+                directory.mkdir()
+                try:
+                    executions[key] = native_method(tools, directory, source, cls, key,
+                                                    PREAMBLE.replace("TYPE", scalar))
+                except (ValueError, AssertionError, RuntimeError) as exc:
+                    if method != "test_post_timeout_communicate_sends_input" or "local may be uninitialized on this path" not in str(exc):
+                        raise
                     blocked[key] = "Imre does not infer that the except handler calling self.fail() never returns."
-                    continue
-                run = build if build.returncode else subprocess.run(
-                    [exe], env={**os.environ, "IMRE_PYTHON": sys.executable},
-                    capture_output=True, text=True, timeout=30)
-                if run.returncode or run.stdout != f"{assertions}\n" or run.stderr:
-                    raise AssertionError((key, run.returncode, run.stdout, run.stderr))
-                results[key] = {"assertions": assertions, "body_sha256": hashlib.sha256(body).hexdigest()}
-    args.result.write_text(json.dumps({"opt_level": args.opt_level, "fully_native": results, "blocked": blocked}, indent=2) + "\n")
+        with patch.dict(os.environ, IMRE_PYTHON=sys.executable):
+            native, failures, skips = run_in_fixtures(load_suite(manifest["module"]), executions)
+        if failures or skips or set(native) != set(executions):
+            raise AssertionError((failures, skips, set(executions) - set(native)))
+    args.result.write_text(json.dumps({"opt_level": args.opt_level,
+                                       "native_body_host_fixtures": native, "blocked": blocked}, indent=2) + "\n")
 
 
 if __name__ == "__main__":

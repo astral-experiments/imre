@@ -134,6 +134,68 @@ impl Checker<'_> {
         ))
     }
 
+    pub(super) fn tee_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let (source, n) = match call.arguments.args.as_ref() {
+            [source] => (source, 2),
+            [source, n] => {
+                let n = if let ast::Expr::NumberLiteral(number) = n
+                    && let ast::Number::Int(n) = &number.value
+                {
+                    n.to_string().parse::<usize>().ok()
+                } else {
+                    None
+                };
+                (
+                    source,
+                    n.filter(|&n| n <= 256).ok_or_else(|| {
+                        error(
+                            self.source,
+                            call,
+                            "tee needs a nonnegative fixed tuple size of at most 256",
+                        )
+                    })?,
+                )
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "tee takes an iterable and optional fork count",
+                ));
+            }
+        };
+        if n == 0 {
+            // Do evaluate the supplied expression, but do not call iter on it.
+            // range is represented by a private cursor even in this discarded position.
+            let value = if matches!(source, ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Name(name) if name.id == "range")
+                && self.resolve(&call.func).is_none() && !self.names.contains_key("range"))
+            {
+                self.cursor_source(source)?.0
+            } else {
+                self.expr(source)?
+            };
+            let ty = self.types.tuple(Vec::new());
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(value)],
+                    value: Box::new(Expr {
+                        ty,
+                        kind: ExprKind::Tuple(Vec::new()),
+                    }),
+                    clear: Vec::new(),
+                },
+            });
+        }
+        let (source, element) = self.cursor_source(source)?;
+        let forks = self.types.tuple(vec![self.types.cursor(element); n]);
+        Ok(Expr {
+            ty: forks,
+            kind: ExprKind::Builtin(Builtin::Tee, vec![source]),
+        })
+    }
+
     pub(super) fn source_adapter(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let [source, bounds @ ..] = call.arguments.args.as_ref() else {

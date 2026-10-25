@@ -158,6 +158,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
                 matches!(
                     operation,
@@ -184,6 +185,7 @@ impl Builtin {
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
+                | ProcessOperation::Call { .. }
                 | ProcessOperation::PopenPid
                 | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
@@ -245,6 +247,8 @@ impl Builtin {
             Self::BytesGet
             | Self::Chr
             | Self::Decode
+            | Self::DecodeAscii
+            | Self::UrlsafeB64encode
             | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
@@ -261,6 +265,7 @@ impl Builtin {
             | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
+            | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
@@ -398,6 +403,7 @@ impl Builtin {
             Self::Repeat
             | Self::CursorLengthHint
             | Self::Progression { .. }
+            | Self::Tee
             | Self::Islice
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
@@ -659,6 +665,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_deletions"
                 | "imre_log_file_should_roll"
                 | "imre_log_file_roll"
+                | "imre_logrecord_message"
                 | "imre_log_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
@@ -687,6 +694,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
                 | "imre_bytes_decode"
+                | "imre_bytes_decode_ascii"
+                | "imre_urlsafe_b64encode"
                 | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
