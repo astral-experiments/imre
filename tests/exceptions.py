@@ -105,6 +105,59 @@ def exercise() -> None:
         print(str(err))
 exercise()
 """,
+    "exception_field_conversions": """
+from dataclasses import dataclass
+
+@dataclass
+class InvalidRow(Exception):
+    issues: list[str]
+    def __post_init__(self) -> None:
+        super().__init__(", ".join(self.issues))
+
+class Report(ValueError):
+    def __init__(self, text: str) -> None:
+        self.text = text
+        super().__init__("base message")
+    def __str__(self) -> str:
+        return f"reported {self.text}"
+    def __repr__(self) -> str:
+        return f"Report(detail={self.text!r})"
+
+def show(err: Exception) -> None:
+    try:
+        raise err
+    except Exception as caught:
+        print(f"detail: {caught!r} | {caught!s} | {caught}")
+        print(repr(caught))
+
+show(ValueError("can't open"))
+show(KeyError("field"))
+show(ValueError(["count", "hash"]))
+show(InvalidRow(["bad hash", "size"]))
+show(Report("item"))
+""",
+    "exception_generated_arguments": r"""
+def show_bytes(data: bytes) -> None:
+    try:
+        print(data.decode("utf-8"))
+    except Exception as err:
+        print(f"{err!r}")
+        print(f"{err!s}")
+
+def show_path() -> None:
+    try:
+        with open("missing-assignable-file", "rb") as stream:
+            print(stream.read())
+    except OSError as err:
+        print(f"{err!r}")
+        print(str(err))
+
+show_bytes(b"prefix\xffabc")
+show_bytes(b"\xe3\x80")
+show_bytes(b"x\xc0\xa0")
+show_bytes(b"x\xe2\x82x")
+show_path()
+""",
     "exception_display_raises": """
 class RenderError(ValueError):
     def __init__(self, key: str) -> None:
@@ -112,6 +165,8 @@ class RenderError(ValueError):
         self.key = key
     def __str__(self) -> str:
         raise TypeError(self.key)
+    def __repr__(self) -> str:
+        raise ValueError("repr: " + self.key)
 def run() -> None:
     try:
         raise RenderError("render failed")
@@ -120,8 +175,13 @@ def run() -> None:
             print(str(error))
         except TypeError as rendering:
             print(str(rendering))
+        try:
+            print(f"{error!r}")
+        except ValueError as rendering:
+            print(str(rendering))
 run()
 """,
+    "checked_unbound_local": (Path(__file__).parent / "fixtures/exceptions/unbound_local.py").read_text(),
     "nominal_exception_hierarchy": """
 class ParseError(ValueError):
     "A failure while reading input."

@@ -56,6 +56,16 @@ pub extern "C" fn imre_sys_platform() -> *const Str {
     StrOwner::into_raw(StrOwner::new(Str::new(platform)))
 }
 
+/// Return the OS interface Python exposes on the target that built this runtime.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_name() -> *const Str {
+    StrOwner::into_raw(StrOwner::new(Str::new(if cfg!(windows) {
+        "nt"
+    } else {
+        "posix"
+    })))
+}
+
 /// Write text without a newline and return the number of Unicode characters.
 ///
 /// # Safety

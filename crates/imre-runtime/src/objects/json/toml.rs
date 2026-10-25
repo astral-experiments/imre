@@ -70,9 +70,13 @@ fn optional(value: OwnedWord, schema: &Schema) -> OwnedWord {
     unsafe { OwnedWord::from_owned(word, schema.storage()) }
 }
 
-fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
+fn convert(
+    value: &DeValue<'_>,
+    schema: &Schema,
+    allocation: &mut Option<Error>,
+) -> Result<OwnedWord, String> {
     if schema.kind == OPTIONAL {
-        return convert(value, schema.child()).map(|value| optional(value, schema));
+        return convert(value, schema.child(), allocation).map(|value| optional(value, schema));
     }
     let word = match (schema.kind, value) {
         (INTEGER, DeValue::Integer(value)) => {
@@ -100,7 +104,8 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
                 let values = values
                     .iter()
                     .map(|value| {
-                        convert(value.get_ref(), child).map(|value| Int(value.into_word()))
+                        convert(value.get_ref(), child, allocation)
+                            .map(|value| Int(value.into_word()))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 crate::new_list(values) as usize
@@ -109,7 +114,7 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
                 for value in values {
                     result
                         .values
-                        .push(convert(value.get_ref(), child)?.into_word());
+                        .push(convert(value.get_ref(), child, allocation)?.into_word());
                 }
                 Rc::into_raw(result.into_object()) as usize
             }
@@ -118,12 +123,15 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
             let child = schema.child();
             let mut result = super::super::mappings::Mapping::new(3, child.word_kind);
             for (name, value) in values {
-                let value = convert(value.get_ref(), child)?;
+                let value = convert(value.get_ref(), child, allocation)?;
                 let word = StrOwner::into_raw(StrOwner::new(Str::new(name.get_ref()))) as usize;
                 // SAFETY: the key transfers one newly allocated string owner.
                 let key = unsafe { OwnedWord::from_owned(word, WordKind::new(3)) };
                 assert!(
-                    result.insert_unique(key, value),
+                    result.insert_unique(key, value).map_err(|error| {
+                        *allocation = Some(error);
+                        String::new()
+                    })?,
                     "parser rejected duplicate keys"
                 );
             }
@@ -139,11 +147,11 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
             let owner = unsafe { OwnedWord::from_owned(pointer as usize, schema.storage()) };
             for (index, field) in fields.iter().enumerate() {
                 let value = if let Some(value) = values.get(field.name()) {
-                    convert(value.get_ref(), field.schema())
+                    convert(value.get_ref(), field.schema(), allocation)
                         .map_err(|error| format!("field {:?}: {error}", field.name()))?
                 } else {
                     field
-                        .missing::<serde_json::Error>()
+                        .missing::<serde_json::Error>(allocation)
                         .map_err(|error| error.to_string())?
                 };
                 // SAFETY: each field is written once with its exact owned representation.
@@ -160,11 +168,15 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
     Ok(unsafe { OwnedWord::from_owned(word, schema.storage()) })
 }
 
-fn decode_toml(text: &str, schema: &Schema) -> Result<OwnedWord, String> {
+fn decode_toml(
+    text: &str,
+    schema: &Schema,
+    allocation: &mut Option<Error>,
+) -> Result<OwnedWord, String> {
     let table = DeTable::parse(text).map_err(|error| tomllib_parse_error(text, error))?;
     let value = DeValue::Table(table.into_inner());
     validate(&value, 1, text)?;
-    convert(&value, schema)
+    convert(&value, schema, allocation)
 }
 
 /// CPython 3.14 reads TOML 1.0. The native parser also accepts four 1.1
@@ -264,7 +276,7 @@ fn tomllib_parse_error(text: &str, error: ::toml::de::Error) -> String {
 pub unsafe extern "C" fn imre_toml_keys(text: *const Str) -> *const Object {
     // SAFETY: the compiler checked and rooted the input.
     let text = unsafe { &*text };
-    let result = (|| {
+    let table = (|| {
         let table = DeTable::parse(text).map_err(|err| tomllib_parse_error(text, err))?;
         tomllib_syntax(text)?;
         let value = DeValue::Table(table.into_inner());
@@ -272,20 +284,25 @@ pub unsafe extern "C" fn imre_toml_keys(text: *const Str) -> *const Object {
         let DeValue::Table(table) = value else {
             unreachable!()
         };
-        let keys = super::super::mappings::imre_set_new(3);
+        Ok(table)
+    })()
+    .map_err(|error: String| Error::new(Kind::TomlDecodeError, error));
+    let result = table.and_then(|table| {
+        // SAFETY: this is one fresh set owner.
+        let keys = unsafe { Rc::from_raw(super::super::mappings::imre_set_new(3)) };
         for (name, _) in table {
             let string = StrOwner::new(Str::new(name.get_ref()));
             // SAFETY: the set has string key storage and insertion retains the rooted key.
             unsafe {
-                super::super::mappings::imre_set_add(keys, StrOwner::as_ptr(&string) as usize)
-            };
+                super::super::mappings::set_add(
+                    Rc::as_ptr(&keys),
+                    StrOwner::as_ptr(&string) as usize,
+                )
+            }?;
         }
-        Ok(keys)
-    })();
-    finish(
-        result.map_err(|error: String| Error::new(Kind::TomlDecodeError, error)),
-        std::ptr::null(),
-    )
+        Ok(Rc::into_raw(keys))
+    });
+    finish(result, std::ptr::null())
 }
 
 /// Decode TOML 1.1 into an exact compiler-proved record or dictionary schema.
@@ -298,9 +315,14 @@ pub unsafe extern "C" fn imre_toml_keys(text: *const Str) -> *const Object {
 pub unsafe extern "C" fn imre_toml_decode(text: *const Str, schema: *const Schema) -> *const usize {
     // SAFETY: caller roots the string and supplies live, compiler-checked metadata.
     let (text, schema) = unsafe { (&*text, &*schema) };
-    let result = decode_toml(text, schema)
+    let mut allocation = None;
+    let result = decode_toml(text, schema, &mut allocation)
         .map(|value| value.into_word() as *const usize)
-        .map_err(|error| Error::new(Kind::ValueError, format!("invalid typed TOML: {error}")));
+        .map_err(|error| {
+            allocation.take().unwrap_or_else(|| {
+                Error::new(Kind::ValueError, format!("invalid typed TOML: {error}"))
+            })
+        });
     finish(result, std::ptr::null())
 }
 

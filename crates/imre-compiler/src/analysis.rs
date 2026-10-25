@@ -257,6 +257,19 @@ impl Session {
         )
     }
 
+    /// A nominal instance here, instead of its declared optional union, records
+    /// a source-level narrowing. The backend must still guard mutable rereads.
+    pub(crate) fn narrowed_instance(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+        self.used_hints.set(true);
+        let program = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, program);
+        let Some(ty @ Ty::NominalInstance(_)) = expression.inferred_type(&model) else {
+            return false;
+        };
+        ty != KnownClass::NoneType.to_instance(&self.db, &ProgramEnvironment::from_file(program))
+    }
+
     /// Get a scalar layout hint for an append operand in its own lexical scope.
     pub(crate) fn scalar_type(
         &self,
