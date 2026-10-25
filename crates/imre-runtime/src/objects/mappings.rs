@@ -1312,6 +1312,38 @@ pub extern "C" fn imre_dict_new(key_kind: u32, value_kind: u32) -> *const Object
     )))))
 }
 
+/// Copies the mapping in insertion order, preserving its subscription policy.
+/// The fresh mapping acquires its keys and values without duplicating them.
+///
+/// # Safety
+/// The input is a rooted dictionary, Counter or closed default-list dictionary.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_copy(value: *const Object) -> *const Object {
+    // SAFETY: the source owns every copied word; insertion in the fresh table
+    // hashes only closed immutable keys and cannot reenter the source.
+    let result = unsafe {
+        object(value).0.with(|storage| {
+            let source = storage.dictionary();
+            let mut copy = Mapping::new(source.tables.key_kind(), source.value_kind.raw());
+            copy.missing = source.missing;
+            let mut position = 0;
+            while let Some((next, key, value)) = source.tables.next(position) {
+                copy.insert(key, source.value_kind.acquire(value))?;
+                position = next;
+            }
+            Ok(copy)
+        })
+    };
+    super::exceptions::finish(
+        result.map(|copy| {
+            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
+                Box::new(copy),
+            )))))
+        }),
+        std::ptr::null(),
+    )
+}
+
 /// Constructs an integer-valued Counter with non-inserting zero subscriptions.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_counter_new(key_kind: u32) -> *const Object {
