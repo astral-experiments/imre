@@ -673,6 +673,13 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    pub(crate) fn is_unittest_main(&self, id: DefinitionId) -> bool {
+        let owner = &self.modules[id.module];
+        owner.bundled
+            && owner.name == "unittest"
+            && owner.bindings.get("main") == Some(&Binding::Definition(id))
+    }
+
     /// Keep module indices stable for the semantic cache. Only after lowering
     /// expose the files a disk build must revalidate and protect from writes.
     pub(crate) fn disk_inputs(

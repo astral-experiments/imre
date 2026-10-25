@@ -73,6 +73,7 @@ mod unbound_locals;
 mod unions;
 mod unittest;
 mod unittest_equality;
+mod unittest_main;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -6171,6 +6172,9 @@ impl<'a> Checker<'a> {
             let Binding::Definition(definition) = binding else {
                 return Err(error(self.source, call, "a module is not callable"));
             };
+            if self.graph.is_unittest_main(definition) {
+                return self.unittest_main(call, definition.module);
+            }
             let signature = self
                 .functions
                 .get(&definition)
