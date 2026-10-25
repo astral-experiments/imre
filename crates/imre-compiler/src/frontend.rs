@@ -43,6 +43,7 @@ mod inspect;
 mod iterables;
 mod itertools;
 mod json;
+mod keyword_forwarding;
 mod linecache;
 mod literals;
 mod local_functions;
@@ -530,10 +531,16 @@ pub(crate) fn lower_with_owners(
                                 node_index: ast::AtomicNodeIndex::NONE,
                             })));
                     }
+                    let defaults = if cached.is_some() {
+                        // A cache can distinguish omitted keywords from explicitly supplied defaults.
+                        keyword_forwarding::Defaults::local(module_id)
+                    } else {
+                        keyword_forwarding::prepare(graph, module_id, &mut function)
+                    };
                     let signature = signature(
                         &function,
                         graph,
-                        module_id,
+                        defaults,
                         &classes.declarations,
                         &types,
                         None,
@@ -639,10 +646,11 @@ pub(crate) fn lower_with_owners(
                 })]
                 .into();
             }
+            let defaults = keyword_forwarding::prepare(graph, module_id, &mut method);
             let mut signature = signature(
                 &method,
                 graph,
-                module_id,
+                defaults,
                 &classes.declarations,
                 &types,
                 Some(context),
@@ -1069,12 +1077,13 @@ pub(crate) fn lower_with_owners(
 fn signature(
     function: &ast::StmtFunctionDef,
     graph: &SourceGraph,
-    module: ModuleId,
+    defaults: keyword_forwarding::Defaults,
     classes: &Classes,
     types: &Types,
     method: Option<records::MethodContext>,
     inference: &inference::Inference,
 ) -> Result<Signature, String> {
+    let module = defaults.module;
     let source = &graph.modules[module].source;
     let owner = method.map(|context| context.class);
     let receiver = method
@@ -1101,20 +1110,27 @@ fn signature(
     let mut params = Vec::new();
     let mut parameter_types = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
-        let module = owner
-            .and_then(|id| {
-                let record = &classes.definitions[id];
-                (record.generated_initializer && function.name.as_str() == "__init__")
-                    .then(|| {
-                        record
-                            .fields
-                            .iter()
-                            .find(|field| field.name == parameter.name().as_str())
-                    })
-                    .flatten()
-                    .map(|field| field.module)
+        let origin = defaults
+            .forwarded
+            .filter(|(first, _)| index >= *first)
+            .map(|(_, id)| id);
+        let module = origin
+            .or_else(|| {
+                owner.and_then(|id| {
+                    let record = &classes.definitions[id];
+                    (record.generated_initializer && function.name.as_str() == "__init__")
+                        .then(|| {
+                            record
+                                .fields
+                                .iter()
+                                .find(|field| field.name == parameter.name().as_str())
+                        })
+                        .flatten()
+                        .map(|field| field.module)
+                })
             })
             .unwrap_or(module);
+        let source = origin.map_or(source, |id| &graph.modules[id].source);
         let sequence = parameter.annotation().is_some_and(|value|
             matches!(value, ast::Expr::Subscript(subscript) if graph.resolve(module, &subscript.value) == Some(Binding::Intrinsic(Intrinsic::Sequence))));
         let empty_sequence = sequence
