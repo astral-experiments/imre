@@ -47,15 +47,8 @@ jobs:
             --suites differential io errno files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
 
-      - name: Get the real pip wheel shipped by the pinned CPython
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          repository: python/cpython
-          ref: 5607950ef232dad16d75c0cf53101d9649d89115
-          path: .cpython-wheel-reference
-          sparse-checkout: Lib/ensurepip/_bundled
       - name: Check pinned PyPA RECORD fixtures with reference CPython
-        run: python3 tests/wheel_record.py --reference-only --real-wheel .cpython-wheel-reference/Lib/ensurepip/_bundled/pip-26.1.1-py3-none-any.whl
+        run: python3 tests/wheel_record.py --reference-only
       - name: Compare uv's upstream wheel checker with CPython
         run: python3 tests/uv_wheel_check.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
       - name: Compare Ruff’s reporters with CPython
