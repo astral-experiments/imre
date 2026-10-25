@@ -300,7 +300,7 @@ impl IntrinsicModule {
         }
     }
 
-    fn symbol(self, name: &str) -> Option<Binding> {
+    pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
