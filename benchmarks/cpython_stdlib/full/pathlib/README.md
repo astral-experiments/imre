@@ -39,23 +39,43 @@ includes all seven child suites; adding their counts again would duplicate them.
 All 391 skips name their fixture, original reason and pinned source condition.
 There are no additional exclusions.
 
-Generate both levels with the test-enabled 3.14.5 interpreter and validate them:
+Reproduce the walking-head baseline with the test-enabled 3.14.5 interpreter:
 
 ```sh
 python -B benchmarks/cpython_stdlib/full/pathlib/evidence.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
     --imre-commit 906b10a80a61bbf4efc5cd05cc5c2ae82689e32a \
     --body-report benchmarks/cpython_stdlib/full/pathlib/body-probes-linux.json \
-    --result benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
+    --cohort lexical --cohort files --cohort traversal --cohort components --cohort walk --cohort basics \
+    --result /tmp/pathlib-baseline.json
+```
+
+Run the metadata cohort with a compiler that implements Path.info, then verify
+those six observations against the versioned per-occurrence records:
+
+```sh
+python -B benchmarks/cpython_stdlib/full/pathlib/evidence.py \
+    --imre /path/to/metadata/imre --runtime /path/to/metadata/libimre_runtime.a --clang /path/to/clang \
+    --cohort metadata --result /tmp/pathlib-metadata.json
+python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py /tmp/pathlib-metadata.json
 python3 benchmarks/cpython_stdlib/suite_evidence.py \
     benchmarks/cpython_stdlib/full/pathlib/reference-linux.json \
     benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
 ```
 
-Both the audited adapters and the complete-method probes used the same compiler
-and runtime, built from walking head `906b10a`. Each observed or blocked row
-records that commit. The 978 per-method probe results and diagnostics matched
-between optimization levels.
+The baseline adapters and complete-method probes used the compiler and runtime
+from walking head `906b10a`. The six newer Path.info records use the measured
+revision `13b6945`; all other rows retain their original revision and roles.
+The 978 baseline probe results and diagnostics matched between optimization levels.
+
+For both Path and PosixPath, the original existence, directory and file cache
+methods check a missing name, create a file or directory and query the same view
+again. The complete bodies, filesystem mutations and 24 boolean assertions per
+level run in Imre; CPython supplies the original fixture setup and teardown.
+The [filesystem comparison](../../../../tests/fixtures/paths/metadata_views.py)
+compares 31 output lines, including stale views, fresh Path queries and directory
+entry information for a dangling symlink whose target appears and disappears.
+The last four lines check a scanned regular file replaced with a dangling symlink.
 
 The lexical runner dispatches each original method under its upstream class.
 It checks that class and its separator before starting the typed native receiver.
@@ -129,10 +149,10 @@ python3 benchmarks/cpython_stdlib/full/pathlib/body_report.py --work /tmp/pathli
 
 | Execution at each of O0 and O3 | Occurrences |
 | --- | ---: |
-| Native body and operation, native assertions if present, host fixture | 116 |
+| Native body and operation, native assertions if present, host fixture | 122 |
 | Host body and assertions, native operation | 54 |
 | Mixed execution | 11 |
-| Blocked: diagnostic in the original body | 360 |
+| Blocked: diagnostic in the original body | 354 |
 | Blocked: fixture or dependency diagnostic | 398 |
 | Blocked: original fixture wrapper | 39 |
 | Upstream reference skip | 391 |
@@ -141,7 +161,7 @@ python3 benchmarks/cpython_stdlib/full/pathlib/body_report.py --work /tmp/pathli
 There are no fully native fixture lifecycles, extra exclusions, or native execution
 failures in this run. Some methods that the general probe could not compile have
 a more specific native or host-driven adapter. Those occurrences keep the observed
-execution roles; the 797 blocked rows above have no successful adapter. The
+execution roles; the 791 blocked rows above have no successful adapter. The
 per-ID records give the original source location, diagnostic or wrapper, and any
 missing fixture behavior. A blocked row is an outstanding failure to run the method.
 

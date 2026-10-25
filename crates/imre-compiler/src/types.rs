@@ -156,6 +156,7 @@ impl Types {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::PathInfo
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -402,7 +403,7 @@ impl Types {
     }
 
     /// Canonicalizes a deliberately bounded union. Mutable container layouts
-    /// remain invariant; only str and bytes may form a nonnullable sum today.
+    /// remain invariant, and distinct numeric kinds keep their Python identity.
     pub(crate) fn union(&self, values: &[Type]) -> Option<Type> {
         let mut members = Vec::new();
         let mut nullable = false;
@@ -426,6 +427,9 @@ impl Types {
         let ty = match members.as_slice() {
             [] if nullable => Type::None,
             [member] => *member,
+            [Type::Bool, Type::Int] | [Type::Int, Type::Bool] => {
+                Type::Union(self.intern(Shape::Union(vec![Type::Bool, Type::Int])))
+            }
             choices @ [_, _, ..]
                 if choices
                     .iter()
@@ -481,6 +485,11 @@ impl Types {
         Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Int])))
     }
 
+    pub(crate) fn is_bool_or_int(&self, ty: Type) -> bool {
+        let Type::Union(id) = ty else { return false };
+        matches!(&self.0.borrow().shapes[id], Shape::Union(members) if members == &[Type::Bool, Type::Int])
+    }
+
     pub(crate) fn members(&self, ty: Type) -> Option<Vec<Type>> {
         let Type::Union(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
@@ -528,6 +537,7 @@ impl Types {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::PathInfo
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
