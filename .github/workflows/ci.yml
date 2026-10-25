@@ -162,6 +162,10 @@ jobs:
       - name: Check pinned types.SimpleNamespace tests and dictionary aliases
         run: |
           python3 benchmarks/cpython_stdlib/full/types/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-types.json"
+      - name: Check pinned linecache methods, cache mutation, and source encodings
+        run: |
+          python3 benchmarks/cpython_stdlib/full/linecache/generate_codecs.py --check
+          python3 benchmarks/cpython_stdlib/full/linecache/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-linecache.json"
       - name: Compare structured OS failures with CPython
         run: |
           work=$(mktemp -d "$RUNNER_TEMP/os-errno-fields-XXXXXX")

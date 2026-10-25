@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation};
+use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation, WrapperAttributes};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -77,6 +77,7 @@ pub(crate) enum IntrinsicModule {
     Asyncio,
     Contextlib,
     Inspect,
+    Linecache,
     Functools,
     Fnmatch,
     Time,
@@ -159,9 +160,11 @@ pub(crate) enum Intrinsic {
     TaskGroup,
     Semaphore,
     ContextManager,
+    Linecache(crate::ir::LinecacheOperation),
     InspectGetattrStatic,
     InspectIsMethodDescriptor,
     InspectSentinel,
+    WrapperAttributes(WrapperAttributes),
     FunctionCache,
     LruCache,
     CachedProperty,
@@ -332,6 +335,7 @@ impl IntrinsicModule {
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
             "inspect" => Some(Self::Inspect),
+            "linecache" => Some(Self::Linecache),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
             "fnmatch" => Some(Self::Fnmatch),
@@ -463,6 +467,16 @@ impl IntrinsicModule {
             (Self::Asyncio, "gather") => Intrinsic::Gather,
             (Self::Asyncio, "TaskGroup") => Intrinsic::TaskGroup,
             (Self::Asyncio, "Semaphore") => Intrinsic::Semaphore,
+            (Self::Linecache, name) => Intrinsic::Linecache(match name {
+                "getline" => crate::ir::LinecacheOperation::Getline,
+                "getlines" => crate::ir::LinecacheOperation::Getlines,
+                "updatecache" => crate::ir::LinecacheOperation::Update,
+                "clearcache" => crate::ir::LinecacheOperation::Clear,
+                "checkcache" => crate::ir::LinecacheOperation::Check,
+                "lazycache" => crate::ir::LinecacheOperation::Lazy,
+                "cache" => crate::ir::LinecacheOperation::Cache,
+                _ => return None,
+            }),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
@@ -481,6 +495,12 @@ impl IntrinsicModule {
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
+            (Self::Functools, "WRAPPER_ASSIGNMENTS") => {
+                Intrinsic::WrapperAttributes(WrapperAttributes::Assigned)
+            }
+            (Self::Functools, "WRAPPER_UPDATES") => {
+                Intrinsic::WrapperAttributes(WrapperAttributes::Updated)
+            }
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
