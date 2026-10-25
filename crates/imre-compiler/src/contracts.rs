@@ -82,14 +82,16 @@ impl Builtin {
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
-                    TextOperation::Lower
+                    TextOperation::SplitLineEnds
+                    | TextOperation::Lower
                     | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit
                     | TextOperation::ShlexQuote => true,
-                    TextOperation::Strip(_)
+                    TextOperation::IsSpace
+                    | TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
                     | TextOperation::Find
@@ -292,6 +294,9 @@ impl Builtin {
             | Self::KeyDifference
             | Self::RegexGroupDict
             | Self::DictGet
+            | Self::NamespaceWrap
+            | Self::NamespaceDict
+            | Self::NamespaceGet
             | Self::DictCopy
             | Self::DeepCopy
             | Self::RecordCopy
@@ -405,6 +410,7 @@ impl Builtin {
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
+            | Self::NamespaceDelete
             | Self::DictDelete
             | Self::DictPop
             | Self::DictTryPop(_)
@@ -788,6 +794,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_regex_groupdict"
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
+                | "imre_str_splitlines_options"
                 | "imre_exception_field_index"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
