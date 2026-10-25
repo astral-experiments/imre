@@ -21,17 +21,19 @@ The implementation covers [file contents and copy errors (#492)](https://github.
 | --- | ---: | ---: |
 | Fully native, including fixtures | 0 | 0 |
 | Native method body, assertions and operations; host fixtures | 15 | 15 |
-| Host body and assertions driving native operations | 73 | 73 |
-| Mixed host and native operations | 38 | 38 |
+| Host body and assertions driving native operations | 81 | 81 |
+| Mixed host and native operations | 55 | 55 |
 | Reference only | 0 | 0 |
-| Blocked | 47 | 47 |
+| Blocked | 22 | 22 |
 | Observed failures | 0 | 0 |
 | Original CPython skips | 50 | 50 |
 | **Total** | **223** | **223** |
 
-Of the 38 mixed methods, 14 use the original rename mock, copy callback or path conversion during moves; 10 use host operands or callbacks for [archive dispatch](archives.md); 8 call original Python deletion handlers, 4 use host callbacks or path conversions during tree copying, and 2 use the original default-search-path mocks. In those last two methods, the native child has no `PATH`: it requests `os.confstr("CS_PATH")` and, after `ValueError`, `os.defpath`, then searches for the executable.
+Of the 55 mixed methods, 17 use original syscall mocks or a host stream copy during [zero-copy operations](fastcopy.md); 14 use a rename mock, copy callback or path conversion during moves; 10 use host operands or callbacks for [archive dispatch](archives.md); 8 call original Python deletion handlers, 4 use host callbacks or path conversions during tree copying, and 2 use the original default-search-path mocks. In those last two methods, both native children have no `PATH`: they request `os.confstr("CS_PATH")` and, after `ValueError`, `os.defpath`, then search for the executable.
 
-The 47 blocked methods include all 29 Linux zero-copy methods, 4 stream open/close methods, 3 `copyfileobj` methods, 4 terminal-size methods, 2 miscellaneous methods, 3 deletion methods, 1 tree-copy method and 1 public API inventory method. The 50 skips retain their original CPython reasons.
+The 22 blocked methods include 4 zero-copy cases whose syscall mocks raise a Python `ZeroDivisionError`, 4 stream open/close methods, 3 `copyfileobj` methods, 4 terminal-size methods, 2 miscellaneous methods, 3 deletion methods, 1 tree-copy method and 1 public API inventory method. The 50 skips retain their original CPython reasons.
+
+These reports use compiler tree `303a34eca6d143d907ab8ae9c5b8891c1ed0396c` (commit `7f0dee8`, including random, archive, and fast-copy work on main `cb99ce6`). [All four unchanged suite startup modes](archive-fastcopy-startup-linux.json) reach `Lib/test/test_shutil.py:31` and stop there; none executes a test. [The import trace](import-sequence-linux.json) shows the real Linux `posix` module binding at line 27, then the `test.support` imports at lines 31–33. On the same Imre tree, an available module, a genuinely absent module and a module raising `ImportError` during initialization all hit the same import-order restriction. The [probe](import_sequence.py) records its CPython controls separately from module operations.
 
 ```sh
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/evidence.py \

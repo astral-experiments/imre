@@ -1,0 +1,142 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "57214a13d2addabe75dd21944f431ff8d1242a4878335f612639503b83ae8e9e",
+  "tests_executed": 0,
+  "original": [
+    {
+      "backend": "CPython",
+      "fixture": "real Linux posix",
+      "events": [
+        {
+          "line": 27,
+          "module": "posix",
+          "fromlist": [],
+          "returned": "posix"
+        },
+        {
+          "line": 31,
+          "module": "test",
+          "fromlist": [
+            "support"
+          ],
+          "returned": "test"
+        },
+        {
+          "line": 32,
+          "module": "test.support",
+          "fromlist": [
+            "os_helper"
+          ],
+          "returned": "test.support"
+        },
+        {
+          "line": 33,
+          "module": "test.support.os_helper",
+          "fromlist": [
+            "TESTFN",
+            "FakePath"
+          ],
+          "returned": "test.support.os_helper"
+        }
+      ],
+      "posix_is_original_module": true,
+      "cases_discovered": 223,
+      "tests_executed": 0
+    },
+    {
+      "backend": "CPython",
+      "fixture": "injected missing posix",
+      "events": [
+        {
+          "line": 27,
+          "module": "posix",
+          "fromlist": [],
+          "injected_error": "ModuleNotFoundError"
+        },
+        {
+          "line": 31,
+          "module": "test",
+          "fromlist": [
+            "support"
+          ],
+          "returned": "test"
+        },
+        {
+          "line": 32,
+          "module": "test.support",
+          "fromlist": [
+            "os_helper"
+          ],
+          "returned": "test.support"
+        },
+        {
+          "line": 33,
+          "module": "test.support.os_helper",
+          "fromlist": [
+            "TESTFN",
+            "FakePath"
+          ],
+          "returned": "test.support.os_helper"
+        }
+      ],
+      "posix_is_original_module": false,
+      "cases_discovered": 223,
+      "tests_executed": 0
+    }
+  ],
+  "controls": {
+    "present": {
+      "cpython_stdout": [
+        "after import",
+        "posix",
+        "True"
+      ],
+      "consumer_sha256": "7d6f10779bffa63a08fce20037a2f39d7f61df2561d63f090c4cf89f418190e6",
+      "levels": {
+        "0": {
+          "status": "compile-blocked",
+          "diagnostic": "main.py:1:1: Imre: consumer.py:6:1: Imre: imports must precede executable module statements"
+        },
+        "3": {
+          "status": "compile-blocked",
+          "diagnostic": "main.py:1:1: Imre: consumer.py:6:1: Imre: imports must precede executable module statements"
+        }
+      }
+    },
+    "missing": {
+      "cpython_stdout": [
+        "after import",
+        "absent"
+      ],
+      "consumer_sha256": "21e4e95948e2be1371d95faff770a48a84f19c1166664d0eed7ab227f452acbe",
+      "levels": {
+        "0": {
+          "status": "compile-blocked",
+          "diagnostic": "main.py:1:1: Imre: consumer.py:6:1: Imre: imports must precede executable module statements"
+        },
+        "3": {
+          "status": "compile-blocked",
+          "diagnostic": "main.py:1:1: Imre: consumer.py:6:1: Imre: imports must precede executable module statements"
+        }
+      }
+    },
+    "raises": {
+      "cpython_stdout": [
+        "inside optional import",
+        "after import",
+        "absent"
+      ],
+      "consumer_sha256": "46d61570a749c757e664c231adb92d17b8ab0461e4abeeb436b6e7ca815fb044",
+      "levels": {
+        "0": {
+          "status": "compile-blocked",
+          "diagnostic": "main.py:1:1: Imre: consumer.py:6:1: Imre: imports must precede executable module statements"
+        },
+        "3": {
+          "status": "compile-blocked",
+          "diagnostic": "main.py:1:1: Imre: consumer.py:6:1: Imre: imports must precede executable module statements"
+        }
+      }
+    }
+  }
+}

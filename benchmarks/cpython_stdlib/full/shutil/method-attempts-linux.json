@@ -1,8 +1,8 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "compiler_sha256": "0aa584a9b0d17f1c82963c3754d9a005c89db6494d2297625ef1c9ff18b5ad04",
-  "compiler_tree": "aa9cdee42fa02f88f14dcebbdbe06f972bdeb660",
-  "runtime_sha256": "c8ba14a4e6f24784970b5ddef0680524c39c31d7bda2ec93218292935da718fb",
+  "compiler_sha256": "57214a13d2addabe75dd21944f431ff8d1242a4878335f612639503b83ae8e9e",
+  "compiler_tree": "303a34eca6d143d907ab8ae9c5b8891c1ed0396c",
+  "runtime_sha256": "c4b54cb539001bf938fbb96782383f9396af0ba82f1d31eab98a9d0c43f87c14",
   "fixture_manifest_sha256": "eb43d0c33580d4a45ffa369afd186b3243f9bf38b15f80fbee02b50254f4bdd9",
   "schema": "imre.shutil-method-attempts.v1",
   "denominator": 223,
@@ -2820,7 +2820,7 @@
         "decorated_sha256": "ecc0ebfb8c2910170c21c61a745d045199ca767bc8a8b6fbb76f140650d5f457",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:4:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "reason": "case.py:11:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -2880,7 +2880,7 @@
         "decorated_sha256": "b1c2580a23d052f9992cc496221133b7a65c1b309b0e0d49d7471ab3ba038133",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "reason": "case.py:15:40: Imre: name is not a local value; globals and first-class functions are unsupported",
         "opt_levels": [
           0,
           3
@@ -2895,7 +2895,7 @@
         "decorated_sha256": "7e446c493feee0dc55bc86f959f84f744ce28a37483da372bfa9080c2b240046",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:4:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "reason": "case.py:28:25: Imre: unknown field; dynamic attributes and first-class methods are unsupported",
         "opt_levels": [
           0,
           3
@@ -3100,7 +3100,7 @@
         "decorated_sha256": "ecc0ebfb8c2910170c21c61a745d045199ca767bc8a8b6fbb76f140650d5f457",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:4:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "reason": "case.py:11:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -3130,7 +3130,7 @@
         "decorated_sha256": "65f0f1dac8d11a30b059c37651b018300da766ad1acd13ed35431aa847965540",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:5:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "reason": "case.py:11:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
         "opt_levels": [
           0,
           3
@@ -3175,7 +3175,7 @@
         "decorated_sha256": "b1c2580a23d052f9992cc496221133b7a65c1b309b0e0d49d7471ab3ba038133",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:3:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "reason": "case.py:15:40: Imre: name is not a local value; globals and first-class functions are unsupported",
         "opt_levels": [
           0,
           3
@@ -3190,7 +3190,7 @@
         "decorated_sha256": "7e446c493feee0dc55bc86f959f84f744ce28a37483da372bfa9080c2b240046",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:4:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "reason": "case.py:28:25: Imre: unknown field; dynamic attributes and first-class methods are unsupported",
         "opt_levels": [
           0,
           3

@@ -1,0 +1,38 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "57214a13d2addabe75dd21944f431ff8d1242a4878335f612639503b83ae8e9e",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_shutil",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:31:1: Imre: imports must precede executable module statements"
+    },
+    {
+      "suite": "test.test_shutil",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:31:1: Imre: imports must precede executable module statements"
+    },
+    {
+      "suite": "test.test_shutil",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:31:1: Imre: imports must precede executable module statements"
+    },
+    {
+      "suite": "test.test_shutil",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:31:1: Imre: imports must precede executable module statements"
+    }
+  ]
+}
