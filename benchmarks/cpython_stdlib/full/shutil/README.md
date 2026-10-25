@@ -53,14 +53,14 @@ The [complete TestCopyTree run](tree-linux.json) retains all 14 original methods
 
 ## Complete-method attempts
 
-[method-attempts-linux.json](method-attempts-linux.json) records the compiler and runtime hashes, original method and decorator hashes, and the first diagnostic for each blocked build. All 173 reference passes were attempted under their original CPython fixtures at both levels. Eight native bodies completed; 165 could not compile. With [native inspect (#784)](https://github.com/astral-sh/imre/pull/784), 83 reach the stock support module's `_opcode` import; 40 reach the unsupported `unittest` import used by the original mocks. The first diagnostic for each other method is in its record. Separate host-driven and mixed results retain their actual execution roles.
+[method-attempts-linux.json](method-attempts-linux.json) records the compiler and runtime hashes, original method and decorator hashes, and the first diagnostic for each blocked build. The [hosted run](https://github.com/astral-sh/imre/actions/runs/40177629056) tested tree `d6aa3eccebad9fc011341575e3745c7d063ca482` (main `71ffc22`, copytree `b88820e`). All 173 reference passes were attempted under their original CPython fixtures at both levels. Eight native bodies completed; 165 could not compile. After [native _opcode (#800)](https://github.com/astral-sh/imre/pull/800), 83 reach `import warnings` in the stock `test/support/__init__.py:21`; 40 reach the unsupported `unittest` import used by the original mocks and 10 stop at `errno`. The first diagnostic for each other method is in its record. The host-driven and mixed results retain their measured execution roles.
 
 Reproduce the method attempts with the pinned interpreter and [vendored shared fixtures](../shared/UPSTREAM.json):
 
 ```sh
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/attempt_methods.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
-    --compiler-tree d8dd86624b1521ae4be8d4565cf5e57580a4805e --result /tmp/method-attempts-linux.json
+    --compiler-tree d6aa3eccebad9fc011341575e3745c7d063ca482 --result /tmp/method-attempts-linux.json
 ```
 
 Pass `--method-attempts /tmp/method-attempts-linux.json` to the evidence runner to use this result.
