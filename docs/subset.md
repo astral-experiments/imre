@@ -1045,6 +1045,11 @@ a native Counter raises `NotImplementedError`.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
 
+Its `default_factory` can be read and set to `list` or `None` through a typed
+defaultdict. An explicit `__missing__(key)` call runs the list factory, then
+returns the stored object if the key already exists. With no factory it raises
+`KeyError` for any key of the declared type, even one present in the mapping.
+
 Direct `mapping.keys()` operands and sets of the same key type support `|`, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set. Stored key-view objects and arbitrary iterables as union operands are outside the supported subset.
 
 `set[T]` accepts the same exact scalar or immutable fixed-tuple shapes as dictionary keys, with the same value equality. Nonempty literals infer their element type and evaluate every element from left to right, including duplicates. Empty `set()` requires a concrete contextual type. `add(value)` inserts an element, `discard(value)` removes it when present, and both return `None`. Adding a duplicate or discarding a missing element is a no-op. `len`, single `in`/`not in` comparisons, direct iteration, and loop-head `enumerate` are supported. Set iteration and display order are unspecified. Iteration checks size changes and owns each yielded element before the body can remove it.

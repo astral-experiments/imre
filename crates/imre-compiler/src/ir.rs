@@ -954,6 +954,11 @@ pub(crate) enum Builtin {
     RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
+    DefaultDictMissing,
+    DefaultFactoryEnabled,
+    DefaultFactorySet {
+        enabled: bool,
+    },
     DequeNew,
     DequeAppend {
         left: bool,

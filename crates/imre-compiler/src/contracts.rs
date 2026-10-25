@@ -355,6 +355,7 @@ impl Builtin {
             | Self::Bool
             | Self::DictContains
             | Self::DictGetDefault
+            | Self::DefaultFactoryEnabled
             | Self::EnumLookup(_)
             | Self::DictSumValues
             | Self::DictTryGet(_)
@@ -442,6 +443,7 @@ impl Builtin {
             | Self::DictDelete
             | Self::DictPop
             | Self::DictSetDefault
+            | Self::DefaultDictMissing
             | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
@@ -501,6 +503,7 @@ impl Builtin {
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
             | Self::CounterNew
