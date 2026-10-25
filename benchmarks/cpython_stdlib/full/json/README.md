@@ -31,6 +31,8 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
 
 The four failed fixture occurrences cover key identity and excessive nesting. The [doctest handoff](DOCTEST.md) identifies the first shared intact-package import blocker.
 
+The [key identity rerun](key-identity-linux.json) distinguishes key owners returned by native `json.loads` from the strings reconstructed by the repr transport. Both original `test_keys_reuse` fixture IDs reach `json.decoder.JSONDecoder()` when the host reconstructs keys using their observed native identity. That constructor is still unbound. The ordinary repr transport still fails the first identity assertion. Neither attempt completes the method; sorted and the identity assertions run on the host. Run `key_identity.py` with the same options as `evidence.py` to reproduce both attempts at O0 and O3.
+
 ## Native calls with host assertions
 
 ```sh

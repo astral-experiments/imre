@@ -17,6 +17,7 @@ mod deque;
 mod difflib;
 pub(crate) mod exceptions;
 mod files;
+mod fnmatch;
 mod hashlib;
 mod itertools;
 mod json;
