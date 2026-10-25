@@ -78,12 +78,19 @@ three `test_suffixes` bodies and their list comparisons run natively. The other
 Across those methods 435 `relative_to`, 168 `is_relative_to` and 177 name, stem
 or suffix calls run natively per level, including the upstream invalid inputs.
 
+The [walk runner](native_walk.py) adds seven occurrences. The unchanged bottom-up
+and two symlink methods run natively with their upstream host fixtures. CPython
+drives the native cursors in the depth-limit and 100-open-cursor methods. The
+top-down and pruning methods also mutate or sort yielded name lists in CPython;
+the driver applies directory edits to the retained native list before resuming.
+These two are mixed. The callback-after-rename method is still reference only.
+
 | Execution at each of O0 and O3 | Occurrences |
 | --- | ---: |
-| Native body, assertions and operation with host fixture | 99 |
-| Host body and assertions, native operation | 52 |
-| Mixed execution | 9 |
-| Reference only | 818 |
+| Native body, assertions and operation with host fixture | 102 |
+| Host body and assertions, native operation | 54 |
+| Mixed execution | 11 |
+| Reference only | 811 |
 | Upstream reference skip | 391 |
 | **Total** | **1,369** |
 
