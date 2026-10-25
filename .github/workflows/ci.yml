@@ -30,7 +30,7 @@ jobs:
         with:
           ref: ${{ matrix.commit }}
           fetch-depth: 0
-          persist-credentials: false
+          persist-credentials: true
       - name: Verify exact commit and tree
         run: |
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
