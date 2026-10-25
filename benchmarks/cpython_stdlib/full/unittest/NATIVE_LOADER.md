@@ -19,10 +19,29 @@ getter. The [executable example](loader_names.py) checks all of these, including
 that a wrong-case pattern and an empty pattern list select nothing. Empty or
 private prefixes and matching unsupported descriptors raise `NotImplementedError`.
 
-The [receipt](loader-names-linux.json.gz) records the CPython and Imre
-transcripts in ordinary and reachable modes at O0 and O3. It covers the constructor and the seven methods named for `getTestCaseNames`. Six of those seven define a local class; one defines an unannotated local comparator. The receipt records their original lines, hashes and diagnostics. Three additional original methods also call this API. [The local class follow-up](https://github.com/astral-sh/imre/pull/1169) tracks all ten direct callers.
+### Classes declared inside test methods
 
-The original `Test_TestLoader.test___init__` now runs once in the primary [1,090-occurrence report](native-linux.json). Its method, assertions, operation and default fixture all run in Imre, [verified in all four configurations](https://github.com/astral-sh/imre/actions/runs/40216305961) on `2df85379543f3eb67b275f15d652e549241badc0`.
+After the declaration the loader can inspect a local class's methods, inherited names, and class attributes that shadow them. Its [executable example](loader_local_classes.py) uses the original qualified name, including `<locals>`. [Boundary controls](loader_class_boundaries.py) cover access before the declaration, conditional bindings, rebinding and defaults with side effects.
+
+The [primary report](native-linux.json) attempts the constructor and all ten original `Test_TestLoader` methods that call `getTestCaseNames`. The [four-configuration run](https://github.com/astral-sh/imre/actions/runs/40220036532) used CPython blob `cdff6d1a20c8dfda384178ab48403074e66409bd`. Each outcome matches in ordinary and reachable builds at O0 and O3.
+
+| Original method | Native result |
+| --- | --- |
+| `test___init__` | Pass: construction and a fresh errors list |
+| `test_getTestCaseNames` | Pass: method selection |
+| `test_getTestCaseNames__inheritance` | Pass: inherited and overridden names |
+| `test_getTestCaseNames__no_tests` | Pass: empty result |
+| `test_getTestCaseNames__testNamePatterns` | Pass: qualified name filtering |
+| `test_sortTestMethodsUsing__default_value` | Pass: default sort order |
+| `test_getTestCaseNames__not_a_TestCase` | Blocked: local class inherits from `int` |
+| `test_getTestCaseNames__testNamePatterns__attribute_access_regression` | Blocked: local descriptor initialization |
+| `test_partial_functions` | Blocked: unannotated local function used by a partial |
+| `test_sortTestMethodsUsing__getTestCaseNames` | Blocked: unannotated local comparator |
+| `test_sortTestMethodsUsing__None` | Blocked: assignment to `sortTestMethodsUsing` |
+
+For the six passes, the original body, assertions, loader operation and default fixture all execute on Imre. The other five pass on CPython and remain native compiler failures; their records include the exact diagnostic and method hash. The [earlier module-level receipt](loader-names-linux.json.gz) covers the constructor and the seven methods named for `getTestCaseNames`.
+
+Of the 1,090 occurrences, 13 were fully native, 8 used native bodies with host fixtures, 9 had host bodies calling native operations, 15 were blocked, 1,043 were reference-only, and two had upstream signal skips.
 
 The complete module startup in [#578](https://github.com/astral-sh/imre/pull/578)
 requires more than class name discovery. Here `TestSuite` and `TextTestRunner`
