@@ -192,6 +192,74 @@ impl PurePath {
         self.with_tail(self.tail[..self.tail.len().saturating_sub(1)].to_vec())
     }
 
+    fn component_eq(&self, left: &str, right: &str) -> bool {
+        left == right || self.windows && left.to_lowercase() == right.to_lowercase()
+    }
+
+    fn shared_tail_prefix(&self, other: &Self) -> Option<usize> {
+        if self.windows != other.windows
+            || !self.component_eq(&self.drive, &other.drive)
+            || self.root != other.root
+        {
+            return None;
+        }
+        Some(
+            self.tail
+                .iter()
+                .zip(&other.tail)
+                .take_while(|(a, b)| self.component_eq(a, b))
+                .count(),
+        )
+    }
+
+    pub(super) fn is_relative_to(&self, other: &Self) -> bool {
+        self.shared_tail_prefix(other) == Some(other.tail.len())
+    }
+
+    pub(super) fn relative_to(&self, other: &Self, walk_up: bool) -> Result<Self> {
+        let shared = self.shared_tail_prefix(other);
+        if shared != Some(other.tail.len()) {
+            if !walk_up {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!(
+                        "{} is not in the subpath of {}",
+                        string_repr(&self.text),
+                        string_repr(&other.text)
+                    ),
+                ));
+            }
+            if other.tail[shared.unwrap_or(0)..]
+                .iter()
+                .any(|s| s.as_str() == "..")
+            {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!(
+                        "'..' segment in {} cannot be walked",
+                        string_repr(&other.text)
+                    ),
+                ));
+            }
+        }
+        let common = shared.ok_or_else(|| {
+            Error::new(
+                Kind::ValueError,
+                format!(
+                    "{} and {} have different anchors",
+                    string_repr(&self.text),
+                    string_repr(&other.text)
+                ),
+            )
+        })?;
+        let tail = std::iter::repeat_n(Str::from(".."), other.tail.len() - common)
+            .chain(self.tail[common..].iter().cloned())
+            .collect();
+        let mut path = Self::parsed(self.windows, vec![], Str::default(), Str::default(), tail);
+        path.raw.push(Rc::clone(&path.text));
+        Ok(path)
+    }
+
     pub(super) fn name(&self) -> &Rc<Str> {
         self.name
             .get_or_init(|| Rc::new(self.tail.last().cloned().unwrap_or_default()))

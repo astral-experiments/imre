@@ -29,7 +29,8 @@ CELL = """class Cell:
 
 REJECTED = {
     "copy_hook_wrong_arity": 'import copy\nclass C:\n    def __copy__(self, extra: int) -> int: return extra\ncopy.copy(C())\n',
-    "copy_no_hook": 'import copy\nclass C:\n    pass\ncopy.copy(C())\n',
+    "inherited_copy_reduction": 'import copy\nclass Base:\n    def __reduce_ex__(self, protocol: int) -> int: return 0\nclass Child(Base): pass\ncopy.copy(Child())\n',
+    "copy_custom_getstate": 'import copy\nclass C:\n    def __getstate__(self) -> int: return 0\ncopy.copy(C())\n',
     "overridden_static_binding": "import hashlib\nclass Base:\n    make = staticmethod(hashlib.sha256)\nclass Child(Base):\n    def make(self, x: int) -> int:\n        return x\n",
     "literal_unknown_value": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> str:\n    return s\nf("c")\n',
     "literal_unproven_string": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    return s\n',
@@ -216,7 +217,7 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "shallow_copy_protocol.py", "implicit_copy.py", "mapping_abc.py"]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "mapping_abc.py"]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)
@@ -244,6 +245,9 @@ def main() -> None:
             result = run([compiler, "check", str(case / "main.py")], temporary)
             assert result.returncode > 0 and result.stderr, (name, result.stdout, result.stderr)
             assert "panicked" not in result.stderr and "AddressSanitizer" not in result.stderr, (name, result.stderr)
+            if name in {"inherited_copy_reduction", "copy_custom_getstate"}:
+                reachable = run([compiler, "check", str(case / "main.py"), "--reachable-only"], temporary)
+                assert reachable.returncode > 0 and "unsupported reconstruction protocol" in reachable.stderr, (name, reachable.stderr)
             if name in {"direct_field_cycle", "mutual_field_cycle"}:
                 assert "cyclic heap types are unsupported" in result.stderr, (name, result.stderr)
             if name in {"recursive_method", "mutual_method_recursion", "constructor_factory_recursion"}:

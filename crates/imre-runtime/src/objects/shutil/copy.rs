@@ -42,6 +42,15 @@ impl<'a> Name<'a> {
         }
     }
 
+    /// Convert the name when the copy operation reaches its filesystem lookup.
+    fn checked_path(&self) -> Result<&Path> {
+        let path = self.path();
+        if path.as_os_str().as_bytes().contains(&0) {
+            return Err(Error::new(Kind::ValueError, "embedded null byte"));
+        }
+        Ok(path)
+    }
+
     fn repr(&self, original: bool) -> String {
         let mut result = String::new();
         match self {
@@ -100,8 +109,8 @@ fn copy_data(src: &Name<'_>, dst: &Name<'_>) -> Result<()> {
 }
 
 fn copyfile(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<()> {
-    let source = fs::metadata(src.path()).ok();
-    let target = fs::metadata(dst.path()).ok();
+    let source = fs::metadata(src.checked_path()?).ok();
+    let target = fs::metadata(dst.checked_path()?).ok();
     if let (Some(source), Some(target)) = (&source, &target)
         && source.dev() == target.dev()
         && source.ino() == target.ino()
@@ -180,12 +189,6 @@ fn run(
     dst: &Name<'_>,
     follow: bool,
 ) -> Result<Option<std::path::PathBuf>> {
-    if [src, dst]
-        .iter()
-        .any(|n| n.path().as_os_str().as_bytes().contains(&0))
-    {
-        return Err(Error::new(Kind::ValueError, "embedded null byte"));
-    }
     match op {
         0 => copyfile(src, dst, follow)?,
         1 => metadata::copymode(src, dst, follow)?,

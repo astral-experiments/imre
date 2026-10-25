@@ -91,3 +91,15 @@ first diagnostics. None earns native ID credit on this installer revision.
 For example, `test_instance` starts with a local factory, then checks keyword
 construction, arity, `_make`, `_replace` and `_asdict`. The module-level
 gate cannot establish those behaviors.
+
+On wheel integration `1a03f4affbb17d2fcb74a04da7c5da7cc1f9fc6e`, both
+wheel fixtures again matched CPython at O0 and O3: 22 output lines from
+the container fixture and three from the imported namedtuple fixture.
+The [new run of all 23 unchanged methods](namedtuple-1a03f4a.tsv) still
+has 17 compiler blockers and six original-decorator blockers at both levels.
+Twelve of the compiler errors are at a factory inside a method. Only
+`test_copy` moved: the `copy` import now resolves, and the body stops at
+the loop over `copy.copy` and `copy.deepcopy` (line 581).
+The separate 11-prompt `collections.namedtuple` docstring stops at
+`Point.__doc__` in its second prompt. Neither the 23 methods nor the
+docstring earns native pass credit on this revision.
