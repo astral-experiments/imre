@@ -4405,12 +4405,71 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        // A chained method checks its receiver before its arguments. Keep the
-        // large general expression frame off that recursive path in debug builds.
+        // Chained calls and binary operands recurse into their receiver or left
+        // operand. Keep the large general expression frame off both paths.
         match expression {
             ast::Expr::Call(call) => self.call(call),
+            ast::Expr::BinOp(binary) => self.check_binary(binary),
             _ => self.non_call_expr(expression),
         }
+    }
+
+    fn check_binary(&mut self, binary: &ast::ExprBinOp) -> Result<Expr, String> {
+        let (mut left, mut right) = if matches!(
+            binary.op,
+            ast::Operator::BitOr | ast::Operator::BitAnd | ast::Operator::Sub
+        ) {
+            let (left, left_key) = self.union_operand(&binary.left)?;
+            let (right, right_key) = self.union_operand(&binary.right)?;
+            if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
+                self.expect(left_key, right_key, binary)?;
+                return Ok(Expr {
+                    ty: self.types.set(left_key),
+                    kind: ExprKind::Builtin(
+                        match binary.op {
+                            ast::Operator::Sub => Builtin::KeyDifference,
+                            ast::Operator::BitAnd => Builtin::KeyIntersection,
+                            _ => Builtin::KeyUnion,
+                        },
+                        vec![left, right],
+                    ),
+                });
+            }
+            (left, right)
+        } else {
+            (self.expr(&binary.left)?, self.expr(&binary.right)?)
+        };
+        if binary.op == ast::Operator::Add
+            && left.ty == Type::JsonValue
+            && right.ty == Type::JsonValue
+        {
+            return Ok(json::add(left, right));
+        }
+        if binary.op == ast::Operator::Add
+            && matches!(left.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
+            && matches!(right.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
+        {
+            left = Self::string_value(left);
+            right = Self::string_value(right);
+        }
+        if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
+            return self.path_join(left, right, binary);
+        }
+        if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
+            if matches!(&left.kind, ExprKind::List(items) if items.is_empty())
+                && self.types.element(right.ty).is_some()
+            {
+                left.ty = right.ty;
+            } else if matches!(&right.kind, ExprKind::List(items) if items.is_empty()) {
+                right.ty = left.ty;
+            }
+            self.expect(left.ty, right.ty, binary)?;
+            return self.concat_lists(left, right, binary);
+        }
+        if self.types.is_counter(left.ty) && self.types.is_counter(right.ty) {
+            return self.counter_math(binary.op, left, right, false, binary);
+        }
+        self.binary_expr(binary.op, left, right, binary)
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
@@ -4658,63 +4717,6 @@ impl<'a> Checker<'a> {
                     .types
                     .tuple(values.iter().map(|value| value.ty).collect());
                 (ty, ExprKind::Tuple(values))
-            }
-            ast::Expr::BinOp(binary) => {
-                let (mut left, mut right) = if matches!(
-                    binary.op,
-                    ast::Operator::BitOr | ast::Operator::BitAnd | ast::Operator::Sub
-                ) {
-                    let (left, left_key) = self.union_operand(&binary.left)?;
-                    let (right, right_key) = self.union_operand(&binary.right)?;
-                    if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
-                        self.expect(left_key, right_key, binary)?;
-                        return Ok(Expr {
-                            ty: self.types.set(left_key),
-                            kind: ExprKind::Builtin(
-                                match binary.op {
-                                    ast::Operator::Sub => Builtin::KeyDifference,
-                                    ast::Operator::BitAnd => Builtin::KeyIntersection,
-                                    _ => Builtin::KeyUnion,
-                                },
-                                vec![left, right],
-                            ),
-                        });
-                    }
-                    (left, right)
-                } else {
-                    (self.expr(&binary.left)?, self.expr(&binary.right)?)
-                };
-                if binary.op == ast::Operator::Add
-                    && left.ty == Type::JsonValue
-                    && right.ty == Type::JsonValue
-                {
-                    return Ok(json::add(left, right));
-                }
-                if binary.op == ast::Operator::Add
-                    && matches!(left.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
-                    && matches!(right.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
-                {
-                    left = Self::string_value(left);
-                    right = Self::string_value(right);
-                }
-                if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
-                    return self.path_join(left, right, binary);
-                }
-                if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
-                    if matches!(&left.kind, ExprKind::List(items) if items.is_empty())
-                        && self.types.element(right.ty).is_some()
-                    {
-                        left.ty = right.ty;
-                    } else if matches!(&right.kind, ExprKind::List(items) if items.is_empty()) {
-                        right.ty = left.ty;
-                    }
-                    self.expect(left.ty, right.ty, binary)?;
-                    return self.concat_lists(left, right, binary);
-                }
-                if self.types.is_counter(left.ty) && self.types.is_counter(right.ty) {
-                    return self.counter_math(binary.op, left, right, false, expression);
-                }
-                return self.binary_expr(binary.op, left, right, expression);
             }
             ast::Expr::UnaryOp(unary) => {
                 let value = if unary.op == ast::UnaryOp::Not {
