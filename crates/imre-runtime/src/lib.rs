@@ -781,7 +781,8 @@ pub extern "C" fn imre_none_str() -> *const Str {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler supplies the readable constant span.
-    Rc::into_raw(Rc::new(Str::new(unsafe { text(data, length) })))
+    let literal = unsafe { text(data, length) };
+    Rc::into_raw(objects::literal_string(literal))
 }
 
 /// # Safety
@@ -791,7 +792,11 @@ pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *co
 pub unsafe extern "C" fn imre_str_static_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler's string globals have static storage duration.
     let literal: &'static str = unsafe { text(data, length) };
-    Rc::into_raw(Rc::new(Str::const_new(literal)))
+    Rc::into_raw(if literal.len() <= 2 {
+        objects::literal_string(literal)
+    } else {
+        Rc::new(Str::const_new(literal))
+    })
 }
 
 /// # Safety
