@@ -356,6 +356,7 @@ impl Builtin {
             | Self::JsonIter
             | Self::JsonLen
             | Self::JsonSelect(_)
+            | Self::TupleGet
             | Self::ListGet
             | Self::ListGetBounded { .. }
             | Self::CacheProbe(_)
@@ -441,6 +442,7 @@ impl Builtin {
             | Self::StrEnumValue
             | Self::EnumString
             | Self::StringListContains
+            | Self::StructListContains
             | Self::StringContains
             | Self::BytesContains
             | Self::UnionInject
@@ -585,6 +587,9 @@ impl Builtin {
         };
         let valid = match self {
             Self::RecordCopy => matches!(result, Type::Class(_)) && signature(&[result], result),
+            Self::TupleGet => {
+                matches!(args, [tuple, index] if index.ty == Type::Int && types.homogeneous_tuple_element(tuple.ty) == Some(result))
+            }
             Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
