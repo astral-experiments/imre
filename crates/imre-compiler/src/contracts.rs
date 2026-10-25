@@ -93,6 +93,7 @@ impl Builtin {
                     TextOperation::SplitLineEnds
                     | TextOperation::ExpandTabs
                     | TextOperation::Lower
+                    | TextOperation::Upper
                     | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
@@ -974,6 +975,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_get"
                 | "imre_str_expandtabs"
                 | "imre_str_lower"
+                | "imre_str_upper"
                 | "imre_str_capitalize"
                 | "imre_str_slice"
                 | "imre_str_int_list"

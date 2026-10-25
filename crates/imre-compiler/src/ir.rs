@@ -1189,6 +1189,7 @@ pub(crate) enum TextOperation {
     SplitLineEnds,
     ExpandTabs,
     Lower,
+    Upper,
     Capitalize,
     /// True splits from the right.
     Split(bool),
