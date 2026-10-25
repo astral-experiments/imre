@@ -5,11 +5,11 @@ use super::{
     files, finish,
     text::python_alnum,
 };
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 #[derive(Default)]
 struct Config {
-    tag: Option<Rc<Str>>,
-    prefix: Option<Rc<Str>>,
+    tag: Option<crate::StrOwner>,
+    prefix: Option<crate::StrOwner>,
 }
 thread_local! { static CONFIG: RefCell<Config> = RefCell::default(); }
 #[unsafe(no_mangle)]
@@ -20,14 +20,14 @@ pub extern "C" fn imre_cache_paths_init(read_env: u32) {
     let p = std::env::var("PYTHONPYCACHEPREFIX")
         .ok()
         .filter(|p| !p.is_empty());
-    CONFIG.with_borrow_mut(|c| c.prefix = p.map(|p| Rc::new(Str::from(p))));
+    CONFIG.with_borrow_mut(|c| c.prefix = p.map(|p| crate::StrOwner::new(Str::from(p))));
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_cache_config_get(prefix: u32) -> usize {
     CONFIG.with_borrow(|c| {
         (if prefix != 0 { &c.prefix } else { &c.tag })
             .as_ref()
-            .map_or(0, |v| Rc::into_raw(v.clone()) as usize)
+            .map_or(0, |v| crate::StrOwner::into_raw(v.clone()) as usize)
     })
 }
 /// # Safety
@@ -38,7 +38,7 @@ pub unsafe extern "C" fn imre_cache_config_set(prefix: u32, value: usize) {
         None
     } else {
         // SAFETY: retain the exact caller object in the public attribute.
-        Some(unsafe { super::acquire_rc::<Str>(value) })
+        Some(unsafe { crate::StrOwner::acquire_word(value) })
     };
     CONFIG.with_borrow_mut(|c| {
         if prefix != 0 {
@@ -48,7 +48,7 @@ pub unsafe extern "C" fn imre_cache_config_set(prefix: u32, value: usize) {
         }
     });
 }
-fn tag() -> Result<Rc<Str>, Error> {
+fn tag() -> Result<crate::StrOwner, Error> {
     CONFIG.with_borrow(|c| c.tag.clone()).ok_or_else(|| {
         Error::new(
             Kind::NotImplementedError,
@@ -58,7 +58,7 @@ fn tag() -> Result<Rc<Str>, Error> {
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_cache_path_tag() -> *const Str {
-    finish(tag().map(Rc::into_raw), std::ptr::null())
+    finish(tag().map(crate::StrOwner::into_raw), std::ptr::null())
 }
 // Bootstrap splits root-only heads differently from posixpath.split.
 fn split(path: &str) -> (&str, &str) {
@@ -172,7 +172,10 @@ pub unsafe extern "C" fn imre_cache_from_source(
 ) -> *const Str {
     // SAFETY: all three strings remain live for the call.
     let result = unsafe { cache_name(&*path, &*tag, &*optimization) };
-    finish(result.map(|s| Rc::into_raw(Rc::new(s))), std::ptr::null())
+    finish(
+        result.map(|s| crate::StrOwner::into_raw(crate::StrOwner::new(s))),
+        std::ptr::null(),
+    )
 }
 /// # Safety
 /// The checked tag and filesystem path are rooted strings.
@@ -180,13 +183,16 @@ pub unsafe extern "C" fn imre_cache_from_source(
 pub unsafe extern "C" fn imre_source_from_cache(_tag: *const Str, path: *const Str) -> *const Str {
     // SAFETY: the path remains live for the call.
     finish(
-        unsafe { source_name(&*path) }.map(|s| Rc::into_raw(Rc::new(s))),
+        unsafe { source_name(&*path) }.map(|s| crate::StrOwner::into_raw(crate::StrOwner::new(s))),
         std::ptr::null(),
     )
 }
-pub(super) fn module_cache(path: &str, optimization: &str) -> Result<Option<Rc<Str>>, Error> {
+pub(super) fn module_cache(
+    path: &str,
+    optimization: &str,
+) -> Result<Option<crate::StrOwner>, Error> {
     let tag = CONFIG.with_borrow(|c| c.tag.clone());
-    tag.map(|tag| cache_name(path, &tag, optimization).map(Rc::new))
+    tag.map(|tag| cache_name(path, &tag, optimization).map(crate::StrOwner::new))
         .transpose()
 }
 

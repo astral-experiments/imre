@@ -4,6 +4,7 @@
 //! Only its temporary syntax tree is dynamic; published values use the same exact
 //! native storage and cleanup rules as typed JSON.
 
+use crate::StrOwner;
 use ::toml::de::{DeTable, DeValue};
 
 use super::*;
@@ -69,11 +70,14 @@ fn optional(value: OwnedWord, schema: &Schema) -> OwnedWord {
     unsafe { OwnedWord::from_owned(word, schema.storage()) }
 }
 
-fn copy_string(value: &str, allocation: &mut Option<Error>) -> Result<Rc<Str>, String> {
-    Str::try_new(value).map(Rc::new).map_err(|_| {
-        *allocation = Some(Error::allocation());
-        String::new()
-    })
+fn copy_string(value: &str, allocation: &mut Option<Error>) -> Result<crate::StrOwner, String> {
+    Str::try_new(value)
+        .ok()
+        .and_then(|text| StrOwner::try_new(text).ok())
+        .ok_or_else(|| {
+            *allocation = Some(Error::allocation());
+            String::new()
+        })
 }
 
 fn convert(
@@ -95,7 +99,9 @@ fn convert(
                 .ok_or("invalid TOML integer")?;
             integer.into_raw()
         }
-        (STRING, DeValue::String(value)) => Rc::into_raw(copy_string(value, allocation)?) as usize,
+        (STRING, DeValue::String(value)) => {
+            StrOwner::into_raw(copy_string(value, allocation)?) as usize
+        }
         (BOOLEAN, DeValue::Boolean(value)) => usize::from(*value),
         (FLOAT, DeValue::Float(value)) => value
             .as_str()
@@ -136,7 +142,7 @@ fn convert(
             let mut result = super::super::mappings::Mapping::new(3, child.word_kind);
             for (name, value) in values {
                 let value = convert(value.get_ref(), child, allocation)?;
-                let word = Rc::into_raw(copy_string(name.get_ref(), allocation)?) as usize;
+                let word = StrOwner::into_raw(copy_string(name.get_ref(), allocation)?) as usize;
                 // SAFETY: the key transfers one newly allocated string owner.
                 let key = unsafe { OwnedWord::from_owned(word, WordKind::new(3)) };
                 assert!(
@@ -303,10 +309,13 @@ pub unsafe extern "C" fn imre_toml_keys(text: *const Str) -> *const Object {
         // SAFETY: this is one fresh set owner.
         let keys = unsafe { Rc::from_raw(super::super::mappings::imre_set_new(3)) };
         for (name, _) in table {
-            let string = Rc::new(Str::new(name.get_ref()));
+            let string = StrOwner::new(Str::new(name.get_ref()));
             // SAFETY: the set has string key storage and insertion retains the rooted key.
             unsafe {
-                super::super::mappings::set_add(Rc::as_ptr(&keys), Rc::as_ptr(&string) as usize)
+                super::super::mappings::set_add(
+                    Rc::as_ptr(&keys),
+                    StrOwner::as_ptr(&string) as usize,
+                )
             }?;
         }
         Ok(Rc::into_raw(keys))
