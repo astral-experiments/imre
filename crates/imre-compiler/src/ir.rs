@@ -1212,6 +1212,8 @@ pub(crate) enum LogOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     Open,
+    Unlink,
+    Remove,
     Seek,
     Pipe,
     Dup2,
