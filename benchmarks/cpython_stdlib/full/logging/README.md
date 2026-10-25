@@ -25,19 +25,19 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-This replay of `7c331cd` includes the level registry, timed file handler,
-records, formatter styles, buffering formatters and named filters. The counts are identical at both levels:
+This replay of `789d115` includes logger hierarchy, the level registry, timed file
+handlers, records, formatter styles, buffering formatters and filters. Both levels have the same counts:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 8 |
+| Imre | Imre | Imre | CPython hooks and native child | 9 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 30 |
-| Blocked before execution | | | | 227 |
+| Blocked before execution | | | | 226 |
 | Unchanged reference skip | | | | 3 |
 
-No occurrence is fully native. The eight native assertion cases cover root
-logger identity, level-name mapping independence, daily rollover with an
+No occurrence has a fully native fixture. The nine native assertion cases cover root
+logger identity, immediate children, level-name mapping independence, daily rollover with an
 explicit time, record representation, formatter precision, both buffering formatter methods,
 and an empty name filter. The four
 output cases verify emitted native stderr with the original CPython helper.
