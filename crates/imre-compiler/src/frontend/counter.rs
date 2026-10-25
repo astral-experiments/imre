@@ -3,6 +3,28 @@
 
 use super::*;
 
+/// Counter ordering compares counts for the union of keys even when the two
+/// key types differ. Other operator families retain their ordinary type checks.
+pub(super) fn comparison(
+    types: &Types,
+    left: Type,
+    right: Type,
+    op: ast::CmpOp,
+) -> Option<Compare> {
+    if !(types.is_counter(left) && types.is_counter(right)) {
+        return None;
+    }
+    Some(match op {
+        ast::CmpOp::Eq => Compare::Equal,
+        ast::CmpOp::NotEq => Compare::NotEqual,
+        ast::CmpOp::Lt => Compare::Less,
+        ast::CmpOp::LtE => Compare::LessEqual,
+        ast::CmpOp::Gt => Compare::Greater,
+        ast::CmpOp::GtE => Compare::GreaterEqual,
+        _ => return None,
+    })
+}
+
 impl Checker<'_> {
     /// Root all evaluated call arguments until the catchable argument error.
     fn counter_call_error(
