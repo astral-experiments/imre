@@ -10,8 +10,9 @@ use super::{LOGGERS, name};
 /// Both the writable stream and the exact string stay live for the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_output_write(stream: *const Object, text: *const Str) -> usize {
-    // SAFETY: these sealed streams cannot call user code while mutably borrowed.
+    // SAFETY: the caller keeps the exact string alive for this write.
     let text = unsafe { &*text };
+    // SAFETY: the caller roots the stream, and these sealed writes cannot reenter it.
     let result = unsafe {
         object(stream).0.with_mut(|s| match s {
             Storage::CodecWriter(writer) => writer.write(text).map(|()| 0),
