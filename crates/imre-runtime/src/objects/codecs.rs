@@ -10,16 +10,33 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-static CP1251: LazyLock<Charmap> = LazyLock::new(|| Charmap::named("cp1251").unwrap());
-static CP1251_ENCODE: LazyLock<HashMap<char, u8>> = LazyLock::new(|| {
-    (0..=u8::MAX)
-        .filter_map(|b| CP1251.decode(b).map(|ch| (ch, b)))
-        .collect()
-});
+pub(super) struct CodePage {
+    index: usize,
+    decode: Charmap,
+    encode: HashMap<char, u8>,
+}
+
+impl CodePage {
+    /// Reuse the pinned source decoding table in both directions.
+    fn new(index: usize, name: &str) -> Self {
+        let decode = Charmap::named(name).unwrap();
+        let encode = (0..=u8::MAX)
+            .filter_map(|byte| decode.decode(byte).map(|ch| (ch, byte)))
+            .collect();
+        Self {
+            index,
+            decode,
+            encode,
+        }
+    }
+}
+
+static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"));
+static CP424: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(5, "cp424"));
 
 thread_local! {
     static REGISTRY: RefCell<HashMap<String, Rc<Object>>> = RefCell::default();
-    static NAMES: [Rc<Str>; 5] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig", "cp1251"].map(|s| Rc::new(Str::new(s)));
+    static NAMES: [Rc<Str>; 6] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig", "cp1251", "cp424"].map(|s| Rc::new(Str::new(s)));
 }
 
 /// Collapse non-ASCII-alphanumeric separators, retaining dots in codec names.
@@ -123,7 +140,7 @@ pub(super) enum Codec {
     Utf8 { signature: bool },
     Latin1,
     Ascii,
-    Cp1251,
+    CodePage(&'static CodePage),
 }
 
 impl Codec {
@@ -133,7 +150,7 @@ impl Codec {
             Self::Latin1 => 1,
             Self::Utf8 { signature: false } => 2,
             Self::Utf8 { signature: true } => 3,
-            Self::Cp1251 => 4,
+            Self::CodePage(page) => page.index,
         }
     }
 
@@ -147,7 +164,8 @@ impl Codec {
                 Ok(Self::Utf8 { signature: false })
             }
             "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
-            "cp1251" | "1251" | "windows_1251" => Ok(Self::Cp1251),
+            "cp1251" | "1251" | "windows_1251" => Ok(Self::CodePage(&CP1251)),
+            "cp424" | "424" | "csibm424" | "ebcdic_cp_he" | "ibm424" => Ok(Self::CodePage(&CP424)),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
                 Ok(Self::Latin1)
@@ -164,10 +182,10 @@ impl Codec {
 
     pub(super) fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
         match self {
-            Self::Cp1251 => {
+            Self::CodePage(page) => {
                 let mut text = String::with_capacity(data.len());
                 for (i, &byte) in data.iter().enumerate() {
-                    if let Some(ch) = CP1251.decode(byte) {
+                    if let Some(ch) = page.decode.decode(byte) {
                         text.push(ch);
                     } else {
                         decoding_error(&mut text, errors, &[byte], || {
@@ -238,12 +256,12 @@ impl Codec {
             }
             Self::Ascii => ("ascii", "ordinal not in range(128)"),
             Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
-            Self::Cp1251 => ("charmap", "character maps to <undefined>"),
+            Self::CodePage(_) => ("charmap", "character maps to <undefined>"),
         };
         let encoded = |ch: char| match self {
             Self::Ascii => ch.is_ascii().then_some(ch as u8),
             Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
-            Self::Cp1251 => CP1251_ENCODE.get(&ch).copied(),
+            Self::CodePage(page) => page.encode.get(&ch).copied(),
             Self::Utf8 { .. } => unreachable!(),
         };
         let mut out = Vec::with_capacity(text.len());
@@ -253,31 +271,43 @@ impl Codec {
                 out.push(byte);
                 continue;
             }
-            match errors.unwrap_or("strict") {
-                "ignore" => (),
-                "replace" => out.push(b'?'),
-                "backslashreplace" => out.extend(escaped(ch).as_bytes()),
-                "xmlcharrefreplace" => out.extend(format!("&#{};", u32::from(ch)).as_bytes()),
+            let replacement: Cow<'_, str> = match errors.unwrap_or("strict") {
+                "ignore" => continue,
+                "replace" => "?".into(),
+                "backslashreplace" => escaped(ch).into(),
+                "xmlcharrefreplace" => format!("&#{};", u32::from(ch)).into(),
+                "namereplace" => unicode_names2::name(ch)
+                    .map_or_else(|| escaped(ch), |name| format!("\\N{{{name}}}"))
+                    .into(),
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
                     while let Some((i, _)) = chars.next_if(|(_, c)| encoded(*c).is_none()) {
                         end = i;
                     }
-                    let at = if start == end {
-                        format!("character '{}' in position {start}", escaped(ch))
-                    } else {
-                        format!("characters in position {start}-{end}")
-                    };
-                    return Err(Error::new(
-                        Kind::UnicodeEncodeError,
-                        format!("'{codec}' codec can't encode {at}: {reason}"),
-                    ));
+                    return Err(encoding_error(codec, reason, start, end, ch));
                 }
                 name => return Err(unknown_handler(name)),
+            };
+            for c in replacement.chars() {
+                out.push(
+                    encoded(c).ok_or_else(|| encoding_error(codec, reason, start, start, ch))?,
+                );
             }
         }
         Ok(Cow::Owned(out))
     }
+}
+
+fn encoding_error(codec: &str, reason: &str, start: usize, end: usize, ch: char) -> Error {
+    let at = if start == end {
+        format!("character '{}' in position {start}", escaped(ch))
+    } else {
+        format!("characters in position {start}-{end}")
+    };
+    Error::new(
+        Kind::UnicodeEncodeError,
+        format!("'{codec}' codec can't encode {at}: {reason}"),
+    )
 }
 
 fn escaped(ch: char) -> String {

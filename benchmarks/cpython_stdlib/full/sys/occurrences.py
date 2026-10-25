@@ -1,8 +1,10 @@
 """Evidence for unsuccessful and platform-specific test_sys occurrences."""
 import ast
+import hashlib
 from pathlib import Path
 
 from exit_case import exit_observation
+from ioencoding_case import observe as ioencoding_observation
 from suite_evidence import roles
 from suite_inventory import load_suite
 from suite_native import NativeCompileError, native_method, run_in_fixtures, testcase_fixture
@@ -72,6 +74,11 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
         folder.mkdir()
         if cls == "SysModuleTest" and method == "test_exit":
             results[key] = exit_observation(module, toolchain, folder, source)
+            continue
+        if cls == "SysModuleTest" and method == "test_ioencoding":
+            lines = source.read_bytes().splitlines(keepends=True)
+            method_sha256 = hashlib.sha256(b"".join(lines[node.lineno - 1:node.end_lineno])).hexdigest()
+            results[key] = ioencoding_observation(module, toolchain, method_sha256)
             continue
         used = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
         preamble = "\n".join(imports[n] for n in sorted(used & imports.keys()))

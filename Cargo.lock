@@ -701,6 +701,7 @@ dependencies = [
  "toml",
  "toml_parser",
  "unicode-case-mapping",
+ "unicode_names2",
 ]
 
 [[package]]
