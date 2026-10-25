@@ -162,6 +162,10 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' && (inputs.audit == 'key-body' || inputs.audit == 'decoder-merge' || inputs.audit == 'decoder-current-main') }}
         shell: bash
         run: |
+          set -euo pipefail
+          if [[ "$JSON_AUDIT" == decoder-current-main ]]; then
+            python3 -B tests/paths.py --compiler "$JSON_IMRE" --runtime "$JSON_RUNTIME" --clang /usr/bin/clang-18 --opt-levels 0 3 --fixture metadata_views | tee "$JSON_RESULTS/pathinfo-identity.txt"
+          fi
           python3 -B - <<'PY'
           import os, subprocess, sys, tempfile
           from pathlib import Path
