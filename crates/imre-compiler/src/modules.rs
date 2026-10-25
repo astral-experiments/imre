@@ -208,6 +208,7 @@ pub(crate) enum Intrinsic {
     AssertNever,
     Cast,
     Path,
+    PurePath(crate::ir::PathFlavor),
     Which,
     TemporaryDirectory,
     SubprocessRun,
@@ -414,6 +415,12 @@ impl IntrinsicModule {
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
             (Self::Pathlib, "Path" | "PosixPath") => Intrinsic::Path,
+            (Self::Pathlib, "PurePath" | "PurePosixPath") => {
+                Intrinsic::PurePath(crate::ir::PathFlavor::Posix)
+            }
+            (Self::Pathlib, "PureWindowsPath") => {
+                Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
+            }
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
