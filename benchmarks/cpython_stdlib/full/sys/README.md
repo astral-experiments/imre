@@ -33,6 +33,7 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
 - `test_43581`: the complete method, both stream attributes, equality and assertion execute in the native binary.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.
+- `test_implementation`: the original parent reads the five PEP 421 fields, the version components and the version slice in Imre. The 30 native operations include the implementation name used by the original CPython-only branch guard. The pinned CPython parent owns the assertions and fixture. Imre reports its own release, no bytecode cache tag, and no isolated interpreters.
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
 
 The existing [stream and exit smoke runner](../../native_sys.py) exercises four
@@ -51,7 +52,13 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-This baseline was executed with Imre compiler/runtime source `20f02ee43e0f33306ae8a7917d0d222d66972602`. The pinned suite has no companion module. The two shorter `native-O*.json`
+The `test_implementation` records were measured on compiler/runtime source
+`dc0ea48199b4afbef27eeeca5aeb4f85224acabe`; the other records are the
+current parent baseline from `20f02ee43e0f33306ae8a7917d0d222d66972602`.
+The metadata record exposes the five PEP 421 fields with distinct native types.
+The current native SimpleNamespace dictionary accepts one value type; arbitrary
+metadata attributes and its Python dictionary interface are not measured here.
+The pinned suite has no companion module. The two shorter `native-O*.json`
 files retain their original records and are not additional test occurrences.
 
 The versioned gate loads the original suite and runs its selected methods
