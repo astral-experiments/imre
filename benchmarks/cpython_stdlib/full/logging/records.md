@@ -50,3 +50,14 @@ no suite occurrences. The default record factory is covered; replacing it with
 a Python callable is separate. No host logging operation is credited as native.
 
 The [full per-occurrence report](evidence-linux.json) at `773d272` changes exactly these two rows at each optimization level. The 270 other occurrence records, including the exact CP1251 bytes and all three reference skips, are identical to the preceding replay.
+
+## Extra fields on emitted events
+
+The [event comparison](../../../../tests/fixtures/files/logging_event_extra.py)
+checks 36 observations at O0 and O3. A disabled logger evaluates the level,
+message, arguments and extra mapping in order without creating a record. An
+enabled call rejects a protected name before a handler sees the record. A named
+logger and its parent receive the same record with the copied fields.
+Module-level calls install the default root handler before a conflicting extra
+raises. Heterogeneous literals, an aliased dictionary, `None`, and an empty
+mapping are covered. The comparison adds no suite IDs.
