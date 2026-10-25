@@ -49,10 +49,16 @@ def fixture_variant(case):
 @cache
 def intact_startup():
     checks = json.loads((HERE / "doctest-startup-linux.json").read_bytes())["checks"]
-    diagnostics = {row["diagnostic"] for row in checks}
-    if len(diagnostics) == 1 and all(row["exit"] for row in checks):
-        return ": ".join(diagnostics.pop().split(": Imre: ")[-2:])
-    return "see the four entry checks in doctest-startup-linux.json"
+    summaries = {}
+    for reachable in (False, True):
+        rows = [row for row in checks if row["reachable_only"] == reachable]
+        reasons = {": ".join(row["diagnostic"].split(": Imre: ")[-2:]) for row in rows}
+        if len(reasons) != 1 or not all(row["exit"] for row in rows):
+            return "see the four entry checks in doctest-startup-linux.json"
+        summaries[reachable] = reasons.pop()
+    if summaries[False] == summaries[True]:
+        return summaries[False]
+    return f"ordinary: {summaries[False]}; --reachable-only: {summaries[True]}"
 
 
 def missing(source, reference, variant, level):
