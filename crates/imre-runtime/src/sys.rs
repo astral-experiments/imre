@@ -1,4 +1,5 @@
 //! Process text streams and their native encoding and buffering.
+mod intern;
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initialize_io};
 use crate::objects::{Codec, errno_error};
 use std::io::{self, Write};

@@ -665,6 +665,8 @@ pub(crate) enum Builtin {
     SysVersionInfo {
         implementation: bool,
     },
+    SysIntern,
+    SysIsInterned,
     OsName,
     DocCaptureStart,
     DocCaptureTake,
