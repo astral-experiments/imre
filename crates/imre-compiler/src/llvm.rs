@@ -19,6 +19,7 @@ use crate::types::Types;
 
 mod asyncio;
 mod byte_outputs;
+mod calendar;
 mod callables;
 mod conditionals;
 mod integer_regions;
@@ -29,6 +30,7 @@ mod posixpath;
 mod processes;
 mod records;
 mod runtime;
+mod socket;
 mod stdlib;
 mod string_enums;
 mod structs;
@@ -101,12 +103,14 @@ impl Type {
             | Self::TimedFileHandler
             | Self::CacheState(_)
             | Self::ClockTime
+            | Self::Calendar(_)
             | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
             | Self::Poll
+            | Self::Socket
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -117,6 +121,7 @@ impl Type {
             | Self::JsonValue
             | Self::JsonObject
             | Self::RegexMatch
+            | Self::SourceModule
             | Self::BinaryIO
             | Self::Tuple(_) => "ptr",
             Self::None => "i8",
@@ -177,12 +182,14 @@ impl Type {
             | Self::TimedFileHandler
             | Self::CacheState(_)
             | Self::ClockTime
+            | Self::Calendar(_)
             | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
             | Self::Poll
+            | Self::Socket
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -193,6 +200,7 @@ impl Type {
             | Self::JsonValue
             | Self::JsonObject
             | Self::RegexMatch
+            | Self::SourceModule
             | Self::BinaryIO
             | Self::Tuple(_) => "null",
             Self::Bool
@@ -814,12 +822,14 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::Calendar(_)
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
             | Type::Poll
+            | Type::Socket
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -830,6 +840,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
+            | Type::SourceModule
             | Type::BinaryIO => "object",
             Type::Float | Type::Bool | Type::StrEnum(_) | Type::Enum(_) | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
@@ -3469,6 +3480,14 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp {predicate} i32 {order}, 0"))
                 }
+                Type::Calendar(_) => {
+                    let equality = matches!(predicate, "eq" | "ne");
+                    let order = self.checked_instruction(format!(
+                        "call i32 @imre_calendar_compare(ptr {}, ptr {}, i1 {equality})",
+                        left.operand, right.operand
+                    ));
+                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                }
                 Type::ClockTime => {
                     let order = self.instruction(format!(
                         "call i32 @imre_log_clock_compare(ptr {}, ptr {})",
@@ -3526,6 +3545,7 @@ impl Emitter<'_, '_> {
                 | Type::PathInfo
                 | Type::CodecInfo
                 | Type::Poll
+                | Type::Socket
                 | Type::Sha256
                 | Type::JsonDecoder
                 | Type::ZipFile
@@ -3541,6 +3561,7 @@ impl Emitter<'_, '_> {
                 | Type::StringIO
                 | Type::HandlerLock
                 | Type::CompletedProcess(..)
+                | Type::SourceModule
                 | Type::BinaryIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
                     left.ty.llvm(),
@@ -3922,6 +3943,19 @@ impl Emitter<'_, '_> {
             Builtin::StrEnumName | Builtin::StrEnumValue => {
                 self.enum_text(&args[0].value, matches!(builtin, Builtin::StrEnumName))
             }
+            Builtin::SourceModule => self.call(
+                "imre_source_module",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::SourceModuleAttribute { filename } => {
+                let name = if *filename {
+                    "imre_source_module_filename"
+                } else {
+                    "imre_source_module_name"
+                };
+                self.call(name, returns, &[&args[0].value])
+            }
             Builtin::NominalIdentity => {
                 let left = self.word(&args[0].value);
                 let right = self.word(&args[1].value);
@@ -4006,6 +4040,7 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::Calendar(operation) => self.calendar_builtin(*operation, returns, &args),
             Builtin::Timed(operation) => {
                 use crate::ir::TimedOperation::*;
                 let name = match operation {
@@ -4532,7 +4567,14 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::JsonIter => self.call("imre_json_iter", returns, &[&args[0].value]),
+            Builtin::JsonIter => {
+                let function = if args[0].value.ty == Type::JsonObject {
+                    "imre_json_object_keys"
+                } else {
+                    "imre_json_iter"
+                };
+                self.call(function, returns, &[&args[0].value])
+            }
             Builtin::JsonLen => self.call("imre_json_len", returns, &[&args[0].value]),
             Builtin::JsonGet { key, empty_list } => self.json_get(key, *empty_list, returns, &args),
             Builtin::JsonAdd => {
@@ -5095,6 +5137,7 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
+            Builtin::Socket(op) => self.socket_operation(*op, &args, returns),
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::HashNew => self.call(
                 "imre_hash_new",
@@ -6683,12 +6726,14 @@ impl Emitter<'_, '_> {
                     | Type::TimedFileHandler
                     | Type::CacheState(_)
                     | Type::ClockTime
+                    | Type::Calendar(_)
                     | Type::StrDescriptor(_)
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
                     | Type::PathInfo
                     | Type::CodecInfo
                     | Type::Poll
+                    | Type::Socket
                     | Type::Sha256
                     | Type::JsonDecoder
                     | Type::ZipFile
@@ -6699,6 +6744,7 @@ impl Emitter<'_, '_> {
                     | Type::JsonValue
                     | Type::JsonObject
                     | Type::RegexMatch
+                    | Type::SourceModule
                     | Type::BinaryIO
                     | Type::ModuleSpec(_)
                     | Type::CompletedProcess(..)
@@ -6939,6 +6985,7 @@ impl Emitter<'_, '_> {
             | Type::TextIO
             | Type::StringIO
             | Type::HandlerLock
+            | Type::SourceModule
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -6959,12 +7006,14 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::Calendar(_)
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
             | Type::Poll
+            | Type::Socket
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -7029,6 +7078,7 @@ impl Emitter<'_, '_> {
             | Type::TextIO
             | Type::StringIO
             | Type::HandlerLock
+            | Type::SourceModule
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -7049,12 +7099,14 @@ impl Emitter<'_, '_> {
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ClockTime
+            | Type::Calendar(_)
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
             | Type::Poll
+            | Type::Socket
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -7658,12 +7710,14 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::TimedFileHandler
         | Type::CacheState(_)
         | Type::ClockTime
+        | Type::Calendar(_)
         | Type::StrDescriptor(_)
         | Type::PlainObject
         | Type::SimpleNamespace(_)
         | Type::PathInfo
         | Type::CodecInfo
         | Type::Poll
+        | Type::Socket
         | Type::Sha256
         | Type::JsonDecoder
         | Type::ZipFile
@@ -7674,6 +7728,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::JsonValue
         | Type::JsonObject
         | Type::RegexMatch
+        | Type::SourceModule
         | Type::BinaryIO => 5,
         Type::Optional(_) => 256 | representation_kind(types.payload(ty).unwrap(), types),
     }
@@ -8070,6 +8125,34 @@ declare ptr @imre_linecache_line_int(ptr, i64, ptr)
 declare ptr @imre_linecache_line_float(ptr, double, ptr)
 declare ptr @imre_inspect_sentinel()
 declare ptr @imre_inspect_str_descriptor(i32)
+@imre_socket_af_inet = external constant i64
+@imre_socket_sock_stream = external constant i64
+@imre_socket_sol_socket = external constant i64
+@imre_socket_so_reuseaddr = external constant i64
+@imre_socket_ipproto_tcp = external constant i64
+@imre_socket_tcp_nodelay = external constant i64
+@imre_socket_somaxconn = external constant i64
+@imre_socket_so_sndbuf = external constant i64
+@imre_socket_so_rcvbuf = external constant i64
+@imre_socket_so_linger = external constant i64
+@imre_socket_msg_peek = external constant i64
+@imre_socket_default_backlog = external constant i64
+declare ptr @imre_socket_new(i64, i64, i64)
+declare void @imre_socket_bind(ptr, ptr)
+declare void @imre_socket_listen(ptr, i64)
+declare ptr @imre_socket_accept(ptr, ptr, ptr)
+declare void @imre_socket_connect(ptr, ptr)
+declare ptr @imre_socket_sockname(ptr, ptr)
+declare ptr @imre_socket_recv(ptr, i64, i64)
+declare i64 @imre_socket_send(ptr, ptr, i64)
+declare void @imre_socket_sendall(ptr, ptr, i64)
+declare void @imre_socket_close(ptr)
+declare i64 @imre_socket_fileno(ptr)
+declare void @imre_socket_setblocking(ptr, i64)
+declare i1 @imre_socket_getblocking(ptr)
+declare void @imre_socket_setsockopt(ptr, i64, i64, i64)
+declare void @imre_socket_setsockopt_bytes(ptr, i64, i64, ptr)
+declare i64 @imre_socket_getsockopt(ptr, i64, i64)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_codec_lookup(ptr)
 declare ptr @imre_codec_name(ptr)
@@ -8123,6 +8206,9 @@ declare ptr @imre_error_take()
 declare void @imre_error_set(ptr)
 declare i32 @imre_error_unhandled()
 declare i32 @imre_record_has_type(ptr, ptr) nounwind memory(read)
+declare ptr @imre_source_module(ptr, ptr)
+declare ptr @imre_source_module_name(ptr)
+declare ptr @imre_source_module_filename(ptr)
 declare ptr @imre_named_exception_new(ptr, ptr)
 declare ptr @imre_exception_new(i32, ptr)
 declare i32 @imre_exception_matches(ptr, i32)
@@ -8176,6 +8262,7 @@ declare ptr @imre_json_loads_bytes(ptr)
 declare i64 @imre_json_error_field(ptr, i32)
 declare ptr @imre_json_index(ptr, i64)
 declare ptr @imre_json_iter(ptr)
+declare ptr @imre_json_object_keys(ptr)
 declare i64 @imre_json_len(ptr)
 declare i64 @imre_json_get(ptr, ptr, i64, i32, i32, i64)
 declare ptr @imre_json_add(ptr, ptr)
@@ -8486,6 +8573,24 @@ declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)
+declare ptr @imre_calendar_delta(i32, i64, i64, i64, i64, i64, i64, i64)
+declare ptr @imre_calendar_datetime(i64, i64, i64, i64, i64, i64, i64, i64, i64)
+declare ptr @imre_calendar_zone(ptr, i64)
+declare ptr @imre_calendar_utc()
+declare ptr @imre_calendar_zone_limit(i1)
+declare ptr @imre_calendar_now(ptr)
+declare ptr @imre_calendar_shift(ptr, ptr, i1)
+declare ptr @imre_calendar_negate(ptr)
+declare i64 @imre_calendar_field(ptr,i64)
+declare i64 @imre_calendar_tzinfo(ptr)
+declare i64 @imre_calendar_offset(ptr)
+declare ptr @imre_calendar_zoneoffset(ptr)
+declare ptr @imre_calendar_zonename(ptr)
+declare ptr @imre_calendar_text(ptr,i1)
+declare double @imre_calendar_seconds(ptr)
+declare i1 @imre_calendar_truth(ptr)
+declare i1 @imre_calendar_equal_optional(i64,i64)
+declare i32 @imre_calendar_compare(ptr,ptr,i1)
 declare ptr @imre_log_clock_new(i64, i64, i64, i64, i8, i64)
 declare i32 @imre_log_clock_compare(ptr, ptr)
 declare i64 @imre_log_clock_part(ptr, i64)
