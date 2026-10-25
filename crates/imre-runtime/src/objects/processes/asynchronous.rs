@@ -30,7 +30,7 @@ unsafe fn wait_for_process(handle: *const Object) -> bool {
     }
     // SAFETY: the compiler roots this exact process through the await.
     let owner: Rc<Object> = unsafe { acquire_rc(handle as usize) };
-    ready(&owner) || asyncio::suspend(Box::new(move || ready(&owner)))
+    ready(&owner) || asyncio::suspend(Rc::new(move || ready(&owner))).is_none()
 }
 
 pub(in crate::objects) struct AsyncProcess {
@@ -179,7 +179,7 @@ pub unsafe extern "C" fn imre_async_process_communicate(
                 .enumerate()
             {
                 let owner: *const Bytes = if captured {
-                    Rc::into_raw(Rc::new(std::mem::take(bytes)))
+                    crate::BytesOwner::into_raw(crate::BytesOwner::new(std::mem::take(bytes)))
                 } else {
                     std::ptr::null()
                 };

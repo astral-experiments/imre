@@ -64,6 +64,11 @@ except LookupError as exc:
     print(str(exc))
     print(path.read_bytes())
 
+try:
+    path.write_text("ë", encoding="ascii", errors="x" * 398 + "雪tail")
+except LookupError as exc:
+    print(str(exc))
+
 
 write_variant(path, "union string")
 write_variant(path, b"union bytes")

@@ -6,5 +6,8 @@
   "files": {
     "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
     "Lib/test/test_functools.py": "16adb8dad7d8bc33f899e3c5778e65c7b79e2b39"
+  },
+  "interpreter_fixtures": {
+    "Lib/test/support/__init__.py": "6635ec3474e12ec6a2f684a1a93b6ec08df49a37"
   }
 }

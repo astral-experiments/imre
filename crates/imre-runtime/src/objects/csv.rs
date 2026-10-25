@@ -1,5 +1,6 @@
 //! Lazy, string-valued CSV rows. A pull retains only the current field and row.
 
+use crate::StrOwner;
 use std::ptr;
 use std::rc::Rc;
 
@@ -12,12 +13,12 @@ type Result<T> = std::result::Result<T, Error>;
 enum Lines {
     List(Rc<Object>, usize),
     File(Rc<Object>),
-    Text(Rc<Str>, usize),
+    Text(StrOwner, usize),
     End,
 }
 
 impl Lines {
-    fn next(&mut self) -> Result<Option<Rc<Str>>> {
+    fn next(&mut self) -> Result<Option<StrOwner>> {
         match self {
             Self::List(lines, index) => {
                 // SAFETY: the concrete list and its string stay rooted during this nonreentrant read.
@@ -26,7 +27,7 @@ impl Lines {
                         s.sequence()
                             .values
                             .get(*index)
-                            .map(|&word| acquire_rc(word))
+                            .map(|&word| crate::StrOwner::acquire_word(word))
                     })
                 };
                 if value.is_some() {
@@ -39,7 +40,7 @@ impl Lines {
             Self::File(file) => {
                 // SAFETY: this rooted file is distinct from its CSV reader; reading cannot reenter.
                 let line = unsafe { file.0.with_mut(|s| s.file_mut().readline()) }?;
-                Ok((!line.is_empty()).then(|| Rc::new(line)))
+                Ok((!line.is_empty()).then(|| StrOwner::new(line)))
             }
             Self::Text(text, byte) => {
                 let Some(ch) = text[*byte..].chars().next() else {
@@ -47,7 +48,7 @@ impl Lines {
                     return Ok(None);
                 };
                 let end = *byte + ch.len_utf8();
-                let line = Rc::new(Str::new(&text[*byte..end]));
+                let line = StrOwner::new(Str::new(&text[*byte..end]));
                 *byte = end;
                 Ok(Some(line))
             }
@@ -160,7 +161,7 @@ impl Row {
         let value = Str::from(std::mem::take(&mut self.field));
         self.fields
             .values
-            .push(Rc::into_raw(Rc::new(value)) as usize);
+            .push(StrOwner::into_raw(StrOwner::new(value)) as usize);
         self.chars = 0;
         Ok(())
     }
@@ -363,7 +364,7 @@ unsafe fn create(
                 }
                 Lines::File(acquire_rc(source as usize))
             }
-            2 => Lines::Text(acquire_rc(source as usize), 0),
+            2 => Lines::Text(crate::StrOwner::acquire_word(source as usize), 0),
             _ => unreachable!(),
         }
     };
