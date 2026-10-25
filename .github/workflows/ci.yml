@@ -231,7 +231,7 @@ jobs:
             Lib/ensurepip/_bundled
             Modules
           persist-credentials: false
-      - name: Check native string line boundaries and whitespace against CPython
+      - name: Check native string line boundaries and Unicode predicates against CPython
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
         run: python3 tests/text_line_methods_upstream.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
