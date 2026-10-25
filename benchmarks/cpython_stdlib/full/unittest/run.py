@@ -32,7 +32,6 @@ EQUALITY_BLOCKERS = {
     "testAssertEqual_shorten": (1067, "9:9: Imre: unknown class method"),
 }
 MOCK_BLOCKERS = {
-    "test_assert_called_once_message_not_called": (1858, "10:9: Imre: unknown class method"),
     "test_reset_mock": (337, '9:35: Imre: unexpected keyword argument "parent"'),
     "test_reset_mock_recursion": (377, "8:9: Imre: properties are read-only"),
     "test_reset_sideeffect": (1890, '7:18: Imre: unexpected keyword argument "return_value"'),
@@ -97,7 +96,7 @@ def run(args, level, root):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["equality_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
+    for name in ["equality_protocol", "membership", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
                  "callable_binding", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
@@ -132,6 +131,8 @@ def run(args, level, root):
         ("testmock.testmock", "MockTest", "test_assert_called", "unittest.mock.Mock.assert_called"),
         ("testmock.testmock", "MockTest", "test_assert_called_once", "unittest.mock.Mock.assert_called_once"),
         ("testmock.testmock", "MockTest", "test_ordered_call_signature", "unittest.mock.Mock.call_args and its representation"),
+        ("testmock.testmock", "MockTest", "test_assert_called_once_message_not_called",
+         "unittest.TestCase.assertNotIn and the message from unittest.mock.Mock.assert_called_once"),
         *(("testmock.testmock", "MockTest", method, "unittest.TestCase.assertRaises and unittest.mock.Mock." + assertion)
           for method, assertion in (("test_assert_any_call", "assert_any_call"),
                                     ("test_assert_called_with", "assert_called_with"),
