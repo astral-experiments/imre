@@ -82,6 +82,7 @@ pub(crate) enum IntrinsicModule {
     Shutil,
     Sysconfig,
     Signal,
+    Opcode,
     Unidiff,
     Pathlib,
     Shlex,
@@ -100,6 +101,7 @@ pub(crate) enum IntrinsicModule {
     Io,
     Gzip,
     Hashlib,
+    Types,
     Base64,
     Zipfile,
     Csv,
@@ -172,7 +174,7 @@ pub(crate) enum Intrinsic {
     Devnull,
     CheckOutput,
     NullContext,
-    SignalNumber(i64),
+    IntConstant(i64),
     WallTime,
     TimeSleep,
     PatchSet,
@@ -217,6 +219,7 @@ pub(crate) enum Intrinsic {
     UrlsafeB64encode,
     Sha256,
     HashNew,
+    SimpleNamespace,
     HashAvailable,
     ZipFile,
     ZipInfo,
@@ -328,6 +331,7 @@ impl IntrinsicModule {
             "shutil" => Some(Self::Shutil),
             "sysconfig" => Some(Self::Sysconfig),
             "signal" => Some(Self::Signal),
+            "_opcode" => Some(Self::Opcode),
             "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
             "sys" => Some(Self::Sys),
@@ -350,6 +354,7 @@ impl IntrinsicModule {
             "textwrap" => Some(Self::Textwrap),
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
+            "types" => Some(Self::Types),
             "hashlib" => Some(Self::Hashlib),
             "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
@@ -442,8 +447,12 @@ impl IntrinsicModule {
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
-            (Self::Signal, "SIGINT") => Intrinsic::SignalNumber(2),
-            (Self::Signal, "SIGTERM") => Intrinsic::SignalNumber(15),
+            (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
+            (Self::Signal, "SIGTERM") => Intrinsic::IntConstant(15),
+            // Native executables have no adaptive bytecode interpreter.
+            (Self::Opcode, "ENABLE_SPECIALIZATION" | "ENABLE_SPECIALIZATION_FT") => {
+                Intrinsic::IntConstant(0)
+            }
             (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
             (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
@@ -530,6 +539,7 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
@@ -823,6 +833,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::MissingArgument(call));
     }
 
+    /// This exact operand is excessive for a resolved native method that raises TypeError.
+    pub(crate) fn checked_excess_argument(&self, module: ModuleId, argument: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::ExcessArgument(argument));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,
@@ -1114,6 +1130,8 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
 
 struct Loader<'a> {
     fs: FileSystem<'a>,
+    /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
+    checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     inputs: crate::SourceInputs,
     root: PathBuf,
     extension_roots: Vec<PathBuf>,
@@ -1155,6 +1173,7 @@ impl<'a> Loader<'a> {
             session: Session::new(&root, &extension_roots)?,
             extension_roots,
             inputs: crate::SourceInputs::default(),
+            checked_builtin_imports: Vec::new(),
             root,
             modules: Vec::new(),
             by_name: HashMap::new(),
@@ -1303,10 +1322,14 @@ impl<'a> Loader<'a> {
         }
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
+        let mut checked_diagnostics = vec![Vec::new(); self.modules.len()];
+        for (id, name) in self.checked_builtin_imports {
+            checked_diagnostics[id].push(CheckedDiagnostic::BuiltinImport(name));
+        }
         let mut graph = SourceGraph {
             command_startup: None,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
-            checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -1539,6 +1562,9 @@ impl<'a> Loader<'a> {
                         }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
+                        if module == IntrinsicModule::Opcode {
+                            self.checked_builtin_imports.push((id, alias.range()));
+                        }
                         continue;
                     }
                     let leaf = self.load_module(name)?;
@@ -1582,6 +1608,11 @@ impl<'a> Loader<'a> {
                             })?;
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), binding, alias)?;
+                    }
+                    if module == IntrinsicModule::Opcode
+                        && let Some(name) = &import.module
+                    {
+                        self.checked_builtin_imports.push((id, name.range()));
                     }
                     return Ok(());
                 }

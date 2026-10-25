@@ -2,6 +2,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 thread_local! {static FLAGS:Cell<u8> = const {Cell::new(15)};}
+use num_traits::ToPrimitive;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -252,7 +253,13 @@ impl Record {
 /// decide whether an empty argument tuple bypasses formatting (only LogRecord does that).
 fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
     let tuple = tuple_len(args);
-    let mut pos = 0;
+    let mut positional = (0..tuple.unwrap_or(1)).map(|i| {
+        if tuple.is_some() {
+            tuple_item(args, i)
+        } else {
+            args.clone()
+        }
+    });
     let mut out = String::new();
     let mut input = msg;
     while let Some((literal, rest)) = input.split_once('%') {
@@ -262,30 +269,22 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
             input = rest;
             continue;
         }
-        let (value, rest) = if let Some(rest) = rest.strip_prefix('(') {
+        let (piece, tail) = if let Some(rest) = rest.strip_prefix('(') {
             if !is_dict(args) {
                 return Err(Error::new(Kind::TypeError, "format requires a mapping"));
             }
-            let (key, rest) = rest
-                .split_once(')')
-                .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format key"))?;
-            (Some(dict_item(args, key)?), rest)
-        } else if pos >= tuple.unwrap_or(1) {
-            (None, rest)
+            let (key, rest) = mapping_key(rest)?;
+            // A named conversion replaces the sole positional mapping with
+            // the looked-up value. Later named conversions can still use args.
+            let _ = positional.next();
+            percent_value_in(rest, &mut std::iter::once(dict_item(args, key)?), Some(msg))?
         } else {
-            let val = if tuple.is_some() {
-                tuple_item(args, pos)
-            } else {
-                args.clone()
-            };
-            pos += 1;
-            (Some(val), rest)
+            percent_value_in(rest, &mut positional, Some(msg))?
         };
-        let (piece, tail) = percent_value_in(rest, value.as_ref(), Some(msg))?;
         out.push_str(&piece);
         input = tail;
     }
-    if !is_dict(args) && pos < tuple.unwrap_or(1) {
+    if !is_dict(args) && positional.len() != 0 {
         return Err(Error::new(
             Kind::TypeError,
             "not all arguments converted during string formatting",
@@ -293,6 +292,20 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
     }
     out.push_str(input);
     Ok(out)
+}
+
+/// Find the closing delimiter after "%(", allowing balanced parentheses in the key.
+pub(super) fn mapping_key(rest: &str) -> Result<(&str, &str)> {
+    let mut nested = 0usize;
+    for (i, b) in rest.bytes().enumerate() {
+        match b {
+            b'(' => nested += 1,
+            b')' if nested == 0 => return Ok((&rest[..i], &rest[i + 1..])),
+            b')' => nested -= 1,
+            _ => {}
+        }
+    }
+    Err(Error::new(Kind::ValueError, "incomplete format key"))
 }
 
 /// Reserve before filling a user-provided field width so it can raise a Python exception.
@@ -306,13 +319,29 @@ fn padding(n: usize, c: char) -> Result<String> {
 
 /// Formats a single percent conversion and returns the remainder of the original format.
 pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(String, &'a str)> {
-    percent_value_in(fmt, Some(value), None)
+    percent_value_in(fmt, &mut std::iter::once(value.clone()), None)
+}
+
+/// Fetch a format operand at the point CPython consumes its width, precision or value.
+fn next_argument(args: &mut impl Iterator<Item = OwnedWord>) -> Result<OwnedWord> {
+    args.next()
+        .ok_or_else(|| Error::new(Kind::TypeError, "not enough arguments for format string"))
+}
+
+/// A '*' consumes one integer before the formatter asks for the next operand.
+fn star_integer(args: &mut impl Iterator<Item = OwnedWord>) -> Result<Int> {
+    let value = next_argument(args)?;
+    match value.kind.raw() {
+        1 => Ok(Int::from_usize(value.word)),
+        2 => Ok(Int(value.into_word())),
+        _ => Err(Error::new(Kind::TypeError, "* wants int")),
+    }
 }
 
 /// The full format supplies the Unicode character offset for invalid conversions.
 fn percent_value_in<'a>(
     fmt: &'a str,
-    value: Option<&OwnedWord>,
+    args: &mut impl Iterator<Item = OwnedWord>,
     full: Option<&str>,
 ) -> Result<(String, &'a str)> {
     let mut chars = fmt.char_indices().peekable();
@@ -324,21 +353,19 @@ fn percent_value_in<'a>(
     while chars.peek().is_some_and(|(_, c)| c.is_ascii_digit()) {
         width.push(chars.next().unwrap().1);
     }
-    let star_error = || match value {
-        None => Some(Error::new(
-            Kind::TypeError,
-            "not enough arguments for format string",
-        )),
-        Some(v) if v.kind.raw() == 3 => Some(Error::new(Kind::TypeError, "* wants int")),
-        _ => None,
-    };
-    if width.is_empty()
-        && chars.peek().is_some_and(|(_, c)| *c == '*')
-        && let Some(error) = star_error()
-    {
-        return Err(error);
-    }
-    let width = if width.is_empty() {
+    let width = if width.is_empty() && chars.next_if(|(_, c)| *c == '*').is_some() {
+        let n = star_integer(args)?.big().to_isize().ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+        if n < 0 {
+            flags.push('-');
+        }
+        // CPython leaves PY_SSIZE_T_MIN without a positive padding width.
+        n.checked_abs().unwrap_or(0) as usize
+    } else if width.is_empty() {
         0
     } else {
         width
@@ -351,19 +378,26 @@ fn percent_value_in<'a>(
         while chars.peek().is_some_and(|(_, c)| c.is_ascii_digit()) {
             n.push(chars.next().unwrap().1);
         }
-        if n.is_empty()
-            && chars.peek().is_some_and(|(_, c)| *c == '*')
-            && let Some(error) = star_error()
-        {
-            return Err(error);
-        }
-        Some(if n.is_empty() {
-            0
-        } else {
-            n.parse::<i32>()
-                .map_err(|_| Error::new(Kind::ValueError, "precision too big"))?
-                as usize
-        })
+        Some(
+            if n.is_empty() && chars.next_if(|(_, c)| *c == '*').is_some() {
+                star_integer(args)?
+                    .big()
+                    .to_i32()
+                    .ok_or_else(|| {
+                        Error::new(
+                            Kind::OverflowError,
+                            "Python int too large to convert to C int",
+                        )
+                    })?
+                    .max(0) as usize
+            } else if n.is_empty() {
+                0
+            } else {
+                n.parse::<i32>()
+                    .map_err(|_| Error::new(Kind::ValueError, "precision too big"))?
+                    as usize
+            },
+        )
     } else {
         None
     };
@@ -373,8 +407,7 @@ fn percent_value_in<'a>(
     let (i, c) = chars
         .next()
         .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format"))?;
-    let value = value
-        .ok_or_else(|| Error::new(Kind::TypeError, "not enough arguments for format string"))?;
+    let value = &next_argument(args)?;
     let mut text = match c {
         's' | 'r' | 'a' => {
             let mut s = display(value, c != 's');
@@ -468,7 +501,6 @@ fn percent_value_in<'a>(
             format!("{sign}{prefix}{digits}")
         }
         'c' => {
-            use num_traits::ToPrimitive;
             if value.kind.raw() == 3 {
                 let s = display(value, false);
                 let count = s.chars().count();
@@ -498,16 +530,13 @@ fn percent_value_in<'a>(
             }
         }
         'f' | 'F' | 'e' | 'E' | 'g' | 'G' => {
-            use num_traits::ToPrimitive;
             let n = match value.kind.raw() {
                 7 => f64::from_bits(value.word as u64),
-                // SAFETY: this arm has an integer descriptor and a live owner.
-                2 => unsafe { Int::borrow(value.word) }
-                    .big()
-                    .to_f64()
-                    .ok_or_else(|| {
-                        Error::new(Kind::OverflowError, "int too large to convert to float")
-                    })?,
+                2 => {
+                    // SAFETY: this arm has an integer descriptor and a live owner.
+                    let n = unsafe { Int::borrow(value.word) };
+                    crate::floats::int_to_float(&n)?
+                }
                 1 => value.word as f64,
                 3 => return Err(Error::new(Kind::TypeError, "must be real number, not str")),
                 _ => return Err(Error::new(Kind::TypeError, "must be real number")),
