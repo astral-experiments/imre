@@ -274,6 +274,8 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 
 ## Fixed regular expressions
 
+Word escapes (`\w`, `\W`) use Python's Unicode alphanumeric characters plus underscore, including inside character classes.
+
 `re.compile` accepts a literal string and an optional literal `0`, `re.VERBOSE`, `re.UNICODE`, or their bitwise union. Unicode matching is already the default for text.
 `re.search(pattern, text)` accepts a literal or a compiled `re.Pattern[str]`.
 A compiled pattern has `search(text)` and `match(text)` methods. The latter
