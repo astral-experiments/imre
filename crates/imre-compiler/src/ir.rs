@@ -788,6 +788,7 @@ pub(crate) enum Builtin {
     Slice,
     Append,
     Pop,
+    ListClear,
     IsNone,
     /// Promotes an exact str/bytes owner without allocating or changing identity.
     UnionInject,
