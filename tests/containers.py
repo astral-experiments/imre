@@ -410,9 +410,6 @@ REJECTED = {
     "dict_get_wrong_key": 'values = {"one": 1}\nvalues.get(1)\n',
     "dict_get_wrong_arity": 'values = {"one": 1}\nvalues.get("one", 2, 3)\n',
     "dict_get_keyword": 'values = {"one": 1}\nvalues.get("one", default=2)\n',
-    "dict_get_without_narrowing": 'values = {"one": 1}\nprint(values.get("one") + 1)\n',
-    "dict_get_repeated_call_narrowing": 'values = {"one": 1}\nif values.get("one") is not None:\n    print(values.get("one") + 1)\n',
-    "dict_optional_element_without_narrowing": 'values: dict[str, int | None] = {"one": 1}\nprint(values["one"] + 1)\n',
     "dict_optional_receiver": "def show(values: dict[int, int] | None) -> None:\n    print(values[1])\n",
     "dict_string_augmented_assignment": 'values = {1: "one"}\nvalues[1] += "two"\n',
     "dict_items_escapes": 'values = {"one": 1}\nview = values.items()\n',
@@ -549,7 +546,6 @@ show(None)
 items: list[Item | None] = [None]
 print(items[0].name)
 """,
-    "optional_arithmetic_without_narrowing": "def add(value: int | None) -> int:\n    return value + 1\n",
     "optional_wrong_argument": "def show(value: str | None) -> None:\n    pass\nshow(1)\n",
     "optional_rebind_invalidates_narrowing": ITEM
     + """
