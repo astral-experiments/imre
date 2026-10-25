@@ -11,6 +11,20 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            PathOperation::Match { full } => {
+                let matched = self.checked_instruction(format!(
+                    "call i32 @imre_path_match(ptr {}, ptr {}, i64 {}, i32 {})",
+                    args[0].value.operand,
+                    args[1].value.operand,
+                    args[2].value.operand,
+                    u32::from(full)
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {matched}, 0")),
+                    small_integer: false,
+                }
+            }
             PathOperation::ContextNew { temporary } => {
                 let operand = self.instruction(format!(
                     "call ptr @imre_directory_context_new(i64 {}, i32 {})",

@@ -79,6 +79,8 @@ reference_python=/path/to/cpython-3.14.5/python
 
 This run records what upstream passes and skips on the host. Native compatibility uses the separate Imre results. An infrastructure error in a stripped interpreter is visible until it is reproduced with a test-enabled CPython build.
 
+`native_zip_members.py` drives the original stored and deflated bad-CRC test methods. The host makes fixtures and runs unittest assertions; the child opens its own `BytesIO`, reads members, checks CRCs, and returns the sequence of reads and errors. A separate control checks duplicate entries, metadata, independent readers and caller-owned stream lifetimes.
+
 ## Native Counter cases
 
 `native_counter.py` compiles the complete CPython `TestCounter.test_total`, `test_invariant_for_the_in_operator` and `test_eq` methods into standalone executables. The typed assertion adapters compare both native operands and count every executed assertion. The three tests must execute 1, 6 and 2 assertions respectively. The manifest pins the entire upstream `test_collections.py` file. The typed subset uses integer counts, so the upstream `test_update`, which also stores `None`, is outside this gate.
