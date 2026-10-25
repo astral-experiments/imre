@@ -79,48 +79,11 @@
     },
     "test.test_sys.SysModuleTest.test_setrecursionlimit": {
       "status": "pass",
-      "execution": "host-driven-native",
-      "body": "CPython",
-      "assertions": "CPython",
-      "fixture_execution": "original CPython SysModuleTest lifecycle",
-      "calls": [
-        {
-          "operation": "getrecursionlimit",
-          "args": [],
-          "reply": "1000"
-        },
-        {
-          "operation": "setrecursionlimit",
-          "args": [
-            10005
-          ],
-          "reply": "None"
-        },
-        {
-          "operation": "getrecursionlimit",
-          "args": [],
-          "reply": "10005"
-        },
-        {
-          "operation": "setrecursionlimit",
-          "args": [],
-          "reply": "TypeError: sys.setrecursionlimit() takes exactly one argument (0 given)"
-        },
-        {
-          "operation": "setrecursionlimit",
-          "args": [
-            -42
-          ],
-          "reply": "ValueError: recursion limit must be greater or equal than 1"
-        },
-        {
-          "operation": "setrecursionlimit",
-          "args": [
-            1000
-          ],
-          "reply": "None"
-        }
-      ]
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "0dc1bfce12f3ad7c3edbd4ba833ea5b01757e67dacead767693c1cccad33ee6a"
     },
     "test.test_sys.TestSysJIT.test_jit_is_available": {
       "status": "pass",
