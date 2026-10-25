@@ -1537,6 +1537,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
         Some(Binding::Intrinsic(Intrinsic::ModuleType)) => return Ok(Type::NativeModule),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
+        Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(
@@ -4766,16 +4767,11 @@ impl<'a> Checker<'a> {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
         if binary.op == ast::Operator::Mod
-            && let ExprKind::Str(pattern) = &left.kind
+            && matches!(left.ty, Type::Str | Type::StrLiteral(_))
             && matches!(right.ty, Type::Str | Type::StrLiteral(_))
         {
-            return self.percent_string(pattern, right).ok_or_else(|| {
-                error(
-                    self.source,
-                    binary,
-                    "literal percent formatting supports one %s field and %% escapes",
-                )
-            });
+            left = Self::string_value(left);
+            right = Self::string_value(right);
         }
         if binary.op == ast::Operator::Add
             && left.ty == Type::JsonValue
@@ -5905,6 +5901,9 @@ impl<'a> Checker<'a> {
                     return self.descriptor_attribute(receiver, method, attribute);
                 }
                 if let Some(declaration) = self.types.tuple_metadata(receiver.ty) {
+                    if self.types.is_stat_result(receiver.ty) {
+                        return self.stat_result_attribute(receiver, attribute, &declaration);
+                    }
                     return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
@@ -7367,6 +7366,17 @@ impl<'a> Checker<'a> {
                 if attribute.attr.as_str() == "fromkeys" {
                     return self.dict_fromkeys(call, None, Some(receiver));
                 }
+                if attribute.attr.as_str() == "copy"
+                    && receiver.ty == self.types.dict(key_type, value_type)
+                {
+                    if !call.arguments.is_empty() {
+                        return Err(error(self.source, call, "dict.copy() takes no arguments"));
+                    }
+                    return Ok(Expr {
+                        ty: receiver.ty,
+                        kind: ExprKind::Builtin(Builtin::DictCopy, vec![receiver]),
+                    });
+                }
                 if attribute.attr.as_str() == "clear"
                     && call.arguments.args.is_empty()
                     && call.arguments.keywords.is_empty()
@@ -7390,7 +7400,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "supported dictionary methods are clear(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
+                        "supported dictionary methods are clear(), copy() on a plain dictionary, get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
                     ));
                 }
                 let key = self.expr_expected(&call.arguments.args[0], key_type)?;
@@ -7882,6 +7892,7 @@ impl<'a> Checker<'a> {
                         | Type::ForwardRef(_)
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)
+                        | Type::Tuple(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
