@@ -122,6 +122,9 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::DictContains | Self::DictGetDefault | Self::DictTryGet(_) | Self::SetContains => {
+                Contract::new(true, PreservesLists)
+            }
             Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
@@ -316,6 +319,7 @@ impl Builtin {
             | Self::SplitLines
             | Self::FreezeStrings
             | Self::SetAdd
+            | Self::SetDiscard
             | Self::CounterUpdate
             | Self::KeySet
             | Self::KeyUnion
@@ -369,11 +373,8 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
-            | Self::DictContains
-            | Self::DictGetDefault
             | Self::EnumLookup(_)
             | Self::DictSumValues
-            | Self::DictTryGet(_)
             | Self::Encode
             | Self::CsvLineNumber
             | Self::Sha256Hex
@@ -423,7 +424,6 @@ impl Builtin {
             | Self::RegexSearch
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds
-            | Self::SetContains
             | Self::Split
             | Self::StringListFilter(_)
             | Self::StringListNonempty
@@ -481,6 +481,7 @@ impl Builtin {
             | Self::ZipNamelist
             | Self::ZipClose
             | Self::Input
+            | Self::LengthResult
             | Self::ParseArgs { .. }
             | Self::ArgparseText { .. }
             | Self::DequeAppend { .. }
@@ -489,6 +490,11 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
+            | Self::BuiltinsLast
+            | Self::BuiltinsHasLast
+            | Self::BuiltinsSetLast
+            | Self::BuiltinsDeleteLast
+            | Self::SysDisplayHook
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
             | Self::RaiseException
@@ -536,7 +542,6 @@ impl Builtin {
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::DequeClear
-            | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
             | Self::SplitLinesIter
@@ -884,6 +889,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bool"
                 | "imre_print_none"
                 | "imre_input"
+                | "imre_builtins_last"
+                | "imre_builtins_del_last"
+                | "imre_sys_displayhook"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
                 | "imre_path_as_posix"

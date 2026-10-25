@@ -6,6 +6,7 @@
 //! attributes can introduce ownership cycles.
 
 mod imports;
+pub(super) use imports::imre_exception_field_repr;
 mod tree;
 pub(super) use tree::append_tree_entries;
 

@@ -35,6 +35,9 @@ pub(super) fn resolve(
                 ));
             }
             for argument in &args.args {
+                if mapping_base(graph, definition.module, argument) {
+                    continue;
+                }
                 match graph.resolve(definition.module, argument) {
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
                         if args.args.len() == 1 => {}
