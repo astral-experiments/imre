@@ -5,6 +5,7 @@
 //! freshly constructed, unescaped exceptions. No traceback or mutable exception
 //! attributes can introduce ownership cycles.
 
+use crate::StrOwner;
 mod arguments;
 mod imports;
 pub(super) use imports::imre_exception_field_repr;
@@ -360,7 +361,7 @@ impl Drop for DirectoryFrame {
 #[derive(Clone)]
 enum Payload {
     Empty,
-    Message(Rc<Str>),
+    Message(StrOwner),
     /// Some builtins render a human message that differs from their original arguments.
     Arguments(Box<BuiltinArguments>),
     Json(Rc<JsonError>),
@@ -379,21 +380,21 @@ enum Payload {
 /// Indirect so retaining several arguments does not grow every Object allocation.
 #[derive(Clone)]
 struct BuiltinArguments {
-    message: Rc<Str>,
+    message: StrOwner,
     args: smallvec::SmallVec<[OwnedWord; 5]>,
     os_paths: Option<Box<os::Filenames>>,
 }
 
 struct JsonError {
-    msg: Rc<Str>,
-    doc: Rc<Str>,
+    msg: StrOwner,
+    doc: StrOwner,
     pos: usize,
     lineno: usize,
     colno: usize,
 }
 
-impl From<Rc<Str>> for Payload {
-    fn from(message: Rc<Str>) -> Self {
+impl From<StrOwner> for Payload {
+    fn from(message: StrOwner) -> Self {
         Self::Message(message)
     }
 }
@@ -518,13 +519,13 @@ impl Error {
     pub(crate) fn new(kind: Kind, message: impl Into<Str>) -> Self {
         Self {
             kind,
-            payload: Some(Payload::Message(Rc::new(message.into()))),
+            payload: Some(Payload::Message(StrOwner::new(message.into()))),
             cause: None,
         }
     }
 
     fn string_arg(text: impl Into<Str>) -> OwnedWord {
-        let word = Rc::into_raw(Rc::new(text.into())) as usize;
+        let word = StrOwner::into_raw(StrOwner::new(text.into())) as usize;
         // SAFETY: kind 3 owns the transferred string allocation.
         unsafe { OwnedWord::from_owned(word, WordKind::new(3)) }
     }
@@ -568,7 +569,7 @@ impl Error {
         Self {
             kind,
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
-                message: Rc::new(message.into()),
+                message: StrOwner::new(message.into()),
                 args: args.into_iter().collect(),
                 os_paths,
             }))),
@@ -595,7 +596,7 @@ impl Error {
         Self {
             kind,
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
-                message: Rc::new(message.into()),
+                message: StrOwner::new(message.into()),
                 args,
                 os_paths: None,
             }))),
@@ -625,14 +626,14 @@ impl Error {
 
     pub(super) fn unicode_encode(
         codec: &str,
-        text: Rc<Str>,
+        text: crate::StrOwner,
         bounds: std::ops::Range<usize>,
         reason: &str,
         message: String,
     ) -> Self {
         // SAFETY: kind 3 owns the Unicode input of the failed encode.
         let object =
-            unsafe { OwnedWord::from_owned(Rc::into_raw(text) as usize, WordKind::new(3)) };
+            unsafe { OwnedWord::from_owned(StrOwner::into_raw(text) as usize, WordKind::new(3)) };
         Self::unicode_codec(
             Kind::UnicodeEncodeError,
             codec,
@@ -649,7 +650,7 @@ impl Error {
 
     pub(super) fn json_decode(
         msg: &str,
-        doc: Rc<Str>,
+        doc: StrOwner,
         pos: usize,
         lineno: usize,
         colno: usize,
@@ -657,7 +658,7 @@ impl Error {
         Self {
             kind: Kind::JsonDecodeError,
             payload: Some(Payload::Json(Rc::new(JsonError {
-                msg: Rc::new(Str::from(msg)),
+                msg: StrOwner::new(Str::from(msg)),
                 doc,
                 pos,
                 lineno,
@@ -693,7 +694,7 @@ impl Error {
     }
 
     pub(super) fn string_key(key: Str) -> Self {
-        let word = Rc::into_raw(Rc::new(key)) as usize;
+        let word = StrOwner::into_raw(StrOwner::new(key)) as usize;
         // SAFETY: the new string contributes one owned reference of exact kind 3.
         Self::key(unsafe { OwnedWord::from_owned(word, WordKind::new(3)) })
     }
@@ -703,7 +704,7 @@ impl Error {
     }
 
     /// Copytree aggregates only OS failures; language errors still escape intact.
-    pub(super) fn into_os_message(self) -> Result<Rc<Str>> {
+    pub(super) fn into_os_message(self) -> Result<StrOwner> {
         if !self.kind.matches(Kind::OSError) {
             return Err(self);
         }
@@ -726,6 +727,10 @@ impl Error {
             Some(payload) => exception_with_cause(self.kind, payload, self.cause),
             None => SEQUENCE_ALLOCATION_ERROR.with_borrow(Rc::clone),
         }
+    }
+
+    pub(super) fn into_exception(self) -> Rc<Object> {
+        self.into_object()
     }
 
     /// Installs this error only after any runtime storage access has ended.
@@ -756,10 +761,10 @@ thread_local! {
     static MEMORY_ERROR: RefCell<Rc<Object>> =
         RefCell::new(new_exception(Kind::MemoryError, Payload::Empty));
     static RECORD_ALLOCATION_ERROR: RefCell<Rc<Object>> = RefCell::new(new_exception(
-        Kind::MemoryError, Rc::new(Str::new("record allocation failed")),
+        Kind::MemoryError, StrOwner::new(Str::new("record allocation failed")),
     ));
     static SEQUENCE_ALLOCATION_ERROR: RefCell<Rc<Object>> = RefCell::new(new_exception(
-        Kind::MemoryError, Rc::new(Str::new("sequence allocation failed")),
+        Kind::MemoryError, StrOwner::new(Str::new("sequence allocation failed")),
     ));
     static PENDING: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
     static ACTIVE: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
@@ -932,14 +937,14 @@ pub(super) fn kind_of(error: &Object) -> Kind {
     unsafe { error.0.with(Storage::exception_kind) }
 }
 
-/// PEP 479 converts an escaping StopIteration into RuntimeError at the generator boundary.
-pub(super) fn generator_error(error: Rc<Object>) -> Rc<Object> {
+/// Wrap an escaping StopIteration with the RuntimeError message for its frame kind.
+pub(super) fn wrap_stop_iteration(error: Rc<Object>, message: &str) -> Rc<Object> {
     if kind_of(&error) != Kind::StopIteration {
         return error;
     }
     exception_with_cause(
         Kind::RuntimeError,
-        Payload::Message(Rc::new("generator raised StopIteration".into())),
+        Payload::Message(StrOwner::new(message.into())),
         Some(error),
     )
 }
@@ -1229,35 +1234,35 @@ impl Storage {
         self.exception().kind
     }
 
-    fn exception_message(&self) -> Rc<Str> {
+    fn exception_message(&self) -> StrOwner {
         match &self.exception().payload {
             Payload::Import(err) => err.message(),
             Payload::Positional(args) | Payload::ExitArguments(args) => args.message(),
             Payload::Exit(code) => exit_text(code.as_ref(), ""),
-            Payload::Empty => Rc::new(Str::new("")),
-            Payload::Message(message) => Rc::clone(message),
-            Payload::Arguments(arguments) => Rc::clone(&arguments.message),
-            Payload::Json(e) => Rc::new(Str::from(format!(
+            Payload::Empty => StrOwner::new(Str::new("")),
+            Payload::Message(message) => StrOwner::clone(message),
+            Payload::Arguments(arguments) => StrOwner::clone(&arguments.message),
+            Payload::Json(e) => StrOwner::new(Str::from(format!(
                 "{}: line {} column {} (char {})",
                 e.msg, e.lineno, e.colno, e.pos
             ))),
-            Payload::Process(process) => Rc::new(process.message()),
-            Payload::Timeout(timeout) => Rc::new(timeout.message()),
+            Payload::Process(process) => StrOwner::new(process.message()),
+            Payload::Timeout(timeout) => StrOwner::new(timeout.message()),
             Payload::Key(key) if key.kind == WordKind::new(3) => {
                 // SAFETY: this owned kind-3 word is a live string.
-                Rc::new(string_repr(unsafe { &*(key.word as *const Str) }))
+                StrOwner::new(string_repr(unsafe { &*(key.word as *const Str) }))
             }
             Payload::Tree(errors) => errors.message(),
             Payload::Key(key) => {
                 let mut message = String::new();
                 // SAFETY: the exception owns the immutable key and its exact kind.
                 unsafe { super::values::write_checked_repr(&mut message, key.word, key.kind) };
-                Rc::new(Str::from(message))
+                StrOwner::new(Str::from(message))
             }
             Payload::Group(members) => {
                 let count = members.len();
                 let suffix = if count == 1 { "" } else { "s" };
-                Rc::new(Str::from(format!(
+                StrOwner::new(Str::from(format!(
                     "unhandled errors in a TaskGroup ({count} sub-exception{suffix})"
                 )))
             }
@@ -1276,8 +1281,8 @@ pub unsafe extern "C" fn imre_json_error_field(value: *const Object, field: u32)
             let exception = storage.exception();
             if let Payload::Json(e) = &exception.payload {
                 return Ok(match field {
-                    0 => Rc::into_raw(e.msg.clone()) as usize,
-                    1 => Rc::into_raw(e.doc.clone()) as usize,
+                    0 => StrOwner::into_raw(e.msg.clone()) as usize,
+                    1 => StrOwner::into_raw(e.doc.clone()) as usize,
                     2 => crate::Int::from_usize(e.pos).into_raw(),
                     3 => crate::Int::from_usize(e.lineno).into_raw(),
                     4 => crate::Int::from_usize(e.colno).into_raw(),
@@ -1294,18 +1299,18 @@ pub unsafe extern "C" fn imre_json_error_field(value: *const Object, field: u32)
     finish(result, 0)
 }
 
-fn exit_text(code: Option<&OwnedWord>, missing: &str) -> Rc<Str> {
+fn exit_text(code: Option<&OwnedWord>, missing: &str) -> StrOwner {
     let Some(code) = code else {
-        return Rc::new(Str::new(missing));
+        return StrOwner::new(Str::new(missing));
     };
     if code.kind == WordKind::new(3) {
         // SAFETY: the exit payload roots this string.
-        return unsafe { acquire_rc(code.word) };
+        return unsafe { crate::StrOwner::acquire_word(code.word) };
     }
     let mut text = String::new();
     // SAFETY: the payload owns a scalar with this exact word kind.
     unsafe { super::values::write_checked_repr(&mut text, code.word, code.kind) };
-    Rc::new(Str::from(text))
+    StrOwner::new(Str::from(text))
 }
 
 /// Construct SystemExit with its original code. Kind 4 denotes an omitted
@@ -1817,10 +1822,10 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
                 }
                 _ => string_repr(&s.exception_message()),
             };
-            Some(Rc::new(format!("{}({})", e.name(), arg).into()))
+            Some(StrOwner::new(format!("{}({})", e.name(), arg).into()))
         })();
         if imre_error_pending() == 0 {
-            text.map_or(std::ptr::null(), Rc::into_raw)
+            text.map_or(std::ptr::null(), StrOwner::into_raw)
         } else {
             std::ptr::null()
         }
@@ -1851,8 +1856,8 @@ pub unsafe extern "C" fn imre_exception_new(kind: u32, message: *const Str) -> *
         // SAFETY: the caller roots the immutable string argument.
         Payload::Key(unsafe { WordKind::new(3).acquire(message as usize) })
     } else {
-        // SAFETY: the non-null argument is a rooted Rc<Str>.
-        Payload::Message(unsafe { acquire_rc(message as usize) })
+        // SAFETY: the non-null argument is a rooted StrOwner.
+        Payload::Message(unsafe { crate::StrOwner::acquire_word(message as usize) })
     };
     Rc::into_raw(new_exception(kind, payload))
 }
@@ -2123,10 +2128,10 @@ fn write_exception_chain(exception: Rc<Object>) {
         let message = unsafe { display(Rc::as_ptr(&exception), false) };
         let message = if message.is_null() {
             drop(take_pending());
-            Rc::new(Str::new("<exception str() failed>"))
+            StrOwner::new(Str::new("<exception str() failed>"))
         } else {
             // SAFETY: display transfers one owned string.
-            unsafe { Rc::from_raw(message) }
+            unsafe { StrOwner::from_raw(message) }
         };
         // Traceback suggestions decorate only uncaught output. The owned exception's
         // message, positional arguments, str() and repr() stay independent.
@@ -2214,7 +2219,7 @@ mod tests {
     fn cached_memory_errors_keep_separate_directory_owners() {
         use crate::objects::tempdirs::{imre_directory_context_new, imre_tempdir_new};
 
-        fn retained(raise: fn()) -> (Rc<Object>, Rc<Str>) {
+        fn retained(raise: fn()) -> (Rc<Object>, StrOwner) {
             let prefix = Str::from("imre-error-");
             let suffix = Str::from("");
             // SAFETY: both names are rooted and a null directory selects the system default.
@@ -2223,7 +2228,7 @@ mod tests {
             // SAFETY: creation transfers one string owner. The manager acquires its own reference.
             let (name, manager) = unsafe {
                 let manager = imre_directory_context_new(name as usize, 1);
-                (Rc::from_raw(name), Rc::from_raw(manager))
+                (StrOwner::from_raw(name), Rc::from_raw(manager))
             };
             // SAFETY: the compiler roots the manager while preparing its one traceback slot.
             let frame =
@@ -2256,7 +2261,7 @@ mod tests {
 
     #[test]
     fn reraised_group_members_keep_identity_without_retaining_a_cycle() {
-        let child = new_exception(Kind::ValueError, Rc::new(Str::from("child")));
+        let child = new_exception(Kind::ValueError, StrOwner::new(Str::from("child")));
         let group = task_group_errors(vec![child.clone(), child.clone()]);
         let weak_group = Rc::downgrade(&group);
         let weak_child = Rc::downgrade(&child);
@@ -2294,19 +2299,23 @@ mod tests {
         value
     }
 
-    fn message(value: &Rc<Object>) -> Rc<Str> {
+    fn message(value: &Rc<Object>) -> StrOwner {
         // SAFETY: the rooted exception accessor transfers one string reference.
-        unsafe { Rc::from_raw(imre_exception_message(Rc::as_ptr(value))) }
+        unsafe { StrOwner::from_raw(imre_exception_message(Rc::as_ptr(value))) }
     }
 
     #[test]
     fn key_error_owns_its_key_until_the_exception_is_released() {
-        let key = Rc::new(Str::new("a quoted 'key'\n"));
+        let key = StrOwner::new(Str::new("a quoted 'key'\n"));
         let expected = string_repr(&key);
-        let weak = Rc::downgrade(&key);
+        let weak = StrOwner::downgrade(&key);
         // SAFETY: the key is rooted and the constructor returns one owned exception.
-        let error =
-            unsafe { Rc::from_raw(imre_exception_new(Kind::KeyError as u32, Rc::as_ptr(&key))) };
+        let error = unsafe {
+            Rc::from_raw(imre_exception_new(
+                Kind::KeyError as u32,
+                StrOwner::as_ptr(&key),
+            ))
+        };
         drop(key);
         assert_eq!(weak.strong_count(), 1);
         assert_eq!(*message(&error), expected);
@@ -2316,8 +2325,8 @@ mod tests {
 
     #[test]
     fn explicit_causes_preserve_identity_and_independent_ownership() {
-        let original = new_exception(Kind::KeyError, Rc::new(Str::new("original")));
-        let wrapped = new_exception(Kind::ValueError, Rc::new(Str::new("wrapped")));
+        let original = new_exception(Kind::KeyError, StrOwner::new(Str::new("original")));
+        let wrapped = new_exception(Kind::ValueError, StrOwner::new(Str::new("wrapped")));
         let weak = Rc::downgrade(&original);
         // SAFETY: wrapped is fresh; every borrowed input remains rooted and each
         // transferred reference is adopted immediately.
@@ -2337,7 +2346,7 @@ mod tests {
             drop(cause);
             assert!(weak.upgrade().is_none());
 
-            let suppressed = new_exception(Kind::ValueError, Rc::new(Str::new("hidden")));
+            let suppressed = new_exception(Kind::ValueError, StrOwner::new(Str::new("hidden")));
             drop(Rc::from_raw(imre_exception_with_cause(
                 Rc::as_ptr(&suppressed),
                 std::ptr::null(),
@@ -2349,7 +2358,7 @@ mod tests {
 
     #[test]
     fn deep_cause_chains_release_without_recursive_drop() {
-        let message = Rc::new(Str::new("chain"));
+        let message = StrOwner::new(Str::new("chain"));
         let mut tail = new_exception(Kind::ValueError, message.clone());
         let weak_first = Rc::downgrade(&tail);
         for _ in 0..100_000 {
@@ -2365,18 +2374,18 @@ mod tests {
         }
         drop(tail);
         assert!(weak_first.upgrade().is_none());
-        assert_eq!(Rc::strong_count(&message), 1);
+        assert_eq!(StrOwner::strong_count(&message), 1);
     }
 
     #[test]
     fn pending_and_active_errors_transfer_independent_owned_references() {
-        let text = Rc::new(Str::new("outer"));
-        let weak_text = Rc::downgrade(&text);
+        let text = StrOwner::new(Str::new("outer"));
+        let weak_text = StrOwner::downgrade(&text);
         // SAFETY: the argument is a rooted string; construction transfers an owner.
         let outer = unsafe {
             Rc::from_raw(imre_exception_new(
                 Kind::ValueError as u32,
-                Rc::as_ptr(&text),
+                StrOwner::as_ptr(&text),
             ))
         };
         let weak_outer = Rc::downgrade(&outer);
@@ -2423,8 +2432,8 @@ mod tests {
 
     #[test]
     fn replacing_clearing_and_reporting_pending_errors_allow_later_recovery() {
-        let first = new_exception(Kind::ValueError, Rc::new(Str::new("first")));
-        let second = new_exception(Kind::IndexError, Rc::new(Str::new("second")));
+        let first = new_exception(Kind::ValueError, StrOwner::new(Str::new("first")));
+        let second = new_exception(Kind::IndexError, StrOwner::new(Str::new("second")));
         let weak_first = Rc::downgrade(&first);
         let weak_second = Rc::downgrade(&second);
         // SAFETY: inputs stay rooted through acquisition, then pending state
@@ -2443,7 +2452,10 @@ mod tests {
         assert_eq!(imre_error_pending(), 0);
         assert!(imre_error_take().is_null());
 
-        let reported = new_exception(Kind::RuntimeError, Rc::new(Str::new("reported test error")));
+        let reported = new_exception(
+            Kind::RuntimeError,
+            StrOwner::new(Str::new("reported test error")),
+        );
         let weak_reported = Rc::downgrade(&reported);
         // SAFETY: pending and active independently acquire this rooted exception.
         unsafe {
@@ -2497,8 +2509,8 @@ mod tests {
                 "'é e\u{301} 😀\\xa0\\u2028\\ue000'",
             ),
         ] {
-            let argument = argument.map(|value| Rc::new(Str::new(value)));
-            let pointer = argument.as_ref().map_or(std::ptr::null(), Rc::as_ptr);
+            let argument = argument.map(|value| StrOwner::new(Str::new(value)));
+            let pointer = argument.as_ref().map_or(std::ptr::null(), StrOwner::as_ptr);
             // SAFETY: the nullable argument remains rooted throughout construction.
             let error = unsafe { Rc::from_raw(imre_exception_new(Kind::KeyError as u32, pointer)) };
             drop(argument);
@@ -2546,22 +2558,27 @@ mod tests {
 
     #[test]
     fn failed_sequence_updates_release_staged_values_after_access() {
-        let text = Rc::new(Str::new("staged"));
-        let weak = Rc::downgrade(&text);
+        let text = StrOwner::new(Str::new("staged"));
+        let weak = StrOwner::downgrade(&text);
         // SAFETY: constructors transfer owners; all string/exception slots use
         // their declared representation and every getter's owner is adopted.
         unsafe {
             let sequence = Rc::from_raw(imre_seq_new(3));
-            imre_seq_set_index(Rc::as_ptr(&sequence), 0, Rc::as_ptr(&text) as usize, 3);
+            imre_seq_set_index(
+                Rc::as_ptr(&sequence),
+                0,
+                StrOwner::as_ptr(&text) as usize,
+                3,
+            );
             drop(take_error(Kind::IndexError));
-            assert_eq!(Rc::strong_count(&text), 1);
+            assert_eq!(StrOwner::strong_count(&text), 1);
             assert_eq!(imre_seq_pop(Rc::as_ptr(&sequence)), 0);
             drop(take_error(Kind::IndexError));
             drop(sequence);
             let sequence = Rc::from_raw(imre_seq_new(5));
             let exception = Rc::from_raw(imre_exception_new(
                 Kind::Exception as u32,
-                Rc::as_ptr(&text),
+                StrOwner::as_ptr(&text),
             ));
             let weak_exception = Rc::downgrade(&exception);
             imre_seq_append(Rc::as_ptr(&sequence), Rc::as_ptr(&exception) as usize, 5);
@@ -2580,18 +2597,18 @@ mod tests {
 
     #[test]
     fn mapping_errors_preserve_outputs_and_scalar_key_messages() {
-        let string_key = Rc::new(Str::new("a'b\n"));
+        let string_key = StrOwner::new(Str::new("a'b\n"));
         let integer_key = Int::new(BigInt::from(1_u8) << 100_u32);
         // SAFETY: dictionary keys/values match their declared representations;
         // iterator output words are independent writable stack slots.
         unsafe {
             let strings = Rc::from_raw(imre_dict_new(3, 2));
             assert_eq!(
-                imre_dict_get(Rc::as_ptr(&strings), Rc::as_ptr(&string_key) as usize),
+                imre_dict_get(Rc::as_ptr(&strings), StrOwner::as_ptr(&string_key) as usize),
                 0
             );
             assert_eq!(message(&take_error(Kind::KeyError)).as_str(), "\"a'b\\n\"");
-            imre_dict_delete(Rc::as_ptr(&strings), Rc::as_ptr(&string_key) as usize);
+            imre_dict_delete(Rc::as_ptr(&strings), StrOwner::as_ptr(&string_key) as usize);
             assert_eq!(message(&take_error(Kind::KeyError)).as_str(), "\"a'b\\n\"");
             let integers = Rc::from_raw(imre_dict_new(2, 2));
             assert_eq!(imre_dict_get(Rc::as_ptr(&integers), integer_key.0), 0);

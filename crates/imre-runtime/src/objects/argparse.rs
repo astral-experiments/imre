@@ -1,6 +1,7 @@
 //! Native parsing for a fixed declaration of long options. Parsing checks all
 //! input before constructing the compiler-described, owned namespace record.
 
+use crate::StrOwner;
 use std::borrow::Cow;
 use std::collections::{HashSet, TryReserveError};
 use std::io::{self, Write};
@@ -19,6 +20,13 @@ mod nargs;
 
 use binding::{Bound, IntegerRange};
 use nargs::{Nargs, positional_counts};
+
+fn owned_text(value: &str) -> Result<crate::StrOwner, Error> {
+    Str::try_new(value)
+        .ok()
+        .and_then(|text| StrOwner::try_new(text).ok())
+        .ok_or_else(Error::allocation)
+}
 
 /// Large decimal conversions obey the interpreter's configured digit limit,
 /// including leading zeroes. Underscores and signs do not count.
@@ -721,7 +729,7 @@ pub unsafe extern "C" fn imre_argparse_text(
     }
     .into();
     match output {
-        0 => return Rc::into_raw(Rc::new(text)),
+        0 => return StrOwner::into_raw(StrOwner::new(text)),
         1 | 2 => {
             // SAFETY: the native stream borrows the live string. A successful
             // write returns an owned character count; zero indicates failure.
@@ -784,7 +792,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
             let words = sequence.values.iter().skip(usize::from(process_argv));
             owners.try_reserve_exact(words.len())?;
             args.try_reserve_exact(words.len())?;
-            owners.extend(words.map(|&word| super::acquire_rc::<Str>(word)));
+            owners.extend(words.map(|&word| crate::StrOwner::acquire_word(word)));
             Ok::<_, std::collections::TryReserveError>(())
         })
     };
@@ -842,13 +850,21 @@ pub unsafe extern "C" fn imre_argparse_parse(
         }
     };
     let mut extras = Words::new(3);
-    if !pair_layout.is_null()
-        && extras
+    if !pair_layout.is_null() {
+        if extras
             .values
             .try_reserve_exact(parsed.extras.len())
             .is_err()
-    {
-        return Error::allocation().returning(std::ptr::null_mut());
+        {
+            return Error::allocation().returning(std::ptr::null_mut());
+        }
+        for value in &parsed.extras {
+            let text = match owned_text(value) {
+                Ok(text) => text,
+                Err(error) => return error.returning(std::ptr::null_mut()),
+            };
+            extras.values.push(StrOwner::into_raw(text) as usize);
+        }
     }
     // SAFETY: every slot receives exactly one owner of its declared kind. All
     // input validation is complete, and option conversion invokes no user code.
@@ -861,16 +877,17 @@ pub unsafe extern "C" fn imre_argparse_parse(
         let result = imre_record_new(layout);
         for (index, field) in parsed.words.into_iter().enumerate() {
             let word = match field {
-                Word::Option(option, values) => match option.word(values) {
-                    Ok(word) => word,
-                    Err(error) => {
-                        // Unfilled record slots are zeroed so its initialized fields can be released.
-                        imre_record_release(result);
-                        return error.returning(std::ptr::null_mut());
-                    }
-                },
-                Word::Command(value) => {
-                    value.map_or(0, |name| Rc::into_raw(Rc::new(Str::new(name))) as usize)
+                Word::Option(option, values) => option.word(values),
+                Word::Command(value) => value.map_or(Ok(0), |name| {
+                    owned_text(name).map(|text| StrOwner::into_raw(text) as usize)
+                }),
+            };
+            let word = match word {
+                Ok(word) => word,
+                Err(error) => {
+                    // Unfilled record slots are zeroed so its initialized fields can be released.
+                    imre_record_release(result);
+                    return error.returning(std::ptr::null_mut());
                 }
             };
             let dest = result.add(index);
@@ -882,12 +899,6 @@ pub unsafe extern "C" fn imre_argparse_parse(
         if pair_layout.is_null() {
             return result;
         }
-        extras.values.extend(
-            parsed
-                .extras
-                .iter()
-                .map(|value| Rc::into_raw(Rc::new(Str::new(value))) as usize),
-        );
         let pair = imre_record_new(pair_layout);
         pair.cast::<*mut usize>().write(result);
         pair.add(1)

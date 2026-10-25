@@ -1,0 +1,104 @@
+{
+  "imre_revision": "838784d2b823c2c6966dc13318203e5e8272c42f",
+  "tested_tree": "c38d89f219a076b740301e096dd0878d00ef04a7",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "id": "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race2",
+      "toolchain": {
+        "imre": "90ec3c8144a48aad29ee0ee5d6c2a4d8c6b9bdd47ba8b0e6b7c44514040d24b2",
+        "runtime": "2b853c4fd58451de11c0e50237360273463c1c63b865948536f583b8f4839b8c",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "method_sha256": "c36d3acf832c32045b8e7386644c15b0de3fc636dc05860cb99b2889c24076ea",
+      "replacement": "lambda: None",
+      "native_parent_sha256": "7311a733258a3a5b37284fe905a360eebfc4e5e2782750df926168c9413cf76a",
+      "body_attempt": {
+        "status": "blocked",
+        "reason": "<case>/case.py:19:14: Imre: name is not a local value; globals and first-class functions are unsupported"
+      },
+      "installed": {
+        "native_parent": 2943952,
+        "child": 2943960,
+        "child_exec": "execve(\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", [\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", \"-c\", \"exit(1)\"], 0x7ffc5eb5b9e0 /* 73 vars */) = 0",
+        "fixture_events": [
+          "install",
+          "clear",
+          "signal",
+          "restore",
+          "kill"
+        ],
+        "reap": "wait4(2943960, [{WIFEXITED(s) && WEXITSTATUS(s) == 1}], WNOHANG, NULL) = 2943960",
+        "signals": [
+          "kill(2943960, SIGTERM)                  = -1 ESRCH (No such process)"
+        ],
+        "restored_wait": "wait4(2943960, 0x7ffc5eb5b33c, WNOHANG, NULL) = -1 ECHILD (No child processes)"
+      },
+      "host_only_control": {
+        "native_parent": 2943977,
+        "child": 2943980,
+        "child_exec": "execve(\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", [\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", \"-c\", \"exit(1)\"], 0x7ffee9f251a0 /* 73 vars */) = 0",
+        "fixture_events": [
+          "install",
+          "clear",
+          "signal",
+          "restore",
+          "kill"
+        ],
+        "reap": "wait4(2943980, [{WIFEXITED(s) && WEXITSTATUS(s) == 1}], WNOHANG, NULL) = 2943980",
+        "signals": [],
+        "restored_wait": "wait4(2943980, 0x7ffee9f24afc, WNOHANG, NULL) = -1 ECHILD (No child processes)"
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "id": "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race2",
+      "toolchain": {
+        "imre": "90ec3c8144a48aad29ee0ee5d6c2a4d8c6b9bdd47ba8b0e6b7c44514040d24b2",
+        "runtime": "2b853c4fd58451de11c0e50237360273463c1c63b865948536f583b8f4839b8c",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "method_sha256": "c36d3acf832c32045b8e7386644c15b0de3fc636dc05860cb99b2889c24076ea",
+      "replacement": "lambda: None",
+      "native_parent_sha256": "42ccfad58fcb573bc7e26894840ce141a82ec69d422c8a2117af08f18fc7441a",
+      "body_attempt": {
+        "status": "blocked",
+        "reason": "<case>/case.py:19:14: Imre: name is not a local value; globals and first-class functions are unsupported"
+      },
+      "installed": {
+        "native_parent": 2943998,
+        "child": 2943999,
+        "child_exec": "execve(\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", [\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", \"-c\", \"exit(1)\"], 0x7ffc5f9e2650 /* 73 vars */) = 0",
+        "fixture_events": [
+          "install",
+          "clear",
+          "signal",
+          "restore",
+          "kill"
+        ],
+        "reap": "wait4(2943999, [{WIFEXITED(s) && WEXITSTATUS(s) == 1}], WNOHANG, NULL) = 2943999",
+        "signals": [
+          "kill(2943999, SIGTERM)                  = -1 ESRCH (No such process)"
+        ],
+        "restored_wait": "wait4(2943999, 0x7ffc5f9e21ec, WNOHANG, NULL) = -1 ECHILD (No child processes)"
+      },
+      "host_only_control": {
+        "native_parent": 2944021,
+        "child": 2944025,
+        "child_exec": "execve(\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", [\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", \"-c\", \"exit(1)\"], 0x7ffffaba7dc0 /* 73 vars */) = 0",
+        "fixture_events": [
+          "install",
+          "clear",
+          "signal",
+          "restore",
+          "kill"
+        ],
+        "reap": "wait4(2944025, [{WIFEXITED(s) && WEXITSTATUS(s) == 1}], WNOHANG, NULL) = 2944025",
+        "signals": [],
+        "restored_wait": "wait4(2944025, 0x7ffffaba795c, WNOHANG, NULL) = -1 ECHILD (No child processes)"
+      }
+    }
+  ]
+}

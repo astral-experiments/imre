@@ -87,9 +87,9 @@ fn view(field: OwnedWord) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::ObjectValue(field))))
 }
 
-fn string(text: Rc<Str>) -> OwnedWord {
+fn string(text: crate::StrOwner) -> OwnedWord {
     // SAFETY: the pointer transfers exactly one owned native string.
-    unsafe { OwnedWord::from_owned(Rc::into_raw(text) as usize, WordKind::new(3)) }
+    unsafe { OwnedWord::from_owned(StrOwner::into_raw(text) as usize, WordKind::new(3)) }
 }
 
 fn tuple(fields: Fields) -> Result<OwnedWord> {
@@ -145,7 +145,7 @@ fn project(exception: &Exception, owner: &Rc<Object>) -> Result<Rc<Object>> {
                 "{}: line {} column {} (char {})",
                 error.msg, error.lineno, error.colno, error.pos
             );
-            smallvec![string(Rc::new(text.into()))]
+            smallvec![string(StrOwner::new(text.into()))]
         }
         Payload::Process(error) => error.arguments(),
         Payload::Timeout(error) => error.arguments(),
@@ -301,8 +301,8 @@ mod tests {
         let first = new_exception(Kind::ValueError, Payload::Empty);
         let second = new_exception(Kind::TypeError, Payload::Empty);
         assert!(Rc::ptr_eq(&args(&first), &args(&second)));
-        let text = Rc::new(Str::from("keep me"));
-        let weak = Rc::downgrade(&text);
+        let text = StrOwner::new(Str::from("keep me"));
+        let weak = StrOwner::downgrade(&text);
         let error = new_exception(Kind::ValueError, Payload::Message(text));
         let saved = args(&error);
         assert!(Rc::ptr_eq(&saved, &args(&error)));

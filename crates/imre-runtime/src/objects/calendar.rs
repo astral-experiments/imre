@@ -121,7 +121,7 @@ pub(super) enum Value {
     },
     Zone {
         offset: Rc<Object>,
-        name: Option<Rc<Str>>,
+        name: Option<crate::StrOwner>,
     },
 }
 
@@ -344,7 +344,7 @@ fn offset_text(offset: i128) -> String {
     }
     s
 }
-fn make_zone(delta_obj: Rc<Object>, name: Option<Rc<Str>>) -> Result<Rc<Object>, Error> {
+fn make_zone(delta_obj: Rc<Object>, name: Option<crate::StrOwner>) -> Result<Rc<Object>, Error> {
     let us = delta(&delta_obj);
     if us.abs() >= DAY {
         return Err(Error::new(
@@ -539,7 +539,12 @@ pub unsafe extern "C" fn imre_calendar_delta(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_zone(d: *const Object, name: usize) -> *const Object {
     // SAFETY: the caller roots the delta and any present name until the new zone owns both.
-    let (d, name) = unsafe { (retain(d), (name != 0).then(|| retain(name as *const Str))) };
+    let (d, name) = unsafe {
+        (
+            retain(d),
+            (name != 0).then(|| crate::StrOwner::acquire_word(name)),
+        )
+    };
     rc_result(make_zone(d, name))
 }
 #[unsafe(no_mangle)]
@@ -656,7 +661,7 @@ pub unsafe extern "C" fn imre_calendar_offset(o: *const Object) -> usize {
 pub unsafe extern "C" fn imre_calendar_zonename(z: *const Object) -> *const Str {
     // SAFETY: the caller roots the exact fixed zone during the string lookup.
     with(unsafe { object(z) }, |v| match v {
-        Value::Zone { offset, name } => Rc::into_raw(
+        Value::Zone { offset, name } => crate::StrOwner::into_raw(
             name.clone()
                 .unwrap_or_else(|| text::owned_string(&zone_name(delta(offset)))),
         ),
@@ -693,5 +698,5 @@ pub unsafe extern "C" fn imre_calendar_text(o: *const Object, iso: bool) -> *con
             .as_ref()
             .map_or_else(|| zone_name(delta(offset)), |s| s.as_str().to_owned()),
     });
-    Rc::into_raw(text::owned_string(&s))
+    crate::StrOwner::into_raw(text::owned_string(&s))
 }

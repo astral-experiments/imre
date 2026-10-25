@@ -321,11 +321,12 @@ pub unsafe extern "C" fn imre_socket_connect(s: &Object, pair: *const usize) {
 // use precisely the same layout as a tuple literal.
 unsafe fn addr_tuple(layout: *const RecordDescriptor, addr: libc::sockaddr_in) -> *mut usize {
     let host = Ipv4Addr::from(addr.sin_addr.s_addr.to_ne_bytes());
-    let host = Rc::new(Str::from(host.to_string()));
+    let host = crate::StrOwner::new(Str::from(host.to_string()));
     // SAFETY: the descriptor describes (str, int); initialize and transfer both owners.
     unsafe {
         let pair = imre_record_new(layout);
-        pair.cast::<*const Str>().write(Rc::into_raw(host));
+        pair.cast::<*const Str>()
+            .write(crate::StrOwner::into_raw(host));
         pair.add(1)
             .write(word(i32::from(u16::from_be(addr.sin_port))));
         pair
