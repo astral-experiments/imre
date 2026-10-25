@@ -5,6 +5,7 @@
 //! freshly constructed, unescaped exceptions. No traceback or mutable exception
 //! attributes can introduce ownership cycles.
 
+mod arguments;
 mod imports;
 mod tree;
 pub(super) use tree::append_tree_entries;
@@ -280,6 +281,7 @@ struct ExceptionDetails {
     named: Option<&'static NamedDescriptor>,
     layout: Option<Rc<NamedPayload>>,
     directories: Option<Rc<DirectoryFrame>>,
+    args: Option<arguments::Cached>,
 }
 
 type Formatter = unsafe extern "C" fn(*const usize) -> *const Str;
@@ -314,6 +316,8 @@ enum Payload {
     Tree(Rc<tree::Errors>),
     Key(OwnedWord),
     Exit(Option<OwnedWord>),
+    /// With multiple positional inputs the exit code is the argument tuple itself.
+    ExitArguments(imports::Positional),
     Import(Box<imports::Import>),
     Positional(imports::Positional),
     Process(Box<super::processes::ProcessError>),
@@ -383,6 +387,7 @@ impl Exception {
             fresh.cause.clone_from(&previous.cause);
             fresh.named = previous.named;
             fresh.layout.clone_from(&previous.layout);
+            fresh.args.clone_from(&previous.args);
             Rc::get_mut(fresh.directories.as_mut().unwrap())
                 .unwrap()
                 .outer = previous.directories.clone();
@@ -520,33 +525,71 @@ impl Error {
         }
     }
 
-    /// UnicodeDecodeError preserves the undecoded bytes and the half-open error bounds.
-    pub(super) fn unicode_decode(
-        bytes: Rc<super::Bytes>,
-        start: usize,
-        end: usize,
-        reason: &'static str,
+    /// Codecs expose the original object and half-open character or byte interval in args.
+    fn unicode_codec(
+        kind: Kind,
+        codec: &str,
+        object: OwnedWord,
+        bounds: std::ops::Range<usize>,
+        reason: &str,
         message: String,
     ) -> Self {
-        // SAFETY: kind 8 owns the original immutable bytes, retained by the failing decoder.
-        let object =
-            unsafe { OwnedWord::from_owned(Rc::into_raw(bytes) as usize, WordKind::new(8)) };
-        let args = [
-            Self::string_arg("utf-8"),
+        let args = smallvec::smallvec![
+            Self::string_arg(codec),
             object,
-            Self::int_arg(crate::Int::from_usize(start)),
-            Self::int_arg(crate::Int::from_usize(end)),
+            Self::int_arg(crate::Int::from_usize(bounds.start)),
+            Self::int_arg(crate::Int::from_usize(bounds.end)),
             Self::string_arg(reason),
         ];
         Self {
-            kind: Kind::UnicodeDecodeError,
+            kind,
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
                 message: Rc::new(message.into()),
-                args: args.into_iter().collect(),
+                args,
                 os_paths: None,
             }))),
             cause: None,
         }
+    }
+
+    pub(super) fn unicode_decode(
+        codec: &str,
+        bytes: Rc<super::Bytes>,
+        bounds: std::ops::Range<usize>,
+        reason: &str,
+        message: String,
+    ) -> Self {
+        // SAFETY: kind 8 owns the immutable input of the failed decode.
+        let object =
+            unsafe { OwnedWord::from_owned(Rc::into_raw(bytes) as usize, WordKind::new(8)) };
+        Self::unicode_codec(
+            Kind::UnicodeDecodeError,
+            codec,
+            object,
+            bounds,
+            reason,
+            message,
+        )
+    }
+
+    pub(super) fn unicode_encode(
+        codec: &str,
+        text: Rc<Str>,
+        bounds: std::ops::Range<usize>,
+        reason: &str,
+        message: String,
+    ) -> Self {
+        // SAFETY: kind 3 owns the Unicode input of the failed encode.
+        let object =
+            unsafe { OwnedWord::from_owned(Rc::into_raw(text) as usize, WordKind::new(3)) };
+        Self::unicode_codec(
+            Kind::UnicodeEncodeError,
+            codec,
+            object,
+            bounds,
+            reason,
+            message,
+        )
     }
 
     pub(super) fn is_kind(&self, kind: Kind) -> bool {
@@ -929,6 +972,7 @@ pub unsafe extern "C" fn imre_async_member_cause(
                     *member = GroupMember::Caused(entry.clone());
                 }
             }
+            parent.detach_group_args();
         });
         child.0.with_mut(|storage| {
             let Storage::Exception(value) = storage else {
@@ -1123,7 +1167,7 @@ impl Storage {
     fn exception_message(&self) -> Rc<Str> {
         match &self.exception().payload {
             Payload::Import(err) => err.message(),
-            Payload::Positional(args) => args.message(),
+            Payload::Positional(args) | Payload::ExitArguments(args) => args.message(),
             Payload::Exit(code) => exit_text(code.as_ref(), ""),
             Payload::Empty => Rc::new(Str::new("")),
             Payload::Message(message) => Rc::clone(message),
@@ -1249,6 +1293,7 @@ pub(super) fn projected_word(storage: &Storage) -> Option<(WordKind, usize)> {
         Storage::ModuleMember(m) => m.scalar().map(|(k, w)| (WordKind::new(k), w)),
         Storage::Exception(e) => match &e.payload {
             Payload::Exit(Some(code)) => Some((code.kind, code.word)),
+            Payload::ExitArguments(args) => Some((args.0.kind, args.0.word)),
             Payload::Exit(None) => Some((WordKind::new(0), 0)),
             _ => None,
         },
@@ -1267,8 +1312,20 @@ pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32
     {
         return kind;
     }
-    // SAFETY: the code view roots its typed payload.
-    unsafe { exit_word(value).0.raw() }
+    // Kind 5 is shared by native containers. A projected list or child
+    // exception is not a dictionary just because it has an Object owner.
+    // SAFETY: the view owns this Object throughout the inspection.
+    unsafe {
+        let (kind, word) = exit_word(value);
+        if kind.raw() == 5 {
+            return object(word as *const Object).0.with(|s| match s {
+                Storage::Sequence(_) => 4,
+                Storage::Dictionary(_) => 5,
+                _ => 15,
+            });
+        }
+        kind.raw()
+    }
 }
 
 /// Render an exit code as a Python value, including None for a missing argument.
@@ -1630,16 +1687,24 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
             return unsafe { super::values::imre_value_repr(layout.record.word, 6) };
         }
     }
-    // SAFETY: base message formatting uses only sealed immutable builtin payloads.
+    // SAFETY: snapshot the argument owners before formatting. Nested exception
+    // repr methods can reinitialize this exception or mutate an argument list.
+    let snapshot = unsafe {
+        object(value)
+            .0
+            .with(|s| Storage::Exception(s.exception().clone()))
+    };
+    let s = &snapshot;
+    // SAFETY: the snapshot owns all words passed to the structural formatter.
     unsafe {
-        object(value).0.with(|s| {
+        let text = (|| {
             if !repr {
-                return Rc::into_raw(s.exception_message());
+                return Some(s.exception_message());
             }
             let e = s.exception();
             let arg = match &e.payload {
                 Payload::Import(err) => err.args.repr_args(),
-                Payload::Positional(args) => args.repr_args(),
+                Payload::Positional(args) | Payload::ExitArguments(args) => args.repr_args(),
                 Payload::Tree(errors) => errors.message().as_ref().clone(),
                 Payload::Empty => Str::new(""),
                 Payload::Arguments(arguments) => {
@@ -1663,10 +1728,18 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
                     super::values::write_repr(&mut s, k.word, k.kind);
                     s.into()
                 }
+                Payload::Process(_) | Payload::Timeout(_) | Payload::Group(_) => {
+                    arguments::projected_repr(value)?
+                }
                 _ => string_repr(&s.exception_message()),
             };
-            Rc::into_raw(Rc::new(format!("{}({})", e.name(), arg).into()))
-        })
+            Some(Rc::new(format!("{}({})", e.name(), arg).into()))
+        })();
+        if imre_error_pending() == 0 {
+            text.map_or(std::ptr::null(), Rc::into_raw)
+        } else {
+            std::ptr::null()
+        }
     }
 }
 
@@ -1886,8 +1959,10 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
     // SAFETY: pending roots its immutable exception payload through this visit.
     let exit = unsafe {
         pending.0.with(|storage| {
-            let Payload::Exit(code) = &storage.exception().payload else {
-                return None;
+            let code = match &storage.exception().payload {
+                Payload::Exit(code) => code.as_ref(),
+                Payload::ExitArguments(args) => Some(&args.0),
+                _ => return None,
             };
             let (status, message) = match code {
                 None => (0, None),

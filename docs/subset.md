@@ -1146,6 +1146,21 @@ Exceptions contain an immutable category, message, optional explicit cause, and 
 
 ## Exceptions and cleanup
 
+A caught `Exception` or `BaseException`, including `cm.exception` from
+`unittest.TestCase.assertRaises`, exposes its original positional arguments in
+`error.args`. The tuple can outlive the handler. Its mutable contents still
+refer to the original objects. Read its length, index it, or format it with
+`repr`. An identity comparison with a known tuple (including another
+`error.args` getter) compares the underlying tuple. Assigning a new `.args`
+tuple and identity comparisons between arbitrary erased scalar values are
+outside the native subset.
+
+The args preserve how an error was raised. For example, a failed
+`subprocess.run(check=True)` has `(returncode, cmd)`; a failed
+`CompletedProcess.check_returncode()` also includes stdout and stderr.
+`SystemExit(1, 2).args` is the same tuple as its code, while
+`SystemExit((1, 2)).args` contains that tuple as one argument.
+
 An explicitly typed local assigned in a `try` body may be read after a handled exception. When a simple assignment did not complete on that path and no earlier value exists, the read raises `UnboundLocalError` (a `NameError`). A successfully assigned `None` remains an ordinary value.
 
 `ImportError` and its subclass `ModuleNotFoundError` retain their positional

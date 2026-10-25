@@ -711,6 +711,9 @@ pub(crate) enum Builtin {
     ExceptionRecordFields,
     /// Check the return type of __str__ or __repr__ before crossing the formatter ABI.
     ExceptionFormatterResult(bool),
+    ExceptionArgs,
+    ExceptionTupleIdentity,
+    SystemExitFromTuple,
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,

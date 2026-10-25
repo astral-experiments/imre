@@ -269,6 +269,7 @@ pub unsafe extern "C" fn imre_import_error_reset(err: *const Object, replacement
             let Storage::Exception(e) = s else {
                 unreachable!()
             };
+            e.clear_args();
             e.payload = new;
         });
     }
@@ -290,6 +291,7 @@ pub unsafe extern "C" fn imre_import_error_reject_reset(
             let Storage::Exception(exception) = s else {
                 unreachable!()
             };
+            exception.clear_args();
             let Payload::Import(import) = &mut exception.payload else {
                 unreachable!()
             };

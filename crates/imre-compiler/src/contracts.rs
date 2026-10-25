@@ -73,20 +73,23 @@ impl Builtin {
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
+            | Self::ExceptionArgs
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
-            Self::MappingObjectGet | Self::ExceptionFieldRepr => {
-                Contract::new(true, PreservesOwners)
-            }
+            Self::MappingObjectGet => Contract::new(true, PreservesOwners),
             Self::BoxValue
             | Self::ExceptionTupleView
+            | Self::ExceptionTupleIdentity
             | Self::ExceptionKeywordSuggestion
             | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
-            Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
-            Self::ExceptionArgument(_) | Self::NamedException { .. } => {
-                Contract::new(false, PreservesLists)
+            // Formatting a projected task-group member may call its own __repr__.
+            Self::ExceptionFieldRepr | Self::ExceptionRepr | Self::ExceptionMessage => {
+                Contract::new(true, Unknown)
             }
+            Self::SystemExitFromTuple
+            | Self::ExceptionArgument(_)
+            | Self::NamedException { .. } => Contract::new(false, PreservesLists),
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(

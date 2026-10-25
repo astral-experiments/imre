@@ -145,8 +145,10 @@ impl Emitter<'_, '_> {
                 (1, Type::Bool),
                 (2, Type::Int),
                 (3, Type::Str),
+                (4, Type::ListInt),
                 (5, Type::Dict(0)),
                 (6, Type::Tuple(0)),
+                (7, Type::Float),
                 (8, Type::Bytes),
             ]
             .iter()

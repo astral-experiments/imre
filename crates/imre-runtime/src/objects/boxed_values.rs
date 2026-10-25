@@ -96,7 +96,12 @@ pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *c
             }
             next = sequence_item(k, w, i);
         }
-        Rc::into_raw(word_text(kind, word, repr))
+        let text = word_text(kind, word, repr);
+        if super::exceptions::imre_error_pending() == 0 {
+            Rc::into_raw(text)
+        } else {
+            std::ptr::null()
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 //! Generated record operations recurse through the existing concrete word kinds.
-//! No operation calls user code or mutates a container; acyclic checked types
-//! bound recursion and keep every borrowed child rooted by its original owner.
+//! Structural traversal uses explicit cursors. Exception repr may call Python;
+//! it roots outstanding cursors before releasing control to the callback.
 
 use std::cmp::Ordering;
 use std::fmt::Write;
@@ -371,14 +371,14 @@ pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
 
 /// # Safety
 /// The word and all descendants are rooted with the supplied representation;
-/// no runtime mutation or user callback can overlap formatting.
+/// an exception formatter may reenter after the traversal roots its pending cursors.
 pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind) {
     let mut pending = Vec::new();
+    let mut callback_roots = std::collections::HashMap::new();
     let mut current = Some(ReprTask::Word(word, kind));
     while let Some(task) = current.take().or_else(|| pending.pop()) {
-        // SAFETY: the root owns the whole immutable graph until formatting
-        // returns. Tasks retain only copied words and positions, never storage
-        // references or buffer addresses.
+        // SAFETY: tasks store values and positions, never references to mutable
+        // storage. A callback roots every pending value before it may mutate a parent.
         current = unsafe {
             match task {
                 ReprTask::Word(word, kind) => match kind.raw() & !NULLABLE {
@@ -404,6 +404,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                             }
                             None
                         }
+                        Storage::Exception(_) => Some(ReprTask::Exception(owner)),
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
@@ -493,6 +494,29 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         _ => fail("SystemError", "unsupported resource representation"),
                     })
                 }
+                ReprTask::Exception(owner) => {
+                    // A custom repr can remove its own reference or a pending container.
+                    // Retain the cursors outside every StorageCell borrow. Formatting
+                    // ordinary values needs no extra owners.
+                    for task in &pending {
+                        if let Some((word, kind)) = task.root() {
+                            callback_roots
+                                .entry((word, kind.raw()))
+                                .or_insert_with(|| kind.acquire(word));
+                        }
+                    }
+                    let exception: Rc<Object> = super::acquire_rc(owner as usize);
+                    let text = super::exceptions::imre_exception_repr(Rc::as_ptr(&exception));
+                    if text.is_null() {
+                        return;
+                    }
+                    let text = Rc::from_raw(text);
+                    if super::exceptions::imre_error_pending() != 0 {
+                        return;
+                    }
+                    output.push_str(&text);
+                    None
+                }
                 ReprTask::Record(payload, position, written) => {
                     record_field_repr(output, payload, position, written, &mut pending)
                 }
@@ -508,8 +532,22 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
 enum ReprTask {
     Word(usize, WordKind),
     Object(*const Object, usize),
+    Exception(*const Object),
     Record(*const usize, usize, usize),
     KeySeparator,
+}
+
+impl ReprTask {
+    fn root(&self) -> Option<(usize, WordKind)> {
+        match *self {
+            Self::Word(word, kind) => Some((word, kind)),
+            Self::Object(owner, _) | Self::Exception(owner) => {
+                Some((owner as usize, WordKind::new(5)))
+            }
+            Self::Record(record, _, _) => Some((record as usize, WordKind::new(6))),
+            Self::KeySeparator => None,
+        }
+    }
 }
 
 pub(super) struct ReprEntry {
