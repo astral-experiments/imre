@@ -307,6 +307,7 @@ impl Builtin {
             | Self::WrapperAttributes(_)
             | Self::Chr
             | Self::Ord
+            | Self::Random(_)
             | Self::IntegerPower
             | Self::ModularPower
             | Self::NegativeIntegerPower
@@ -791,6 +792,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "imre_chr"
+                | "imre_random_bits"
+                | "imre_random_choice_index"
+                | "imre_random_progression"
                 | "imre_int_pow"
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"
