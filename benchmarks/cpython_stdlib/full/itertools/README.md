@@ -84,3 +84,19 @@ between spreads, partial iteration on failure, invalid operands, callable
 retention, a partially consumed iterator, and a 1,025-element input. It also records how the two checking
 modes treat an unused function. These controls add no occurrence to the 137
 primary or one companion test.
+
+[whole_files.py](whole_files.py) also builds both original test files directly,
+with their own `unittest.main()` entry points. It checks each staged file against
+its pinned Git blob and records compiler and runtime hashes, output and exit
+status at O0/O3 in ordinary and reachable-only builds. The [Linux
+receipt](whole-files-linux.json), from compiler tree
+`2118d7493f4b357878aec940ac53869a10363e89`, records `_thread` as the primary blocker and
+`threading` as the companion blocker in all four modes. These eight builds
+executed zero upstream bodies.
+
+```sh
+python3 benchmarks/cpython_stdlib/full/itertools/whole_files.py \
+  --imre /path/to/imre --runtime /path/to/libimre_runtime.a \
+  --clang /usr/bin/clang-18 --cpython-git /path/to/cpython \
+  --result /tmp/itertools-whole-files.json
+```
