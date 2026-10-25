@@ -62,11 +62,11 @@ impl View {
                 a.len() == b.len() && a.iter().zip(b).all(|(&a, &b)| self.equal_at(a, other, b))
             }
             (Node::Object(a), Node::Object(b)) => {
-                // Only the last value for a repeated JSON key participates in comparison.
-                a.iter().all(|(key, _)| {
-                    right
-                        .lookup(key)
-                        .is_some_and(|b| self.equal_at(left.lookup(key).unwrap(), other, b))
+                a.iter().enumerate().all(|(i, (key, value))| {
+                    a.is_shadowed(i)
+                        || right
+                            .lookup(key)
+                            .is_some_and(|b| self.equal_at(*value, other, b))
                 }) && b.iter().all(|(key, _)| left.lookup(key).is_some())
             }
             _ => false,
