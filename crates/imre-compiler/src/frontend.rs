@@ -6614,11 +6614,6 @@ impl<'a> Checker<'a> {
         if let Some(kind) = self.exception_category(&call.func) {
             return self.simple_exception(call, kind);
         }
-        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "issubclass" && !self.names.contains_key("issubclass") && self.resolve(&call.func).is_none())
-            && let Some(result) = self.nominal_issubclass(call)?
-        {
-            return Ok(result);
-        }
         if let Some(binding) = self.resolve(&call.func) {
             let Binding::Definition(definition) = binding else {
                 return Err(error(self.source, call, "a module is not callable"));

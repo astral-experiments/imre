@@ -3744,17 +3744,6 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::ClassIsSubclass => {
-                let result = self.instruction(format!(
-                    "call i32 @imre_class_is_subclass(ptr {}, ptr {})",
-                    args[0].value.operand, args[1].value.operand
-                ));
-                Value {
-                    ty: Type::Bool,
-                    operand: self.instruction(format!("icmp ne i32 {result}, 0")),
-                    small_integer: false,
-                }
-            }
             Builtin::ForwardRefField(_)
             | Builtin::NewForwardRef
             | Builtin::LiteralStringView
@@ -7586,7 +7575,6 @@ declare i64 @imre_enum_lookup(ptr, i64, i64)
 declare ptr @imre_enum_string(i64)
 declare i32 @imre_str_equal(ptr, ptr)
 declare ptr @imre_class_name_part(ptr, i32)
-declare i32 @imre_class_is_subclass(ptr, ptr)
 declare i32 @imre_optional_int_equal(i64, i64)
 declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)

@@ -407,7 +407,6 @@ impl Builtin {
             | Self::NewForwardRef
             | Self::ClassNameView
             | Self::ClassNamePart { .. }
-            | Self::ClassIsSubclass
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString

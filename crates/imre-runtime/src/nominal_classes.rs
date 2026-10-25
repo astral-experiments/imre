@@ -18,7 +18,7 @@ pub unsafe extern "C" fn imre_class_name_part(class: *const Str, module: u32) ->
 /// Both pointers are rooted class names. Virtual ABC registration is independent
 /// of the concrete base: an array is a mutable sequence without inheriting it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_class_is_subclass(child: *const Str, parent: *const Str) -> u32 {
+pub unsafe extern "C" fn imre_builtin_issubclass(child: *const Str, parent: *const Str) -> u32 {
     // SAFETY: these names are immutable throughout the query.
     let (child, parent) = unsafe { ((&*child).as_str(), (&*parent).as_str()) };
     let mutable_sequence = matches!(

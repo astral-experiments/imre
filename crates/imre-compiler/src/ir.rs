@@ -601,7 +601,6 @@ pub(crate) enum Builtin {
     ClassNamePart {
         module: bool,
     },
-    ClassIsSubclass,
     NewForwardRef,
     ForwardRefField(usize),
     StrEnumValue,
