@@ -7678,6 +7678,20 @@ mod tests {
     }
 
     #[test]
+    fn bytes_text_allocation_errors_escape_nested_calls() {
+        let llvm = compile(
+            "def text(data: bytes) -> str:\n    return str(data)\ndef outer(data: bytes) -> str:\n    return text(data)\ntry:\n    print(outer(b'abc'))\nexcept MemoryError:\n    print('memory')\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        for call in ["call ptr @imre_bytes_str(", "call ptr @fn_0("] {
+            let (_, after) = llvm.split_once(call).unwrap();
+            let (body, _) = after.split_once("\n}").unwrap();
+            assert!(body.contains("call i32 @imre_error_pending()"));
+        }
+    }
+
+    #[test]
     fn exception_field_display_checks_for_allocation_failure() {
         let llvm = compile("def show(label: str, quoted: bool) -> str:\n    try:\n        raise SystemExit((label, label))\n    except SystemExit as error:\n        if quoted:\n            return repr(error.code)\n        return str(error.code)\nprint(show(\"text\", True))\n", &CompileOptions::default()).unwrap();
         for call in [
