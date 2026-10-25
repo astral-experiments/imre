@@ -14,6 +14,12 @@ Mapping class base, and the copy protocols exercised by 16 original cases.
 The [branch verification runs](runs/README.md) retain full historical reports
 for individual compiler trees. Each report has its own O0 and O3 denominator.
 
+On [canonical main `0a46708`](runs/0a46708e7a95/README.md), both levels recorded
+**7 fully native / 659**, eight native bodies with host fixtures, 14 host-driven
+native operations, four cases without a collections operation, three reference
+skips and 623 blockers. The separate [dict.fromkeys dependency](fromkeys/)
+does not add an occurrence to this total.
+
 | Suite | IDs |
 | --- | ---: |
 | test_collections (containers, ABCs and doctests) | 116 |
