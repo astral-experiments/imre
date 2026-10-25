@@ -32,4 +32,32 @@ def read(mode: str):
     return parser.parse_known_args(["--bad", "--ok"])
 
 
-print(repr(read(sys.argv[1] if len(sys.argv) > 1 else "absent")))
+def nested(mode: str):
+    parser = argparse.ArgumentParser(prog="nested", prefix_chars="+")
+    group = parser.add_argument_group("parent options")
+    group.add_argument("++ok", action="store_true")
+    commands = parser.add_subparsers(dest="command")
+    child = commands.add_parser("run")
+    child_group = child.add_argument_group("child options")
+    child_group.add_argument("--on", action="store_true")
+    try:
+        if mode == "nested-group":
+            group.add_argument("++bad", action="count", choices=value("group"))
+        elif mode == "nested-child":
+            child.add_argument("--no-bad", action=argparse.BooleanOptionalAction)
+        else:
+            child_group.add_argument("--bad", action="store_true", const=value("interrupt"), help=value("late"))
+    except TypeError as error:
+        print(str(error))
+    except ValueError as error:
+        print(str(error))
+    except RuntimeError as error:
+        print(str(error))
+    return parser.parse_known_args(["++ok", "run", "--on", "--bad"])
+
+
+mode = sys.argv[1] if len(sys.argv) > 1 else "absent"
+if mode.startswith("nested-"):
+    print(repr(nested(mode)))
+else:
+    print(repr(read(mode)))

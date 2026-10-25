@@ -1,7 +1,7 @@
 //! A log record owns one native Python value per attribute, including user-supplied extras.
 use std::cell::Cell;
 use std::collections::HashMap;
-thread_local! {static FLAGS:Cell<u8> = const {Cell::new(15)};}
+thread_local! {static FLAGS:Cell<u8> = const {Cell::new(31)};}
 use num_traits::ToPrimitive;
 use std::rc::Rc;
 use std::sync::OnceLock;
@@ -891,7 +891,7 @@ pub extern "C" fn imre_logrecord_set_flag(mask: usize, value: bool) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_percent_int(fmt: *const Str, integer: usize) -> *const Str {
     // SAFETY: the caller roots both precise input representations for the whole operation.
-    unsafe { percent_scalar(&*fmt, WordKind::new(2).acquire(integer)) }
+    unsafe { percent(&*fmt, WordKind::new(2).acquire(integer)) }
 }
 
 /// Format an exact text operand using the same conversions as a log message.
@@ -901,10 +901,24 @@ pub unsafe extern "C" fn imre_str_percent_int(fmt: *const Str, integer: usize) -
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_percent_text(fmt: *const Str, text: *const Str) -> *const Str {
     // SAFETY: the caller roots the format and the exact string allocation.
-    unsafe { percent_scalar(&*fmt, WordKind::new(3).acquire(text as usize)) }
+    unsafe { percent(&*fmt, WordKind::new(3).acquire(text as usize)) }
 }
 
-fn percent_scalar(fmt: &Str, value: OwnedWord) -> *const Str {
+/// Format the positional items of an exact tuple with the log-record formatter.
+///
+/// # Safety
+/// Both arguments are rooted through the call. The tuple has an immutable native
+/// descriptor; a successful result transfers an owned string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_percent_tuple(
+    fmt: *const Str,
+    tuple: *const usize,
+) -> *const Str {
+    // SAFETY: kind six retains the tuple and its descriptor-typed fields until formatting ends.
+    unsafe { percent(&*fmt, WordKind::new(6).acquire(tuple as usize)) }
+}
+
+fn percent(fmt: &Str, value: OwnedWord) -> *const Str {
     finish(
         format_arguments(fmt.as_str(), &value).map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
         std::ptr::null(),
