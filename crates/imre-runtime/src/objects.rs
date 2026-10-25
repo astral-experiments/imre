@@ -366,9 +366,10 @@ pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind
     i32::from(appended)
 }
 
+/// Publish an empty typed list before releasing the elements of the old buffer.
+///
 /// # Safety
-/// Root a mutable typed list; every old element keeps its owner until the empty
-/// buffer has been published and the storage borrow has ended.
+/// The caller keeps the mutable list rooted for the duration of the operation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_seq_clear(value: *const Object) {
     // SAFETY: only the detached buffer escapes; no element destructor runs under the borrow.
@@ -382,7 +383,11 @@ pub unsafe extern "C" fn imre_seq_clear(value: *const Object) {
             }
             // A deferred diff is a list of strings. Clearing it discards its plan
             // without materializing values that no observer can access.
-            let kind = if words.plan().is_some() { 3 } else { words.kind.raw() };
+            let kind = if words.plan().is_some() {
+                3
+            } else {
+                words.kind.raw()
+            };
             Some(std::mem::replace(words, Words::new(kind)))
         })
     };

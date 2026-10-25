@@ -5929,7 +5929,8 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "clear"
-            && (self.unshadowed_builtin(&method.value, "dict")
+            && (self.unshadowed_builtin(&method.value, "list")
+                || self.unshadowed_builtin(&method.value, "dict")
                 || matches!(
                     self.resolve(&method.value),
                     Some(Binding::Intrinsic(
@@ -5942,10 +5943,20 @@ impl<'a> Checker<'a> {
                 return Err(error(
                     self.source,
                     call,
-                    "unbound dict.clear requires one dictionary",
+                    "unbound clear requires one receiver",
                 ));
             };
             let receiver = self.expr(owner)?;
+            if self.unshadowed_builtin(&method.value, "list") {
+                let receiver = self.json_mutation_receiver(receiver, owner)?;
+                if self.types.element(receiver.ty).is_none() {
+                    return Err(error(self.source, owner, "list.clear requires a list"));
+                }
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::ListClear, vec![receiver]),
+                });
+            }
             if self.types.mapping(receiver.ty).is_none() {
                 return Err(error(
                     self.source,
