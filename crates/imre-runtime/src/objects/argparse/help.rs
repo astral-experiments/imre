@@ -103,14 +103,12 @@ impl OptionSpec {
             format!("{{{}}}", self.choices.join(","))
         };
         if self.positional() {
-            if self.many && summary {
-                metavar = format!("{metavar} [{metavar} ...]");
+            if summary {
+                metavar = self.nargs.label(&metavar);
             }
             return paint(color, if summary { "32" } else { "1;32" }, &metavar);
         }
-        if self.many {
-            metavar = format!("{metavar} [{metavar} ...]");
-        }
+        metavar = self.nargs.label(&metavar);
         let option_color = |flag: &str, bold: bool| match (flag.starts_with("--"), bold) {
             (true, true) => "1;36",
             (true, false) => "36",
@@ -608,6 +606,7 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                     super::super::paths::normalize(option.default.as_deref().unwrap()).to_string()
                 }
                 ("default", Some(option)) => option.default.as_deref().unwrap_or("None").to_owned(),
+                ("const", Some(option)) => option.constant.as_deref().unwrap_or("None").to_owned(),
                 ("choices", Some(option)) => {
                     if option.choices.is_empty() {
                         "None".into()
@@ -623,12 +622,10 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
                     }
                 }
                 ("nargs", Some(option)) => {
-                    if option.many {
-                        "+".into()
-                    } else if option.kind == Kind::Bool {
+                    if option.kind == Kind::Bool {
                         "0".into()
                     } else {
-                        "None".into()
+                        option.nargs.spelling()
                     }
                 }
                 _ => unreachable!("compile-time argparse template check"),

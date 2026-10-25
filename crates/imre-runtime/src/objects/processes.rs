@@ -16,13 +16,15 @@ use std::time::{Duration, Instant};
 
 use super::exceptions::{Error, Kind, Result, finish, raise_process, raise_timeout};
 use super::files::{decode_utf8_text, os_error};
-use super::mappings::{StringPairs, imre_dict_contains, imre_dict_new, imre_dict_set};
+use super::mappings::{StringPairs, imre_dict_contains, imre_dict_new};
 use super::records::{RecordDescriptor, imre_record_new};
 use super::words::{OwnedWord, WordKind};
 use super::{Bytes, Int, Object, Storage, Str, acquire_rc, fail, object};
 
 mod asynchronous;
+mod popen;
 pub(super) use asynchronous::AsyncProcess;
+pub(super) use popen::Popen;
 
 #[cfg(target_os = "linux")]
 unsafe extern "C" {
@@ -92,6 +94,29 @@ impl ProcessError {
 enum Deadline {
     Integer(Int),
     Float(f64),
+}
+
+impl Deadline {
+    fn seconds(&self) -> Result<f64> {
+        match self {
+            Self::Integer(seconds) => crate::floats::int_to_float(seconds),
+            Self::Float(seconds) => Ok(*seconds),
+        }
+    }
+
+    /// # Safety
+    /// A nonzero word is a rooted integer (2) or a nullable float pointer (7).
+    unsafe fn from_word(kind: u32, word: usize) -> Option<Self> {
+        // SAFETY: the caller supplies the representation selected by the kind.
+        unsafe {
+            match kind {
+                0 => None,
+                2 => Some(Self::Integer(Int::clone(&Int::borrow(word)))),
+                7 => (word as *const f64).as_ref().copied().map(Self::Float),
+                _ => fail("SystemError", "invalid process deadline kind"),
+            }
+        }
+    }
 }
 
 /// A deadline failure owns the original argv and undecoded pipe snapshots.
@@ -406,6 +431,7 @@ struct Launch {
 impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
     fn new(argv: Vec<CString>, env: Option<StringPairs>) -> Result<Self> {
+        popen::cleanup();
         let program = &argv[0];
         let search = if program.as_bytes().contains(&b'/') {
             None
@@ -584,10 +610,7 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
         child,
         reaped: false,
     };
-    let timeout = match deadline {
-        Deadline::Integer(seconds) => crate::floats::int_to_float(seconds)?,
-        Deadline::Float(seconds) => *seconds,
-    };
+    let timeout = deadline.seconds()?;
     let mut stdout = child.child.stdout.take();
     let mut stderr = child.child.stderr.take();
     let fds = [
@@ -946,11 +969,11 @@ unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<Rc
             // SAFETY: insertion acquires both rooted strings; no language alias
             // can observe this new acyclic dictionary before it is complete.
             unsafe {
-                imre_dict_set(
+                super::mappings::dict_set(
                     Rc::as_ptr(&result),
                     Rc::as_ptr(&key) as usize,
                     Rc::as_ptr(&value) as usize,
-                );
+                )?;
             }
         }
     }
@@ -1241,15 +1264,7 @@ pub unsafe extern "C" fn imre_subprocess_run_modes(
     }
     // SAFETY: the caller supplies either None, a rooted integer, or a nullable float.
     unsafe {
-        let timeout = match deadline_kind {
-            0 => None,
-            2 => Some(Deadline::Integer(Int::clone(&Int::borrow(deadline)))),
-            7 => (deadline as *const f64)
-                .as_ref()
-                .copied()
-                .map(Deadline::Float),
-            _ => fail("SystemError", "invalid process deadline kind"),
-        };
+        let timeout = Deadline::from_word(deadline_kind, deadline);
         run_process(args, cwd, env, check, streams, timeout, descriptor)
     }
 }
@@ -1468,7 +1483,7 @@ mod tests {
             let value = Rc::new(Str::new(value));
             // SAFETY: both strings remain rooted while insertion acquires them.
             unsafe {
-                imre_dict_set(
+                crate::objects::mappings::imre_dict_set(
                     Rc::as_ptr(&result),
                     Rc::as_ptr(&key) as usize,
                     Rc::as_ptr(&value) as usize,
@@ -2195,7 +2210,7 @@ mod tests {
         // SAFETY: insertion acquires the two exact rooted strings into the owned
         // dictionary; it has no link back to the process's native environment.
         unsafe {
-            imre_dict_set(
+            crate::objects::mappings::imre_dict_set(
                 Rc::as_ptr(&copy),
                 Rc::as_ptr(&key) as usize,
                 Rc::as_ptr(&value) as usize,

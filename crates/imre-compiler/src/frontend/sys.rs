@@ -2,10 +2,14 @@
 use super::*;
 
 impl Checker<'_> {
-    /// The runtime uses UTF-8 for both strings and text paths.
-    fn encoding_call(&mut self, call: &ast::ExprCall, name: &str) -> Result<Expr, String> {
+    fn sys_no_args(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &str,
+        result: Expr,
+    ) -> Result<Expr, String> {
         if call.arguments.is_empty() {
-            return Ok(unpacking::string("utf-8"));
+            return Ok(result);
         }
         let count = call.arguments.args.len();
         let message = if call.arguments.keywords.is_empty() {
@@ -13,7 +17,7 @@ impl Checker<'_> {
         } else {
             format!("sys.{name}() takes no keyword arguments")
         };
-        self.sys_type_error(call, Type::Str, message)
+        self.sys_type_error(call, result.ty, message)
     }
 
     fn sys_type_error(
@@ -55,7 +59,16 @@ impl Checker<'_> {
                 return self.system_exit(call, true).map(Some);
             }
             Some(Binding::Intrinsic(Intrinsic::SysEncoding(name))) => {
-                return self.encoding_call(call, name).map(Some);
+                return self
+                    .sys_no_args(call, name, unpacking::string("utf-8"))
+                    .map(Some);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysException)) => {
+                let result = Expr {
+                    ty: self.types.optional(Type::Exception),
+                    kind: ExprKind::Builtin(Builtin::ActiveException, Vec::new()),
+                };
+                return self.sys_no_args(call, "exception", result).map(Some);
             }
             _ => {}
         }

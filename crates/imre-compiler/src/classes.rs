@@ -702,11 +702,24 @@ fn check_initializer(
                 called_super = true;
                 continue;
             }
+            ast::Stmt::Assert(assertion) => {
+                let mut use_self = SelfUse(receiver, None, &initialized);
+                use_self.visit_expr(&assertion.test);
+                if let Some(message) = &assertion.msg {
+                    use_self.visit_expr(message);
+                }
+                if let Some(expr) = use_self.1 {
+                    return Err(
+                        module.error(expr, "an assertion cannot expose an incomplete instance")
+                    );
+                }
+                continue;
+            }
             ast::Stmt::Pass(_) => continue,
             _ => {
                 return Err(module.error(
                     statement,
-                    "__init__ must contain only straight-line self.field assignments, docstrings, or pass",
+                    "__init__ must contain only straight-line local and self.field assignments, assertions, docstrings, or pass",
                 ));
             }
         };
@@ -723,6 +736,12 @@ fn check_initializer(
             initializer_targets(target, &mut targets);
         }
         for target in targets {
+            if let ast::Expr::Name(name) = target {
+                if name.id == receiver {
+                    return Err(module.error(target, "an initializer cannot rebind its receiver"));
+                }
+                continue;
+            }
             let ast::Expr::Attribute(attribute) = target else {
                 return Err(module.error(target, "__init__ must assign a declared self.field"));
             };
