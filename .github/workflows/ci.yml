@@ -63,6 +63,7 @@ jobs:
           required += ("benchmarks/cpython_stdlib/full/unittest/mock_reset.py",
                        "tests/fixtures/containers/dict_method_copy.py")
           required += ("benchmarks/cpython_stdlib/full/unittest/context_regex.py",)
+          required += ("tests/fixtures/exceptions/warning_hierarchy.py", "tests/fixtures/files/nonblocking_write.py")
           optional = ("tests/fixtures/classes/initializer_hook.py",)
           for name in (*required, *(path for path in optional if (root / path).is_file())):
               source = root / name
@@ -115,7 +116,7 @@ jobs:
             echo "Passed: base=$base pr=$pr tree=$tree (-O0 and -O3 stdout, stderr and exit; runtime ownership)." >> "$GITHUB_STEP_SUMMARY"
             git fetch --no-tags origin refs/heads/main
             latest=$(git rev-parse FETCH_HEAD)
-            inputs=(benchmarks/cpython_stdlib/full/unittest/context_regex.py benchmarks/cpython_stdlib/full/logging/null_handler.py benchmarks/cpython_stdlib/full/logging/UPSTREAM.json tests/paths.py tests/files.py tests/fixtures/paths tests/fixtures/sys/streams_exit.py benchmarks/cpython_stdlib/native_sys.py benchmarks/cpython_stdlib/upstream.py benchmarks/cpython_stdlib/UPSTREAM.json benchmarks/cpython_stdlib/upstream benchmarks/cpython_stdlib/full/sys/stream_errno.py benchmarks/cpython_stdlib/full/sys/exit_payloads.py benchmarks/cpython_stdlib/full/unittest/mock_reset.py tests/fixtures/containers/dict_method_copy.py tests/io.py tests/unittest_main.py tests/fixtures/unittest_main crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse
+            inputs=(tests/exceptions.py tests/fixtures/exceptions/warning_hierarchy.py tests/fixtures/files/nonblocking_write.py benchmarks/cpython_stdlib/full/unittest/context_regex.py benchmarks/cpython_stdlib/full/logging/null_handler.py benchmarks/cpython_stdlib/full/logging/UPSTREAM.json tests/paths.py tests/files.py tests/fixtures/paths tests/fixtures/sys/streams_exit.py benchmarks/cpython_stdlib/native_sys.py benchmarks/cpython_stdlib/upstream.py benchmarks/cpython_stdlib/UPSTREAM.json benchmarks/cpython_stdlib/upstream benchmarks/cpython_stdlib/full/sys/stream_errno.py benchmarks/cpython_stdlib/full/sys/exit_payloads.py benchmarks/cpython_stdlib/full/unittest/mock_reset.py tests/fixtures/containers/dict_method_copy.py tests/io.py tests/unittest_main.py tests/fixtures/unittest_main crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse
                     tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py
                     benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py
                     tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py
