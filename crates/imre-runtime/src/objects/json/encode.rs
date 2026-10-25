@@ -597,7 +597,7 @@ impl Encoder<'_> {
                     let Storage::Document(doc) = storage else {
                         unreachable!("checked native document")
                     };
-                    let view = doc.view();
+                    let view = doc.view()?;
                     self.document(&view, view.index, depth)
                 })?,
                 JSON_VIEW => object(word as *const Object).0.with(|storage| {
