@@ -797,6 +797,30 @@ mod tests {
     }
 
     #[test]
+    fn ascii_decode_error_retains_its_input_and_offsets() {
+        let input = Rc::new(b"a\xffb".to_vec());
+        let original = Rc::downgrade(&input);
+        // SAFETY: input roots the bytes until the decoder returns.
+        assert!(unsafe { imre_bytes_decode_ascii(Rc::as_ptr(&input)) }.is_null());
+        drop(input);
+        // SAFETY: taking the pending error transfers its owner.
+        let error = unsafe { Rc::from_raw(imre_error_take()) };
+        // SAFETY: error roots the exception, and repr transfers a new string owner.
+        let repr = unsafe {
+            Rc::from_raw(crate::objects::exceptions::imre_exception_repr(Rc::as_ptr(
+                &error,
+            )))
+        };
+        assert_eq!(
+            repr.as_str(),
+            r"UnicodeDecodeError('ascii', b'a\xffb', 1, 2, 'ordinal not in range(128)')"
+        );
+        assert!(original.upgrade().is_some());
+        drop(error);
+        assert!(original.upgrade().is_none());
+    }
+
+    #[test]
     fn utf8_validation_preserves_identity_ownership_and_decode_errors() {
         for text in ["", "ascii\0", "é\u{10ffff}"] {
             let source = Rc::new(text.as_bytes().to_vec());
