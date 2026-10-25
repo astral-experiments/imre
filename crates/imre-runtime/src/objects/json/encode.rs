@@ -160,6 +160,14 @@ unsafe fn separators(
                 )
             }),
             LIST => object(word as *const Object).0.with(|s| {
+                if let Some(rows) = s.sequence_storage().rows() {
+                    length(rows.len())?;
+                    // The rows stay rooted while we classify the two separators.
+                    let child = schema.child();
+                    debug_assert_eq!(child.kind, RECORD);
+                    let item = |i| field(rows.row(i).as_ptr() as usize, child);
+                    return pair(item(0), item(1));
+                }
                 let words = &s.sequence().values;
                 length(words.len())?;
                 pair(
