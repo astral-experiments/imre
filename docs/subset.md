@@ -825,6 +825,8 @@ remain available when the program accesses them.
 
 `sys.platform` gives the target platform name; `os.name` gives its OS interface (`posix` or `nt`). `sys.stdout.write(text)` and `sys.stderr.write(text)` return the number of Unicode characters written. Each stream’s `flush()` flushes that stream.
 
+`_opcode.ENABLE_SPECIALIZATION` and `_opcode.ENABLE_SPECIALIZATION_FT` are both the integer `0`: Imre emits native code and does not specialize CPython bytecode at runtime. Other `_opcode` operations are unsupported.
+
 `sys.exception()` returns the actual exception being handled, or `None` outside a handler. Nested handlers restore their caller’s active exception. Exception identity can be compared with `is` and `is not`.
 
 `sys.exit()` raises `SystemExit` through the ordinary exception and `finally` paths. It accepts an optional `None`, boolean, integer or string. An uncaught string prints to stderr and exits with status 1. An omitted or `None` code exits with status 0. A caught `SystemExit.code` preserves the scalar for printing, truth tests, equality, and type tests.

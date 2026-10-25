@@ -321,6 +321,14 @@ impl ClassInfo {
                             states[id] = 1;
                             pending.push(Step::Finish(id));
                             pending.extend(fields[id].iter().copied().map(Step::Visit));
+                            // A base-typed field can own any concrete subclass.
+                            pending.extend(
+                                types
+                                    .concrete_subclasses(id)
+                                    .iter()
+                                    .copied()
+                                    .map(Step::Visit),
+                            );
                         }
                     },
                     Step::Visit(ty) => {
@@ -4594,7 +4602,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
-            | Intrinsic::SignalNumber(level)
+            | Intrinsic::IntConstant(level)
             | Intrinsic::AnnotationFormat(level),
         )) = self.resolve(expression)
         {
@@ -7477,6 +7485,18 @@ scan("a\nb", Path("lines.txt"), "4")
             let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
             assert!(llvm.contains("call ptr @imre_seq_new("), "{source}");
         }
+    }
+
+    #[test]
+    fn fields_can_own_a_concrete_subclass_of_the_declared_type() {
+        use super::{ClassInfo, Type, Types};
+
+        let types = Types::default();
+        types.add_concrete_subclass(1, &[0]);
+        let mut fields = vec![vec![], vec![], vec![types.list(Type::Class(0))]];
+        assert_eq!(ClassInfo::cyclic_field_root(&fields, &types), None);
+        fields[1].push(Type::Class(2));
+        assert!(ClassInfo::cyclic_field_root(&fields, &types).is_some());
     }
 
     #[test]
