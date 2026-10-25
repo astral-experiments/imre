@@ -26,6 +26,7 @@ mod copying;
 mod counter;
 mod csv;
 mod dataclass_values;
+mod defaultdict_factory;
 mod deque;
 mod dispatch;
 mod doctest;
@@ -2406,6 +2407,11 @@ impl<'a> Checker<'a> {
         self.reject_class_receiver_value(expression)?;
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
         if let ast::Expr::Call(call) = expression
+            && let Some(raised) = self.defaultdict_factory_error(call, expected)?
+        {
+            return Ok(raised);
+        }
+        if let ast::Expr::Call(call) = expression
             && let Some(shape) = self.types.mapping(concrete)
             && let Some(result) = self.fromkeys_call(call, Some(shape))?
         {
@@ -2531,9 +2537,7 @@ impl<'a> Checker<'a> {
             {
                 self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
             }
-            ast::Expr::Call(call)
-                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
-            {
+            ast::Expr::Call(call) if self.is_defaultdict_constructor(&call.func) => {
                 let (key, value) = self.types.mapping(concrete).ok_or_else(|| {
                     error(
                         self.source,
@@ -2542,7 +2546,8 @@ impl<'a> Checker<'a> {
                     )
                 })?;
                 if self.types.element(value).is_none()
-                    || !matches!(call.arguments.args.as_slice(), [ast::Expr::Name(name)] if name.id == "list")
+                    || !matches!(call.arguments.args.as_slice(), [factory @ ast::Expr::Name(name)]
+                        if name.id == "list" && !self.names.contains_key("list") && self.resolve(factory).is_none())
                     || !call.arguments.keywords.is_empty()
                 {
                     return Err(error(
@@ -6267,6 +6272,11 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if receiver.is_none()
+            && let Some(raised) = self.defaultdict_factory_error(call, Type::None)?
+        {
+            return Ok(raised);
+        }
         if receiver.is_none()
             && let Some(result) = self.fromkeys_call(call, None)?
         {
