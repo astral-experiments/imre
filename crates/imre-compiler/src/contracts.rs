@@ -413,6 +413,7 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName
             | Self::SysOrigArgv

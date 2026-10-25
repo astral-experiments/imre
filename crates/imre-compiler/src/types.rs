@@ -20,7 +20,7 @@ enum Shape {
     Counter(Type),
     Set(Type),
     Tuple(Vec<Type>),
-    NamedTuple(DefinitionId, Vec<Type>),
+    NamedTuple(TupleOrigin, Vec<Type>),
     PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
     Awaitable(Type),
@@ -28,6 +28,12 @@ enum Shape {
     ProcessArgs(Type),
     Optional(Type),
     Union(Vec<Type>),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum TupleOrigin {
+    Declaration(DefinitionId),
+    StructSequence(&'static str, &'static [&'static str]),
 }
 
 #[derive(Clone)]
@@ -534,7 +540,50 @@ impl Types {
     }
 
     pub(crate) fn namedtuple_layout(&self, definition: DefinitionId, fields: Vec<Type>) -> Type {
-        Type::Tuple(self.intern(Shape::NamedTuple(definition, fields)))
+        Type::Tuple(self.intern(Shape::NamedTuple(
+            TupleOrigin::Declaration(definition),
+            fields,
+        )))
+    }
+
+    /// A native struct sequence shares the tuple descriptor but has no Python declaration.
+    pub(crate) fn struct_sequence(
+        &self,
+        name: &'static str,
+        names: &'static [&'static str],
+        fields: Vec<Type>,
+    ) -> Type {
+        assert_eq!(names.len(), fields.len());
+        Type::Tuple(self.intern(Shape::NamedTuple(
+            TupleOrigin::StructSequence(name, names),
+            fields,
+        )))
+    }
+
+    pub(crate) fn tuple_metadata(&self, ty: Type) -> Option<Rc<NamedTuple>> {
+        let Type::Tuple(id) = ty else { return None };
+        let storage = self.0.borrow();
+        match &storage.shapes[id] {
+            Shape::NamedTuple(TupleOrigin::Declaration(id), _) => {
+                storage.named_tuples.get(id).cloned()
+            }
+            Shape::NamedTuple(TupleOrigin::StructSequence(name, fields), _) => {
+                Some(Rc::new(NamedTuple {
+                    name: name.to_string(),
+                    fields: fields.iter().map(|v| v.to_string()).collect(),
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    /// Slicing a struct sequence materializes a plain tuple of its visible fields.
+    pub(crate) fn struct_sequence_fields(&self, ty: Type) -> Option<Vec<Type>> {
+        let Type::Tuple(id) = ty else { return None };
+        match &self.0.borrow().shapes[id] {
+            Shape::NamedTuple(TupleOrigin::StructSequence(..), fields) => Some(fields.clone()),
+            _ => None,
+        }
     }
 
     pub(crate) fn namedtuple_definition(&self, ty: Type) -> Option<DefinitionId> {
@@ -542,7 +591,7 @@ impl Types {
             return None;
         };
         match self.0.borrow().shapes[id] {
-            Shape::NamedTuple(definition, _) => Some(definition),
+            Shape::NamedTuple(TupleOrigin::Declaration(definition), _) => Some(definition),
             _ => None,
         }
     }
