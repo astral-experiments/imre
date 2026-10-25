@@ -351,6 +351,7 @@ impl Builtin {
             | Self::Slice
             | Self::StringFormat
             | Self::RegexSub(_)
+            | Self::UnittestCompilePattern
             | Self::StringIterationList
             | Self::StringJoin
             | Self::StringReplace
@@ -407,7 +408,8 @@ impl Builtin {
             | Self::TextStreamView
             | Self::LiteralStringView
             | Self::RStrip
-            | Self::RegexCompile(_)
+            | Self::RegexCompile { .. }
+            | Self::RegexSpelling
             | Self::RegexSearch
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds

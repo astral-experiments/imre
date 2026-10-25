@@ -371,6 +371,12 @@ jobs:
           suite=benchmarks/cpython_stdlib/full/textwrap
           python3 "$suite/run.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/textwrap-native.json"
           cmp "$suite/native-linux.json" "$RUNNER_TEMP/textwrap-native.json"
+      - name: Run original textwrap exception assertions through native unittest
+        run: |
+          gate=benchmarks/cpython_stdlib/full/unittest/textwrap_exception.py
+          args=(--textwrap-suite benchmarks/cpython_stdlib/full/textwrap --cpython-source .cpython-stdlib-reference --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18)
+          python3 "$gate" "${args[@]}" --baseline "$RUNNER_TEMP/textwrap-native.json" --result "$RUNNER_TEMP/textwrap-unittest.json"
+          python3 "$gate" "${args[@]}" --reachable-only --result "$RUNNER_TEMP/textwrap-unittest-reachable.json"
       - name: Run complete upstream copy methods in native Imre
         run: |
           python3 benchmarks/cpython_stdlib/full/copy/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/copy-native.json"

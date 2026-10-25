@@ -97,7 +97,7 @@ def run(args, level, root):
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
     for name in ["equality_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
-                 "callable_binding", *("context_" + family for family in families)]:
+                 "callable_binding", "context_regex", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
         program = HERE / (name + ".py")
@@ -129,6 +129,8 @@ def run(args, level, root):
                          "testAssertMultiLineEqual", *EQUALITY_BLOCKERS)),
         ("testmock.testmock", "MockTest", "test_assert_not_called", "unittest.mock.Mock.assert_not_called"),
         ("testmock.testmock", "MockTest", "test_assert_called", "unittest.mock.Mock.assert_called"),
+        ("testmock.testmock", "MockTest", "test_assert_called_exception_message",
+         "unittest.TestCase.assertRaisesRegex and unittest.mock.Mock.assert_called"),
         ("testmock.testmock", "MockTest", "test_assert_called_once", "unittest.mock.Mock.assert_called_once"),
         ("testmock.testmock", "MockTest", "test_ordered_call_signature", "unittest.mock.Mock.call_args and its representation"),
         *(("testmock.testmock", "MockTest", method, "unittest.TestCase.assertRaises and unittest.mock.Mock." + assertion)
