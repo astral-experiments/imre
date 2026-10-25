@@ -44,13 +44,16 @@ pub unsafe extern "C" fn imre_source_module(
 /// # Safety
 /// `module` is a live native source module owned by the caller.
 unsafe fn attribute(module: *const Object, file: bool) -> *const Str {
-    // SAFETY: the ABI caller roots the module during this read.
-    unsafe { object(module) }.0.with(|state| match state {
-        Storage::SourceModule { name, filename } => {
-            Rc::into_raw(Rc::clone(if file { filename } else { name }))
-        }
-        _ => super::fail("SystemError", "expected a native source module"),
-    })
+    // SAFETY: the caller roots the module; cloning an immutable string cannot
+    // reenter the module or mutate its storage during this borrow.
+    unsafe {
+        object(module).0.with(|state| match state {
+            Storage::SourceModule { name, filename } => {
+                Rc::into_raw(Rc::clone(if file { filename } else { name }))
+            }
+            _ => super::fail("SystemError", "expected a native source module"),
+        })
+    }
 }
 
 /// Read the import name from a live module.
