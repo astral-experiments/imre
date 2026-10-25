@@ -754,6 +754,7 @@ pub(crate) enum Builtin {
         percent: bool,
         positive_sign: u8,
     },
+    TupleGet,
     ListGet,
     /// A live-length guard proves a private cursor or constant index is in
     /// bounds, with no intervening mutation or user code. Returns an owned

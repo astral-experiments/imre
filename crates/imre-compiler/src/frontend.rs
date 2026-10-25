@@ -87,6 +87,7 @@ mod sys;
 mod text;
 mod timed_handlers;
 mod truthiness;
+mod tuple_index;
 mod unbound_locals;
 mod unions;
 mod unittest;
@@ -5856,48 +5857,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Some(fields) = self.types.fields(list.ty) {
-                    let (literal, negative) = if let ast::Expr::UnaryOp(unary) = &*subscript.slice {
-                        if unary.op != ast::UnaryOp::USub {
-                            return Err(error(
-                                self.source,
-                                expression,
-                                "tuple indexes must be integer literals",
-                            ));
-                        }
-                        (&*unary.operand, true)
-                    } else {
-                        (&*subscript.slice, false)
-                    };
-                    let index = if let ast::Expr::NumberLiteral(value) = literal
-                        && let ast::Number::Int(value) = &value.value
-                    {
-                        value.to_string().parse::<i64>().ok()
-                    } else {
-                        None
-                    }
-                    .ok_or_else(|| {
-                        error(
-                            self.source,
-                            expression,
-                            "tuple indexes must be bounded integer literals",
-                        )
-                    })?;
-                    let index = if negative { -index } else { index };
-                    let index = if index < 0 {
-                        index + fields.len() as i64
-                    } else {
-                        index
-                    };
-                    let field = usize::try_from(index)
-                        .ok()
-                        .filter(|&index| index < fields.len())
-                        .ok_or_else(|| {
-                            error(self.source, expression, "tuple index is out of bounds")
-                        })?;
-                    return Ok(Expr {
-                        ty: fields[field],
-                        kind: ExprKind::Field(Box::new(list), field),
-                    });
+                    return self.fixed_tuple_item(list, &fields, &subscript.slice, expression);
                 }
                 let element = self.types.element(list.ty).ok_or_else(|| {
                     error(

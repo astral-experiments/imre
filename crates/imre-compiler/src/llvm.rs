@@ -5366,6 +5366,24 @@ impl Emitter<'_, '_> {
                     )
                 }
             }
+            Builtin::TupleGet => {
+                let tuple = &args[0].value;
+                let index = &args[1].value;
+                let len = self.module.types.fields(tuple.ty).unwrap().len();
+                let offset = self.checked_instruction(format!(
+                    "call i64 @imre_tuple_index(i64 {}, i64 {len})",
+                    index.operand
+                ));
+                // Every fixed tuple field occupies one word. Check before forming the inbounds pointer.
+                let ptr = self.instruction(format!(
+                    "getelementptr inbounds {}, ptr {}, i64 {offset}",
+                    storage_type(returns),
+                    tuple.operand
+                ));
+                let selected = self.field_value(&ptr, returns);
+                self.retain(&selected);
+                selected
+            }
             Builtin::ListGet => self.get_item(
                 &args[0].value,
                 &args[1].value,
@@ -7629,6 +7647,7 @@ declare void @imre_exception_reraise()
 declare i32 @imre_finish_stdio()
 declare void @imre_record_error_init()
 declare void @imre_stdio_init()
+declare i64 @imre_tuple_index(i64, i64)
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
