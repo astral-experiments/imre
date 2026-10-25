@@ -1,0 +1,25 @@
+# CPython unittest suite
+
+The [manifest](UPSTREAM.json) pins all 38 files in CPython 3.14.5's
+[test_unittest package](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_unittest),
+including its testmock package, namespace discovery fixtures and support
+modules. The [license](upstream/LICENSE) is the release's original license.
+
+## Reference
+
+From the repository root, use a test-enabled interpreter built from the pinned
+CPython source tree:
+
+```sh
+/path/to/python -B benchmarks/cpython_stdlib/suite_inventory.py \
+    benchmarks/cpython_stdlib/full/unittest/UPSTREAM.json --result /tmp/unittest.json
+```
+
+The runner verifies both the vendored blobs and the interpreter's test files,
+invokes the package's load_tests hook, and compares every discovered ID with
+regrtest's JUnit report. Missing or duplicate IDs are errors.
+
+[Linux reference](reference-linux.json): **1,090 IDs in 24 modules**, 1,088
+passed, two skipped. Both skips come from TestBreakSignalIgnored, whose fixture
+ignores SIGINT. Each ID retains its original skip reason. These results are all
+CPython reference executions; they confer no Imre coverage.
