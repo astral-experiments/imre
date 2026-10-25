@@ -364,12 +364,19 @@ impl Emitter<'_, '_> {
                     }
                 }
                 if child_options {
-                    let start = args.len() - 3;
+                    let pass_fds = streams & (1 << 19) != 0;
+                    let start = args.len() - 3 - usize::from(pass_fds);
                     fields.extend([
                         ("i64", args[start].value.operand.clone()),
                         ("i64", args[start + 1].value.operand.clone()),
                         ("i1", args[start + 2].value.operand.clone()),
                     ]);
+                    if pass_fds {
+                        fields.extend([
+                            ("i64", self.word(&args[start + 3].value)),
+                            ("i32", kind(start + 3).to_string()),
+                        ]);
+                    }
                 }
                 let layout = format!(
                     "{{{}}}",
