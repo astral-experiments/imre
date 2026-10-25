@@ -511,11 +511,11 @@ pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
     Keyword(TextRange),
-    ExtraPositional(TextRange),
-    PositionalOnlyKeyword(TextRange),
     TupleListRead(TextRange),
     MissingArgument(TextRange),
     BuiltinImport(TextRange),
+    ExcessArgument(TextRange),
+    PositionalOnlyKeyword(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -527,7 +527,7 @@ impl CheckedDiagnostic {
             Self::TupleListRead(range) => (range, 3),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
-            Self::ExtraPositional(range) => (range, 6),
+            Self::ExcessArgument(range) => (range, 6),
             Self::PositionalOnlyKeyword(range) => (range, 7),
         };
         (range.start(), range.end(), kind)
@@ -540,15 +540,15 @@ impl CheckedDiagnostic {
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
-            Self::ExtraPositional(site) => {
-                diagnostic == "too-many-positional-arguments" && site == range
-            }
-            Self::PositionalOnlyKeyword(site) => {
-                diagnostic == "positional-only-parameter-as-kwarg" && site == range
-            }
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
+            Self::PositionalOnlyKeyword(site) => {
+                diagnostic == "positional-only-parameter-as-kwarg" && site == range
+            }
+            Self::ExcessArgument(arg) => {
+                diagnostic == "too-many-positional-arguments" && arg == range
+            }
         }
     }
 }
