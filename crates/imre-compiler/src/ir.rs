@@ -654,6 +654,9 @@ pub(crate) enum Builtin {
     DocCaptureStart,
     DocCaptureTake,
     DocAscii,
+    MockCallList {
+        mark: bool,
+    },
     SystemExitNew {
         omit_none: bool,
     },
@@ -1228,6 +1231,12 @@ pub(crate) enum PathOperation {
     Resolve,
     Info,
     InfoRepr,
+    CheckStatPath,
+    Stat {
+        lstat: bool,
+    },
+    StatTime(u32),
+    StatExtraInt(u32),
     Query(PathQuery),
     ReadText,
     ReadBytes,
