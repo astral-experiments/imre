@@ -293,6 +293,13 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             "STDOUT can only be used for stderr",
         ));
     }
+    if !config.close_fds
+        && let Some((word, kind)) = extras.keep
+        // SAFETY: the launch trailer retains the original collection.
+        && unsafe { super::pass_fds::nonempty(word, kind) }
+    {
+        crate::objects::warnings::pass_fds_override()?;
+    }
     let mut descriptors = [-1; 3];
     for (i, mode) in modes.into_iter().enumerate() {
         descriptors[i] = match mode {
