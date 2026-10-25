@@ -1,14 +1,14 @@
 //! The two dictionaries are independent: renaming a number preserves its old
 //! name as an alias, and reassigning a name preserves the other number's label.
-use std::rc::Rc;
+use crate::StrOwner;
 
 use super::super::exceptions::string_repr;
 use super::super::mappings::{imre_dict_new, imre_dict_set, lookup};
 use super::super::{Error, Int, Kind, Object, Str, finish};
 
 struct Levels {
-    names: Rc<Object>,
-    numbers: Rc<Object>,
+    names: crate::ObjectOwner,
+    numbers: crate::ObjectOwner,
 }
 
 impl Levels {
@@ -16,8 +16,8 @@ impl Levels {
         // SAFETY: each constructor transfers a fresh dictionary owner.
         let (names, numbers) = unsafe {
             (
-                Rc::from_raw(imre_dict_new(3, 2)),
-                Rc::from_raw(imre_dict_new(2, 3)),
+                crate::ObjectOwner::from_raw(imre_dict_new(3, 2)),
+                crate::ObjectOwner::from_raw(imre_dict_new(2, 3)),
             )
         };
         let levels = Self { names, numbers };
@@ -31,14 +31,14 @@ impl Levels {
             ("DEBUG", 10),
             ("NOTSET", 0),
         ] {
-            let name = Rc::new(Str::from(name));
+            let name = StrOwner::new(Str::from(name));
             let number = Int::small(number).unwrap();
-            let key = Rc::as_ptr(&name) as usize;
+            let key = StrOwner::as_ptr(&name) as usize;
             // SAFETY: each input remains rooted while the typed dictionary acquires it.
             unsafe {
-                imre_dict_set(Rc::as_ptr(&levels.names), key, number.0);
+                imre_dict_set(crate::ObjectOwner::as_ptr(&levels.names), key, number.0);
                 if name.as_str() != "FATAL" && name.as_str() != "WARN" {
-                    imre_dict_set(Rc::as_ptr(&levels.numbers), number.0, key);
+                    imre_dict_set(crate::ObjectOwner::as_ptr(&levels.numbers), number.0, key);
                 }
             }
         }
@@ -47,8 +47,13 @@ impl Levels {
 
     fn number(&self, name: &Str) -> Option<Int> {
         // SAFETY: the registry and caller root the dictionary and its exact string key.
-        unsafe { lookup(Rc::as_ptr(&self.names), std::ptr::from_ref(name) as usize) }
-            .map(|value| Int(value.into_word()))
+        unsafe {
+            lookup(
+                crate::ObjectOwner::as_ptr(&self.names),
+                std::ptr::from_ref(name) as usize,
+            )
+        }
+        .map(|value| Int(value.into_word()))
     }
 }
 
@@ -69,13 +74,13 @@ pub(super) fn named_level(name: &Str) -> Result<Int, Error> {
     })
 }
 
-pub(super) fn level_name(level: &Int) -> Rc<Str> {
+pub(super) fn level_name(level: &Int) -> StrOwner {
     LEVELS.with(|levels| {
         // SAFETY: the registry roots the integer-key dictionary; lookup returns a string owner.
-        unsafe { lookup(Rc::as_ptr(&levels.numbers), level.0) }.map_or_else(
-            || Rc::new(Str::from(format!("Level {}", level.big()))),
+        unsafe { lookup(crate::ObjectOwner::as_ptr(&levels.numbers), level.0) }.map_or_else(
+            || StrOwner::new(Str::from(format!("Level {}", level.big()))),
             // SAFETY: every value in this typed dictionary is an owned exact string.
-            |value| unsafe { Rc::from_raw(value.into_word() as *const Str) },
+            |value| unsafe { StrOwner::from_raw(value.into_word() as *const Str) },
         )
     })
 }
@@ -87,8 +92,16 @@ pub unsafe extern "C" fn imre_log_add_level(level: usize, name: *const Str) {
     LEVELS.with(|levels| {
         // SAFETY: the caller roots the integer and string across both dictionary writes.
         unsafe {
-            imre_dict_set(Rc::as_ptr(&levels.numbers), level, name as usize);
-            imre_dict_set(Rc::as_ptr(&levels.names), name as usize, level);
+            imre_dict_set(
+                crate::ObjectOwner::as_ptr(&levels.numbers),
+                level,
+                name as usize,
+            );
+            imre_dict_set(
+                crate::ObjectOwner::as_ptr(&levels.names),
+                name as usize,
+                level,
+            );
         }
     });
 }
@@ -99,7 +112,7 @@ pub unsafe extern "C" fn imre_log_add_level(level: usize, name: *const Str) {
 pub unsafe extern "C" fn imre_log_level_name(level: usize) -> *const Str {
     // SAFETY: the caller owns this exact tagged integer.
     let level = unsafe { Int::borrow(level) };
-    Rc::into_raw(level_name(&level))
+    StrOwner::into_raw(level_name(&level))
 }
 
 /// # Safety
@@ -109,7 +122,7 @@ pub unsafe extern "C" fn imre_log_level_for_name(name: *const Str) -> usize {
     // SAFETY: the caller retains the string until lookup completes.
     let name = unsafe { &*name };
     number_for(name).map_or_else(
-        || Rc::into_raw(Rc::new(Str::from(format!("Level {name}")))) as usize,
+        || StrOwner::into_raw(StrOwner::new(Str::from(format!("Level {name}")))) as usize,
         super::super::unions::integer,
     )
 }
@@ -145,20 +158,20 @@ pub unsafe extern "C" fn imre_log_config_named(
         let level = imre_log_check_level(name);
         if level != 0 {
             let level = Int(level);
-            let root = Rc::from_raw(super::imre_log_root(std::ptr::null()));
-            super::imre_log_set_level(Rc::as_ptr(&root), level.0);
+            let root = crate::ObjectOwner::from_raw(super::imre_log_root(std::ptr::null()));
+            super::imre_log_set_level(crate::ObjectOwner::as_ptr(&root), level.0);
         }
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_log_names() -> *const Object {
-    LEVELS.with(|levels| Rc::into_raw(levels.names.clone()))
+    LEVELS.with(|levels| crate::ObjectOwner::into_raw(levels.names.clone()))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_log_numbers() -> *const Object {
-    LEVELS.with(|levels| Rc::into_raw(levels.numbers.clone()))
+    LEVELS.with(|levels| crate::ObjectOwner::into_raw(levels.numbers.clone()))
 }
 
 #[unsafe(no_mangle)]

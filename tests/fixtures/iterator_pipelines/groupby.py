@@ -42,6 +42,8 @@ def mutation_and_lookahead() -> None:
 
 def fallible(value: int) -> int:
     print(value)
+    if value == 9:
+        raise StopIteration("key stopped")
     if value < 0:
         raise ValueError("invalid key")
     return value
@@ -103,6 +105,9 @@ print(repr(sections(["alpha", "apple", "beta", "again"])))
 mutation_and_lookahead()
 failure([-1])
 failure([1, 2, -1])
+failure([9, 1])
+failure([1, 9, 1, 2])
+failure([1, 9, 9, 2])
 identity([])
 identity([1, 1, 2, 1])
 keep_groups()

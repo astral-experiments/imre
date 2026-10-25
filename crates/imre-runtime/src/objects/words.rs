@@ -5,6 +5,7 @@
 //! a nullable value; optional booleans use 0=None, 1=False, and 2=True.
 //! Bare float words hold all binary64 bits; nullable floats instead own an Rc<f64>.
 
+use crate::StrOwner;
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::mem::ManuallyDrop;
@@ -21,9 +22,10 @@ pub(super) struct WordKind(u16);
 impl WordKind {
     // Private to Words. A deferred list stores a plan instead of element words.
     const DEFERRED: Self = Self(u16::MAX);
+    const STRUCT_ROWS: Self = Self(u16::MAX - 1);
 
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 12 {
+        if kind & !NULLABLE > 14 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind as u16)
@@ -34,11 +36,16 @@ impl WordKind {
     }
 
     pub(super) fn can_queue_release(self) -> bool {
-        matches!(self.base(), 5 | 6 | 9)
+        matches!(self.base(), 5 | 6 | 9 | 14)
     }
 
     pub(super) fn base(self) -> u32 {
         self.raw() & !NULLABLE
+    }
+
+    /// Nonnullable handles whose LLVM record field is a pointer.
+    fn is_pointer_field(self) -> bool {
+        matches!(self.0, 3..=6 | 8 | 11..=14)
     }
 
     /// Reads the compiler's concrete field storage without reinterpreting pointer
@@ -50,7 +57,7 @@ impl WordKind {
     /// `field` is an aligned, readable record slot stored using this descriptor's
     /// LLVM representation, or its initial all-zero state.
     pub(super) unsafe fn read_record_field(self, field: *const usize) -> usize {
-        if matches!(self.0, 3..=6 | 8 | 11 | 12) {
+        if self.is_pointer_field() {
             // SAFETY: this exact descriptor denotes a pointer-typed field.
             unsafe { field.cast::<*const ()>().read() as usize }
         } else if self.0 == 7 {
@@ -69,7 +76,7 @@ impl WordKind {
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
-            2..=6 | 8..=12 => word != 0 || nullable,
+            2..=6 | 8..=14 => word != 0 || nullable,
             7 => true,
             _ => unreachable!(),
         };
@@ -103,13 +110,13 @@ impl WordKind {
                         Rc::increment_strong_count(word as *const num_bigint::BigInt);
                     }
                 }
-                3 | 11 => Rc::increment_strong_count(word as *const Str),
+                3 | 11 => StrOwner::increment_strong_count(word as *const Str),
                 4 => Rc::increment_strong_count(word as *const List),
-                5 => Rc::increment_strong_count(word as *const Object),
-                6 | 12 => records::imre_record_retain(word as *const usize),
+                5 => crate::ObjectOwner::increment_strong_count(word as *const Object),
+                6 | 12 | 13 | 14 => records::imre_record_retain(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
-                8 => Rc::increment_strong_count(word as *const Bytes),
+                8 => crate::retain_bytes(word as *const Bytes),
                 9 => unions::imre_union_retain(word),
                 _ => unreachable!(),
             }
@@ -128,13 +135,15 @@ impl WordKind {
             match self.base() {
                 0 | 1 | 10 => {}
                 2 => drop(Int(word)),
-                3 | 11 => Rc::decrement_strong_count(word as *const Str),
+                3 | 11 => StrOwner::decrement_strong_count(word as *const Str),
                 4 => crate::imre_list_release(word as *const List),
-                5 => records::release_object_word(Rc::from_raw(word as *const Object)),
-                6 | 12 => records::imre_record_release(word as *const usize),
+                5 => records::release_object_word(crate::ObjectOwner::from_raw(
+                    word as *const Object,
+                )),
+                6 | 12 | 13 | 14 => records::imre_record_release(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
-                8 => Rc::decrement_strong_count(word as *const Bytes),
+                8 => crate::release_bytes(word as *const Bytes),
                 9 => unions::imre_union_release(word),
                 _ => unreachable!(),
             }
@@ -154,14 +163,16 @@ impl OwnedWord {
     /// # Safety
     /// The destination is an uninitialized slot of this exact descriptor.
     pub(super) unsafe fn initialize_record_field(self, field: *mut usize) {
-        let kind = self.kind.raw();
+        let kind = self.kind;
         let word = self.into_word();
         // SAFETY: this is the inverse of WordKind::read_record_field.
         unsafe {
-            match kind {
-                3..=6 | 8 => field.cast::<*const ()>().write(word as *const ()),
-                7 => field.cast::<f64>().write(f64::from_bits(word as u64)),
-                _ => field.write(word),
+            if kind.is_pointer_field() {
+                field.cast::<*const ()>().write(word as *const ());
+            } else if kind.raw() == 7 {
+                field.cast::<f64>().write(f64::from_bits(word as u64));
+            } else {
+                field.write(word);
             }
         }
     }
@@ -233,6 +244,28 @@ impl Words {
         words
     }
 
+    pub(super) fn from_rows(rows: super::structs::Rows) -> Self {
+        let mut words = Self::new(6);
+        words.kind = WordKind::STRUCT_ROWS;
+        words.values.push(Box::into_raw(Box::new(rows)) as usize);
+        words.update_header();
+        words
+    }
+
+    pub(super) fn rows(&self) -> Option<&super::structs::Rows> {
+        (self.kind == WordKind::STRUCT_ROWS).then(|| {
+            // SAFETY: only from_rows installs this sentinel and owned box.
+            unsafe { &*(self.values[0] as *const super::structs::Rows) }
+        })
+    }
+
+    pub(super) fn rows_mut(&mut self) -> Option<&mut super::structs::Rows> {
+        (self.kind == WordKind::STRUCT_ROWS).then(|| {
+            // SAFETY: the unique Words borrow exclusively owns this box.
+            unsafe { &mut *(self.values[0] as *mut super::structs::Rows) }
+        })
+    }
+
     pub(super) fn plan(&self) -> Option<&Deferred> {
         if self.kind == WordKind::DEFERRED {
             debug_assert_eq!(self.header, u32::MAX);
@@ -245,13 +278,18 @@ impl Words {
     }
 
     pub(super) fn resolved(&self) -> &Self {
+        if let Some(rows) = self.rows() {
+            return rows.boxed();
+        }
         self.plan().map_or(self, Deferred::ordered)
     }
 
     /// A mutating alias gets its own ordinary buffer. Copies share only the
     /// immutable snapshot and retain independent list identities and contents.
     pub(super) fn resolve_mut(&mut self) {
-        if let Some(plan) = self.plan() {
+        if let Some(rows) = self.rows_mut() {
+            *self = rows.take_boxed();
+        } else if let Some(plan) = self.plan() {
             *self = plan.ordered().copy_strings();
         }
     }
@@ -283,9 +321,8 @@ impl Words {
     /// Deferred words live in their plan even when their resolved list is
     /// small. Its inline bit must never address the plan pointer as an element.
     pub(super) fn resolved_header(&self) -> u32 {
-        self.plan().map_or(self.header, |plan| {
-            Self::header_for(plan.ordered().values.len(), false)
-        })
+        self.plan()
+            .map_or(self.header, |plan| Self::header_for(plan.len(), false))
     }
 
     /// An empty inline buffer normally has header 1. Publishing length zero
@@ -297,23 +334,52 @@ impl Words {
     }
 
     pub(super) fn is_sorting_empty(&self) -> bool {
-        self.header == 0 && !self.values.spilled()
+        self.header == 0 && self.values.is_empty() && !self.values.spilled()
     }
 
     /// Publish a fully initialized buffer after bulk initialization by a decoder or splitter.
-    pub(super) fn into_object(mut self) -> Rc<Object> {
+    /// Bulk producers build initialized, owned record words before publication.
+    /// Convert homogeneous struct outputs too, including schema-decoded lists.
+    pub(super) fn pack_structs(&mut self) -> super::exceptions::Result<()> {
+        if self.kind.raw() != 6 || self.values.is_empty() {
+            return Ok(());
+        }
+        // SAFETY: kind six guarantees initialized, rooted native record payloads.
+        let layout = unsafe { records::descriptor(self.values[0] as *const usize) };
+        if !layout.is_value_struct() {
+            return Ok(());
+        }
+        let mut rows = super::structs::Rows::new(layout);
+        for &word in &self.values {
+            // SAFETY: all words share the immutable exact class and are rooted by self.
+            rows.append(unsafe { rows.payload(word as *const usize) })?;
+        }
+        *self = Self::from_rows(rows);
+        Ok(())
+    }
+
+    pub(super) fn into_object(self) -> crate::ObjectOwner {
+        crate::ObjectOwner::new(Object(super::StorageCell::new(self.into_storage())))
+    }
+
+    /// Finish the header and optional packing without allocating the surrounding owner.
+    pub(super) fn into_storage(mut self) -> super::Storage {
+        // The original boxed list remains usable if optional packing cannot allocate.
+        let _ = self.pack_structs();
         if self.kind != WordKind::DEFERRED {
             self.update_header();
         }
-        Rc::new(Object(super::StorageCell::new(super::Storage::Sequence(
-            self,
-        ))))
+        super::Storage::Sequence(self)
     }
 
     /// A saturated header defers to the full-width buffer length in the runtime.
     pub(super) fn update_header(&mut self) {
         debug_assert_ne!(self.kind, WordKind::DEFERRED);
-        self.header = Self::header_for(self.values.len(), !self.values.spilled());
+        self.header = if let Some(rows) = self.rows() {
+            Self::header_for(rows.len(), false)
+        } else {
+            Self::header_for(self.values.len(), !self.values.spilled())
+        };
     }
 
     fn header_for(length: usize, inline: bool) -> u32 {
@@ -409,6 +475,7 @@ pub extern "C" fn imre_seq_layout_with_orig_argv() -> SequenceLayout {
 }
 
 fn sequence_layout() -> SequenceLayout {
+    crate::initialize_io();
     let mut sample = Words::new(0);
     sample.values.push(0);
     // One non-owning word fits inline and needs no destructor.
@@ -425,6 +492,11 @@ fn sequence_layout() -> SequenceLayout {
 
 impl Drop for Words {
     fn drop(&mut self) {
+        if self.kind == WordKind::STRUCT_ROWS {
+            // SAFETY: the sentinel transfers the unique Rows allocation back to Box.
+            drop(unsafe { Box::from_raw(self.values[0] as *mut super::structs::Rows) });
+            return;
+        }
         if self.kind == WordKind::DEFERRED {
             // SAFETY: the deferred header owns exactly this one boxed plan.
             drop(unsafe { Box::from_raw(self.values[0] as *mut Deferred) });
@@ -468,57 +540,69 @@ mod tests {
         // SAFETY: every handle stays rooted, readonly views end before mutation,
         // and each new or popped owner is adopted exactly once.
         unsafe {
-            let child = Rc::from_raw(imre_seq_new(1));
-            let weak = Rc::downgrade(&child);
-            let word = Rc::as_ptr(&child) as usize;
-            let sequence = Rc::from_raw(imre_seq_new(5));
-            let alias = Rc::clone(&sequence);
+            let child = crate::ObjectOwner::from_raw(imre_seq_new(1));
+            let weak = crate::ObjectOwner::downgrade(&child);
+            let word = crate::ObjectOwner::as_ptr(&child) as usize;
+            let sequence = crate::ObjectOwner::from_raw(imre_seq_new(5));
+            let alias = crate::ObjectOwner::clone(&sequence);
             let layout = imre_seq_layout();
-            let cached = Rc::as_ptr(&sequence).byte_add(layout.header).cast::<u32>();
+            let cached = crate::ObjectOwner::as_ptr(&sequence)
+                .byte_add(layout.header)
+                .cast::<u32>();
             assert_eq!(cached.read(), 1);
             for _ in 0..3 {
-                imre_seq_append(Rc::as_ptr(&sequence), word, 5);
+                imre_seq_append(crate::ObjectOwner::as_ptr(&sequence), word, 5);
             }
             assert_eq!(cached.read(), 7);
-            assert_eq!(Rc::strong_count(&child), 4);
+            assert_eq!(crate::ObjectOwner::strong_count(&child), 4);
             assert!(
                 !sequence
                     .0
                     .with(|storage| storage.sequence().values.spilled())
             );
             {
-                let view = imre_seq_data_readonly(Rc::as_ptr(&sequence));
+                let view = imre_seq_data_readonly(crate::ObjectOwner::as_ptr(&sequence));
                 assert_eq!(
                     view,
-                    Rc::as_ptr(&sequence).byte_add(layout.inline_words).cast()
+                    crate::ObjectOwner::as_ptr(&sequence)
+                        .byte_add(layout.inline_words)
+                        .cast()
                 );
                 assert_eq!(std::slice::from_raw_parts(view, 3), &[word; 3]);
             }
 
-            imre_seq_append(Rc::as_ptr(&alias), word, 5);
+            imre_seq_append(crate::ObjectOwner::as_ptr(&alias), word, 5);
             assert_eq!(cached.read(), 8);
-            assert_eq!(Rc::strong_count(&child), 5);
+            assert_eq!(crate::ObjectOwner::strong_count(&child), 5);
             assert!(
                 sequence
                     .0
                     .with(|storage| storage.sequence().values.spilled())
             );
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&sequence))).as_small(), Some(4));
+            assert_eq!(
+                Int(imre_seq_len(crate::ObjectOwner::as_ptr(&sequence))).as_small(),
+                Some(4)
+            );
             {
-                let view = imre_seq_data_readonly(Rc::as_ptr(&alias));
+                let view = imre_seq_data_readonly(crate::ObjectOwner::as_ptr(&alias));
                 assert_eq!(std::slice::from_raw_parts(view, 4), &[word; 4]);
             }
 
-            let popped = Rc::from_raw(imre_seq_pop(Rc::as_ptr(&alias)) as *const Object);
+            let popped = crate::ObjectOwner::from_raw(imre_seq_pop(crate::ObjectOwner::as_ptr(
+                &alias,
+            )) as *const Object);
             assert_eq!(cached.read(), 6); // Popping preserves spilled storage.
-            assert!(Rc::ptr_eq(&child, &popped));
-            assert_eq!(Rc::strong_count(&child), 5);
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&sequence))).as_small(), Some(3));
+            assert!(crate::ObjectOwner::ptr_eq(&child, &popped));
+            assert_eq!(crate::ObjectOwner::strong_count(&child), 5);
+            assert_eq!(
+                Int(imre_seq_len(crate::ObjectOwner::as_ptr(&sequence))).as_small(),
+                Some(3)
+            );
             drop(child);
             drop(sequence);
-            assert_eq!(Rc::strong_count(&popped), 4);
+            assert_eq!(crate::ObjectOwner::strong_count(&popped), 4);
             drop(alias);
-            assert_eq!(Rc::strong_count(&popped), 1);
+            assert_eq!(crate::ObjectOwner::strong_count(&popped), 1);
             drop(popped);
             assert!(weak.upgrade().is_none());
         }
@@ -531,19 +615,27 @@ mod tests {
         };
         use super::super::{imre_seq_append, imre_seq_data_readonly};
 
-        let held = Rc::new(Str::new("rooted"));
-        let weak = Rc::downgrade(&held);
+        let held = StrOwner::new(Str::new("rooted"));
+        let weak = StrOwner::downgrade(&held);
         let input = Words::new(3).into_object();
         // SAFETY: all handles remain rooted through their last access. The
         // buffer pointer is read before either the list or a copy is changed.
         unsafe {
-            imre_seq_append(Rc::as_ptr(&input), Rc::as_ptr(&held) as usize, 3);
-            let diff = Rc::from_raw(imre_ndiff_deferred(Rc::as_ptr(&input), Rc::as_ptr(&input)));
-            let copy = Rc::from_raw(imre_str_list_copy(Rc::as_ptr(&diff)));
+            imre_seq_append(
+                crate::ObjectOwner::as_ptr(&input),
+                StrOwner::as_ptr(&held) as usize,
+                3,
+            );
+            let diff = crate::ObjectOwner::from_raw(imre_ndiff_deferred(
+                crate::ObjectOwner::as_ptr(&input),
+                crate::ObjectOwner::as_ptr(&input),
+            ));
+            let copy =
+                crate::ObjectOwner::from_raw(imre_str_list_copy(crate::ObjectOwner::as_ptr(&diff)));
             drop(held);
             drop(input);
             let layout = imre_seq_layout();
-            let handle = Rc::as_ptr(&diff);
+            let handle = crate::ObjectOwner::as_ptr(&diff);
             assert_eq!(
                 handle.byte_add(layout.header).cast::<u32>().read(),
                 u32::MAX

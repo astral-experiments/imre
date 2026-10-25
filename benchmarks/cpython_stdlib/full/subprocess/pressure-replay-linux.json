@@ -1,0 +1,142 @@
+{
+  "schema": "imre.subprocess.pressure/v2",
+  "platform": "linux",
+  "subprocess_revision": "12a645f666187b35ebfaa4c53ad152187bb356d7",
+  "tested_tree": "3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "toolchain": {
+        "imre": "f6060be2079656368220a946a71d4c31ca9e336bae91efd72b13288503d5b863",
+        "runtime": "7e4c195aebfc1dea384ec14e0548f2367e7ac00ef73032237f5c8fb9601e0997",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_no_leaking": [
+          {
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "fixture_selector": "PollSelector",
+            "native_parent_sha256": "35d90f62bdf84f71942ab6f7a32b6b3c2f38efba380aa88ee574e1404f96f668",
+            "native_parents": 1,
+            "open_file_limit": 1024,
+            "free_slots": 10,
+            "pressure_fds": 1011,
+            "original_descriptor_numbers_and_cloexec": true,
+            "unchanged_fd_table_after_each_communicate": 15,
+            "native_creations": 15,
+            "native_reaps": 15,
+            "data_child": "CPython stdin/stdout echo",
+            "selector_calls": {
+              "poll": 47
+            },
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_no_leaking": [
+          {
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "fixture_selector": "SelectSelector",
+            "native_parent_sha256": "17071ba27c2ff7c935e057480d260bd151fea6677aa4db9587845bacb12383c6",
+            "native_parents": 1,
+            "open_file_limit": 1024,
+            "free_slots": 10,
+            "pressure_fds": 1011,
+            "original_descriptor_numbers_and_cloexec": true,
+            "unchanged_fd_table_after_each_communicate": 15,
+            "native_creations": 15,
+            "native_reaps": 15,
+            "data_child": "CPython stdin/stdout echo",
+            "selector_calls": {
+              "pselect6": 46
+            },
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "toolchain": {
+        "imre": "f6060be2079656368220a946a71d4c31ca9e336bae91efd72b13288503d5b863",
+        "runtime": "7e4c195aebfc1dea384ec14e0548f2367e7ac00ef73032237f5c8fb9601e0997",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_no_leaking": [
+          {
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "fixture_selector": "PollSelector",
+            "native_parent_sha256": "8cf2a2305ba24d6bb0069829fd63b4d6b8944105147563638ca133cbe07ef541",
+            "native_parents": 1,
+            "open_file_limit": 1024,
+            "free_slots": 10,
+            "pressure_fds": 1011,
+            "original_descriptor_numbers_and_cloexec": true,
+            "unchanged_fd_table_after_each_communicate": 15,
+            "native_creations": 15,
+            "native_reaps": 15,
+            "data_child": "CPython stdin/stdout echo",
+            "selector_calls": {
+              "poll": 45
+            },
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_no_leaking": [
+          {
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "fixture_selector": "SelectSelector",
+            "native_parent_sha256": "92489b56d5b354ec41e583893ef8fa1df2dfc6f42c26ec39d02bdcb0e2720490",
+            "native_parents": 1,
+            "open_file_limit": 1024,
+            "free_slots": 10,
+            "pressure_fds": 1011,
+            "original_descriptor_numbers_and_cloexec": true,
+            "unchanged_fd_table_after_each_communicate": 15,
+            "native_creations": 15,
+            "native_reaps": 15,
+            "data_child": "CPython stdin/stdout echo",
+            "selector_calls": {
+              "pselect6": 46
+            },
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

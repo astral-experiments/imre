@@ -1,45 +1,8 @@
 //! Capture Python standard output at the stream shared by print and sys.stdout.
 //! Nested examples restore their caller's stream; stderr is never captured.
 
-use super::{Error, Kind, OUTPUT, Rc, Str};
-use std::fmt::Write;
-
-/// Python's ASCII backslash replacement used by doctest.OutputChecker.
-///
-/// # Safety
-/// The caller roots the Unicode input for this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_doctest_ascii(value: *const Str) -> *const Str {
-    // SAFETY: the generated caller owns this immutable string.
-    let text = unsafe { &*value };
-    if text.is_ascii() {
-        // SAFETY: transfer another ownership share to the checked caller.
-        unsafe { Rc::increment_strong_count(value) };
-        return value;
-    }
-    let mut ascii = String::new();
-    let size = text.chars().try_fold(0usize, |len, ch| {
-        len.checked_add(match ch as u32 {
-            0..=127 => 1,
-            128..=255 => 4,
-            256..=65535 => 6,
-            _ => 10,
-        })
-    });
-    if size.is_none_or(|size| ascii.try_reserve_exact(size).is_err()) {
-        return Error::allocation().returning(std::ptr::null());
-    }
-    for ch in text.chars() {
-        let n = ch as u32;
-        match n {
-            0..=127 => ascii.push(ch),
-            128..=255 => write!(ascii, "\\x{n:02x}").unwrap(),
-            256..=65535 => write!(ascii, "\\u{n:04x}").unwrap(),
-            _ => write!(ascii, "\\U{n:08x}").unwrap(),
-        }
-    }
-    Rc::into_raw(Rc::new(Str::from(ascii)))
-}
+use super::{Error, Kind, OUTPUT, Str};
+use crate::StrOwner;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_doctest_capture_start() {
@@ -75,5 +38,5 @@ pub extern "C" fn imre_doctest_capture_take() -> *const Str {
         }
         text.push('\n');
     }
-    Rc::into_raw(Rc::new(Str::from(text)))
+    StrOwner::into_raw(StrOwner::new(Str::from(text)))
 }

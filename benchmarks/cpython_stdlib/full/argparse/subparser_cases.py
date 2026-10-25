@@ -22,7 +22,8 @@ METHODS = {
 }
 
 
-class SubparserDriver(Driver):
+class ErrorParserDriver(Driver):
+    """Route parsers instantiated by the original body through the native driver."""
     def parser_patch(self, case):
         from test import test_argparse as upstream
         return patch.object(upstream, "ErrorRaisingArgumentParser", partial(HelpParser, self))
@@ -34,7 +35,7 @@ def measure(toolchain, module, reference, bodies):
                and case._testMethodName in METHODS and bodies[case.id()]["outcome"] == "blocked"]
     with tempfile.TemporaryDirectory(prefix="imre-argparse-subparsers-") as work:
         attempted = {}
-        driver = SubparserDriver(toolchain, Path(work), attempted)
+        driver = ErrorParserDriver(toolchain, Path(work), attempted)
         driver.outcomes(unittest.TestSuite(members), {case.id(): driver.execute for case in members}, reference)
         driver.build.cache_clear()
     for name, observation in attempted.items():
