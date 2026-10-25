@@ -151,7 +151,7 @@ impl Checker<'_> {
                 .mapping(receiver.ty)
                 .is_some_and(|(_, value)| value == Type::Int)
             {
-                let start = self.sum_start(call)?;
+                let start = self.integer_fold_start(call, "0")?;
                 return Ok(Expr {
                     ty: Type::Int,
                     kind: ExprKind::Builtin(Builtin::DictSumValues, vec![receiver, start]),
@@ -175,7 +175,7 @@ impl Checker<'_> {
         }
         if matches!(source, ast::Expr::ListComp(_)) {
             let subtotal = self.sum_comprehension(source)?;
-            let start = self.sum_start(call)?;
+            let start = self.integer_fold_start(call, "0")?;
             return Ok(add_start(subtotal, start));
         }
         let generator = matches!(source, ast::Expr::Generator(_));
@@ -192,7 +192,7 @@ impl Checker<'_> {
         } else {
             self.consumer_input(source, (!generator).then_some(Type::Int))?
         };
-        let start = self.sum_start(call)?;
+        let start = self.integer_fold_start(call, "0")?;
         if !convert
             && let Iteration::Container {
                 iterable,
@@ -223,6 +223,47 @@ impl Checker<'_> {
         if let Some(sum) = zip_sum {
             self.zip_sums.insert(result, sum);
         }
+        self.integer_fold(call, input, start, result, convert, Binary::Add)
+    }
+
+    /// Lowers `math.prod` over exact integers without materializing the source.
+    pub(super) fn integer_product(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let [source] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "math.prod requires one positional iterable",
+            ));
+        };
+        if call.arguments.keywords.len() > 1
+            || call.arguments.keywords.first().is_some_and(|keyword| {
+                keyword.arg.as_ref().map(|name| name.as_str()) != Some("start")
+            })
+        {
+            return Err(error(
+                self.source,
+                call,
+                "math.prod accepts only the keyword argument start",
+            ));
+        }
+        let (input, convert) = self.consumer_input(source, None)?;
+        let start = self.integer_fold_start(call, "1")?;
+        let result = self.hidden(Type::Int);
+        self.integer_fold(call, input, start, result, convert, Binary::Multiply)
+    }
+
+    /// Evaluates the iterable and start in order, then folds each yielded value.
+    fn integer_fold(
+        &mut self,
+        call: &ast::ExprCall,
+        input: Iteration,
+        start: Expr,
+        result: usize,
+        convert: bool,
+        operation: Binary,
+    ) -> Result<Expr, String> {
+        let accept_bool = matches!(operation, Binary::Multiply)
+            || matches!(call.arguments.args[0], ast::Expr::Generator(_));
         let mut body = Vec::new();
         let mut clear = vec![result];
         let fixed_tuple = matches!(
@@ -250,7 +291,7 @@ impl Checker<'_> {
         };
         body.extend(
             self.expand_items_after(input, call, after, |checker, value| {
-                let as_int = convert || (generator && value.ty == Type::Bool);
+                let as_int = convert || (accept_bool && value.ty == Type::Bool);
                 let value = checker.consumer_value(value, as_int, call)?;
                 checker.expect(Type::Int, value.ty, call)?;
                 Ok(vec![Statement::Assign(
@@ -258,7 +299,7 @@ impl Checker<'_> {
                     Expr {
                         ty: Type::Int,
                         kind: ExprKind::Binary(
-                            Binary::Add,
+                            operation,
                             Box::new(checker.local(result)),
                             Box::new(value),
                         ),
@@ -277,7 +318,7 @@ impl Checker<'_> {
     }
 
     /// Checks the optional starting value after checking the eager first argument.
-    fn sum_start(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    fn integer_fold_start(&mut self, call: &ast::ExprCall, identity: &str) -> Result<Expr, String> {
         let start = call.arguments.args.get(1).or_else(|| {
             call.arguments
                 .keywords
@@ -288,7 +329,7 @@ impl Checker<'_> {
             Some(start) => self.expr_expected(start, Type::Int),
             None => Ok(Expr {
                 ty: Type::Int,
-                kind: ExprKind::Int("0".into()),
+                kind: ExprKind::Int(identity.into()),
             }),
         }
     }

@@ -78,6 +78,8 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 `sum(source[, start])`, including `start=`, consumes exact integers and defaults to zero. Its source can be any supported concrete iterable whose yielded values are integers, including fixed tuples such as `divmod(...)`. An immediate generator may also yield exact booleans. For example, `sum(file.passes for file in files)` counts the true values. The generator acquires its outer iterator before `start` runs, then evaluates each projection once. The start and the result are exact, arbitrary-precision integers, including for an empty generator.
 
+`math.prod(source, *, start=1)` consumes an integer iterable in order and multiplies using arbitrary-precision integers. An empty iterable returns the integer start unchanged. A zero factor does not stop iteration or mask an exception from a later element.
+
 `map(str, source)` supports scalar values, paths, and records with a checked string conversion. Conversion happens as each item is pulled.
 
 An immediate `map(int, source)` converts each item using the ordinary checked `int` conversion. Inputs may yield exact integers, floats, booleans, or strings. Conversion proceeds lazily as the enclosing consumer iterates; input expressions, iterator creation, the optional sum start, and conversion failures retain Python evaluation order. Mutable sources remain live and keep the existing dictionary/set mutation checks. User callbacks follow the exact callable contract below. A map cannot escape into storage, and user-defined iteration protocols remain unsupported.
