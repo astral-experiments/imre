@@ -67,3 +67,12 @@ moves from test_functools.py:2 (annotationlib) to line 3 (builtins). The two
 LRU variants of test_lru_reentrancy_with_len save, replace and restore
 builtins.len. These **four failed startup attempts** establish the next import;
 they do not change the number of complete native test bodies.
+
+The [six package startup checks](annotation-package-startup-linux.json) use
+the coordinator's combined guard and ImportError head, `03977539`, plus the
+two annotation changes, and the complete pinned test package. In both
+check modes `import test.support` advances from line 6 to line 9,
+`import inspect`. The actual uses in that module are `_static_getmro`
+(2849), `_get_dunder_dict_of_class` (2851), and `_sentinel` (2860/2864).
+The direct import and runner for `test.test_functools` still stop at
+`import builtins` (line 3) in each mode. These checks execute no test body.
