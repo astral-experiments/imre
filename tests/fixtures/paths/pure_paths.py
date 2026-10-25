@@ -18,7 +18,7 @@ def show(p: PureWindowsPath) -> None:
 
 for parent in ['', '/', '//', '///', 'C:', 'C:/', 'a/b', r'\\host',
                '//host/share', '//host/share/spam', '//?/UNC/server/share',
-               '//./device', '/?/UNC', './c:s', 'é:/', 'Σ:/', '/.']:
+               '//./device', '//?./share', '//.?/share', '/?/UNC', './c:s', 'é:/', 'Σ:/', '/.']:
     for child in ['', '.', '..', 'a.txt', './c:s', 'C:', 'c:leaf', '/tail',
                   'D:leaf', 'd:/root', '//other/share', 'a///b', '//?/C:']:
         p = PureWindowsPath(parent, child)
