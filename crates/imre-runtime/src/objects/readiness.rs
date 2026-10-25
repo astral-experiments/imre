@@ -51,19 +51,11 @@ pub unsafe extern "C" fn imre_poll_update(
             } else {
                 // SAFETY: a present mask is a rooted canonical integer.
                 let mask = unsafe { Int::borrow(mask) };
-                let n = mask
-                    .as_small()
-                    .or_else(|| num_traits::ToPrimitive::to_i64(&*mask.big()))
-                    .ok_or_else(|| {
-                        Error::new(
-                            Kind::OverflowError,
-                            "Python int too large to convert to C long",
-                        )
-                    })?;
-                if n < 0 {
-                    return Err(Error::new(Kind::ValueError, "value must be positive"));
+                let small = mask.as_small();
+                if small.map_or_else(|| num_traits::Signed::is_negative(&*mask.big()), |n| n < 0) {
+                    return Err(Error::new(Kind::ValueError, "Cannot convert negative int"));
                 }
-                u16::try_from(n).map_err(|_| {
+                small.and_then(|n| u16::try_from(n).ok()).ok_or_else(|| {
                     Error::new(
                         Kind::OverflowError,
                         "Python int too large for C unsigned short",
@@ -150,7 +142,7 @@ unsafe fn timeout(tag: u32, word: usize, poll: bool) -> Result<Option<Duration>>
     let overflow = || {
         Error::new(
             Kind::OverflowError,
-            "timestamp out of range for platform time_t",
+            "timestamp too large to convert to C PyTime_t",
         )
     };
     let value = match tag & !NULLABLE {

@@ -1515,6 +1515,9 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Any)) if graph.mutable_documents => {
             return Ok(documents::ANY);
         }
+        Some(Binding::Intrinsic(Intrinsic::Readiness(ir::Readiness::New))) => {
+            return Ok(Type::Poll);
+        }
         Some(Binding::Intrinsic(Intrinsic::Deque)) => return Ok(types.deque(Type::Int)),
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),

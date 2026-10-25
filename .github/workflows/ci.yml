@@ -107,7 +107,7 @@ jobs:
           target/release/imre build tests/programs/control_flow.py -o "$RUNNER_TEMP/control_flow"
           lipo "$RUNNER_TEMP/control_flow" -verify_arch arm64
           python3 tests/run_suites.py --workers 3 --log-dir "$RUNNER_TEMP/imre-suites" \
-            --suites unittest_main differential io errno files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
+            --suites unittest_main differential io errno posix_readiness files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
           cat "$RUNNER_TEMP/imre-suites/errno.log"
           python3 tests/unittest_main.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --manifest benchmarks/cpython_stdlib/full/errno/UPSTREAM.json --upstream-source benchmarks/cpython_stdlib/full/errno/upstream/Lib/test/test_errno.py --opt-levels 3
@@ -200,6 +200,10 @@ jobs:
             Lib/ensurepip/_bundled
             Modules
           persist-credentials: false
+      - name: Compare POSIX fd readiness with CPython
+        env:
+          PYTHONPATH: .cpython-stdlib-reference/Lib
+        run: python3 tests/posix_readiness.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --host-original
       - name: Check native string line boundaries and whitespace against CPython
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
