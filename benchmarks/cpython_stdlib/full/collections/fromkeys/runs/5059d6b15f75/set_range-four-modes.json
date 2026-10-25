@@ -1,0 +1,32 @@
+{
+  "fixture_sha256": "7e06c172980a14c06cd4f44cb1849717a3a996ac87fbaeba57b8aa8369d9e1d9",
+  "imre_sha256": "bae6c6e0ea741f2b6c886a3c2192e34a76afe578e491adb6d3e5905a901dc283",
+  "runtime_sha256": "11a56f72e140643a6cea8ef10cf83e025ce732e53d2b8979951f626ea58408e2",
+  "reference": "{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n",
+      "stderr": ""
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n",
+      "stderr": ""
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n",
+      "stderr": ""
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n",
+      "stderr": ""
+    }
+  }
+}

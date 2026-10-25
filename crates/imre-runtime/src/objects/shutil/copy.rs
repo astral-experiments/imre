@@ -222,6 +222,8 @@ fn run(op: u32, src: &Name, dst: &Name, follow: bool) -> Result<Option<std::path
 
 #[path = "metadata.rs"]
 mod metadata;
+#[path = "move.rs"]
+mod moving;
 #[path = "tree.rs"]
 mod tree;
 
