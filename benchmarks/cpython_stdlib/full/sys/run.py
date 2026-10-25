@@ -19,6 +19,7 @@ from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
 import argv_case
 import locale_case
+from metadata import metadata_observer
 
 MODULE = "test.test_sys"
 SYS = MODULE + ".SysModuleTest."
@@ -72,6 +73,15 @@ def select(toolchain, work, source, module):
         case_id = f"{MODULE}.{cls}.{method}"
         executions[case_id] = native_method(toolchain, directory(work, method),
                                              source, cls, case_id, fixture, operation=("imre", operation))
+
+    impl = toolchain.build((HERE / "metadata_driver.py").read_bytes(), directory(work, "implementation"))
+    executions[SYS + "test_implementation"] = metadata_observer(module, impl, toolchain.level)
+    identity = subprocess.run([impl, "identity"], check=True, capture_output=True, text=True, timeout=15)
+    lines = identity.stdout.splitlines()
+    if identity.stderr or len(lines) != 4 or lines[:3] != ["True", "True", "True"]:
+        raise AssertionError(identity)
+    if not lines[3].startswith("namespace(name='imre', cache_tag=None, version=sys.version_info("):
+        raise AssertionError(lines[3])
 
     # Both implementations check internal consistency using their own language version.
     metadata = HERE / "version_info.py"

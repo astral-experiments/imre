@@ -57,6 +57,8 @@ pub(crate) enum Type {
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
     PurePath(PathFlavor),
+    /// Native implementation metadata has one stable, struct-like owner.
+    SysImplementation,
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
@@ -198,6 +200,7 @@ impl std::fmt::Display for Type {
             Self::Path => "pathlib.Path",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
+            Self::SysImplementation => "sys.implementation",
             Self::CompletedProcess(capture, _) if capture.text => {
                 "subprocess.CompletedProcess[str]"
             }
@@ -570,6 +573,7 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysImplementation,
     SysVersionInfo {
         implementation: bool,
     },

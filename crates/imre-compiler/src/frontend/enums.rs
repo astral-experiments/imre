@@ -258,6 +258,7 @@ impl Checker<'_> {
                 && types
                     .iter()
                     .any(|ty| self.types.struct_sequence_fields(*ty).is_some()))
+            || types == [Type::SysImplementation; 2]
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
