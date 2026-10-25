@@ -22,6 +22,10 @@ impl Checker<'_> {
             for arg in &call.arguments.args {
                 values.push(self.expr(arg)?);
             }
+            if call.arguments.args.len() < 3 {
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+            }
             // RLock releases only the receiver but evaluates all supplied exception arguments.
             return Ok(self.ordered_builtin(
                 Builtin::Logging(Op::LockRelease),
@@ -104,6 +108,10 @@ impl Checker<'_> {
         manager: Expr,
     ) -> Result<(Vec<Statement>, bool), String> {
         let ty = self.types.optional(Type::HandlerLock);
+        if manager.ty == ty {
+            self.graph
+                .checked_optional_lock_context(self.module, item.context_expr.range());
+        }
         let manager = self.coerce(manager, ty, &item.context_expr)?;
         let captured = self.hidden(ty);
         let enter = Expr {
