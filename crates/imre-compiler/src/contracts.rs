@@ -272,6 +272,8 @@ impl Builtin {
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
+                | ProcessOperation::Credential(_)
+                | ProcessOperation::CredentialId { .. }
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
@@ -391,6 +393,8 @@ impl Builtin {
             | Self::ActiveException
             | Self::ExceptionRecord
             | Self::ExceptionCause
+            // A fresh exception retains its cause without replacing any existing owner.
+            | Self::ExceptionWithCause
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
             | Self::HexFormat { .. }
@@ -528,12 +532,14 @@ impl Builtin {
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
             | Self::CounterNew
+            | Self::ChainMapNew
+            | Self::ChainMapMaps
+            | Self::ChainMapSetMaps
             | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictClear
             | Self::ListClear
             | Self::DictIter(_)
-            | Self::ExceptionWithCause
             | Self::GlobalSet(_)
             | Self::ExactRecord(_)
             | Self::RecordView

@@ -18,6 +18,7 @@ mod empty_keywords;
 mod entry_profile;
 mod namedtuple_fields;
 mod os;
+pub(crate) use os::credential_arity;
 mod reachability;
 mod type_aliases;
 
@@ -96,6 +97,7 @@ pub(crate) enum IntrinsicModule {
     Tempfile,
     Subprocess,
     Os,
+    Posix,
     PosixPath,
     Urllib,
     UrllibParse,
@@ -277,6 +279,7 @@ pub(crate) enum Intrinsic {
     StrEnum,
     EnumAuto,
     DefaultDict,
+    ChainMap,
     NamedTuple,
     Counter,
     Deque,
@@ -339,6 +342,7 @@ pub(crate) enum Intrinsic {
     Strerror,
     StatResult,
     Fd(crate::ir::FdOperation),
+    Credential(&'static str),
     DescriptorConstant(&'static str),
     FsPath,
     PosixNormcase,
@@ -399,6 +403,7 @@ impl IntrinsicModule {
             "tempfile" => Some(Self::Tempfile),
             "subprocess" => Some(Self::Subprocess),
             "os" => Some(Self::Os),
+            "posix" if cfg!(unix) => Some(Self::Posix),
             "os.path" | "posixpath" => Some(Self::PosixPath),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
@@ -678,6 +683,7 @@ impl IntrinsicModule {
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections, "ChainMap") => Intrinsic::ChainMap,
             (Self::Collections, "deque") => Intrinsic::Deque,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
@@ -740,6 +746,7 @@ impl IntrinsicModule {
             (Self::Subprocess, "SubprocessError") => Intrinsic::SubprocessError,
             (Self::Subprocess, "CalledProcessError") => Intrinsic::CalledProcessError,
             (Self::Subprocess, "TimeoutExpired") => Intrinsic::TimeoutExpired,
+            (Self::Posix, name) => os::symbol(name)?,
             (Self::Os, "F_OK") => Intrinsic::AccessMode(0),
             (Self::Os, "X_OK") => Intrinsic::AccessMode(1),
             (Self::Os, "W_OK") => Intrinsic::AccessMode(2),
