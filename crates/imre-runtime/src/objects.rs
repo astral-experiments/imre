@@ -48,6 +48,7 @@ mod string_enums;
 mod structs;
 mod tempdirs;
 mod text;
+pub(crate) use text::short_string;
 mod unions;
 mod values;
 mod warnings;
@@ -134,6 +135,7 @@ enum Storage {
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
     Logger(Rc<Str>),
+    HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
     LogRecord(Box<logging::record::Record>),

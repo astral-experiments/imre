@@ -1,15 +1,62 @@
 //! Whole-file text conversion uses the same descriptor, buffering, and close path as binary I/O.
 
-use super::super::codecs::Codec;
+use super::super::codecs::{Codec, option_error};
 use super::{Error, Int, Kind, Object, Rc, Result, Str, finish, object, with_path_file};
+
+/// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.
+fn universal_newlines(text: String) -> String {
+    let mut bytes = text.into_bytes();
+    let mut read = 0;
+    let mut written = 0;
+    while read < bytes.len() {
+        let byte = bytes[read];
+        read += 1;
+        bytes[written] = if byte == b'\r' {
+            read += usize::from(bytes.get(read) == Some(&b'\n'));
+            b'\n'
+        } else {
+            byte
+        };
+        written += 1;
+    }
+    bytes.truncate(written);
+    String::from_utf8(bytes).expect("ASCII newline conversion preserves UTF-8")
+}
+
+fn output_newlines(text: &str, replacement: &str) -> Result<String> {
+    let extra = if replacement.len() == 2 {
+        text.bytes().filter(|&byte| byte == b'\n').count()
+    } else {
+        0
+    };
+    let mut result = String::new();
+    let len = text
+        .len()
+        .checked_add(extra)
+        .ok_or_else(Error::allocation)?;
+    result
+        .try_reserve_exact(len)
+        .map_err(|_| Error::allocation())?;
+    for part in text.split_inclusive('\n') {
+        if let Some(line) = part.strip_suffix('\n') {
+            result.push_str(line);
+            result.push_str(replacement);
+        } else {
+            result.push_str(part);
+        }
+    }
+    Ok(result)
+}
 
 fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
     if let Some(value) = newline
         && !matches!(value, "" | "\n" | "\r" | "\r\n")
     {
-        return Err(Error::new(
+        return Err(option_error(
             Kind::ValueError,
-            format!("illegal newline value: {value}"),
+            "illegal newline value: ",
+            value,
+            "",
         ));
     }
     match encoding {
@@ -35,7 +82,7 @@ pub(super) fn read(
         let data = file.input()?.read_bytes(None)?;
         let text = codec.decode(&data, errors)?;
         let text = if newline.is_none() && text.contains('\r') {
-            text.replace("\r\n", "\n").replace('\r', "\n")
+            universal_newlines(text)
         } else {
             text
         };
@@ -99,7 +146,7 @@ pub unsafe extern "C" fn imre_path_write_text_options(
                 let codec = options(encoding, newline)?;
                 let converted;
                 let value = if let Some(replacement @ ("\r" | "\r\n")) = newline {
-                    converted = text.replace('\n', replacement);
+                    converted = output_newlines(text, replacement)?;
                     &converted
                 } else {
                     text.as_str()

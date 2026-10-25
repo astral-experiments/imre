@@ -690,12 +690,12 @@ impl OptionSpec {
 }
 
 impl Parser {
-    fn from_schema(schema: &str) -> Self {
+    fn from_schema(schema: &str) -> Result<Self, Error> {
         let mut parser: Self = serde_json::from_str(schema)
             .unwrap_or_else(|_| fail("SystemError", "invalid argparse schema"));
         parser.normalize_numbers();
-        parser.set_child_programs();
-        parser
+        parser.set_child_programs()?;
+        Ok(parser)
     }
 }
 
@@ -714,7 +714,10 @@ pub unsafe extern "C" fn imre_argparse_text(
 ) -> *const Str {
     // SAFETY: both strings stay rooted while the formatter reads them.
     let (schema, description) = unsafe { (&*schema, &*description) };
-    let parser = Parser::from_schema(schema);
+    let parser = match Parser::from_schema(schema) {
+        Ok(parser) => parser,
+        Err(error) => return error.returning(std::ptr::null_mut()),
+    };
     let text: Str = if usage {
         parser.usage(help::width())
     } else {
@@ -773,7 +776,10 @@ pub unsafe extern "C" fn imre_argparse_parse(
 ) -> *mut usize {
     // SAFETY: these immutable inputs remain rooted during parsing and construction.
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
-    let parser = Parser::from_schema(schema);
+    let parser = match Parser::from_schema(schema) {
+        Ok(parser) => parser,
+        Err(error) => return error.returning(std::ptr::null_mut()),
+    };
     let mut owners = Vec::new();
     let mut args = Vec::new();
     // SAFETY: argv is a rooted list[str]; take independent string owners before
