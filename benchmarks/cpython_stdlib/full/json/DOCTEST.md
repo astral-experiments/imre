@@ -26,3 +26,14 @@ The `json.encoder.JSONEncoder.encode` case imports `JSONEncoder` from `json.enco
 These are two source cases and four occurrences of the 216, including when the reference runs all 68 example occurrences. The host reference supplies discovery, shared example state, interactive display, and expected output checks. Running any of the same JSON calls in a different test does not credit either doctest case. The Python/C backend identity methods are separate unittest cases; neither is a doctest fixture.
 
 The [shared doctest implementation](https://github.com/astral-sh/imre/pull/646) discovers the same cases from the original docstrings. Its direct native runs reached the missing `io.StringIO` export in the root case and the missing `json.encoder.JSONEncoder` class in the encoder case. Neither direct run completed the corresponding package fixture.
+
+The [hosted decoder check](https://github.com/astral-sh/imre/actions/runs/40179030429) included the shared doctest implementation and native `types`. Its [intact-package results](doctest-startup-linux.json) agree between the vendored fixture tree and the full pinned Git tree. Both import and runner stop at `Lib/test/support/__init__.py:21`, `import warnings`, in ordinary mode; with `--reachable-only`, both stop at `Lib/test/support/import_helper.py:2`, `import _imp`. No test starts in either mode.
+
+The JSON fixture calls `import_fresh_module('json', fresh=['_json'])` and `import_fresh_module('json', blocked=['_json'])`. The pinned helper saves and restores `sys.modules`, imports each fresh dependency, and calls `_imp._override_frozen_modules_for_tests` on entry and exit. JSON uses the default `deprecated=False`, so the helper does not enter its warnings-suppression context for either call. `support.load_package_tests` later calls `loader.discover` and adds the result to the supplied suite. These are shared fixture dependencies; CPython's C and Python imports describe the two original fixtures for the same Imre operations.
+
+Reproduce using the shared checker on both sources:
+
+```sh
+python -B benchmarks/cpython_stdlib/full/json/startup.py --compiler /path/to/imre \
+    --cpython-git /path/to/cpython.git --result /tmp/json-startup.json
+```

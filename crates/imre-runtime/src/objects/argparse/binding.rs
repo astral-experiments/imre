@@ -7,7 +7,7 @@ use num_bigint::BigInt;
 use num_traits::{Signed, Zero};
 use serde::{Deserialize, Deserializer};
 
-use super::{Kind, OptionSpec, Str, Words, imre_path_new, string_repr};
+use super::{Action, Kind, OptionSpec, Str, Words, imre_path_new, string_repr};
 use crate::{Int, List, floats, parse_decimal_int};
 
 #[derive(Deserialize)]
@@ -61,7 +61,7 @@ pub(super) enum Scalar<'a> {
 impl<'a> Scalar<'a> {
     fn convert(option: &OptionSpec, text: &'a str) -> Result<Self, String> {
         let value = match option.kind {
-            Kind::Str | Kind::Path => Some(Self::Text(text)),
+            Kind::Str | Kind::Path | Kind::Class => Some(Self::Text(text)),
             Kind::Int => {
                 if text.len() > 640
                     && !super::decimal_digits_allowed(
@@ -159,16 +159,43 @@ impl OptionSpec {
         result
     }
 
+    /// Apply a zero-argument option to the current namespace value. Repeated
+    /// short options in a cluster have the same effect as separate occurrences.
+    pub(super) fn flag_value<'a>(
+        &'a self,
+        previous: Option<Bound<'a>>,
+        spelling: &str,
+    ) -> Result<Bound<'a>, String> {
+        if self.action == Action::BooleanOptional {
+            return Ok(Bound::Bool(!spelling.starts_with("--no-")));
+        }
+        if self.action == Action::Count {
+            let n = match previous {
+                Some(Bound::Scalar(Scalar::Int(n))) => n,
+                None => self
+                    .default
+                    .as_deref()
+                    .and_then(parse_decimal_int)
+                    .unwrap_or_else(|| Int::from_usize(0)),
+                _ => unreachable!("count produces integers"),
+            };
+            return Ok(Bound::Scalar(Scalar::Int(Int::new(n.big().as_ref() + 1))));
+        }
+        self.bind(Some(&[]))
+    }
+
     pub(super) fn bind<'a>(&'a self, args: Option<&[&'a str]>) -> Result<Bound<'a>, String> {
         let missing = args.is_none() || self.positional() && args.is_some_and(<[_]>::is_empty);
         if missing && let Some(member) = self.enum_default {
             return Ok(Bound::Enum(member));
         }
         if self.kind == Kind::Bool {
-            let value = args
-                .is_some()
-                .then_some(true)
-                .or_else(|| self.default.as_deref().map(|value| value == "True"));
+            let value = if args.is_some() {
+                &self.constant
+            } else {
+                &self.default
+            };
+            let value = value.as_deref().map(|text| text == "True");
             return Ok(value.map_or(Bound::Absent, Bound::Bool));
         }
         if self.nargs.list() {

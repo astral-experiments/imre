@@ -1,6 +1,10 @@
 """Logging classes compiled into the native program."""
 
-from logging import Formatter, LogRecord
+import os.path
+from logging import Formatter, LogRecord, getLevelNamesMapping
+from imre._logging import _Level, _lookup_handler, _rename_handler
+from pathlib import Path
+from typing import TextIO
 
 _default_formatter = Formatter()
 
@@ -24,6 +28,176 @@ class Filter:
         if not name[:self.nlen].startswith(self.name):
             return False
         return name[self.nlen] == "."
+
+
+def _handler_level(level: _Level) -> int:
+    if isinstance(level, str):
+        levels = getLevelNamesMapping()
+        if level not in levels:
+            raise ValueError(f"Unknown level: {level!r}")
+        return levels[level]
+    return level
+
+
+class Handler:
+    _name: str | None
+    _closed: bool
+    level: int
+    formatter: Formatter | None
+    filters: list[Filter]
+
+    def __init__(self, level: _Level = 0) -> None:
+        self.filters = []
+        self._name = None
+        self.level = _handler_level(level)
+        self.formatter = None
+        self._closed = False
+
+    def get_name(self) -> str | None:
+        return self._name
+
+    def set_name(self, name: str | None) -> None:
+        _rename_handler(self, self._name, name)
+        self._name = name
+
+    name = property(get_name, set_name)
+
+    def setLevel(self, level: _Level) -> None:
+        self.level = _handler_level(level)
+
+    def setFormatter(self, fmt: Formatter | None) -> None:
+        self.formatter = fmt
+
+    def format(self, record: LogRecord) -> str:
+        fmt = self.formatter
+        if fmt is None:
+            return _default_formatter.format(record)
+        return fmt.format(record)
+
+    def emit(self, record: LogRecord | None) -> None:
+        raise NotImplementedError("emit must be implemented by Handler subclasses")
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self._closed = True
+        _rename_handler(self, self._name, None)
+
+
+def getHandlerByName(name: str) -> Handler | None:
+    return _lookup_handler(name)
+
+
+def _logfile_name(filename: str | Path) -> str:
+    if isinstance(filename, Path):
+        return os.path.abspath(str(filename))
+    return os.path.abspath(filename)
+
+
+def _open_logfile(filename: str, mode: str, encoding: str) -> TextIO:
+    codec = encoding.lower().replace("_", "-")
+    if codec != "utf-8" and codec != "utf8" and codec != "locale":
+        raise NotImplementedError("FileHandler stream encoding: " + encoding)
+    path = Path(filename)
+    if mode == "a" or mode == "at" or mode == "ta":
+        return path.open("a", encoding="utf-8")
+    if mode == "w" or mode == "wt" or mode == "tw":
+        return path.open("w", encoding="utf-8")
+    if mode == "x" or mode == "xt" or mode == "tx":
+        return path.open("x", encoding="utf-8")
+    if mode == "r" or mode == "rt" or mode == "tr":
+        return path.open("r", encoding="utf-8")
+    raise NotImplementedError("FileHandler stream mode: " + mode)
+
+
+class FileHandler:
+    baseFilename: str
+    mode: str
+    encoding: str
+    errors: str | None
+    delay: bool
+    stream: TextIO | None
+    terminator: str
+    formatter: Formatter | None
+    _closed: bool
+
+    def __init__(self, filename: str | Path, mode: str = "a", encoding: str | None = None,
+                 delay: bool = False, errors: str | None = None) -> None:
+        path = _logfile_name(filename)
+        codec = "locale" if encoding is None else encoding
+        self.baseFilename = path
+        self.mode = mode
+        self.encoding = codec
+        self.errors = errors
+        self.delay = delay
+        self.terminator = "\n"
+        self.formatter = None
+        self._closed = False
+        self.stream = None if delay else _open_logfile(path, mode, codec)
+
+    def _open(self) -> TextIO:
+        return _open_logfile(self.baseFilename, self.mode, self.encoding)
+
+    def format(self, record: LogRecord) -> str:
+        formatter = self.formatter
+        if formatter is None:
+            return _default_formatter.format(record)
+        return formatter.format(record)
+
+    def setFormatter(self, fmt: Formatter | None) -> None:
+        self.formatter = fmt
+
+    def flush(self) -> None:
+        stream = self.stream
+        if stream is not None:
+            stream.flush()
+
+    def emit(self, record: LogRecord) -> None:
+        stream = self.stream
+        if stream is None:
+            if self.mode == "w" and self._closed:
+                return
+            stream = self._open()
+            self.stream = stream
+        stream.write(self.format(record) + self.terminator)
+        self.flush()
+
+    def handle(self, record: LogRecord) -> LogRecord:
+        self.emit(record)
+        return record
+
+    def close(self) -> None:
+        try:
+            stream = self.stream
+            if stream is not None:
+                try:
+                    stream.flush()
+                finally:
+                    self.stream = None
+                    stream.close()
+        finally:
+            self._closed = True
+
+
+class NullHandler(Handler):
+    lock: None
+
+    def __init__(self, level: _Level = 0) -> None:
+        super().__init__(level)
+        self.lock = None
+
+    def handle(self, record: LogRecord | None):
+        pass
+
+    def emit(self, record: LogRecord | None) -> None:
+        pass
+
+    def createLock(self) -> None:
+        self.lock = None
+
+    def _at_fork_reinit(self) -> None:
+        pass
 
 
 class BufferingFormatter:

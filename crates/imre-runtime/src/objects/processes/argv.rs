@@ -3,16 +3,24 @@
 use super::*;
 use crate::objects::records::descriptor;
 
-/// Python selects argv[0] before validating an explicit environment.
-pub(super) fn empty(cmd: &OwnedWord) -> bool {
+/// Borrow argv[0] and its descriptor while the original command stays rooted.
+pub(super) fn first(cmd: &OwnedWord) -> Option<(usize, WordKind)> {
     // SAFETY: the compiler admits only scalars, lists, and tuples of path arguments.
     unsafe {
         match cmd.kind.raw() {
-            5 => object(cmd.word as *const Object)
-                .0
-                .with(|s| matches!(s, Storage::Sequence(v) if v.values.is_empty())),
-            6 => descriptor(cmd.word as *const usize).length == 0,
-            _ => false,
+            5 => object(cmd.word as *const Object).0.with(|s| match s {
+                Storage::Sequence(list) => list.values.first().map(|&word| (word, list.kind)),
+                _ => Some((cmd.word, cmd.kind)),
+            }),
+            6 => {
+                let tuple = cmd.word as *const usize;
+                let layout = descriptor(tuple);
+                (layout.length != 0).then(|| {
+                    let kind = WordKind::new(*layout.kinds);
+                    (kind.read_record_field(tuple), kind)
+                })
+            }
+            _ => Some((cmd.word, cmd.kind)),
         }
     }
 }
@@ -60,6 +68,12 @@ pub(super) unsafe fn optional_path(value: *const (), kind: u32) -> Result<Option
 /// # Safety
 /// The caller roots the element with the given storage kind.
 unsafe fn element(word: usize, kind: WordKind) -> Result<CString> {
+    // SAFETY: the caller roots the exact command argument.
+    unsafe { with_bytes(word, kind, cstring) }
+}
+
+/// Inspect the original path bytes, including NUL, before a launch API validates them.
+pub(super) unsafe fn with_bytes<T>(word: usize, kind: WordKind, f: impl FnOnce(&[u8]) -> T) -> T {
     let (word, kind) = if kind.raw() == 9 {
         crate::objects::unions::member(word)
     } else {
@@ -68,11 +82,11 @@ unsafe fn element(word: usize, kind: WordKind) -> Result<CString> {
     // SAFETY: all permitted union members are owned str, bytes or Path values.
     unsafe {
         match kind.raw() {
-            3 => cstring((&*(word as *const Str)).as_bytes()),
-            8 => cstring(&*(word as *const Bytes)),
+            3 => f((&*(word as *const Str)).as_bytes()),
+            8 => f(&*(word as *const Bytes)),
             5 => object(word as *const Object)
                 .0
-                .with(|s| cstring(s.path().as_bytes())),
+                .with(|s| f(s.path().as_bytes())),
             _ => fail("SystemError", "unexpected process argument element"),
         }
     }
