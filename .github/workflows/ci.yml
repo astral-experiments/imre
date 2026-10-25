@@ -676,7 +676,11 @@ jobs:
         run: |
           imre_target="$(rustc -vV | sed -n 's/^host: //p')"
           imre_lld_dir="$(rustc --print sysroot)/lib/rustlib/$imre_target/bin"
-          python3 tests/lto.py --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --rust-lld "$imre_lld_dir/rust-lld" --python python3
+          export IMRE_CI_LLD="$imre_lld_dir/gcc-ld/ld.lld"
+          export IMRE_CI_LTO_CACHE="$RUNNER_TEMP/imre-thinlto-cache"
+          mkdir -p "$IMRE_CI_LTO_CACHE"
+          ci_lld="$GITHUB_WORKSPACE/.github/scripts/ci-thinlto-ld.lld"
+          python3 tests/lto.py --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --rust-lld "$ci_lld" --python python3
           if [[ "$FULL_THINLTO" != true ]]; then
             suites=(module_values)
           else
@@ -689,4 +693,4 @@ jobs:
             )
           fi
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
-            -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$imre_lld_dir/gcc-ld/ld.lld" --opt-levels 3
+            -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3
