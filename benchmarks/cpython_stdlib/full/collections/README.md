@@ -7,6 +7,10 @@ free-threading test. The loader includes inherited test methods and both
 `load_tests` hooks. The 15 docstrings in `Lib/collections/__init__.py` are
 upstream test inputs.
 
+See the [complete native routine baseline](routines.md) for per-ID results at
+both optimization levels and the [array startup inventory](startup.md) for
+the full-module entry point.
+
 | Suite | IDs |
 | --- | ---: |
 | test_collections (containers, ABCs and doctests) | 116 |

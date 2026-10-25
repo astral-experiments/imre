@@ -1,0 +1,660 @@
+upstream_id	execution_at_O0_and_O3	method_source	diagnostic_location	evidence
+collections.Counter	compile-blocked			case.py:5:1: Imre: supported dictionary methods are get(key[, default]), loop-head items(), and keys() in a key union
+collections.Counter.__add__	compile-blocked			case.py:3:1: Imre: arithmetic requires int or float operands
+collections.Counter.__and__	compile-blocked			case.py:3:1: Imre: expected int, got Counter[str]; annotations are enforced contracts
+collections.Counter.__iadd__	compile-blocked			case.py:4:1: Imre: arithmetic requires int or float operands
+collections.Counter.__iand__	compile-blocked			case.py:4:1: Imre: expected int, got Counter[str]; annotations are enforced contracts
+collections.Counter.__init__	native-body/host-output-check			4 original doctest prompts
+collections.Counter.__ior__	compile-blocked			case.py:4:1: Imre: expected int, got Counter[str]; annotations are enforced contracts
+collections.Counter.__isub__	compile-blocked			case.py:4:1: Imre: arithmetic requires int or float operands
+collections.Counter.__or__	compile-blocked			case.py:3:1: Imre: expected int, got Counter[str]; annotations are enforced contracts
+collections.Counter.__sub__	compile-blocked			case.py:3:1: Imre: arithmetic requires int or float operands
+collections.Counter.elements	compile-blocked			case.py:10:1: Imre: imports must precede executable module statements
+collections.Counter.most_common	compile-blocked			case.py:3:1: Imre: supported dictionary methods are get(key[, default]), loop-head items(), and keys() in a key union
+collections.Counter.subtract	compile-blocked			case.py:5:1: Imre: supported dictionary methods are get(key[, default]), loop-head items(), and keys() in a key union
+collections.Counter.update	native-body/host-output-check			5 original doctest prompts
+collections.namedtuple	compile-blocked			case.py:1:1: Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestChainMap.test_basics	compile-blocked	Lib/test/test_collections.py:90	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""copy"""
+test.test_collections.TestChainMap.test_bool	compile-blocked	Lib/test/test_collections.py:168	fixture:1:1	Imre: unsupported sealed standard-library export collections.ChainMap
+test.test_collections.TestChainMap.test_constructor	compile-blocked	Lib/test/test_collections.py:164	fixture:1:1	Imre: unsupported sealed standard-library export collections.ChainMap
+test.test_collections.TestChainMap.test_dict_coercion	compile-blocked	Lib/test/test_collections.py:224	fixture:1:1	Imre: unsupported sealed standard-library export collections.ChainMap
+test.test_collections.TestChainMap.test_iter_not_calling_getitem_on_maps	compile-blocked	Lib/test/test_collections.py:208	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserDict
+test.test_collections.TestChainMap.test_missing	compile-blocked	Lib/test/test_collections.py:174	fixture:1:1	Imre: unsupported sealed standard-library export collections.ChainMap
+test.test_collections.TestChainMap.test_new_child	compile-blocked	Lib/test/test_collections.py:229	fixture:1:1	Imre: unsupported sealed standard-library export collections.ChainMap
+test.test_collections.TestChainMap.test_order_preservation	compile-blocked	Lib/test/test_collections.py:191	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_collections.TestChainMap.test_ordering	compile-blocked	Lib/test/test_collections.py:150	fixture:1:1	Imre: unsupported sealed standard-library export collections.ChainMap
+test.test_collections.TestChainMap.test_union_operators	compile-blocked	Lib/test/test_collections.py:265	fixture:1:1	Imre: unsupported sealed standard-library export collections.ChainMap
+test.test_collections.TestCollectionABCs.test_Buffer	compile-blocked	Lib/test/test_collections.py:1959	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.Buffer
+test.test_collections.TestCollectionABCs.test_ByteString	compile-blocked	Lib/test/test_collections.py:1937	fixture:2:1	Imre: unsupported sealed standard-library export collections.abc.ByteString
+test.test_collections.TestCollectionABCs.test_Mapping	compile-blocked	Lib/test/test_collections.py:1842	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.Mapping
+test.test_collections.TestCollectionABCs.test_MutableMapping	compile-blocked	Lib/test/test_collections.py:1857	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.MutableMapping
+test.test_collections.TestCollectionABCs.test_MutableMapping_subclass	compile-blocked	Lib/test/test_collections.py:1864	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserDict
+test.test_collections.TestCollectionABCs.test_MutableSequence	compile-blocked	Lib/test/test_collections.py:1968	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""array"""
+test.test_collections.TestCollectionABCs.test_MutableSequence_mixins	compile-blocked	Lib/test/test_collections.py:1980	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.MutableSequence
+test.test_collections.TestCollectionABCs.test_MutableSet	compile-blocked	Lib/test/test_collections.py:1502	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.MutableSet
+test.test_collections.TestCollectionABCs.test_Sequence	compile-blocked	Lib/test/test_collections.py:1891	upstream:1892:24	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_collections.TestCollectionABCs.test_Sequence_mixins	compile-blocked	Lib/test/test_collections.py:1902	upstream:1903:9	Imre: unsupported statement in the Imre subset
+test.test_collections.TestCollectionABCs.test_Set	compile-blocked	Lib/test/test_collections.py:1420	upstream:1421:24	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_collections.TestCollectionABCs.test_Set_from_iterable	compile-blocked	Lib/test/test_collections.py:1622	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.MutableSet
+test.test_collections.TestCollectionABCs.test_Set_hash_matches_frozenset	compile-blocked	Lib/test/test_collections.py:1830	upstream:1832:13	Imre: an empty dictionary requires a concrete dict[K, V] context
+test.test_collections.TestCollectionABCs.test_Set_interoperability_with_real_sets	compile-blocked	Lib/test/test_collections.py:1678	upstream:1680:9	Imre: unsupported statement in the Imre subset
+test.test_collections.TestCollectionABCs.test_arithmetic_Set	compile-blocked	Lib/test/test_collections.py:1487	upstream:1488:9	Imre: unsupported statement in the Imre subset
+test.test_collections.TestCollectionABCs.test_equality_Set	compile-blocked	Lib/test/test_collections.py:1465	upstream:1466:9	Imre: unsupported statement in the Imre subset
+test.test_collections.TestCollectionABCs.test_hash_Set	compile-blocked	Lib/test/test_collections.py:1434	upstream:1435:9	Imre: unsupported statement in the Imre subset
+test.test_collections.TestCollectionABCs.test_illegal_patma_flags	compile-blocked	Lib/test/test_collections.py:2030	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.Collection
+test.test_collections.TestCollectionABCs.test_isdisjoint_Set	compile-blocked	Lib/test/test_collections.py:1449	upstream:1450:9	Imre: unsupported statement in the Imre subset
+test.test_collections.TestCollectionABCs.test_issue16373	compile-blocked	Lib/test/test_collections.py:1562	upstream:1565:9	Imre: unsupported statement in the Imre subset
+test.test_collections.TestCollectionABCs.test_issue26915	compile-blocked	Lib/test/test_collections.py:1591	fixture:1:1	"Imre: cannot resolve first-party module ""test"" under <work>; external and namespace-package imports are unsupported"
+test.test_collections.TestCollectionABCs.test_issue8750	compile-blocked	Lib/test/test_collections.py:1547	upstream:1548:17	Imre: unknown function or unsupported builtin arguments
+test.test_collections.TestCollectionABCs.test_issue_4920	compile-blocked	Lib/test/test_collections.py:1516	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.MutableSet
+test.test_collections.TestCollectionABCs.test_issue_5647	compile-blocked	Lib/test/test_collections.py:1510	upstream:1512:13	Imre: unknown function or unsupported builtin arguments
+test.test_collections.TestCounter.test_basics	compile-blocked	Lib/test/test_collections.py:2061	fixture:2:1	Imre: unsupported sealed standard-library export collections.abc.Mapping
+test.test_collections.TestCounter.test_conversions	compile-blocked	Lib/test/test_collections.py:2246	upstream:2249:33	Imre: supported dictionary methods are get(key[, default]), loop-head items(), and keys() in a key union
+test.test_collections.TestCounter.test_copy_subclass	compile-blocked	Lib/test/test_collections.py:2237	upstream:2238:9	Imre: unsupported statement in the Imre subset
+test.test_collections.TestCounter.test_copying	compile-blocked	Lib/test/test_collections.py:2217	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""copy"""
+test.test_collections.TestCounter.test_eq	native-body/native-assertions	Lib/test/test_collections.py:2394		2 native assertions; method SHA-256 60f59bc732ad2880965d2b92b61975e1b1627b926f369b5650a3fcc8fb88eb47
+test.test_collections.TestCounter.test_ge	compile-blocked	Lib/test/test_collections.py:2406	upstream:2407:25	Imre: unsupported comparison for these types
+test.test_collections.TestCounter.test_gt	compile-blocked	Lib/test/test_collections.py:2410	upstream:2411:25	Imre: unsupported comparison for these types
+test.test_collections.TestCounter.test_helper_function	compile-blocked	Lib/test/test_collections.py:2352	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_collections.TestCounter.test_init	compile-blocked	Lib/test/test_collections.py:2134	upstream:2135:26	Imre: expected int, got list[tuple[str, int]]; annotations are enforced contracts
+test.test_collections.TestCounter.test_inplace_operations	compile-blocked	Lib/test/test_collections.py:2299	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_collections.TestCounter.test_invariant_for_the_in_operator	native-body/native-assertions	Lib/test/test_collections.py:2254		6 native assertions; method SHA-256 e7617c0968c241b981206b2dfabb2b1e00b7703f9abc5aa03103fb648974b5d9
+test.test_collections.TestCounter.test_le	compile-blocked	Lib/test/test_collections.py:2398	upstream:2399:25	Imre: unsupported comparison for these types
+test.test_collections.TestCounter.test_lt	compile-blocked	Lib/test/test_collections.py:2402	upstream:2403:25	Imre: unsupported comparison for these types
+test.test_collections.TestCounter.test_multiset_operations	compile-blocked	Lib/test/test_collections.py:2260	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_collections.TestCounter.test_multiset_operations_equivalent_to_set_operations	compile-blocked	Lib/test/test_collections.py:2373	fixture:1:1	Imre: unsupported sealed standard-library export itertools.product
+test.test_collections.TestCounter.test_order_preservation	compile-blocked	Lib/test/test_collections.py:2146	upstream:2148:26	Imre: expected int, got list[tuple[str, int]]; annotations are enforced contracts
+test.test_collections.TestCounter.test_repr_nonsortable	compile-blocked	Lib/test/test_collections.py:2346	upstream:2347:28	Imre: expected int, got None; annotations are enforced contracts
+test.test_collections.TestCounter.test_subtract	compile-blocked	Lib/test/test_collections.py:2320	upstream:2322:9	Imre: keyword arguments are unsupported for this builtin
+test.test_collections.TestCounter.test_total	native-body/native-assertions	Lib/test/test_collections.py:2142		1 native assertions; method SHA-256 2df0ee692238ec6c283b680fc22ec954def93ab097c1c50daec0b41c4c77de2e; also passed under the original host fixtures
+test.test_collections.TestCounter.test_unary	compile-blocked	Lib/test/test_collections.py:2341	upstream:2343:31	Imre: unary signs require int or float
+test.test_collections.TestCounter.test_update	compile-blocked	Lib/test/test_collections.py:2203	upstream:2206:26	Imre: expected int, got list[tuple[str, int]]; annotations are enforced contracts
+test.test_collections.TestCounter.test_update_reentrant_add_clears_counter	compile-blocked	Lib/test/test_collections.py:2121	upstream:2123:15	Imre: unknown function or unsupported builtin arguments
+test.test_collections.TestNamedTuple.test_copy	compile-blocked	Lib/test/test_collections.py:579	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""copy"""
+test.test_collections.TestNamedTuple.test_defaults	compile-blocked	Lib/test/test_collections.py:349	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_factory	compile-blocked	Lib/test/test_collections.py:320	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_factory_doc_attr	fixture-blocked	Lib/test/test_collections.py:415		TestNamedTuple.test_factory_doc_attr needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_field_descriptor	fixture-blocked	Lib/test/test_collections.py:679		TestNamedTuple.test_field_descriptor needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_field_doc	fixture-blocked	Lib/test/test_collections.py:423		TestNamedTuple.test_field_doc needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_field_doc_reuse	fixture-blocked	Lib/test/test_collections.py:438		TestNamedTuple.test_field_doc_reuse needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_field_repr	fixture-blocked	Lib/test/test_collections.py:445		TestNamedTuple.test_field_repr needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_instance	compile-blocked	Lib/test/test_collections.py:471	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_keyword_only_arguments	compile-blocked	Lib/test/test_collections.py:658	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_large_size	fixture-blocked	Lib/test/test_collections.py:546		TestNamedTuple.test_large_size needs its upstream method decorator
+test.test_collections.TestNamedTuple.test_match_args	compile-blocked	Lib/test/test_collections.py:704	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_module_parameter	compile-blocked	Lib/test/test_collections.py:467	fixture:2:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_name_conflicts	compile-blocked	Lib/test/test_collections.py:586	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_name_fixer	compile-blocked	Lib/test/test_collections.py:456	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_namedtuple_subclass_issue_24931	compile-blocked	Lib/test/test_collections.py:668	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_new_builtins_issue_43102	compile-blocked	Lib/test/test_collections.py:698	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_non_generic_subscript	compile-blocked	Lib/test/test_collections.py:708	upstream:711:17	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_collections.TestNamedTuple.test_odd_sizes	compile-blocked	Lib/test/test_collections.py:528	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_pickle	compile-blocked	Lib/test/test_collections.py:568	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""pickle"""
+test.test_collections.TestNamedTuple.test_readonly	compile-blocked	Lib/test/test_collections.py:399	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_repr	compile-blocked	Lib/test/test_collections.py:650	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestNamedTuple.test_tupleness	compile-blocked	Lib/test/test_collections.py:505	fixture:1:1	Imre: unsupported sealed standard-library export collections.namedtuple
+test.test_collections.TestOneTrickPonyABCs.test_AsyncGenerator	compile-blocked	Lib/test/test_collections.py:1242	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.AsyncIterator
+test.test_collections.TestOneTrickPonyABCs.test_AsyncIterable	compile-blocked	Lib/test/test_collections.py:934	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.AsyncIterable
+test.test_collections.TestOneTrickPonyABCs.test_AsyncIterator	compile-blocked	Lib/test/test_collections.py:948	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.AsyncIterator
+test.test_collections.TestOneTrickPonyABCs.test_Awaitable	compile-blocked	Lib/test/test_collections.py:789	fixture:1:1	"Imre: cannot resolve first-party module ""test"" under <work>; external and namespace-package imports are unsupported"
+test.test_collections.TestOneTrickPonyABCs.test_Callable	compile-blocked	Lib/test/test_collections.py:1359	upstream:1360:30	Imre: expected None, got int; annotations are enforced contracts
+test.test_collections.TestOneTrickPonyABCs.test_Collection	compile-blocked	Lib/test/test_collections.py:1059	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.Collection
+test.test_collections.TestOneTrickPonyABCs.test_Container	compile-blocked	Lib/test/test_collections.py:1341	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.Container
+test.test_collections.TestOneTrickPonyABCs.test_Coroutine	compile-blocked	Lib/test/test_collections.py:841	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""types"""
+test.test_collections.TestOneTrickPonyABCs.test_Generator	compile-blocked	Lib/test/test_collections.py:1171	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.Generator
+test.test_collections.TestOneTrickPonyABCs.test_Hashable	compile-blocked	Lib/test/test_collections.py:908	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.Hashable
+test.test_collections.TestOneTrickPonyABCs.test_Iterable	compile-blocked	Lib/test/test_collections.py:968	upstream:970:30	Imre: expected None, got int; annotations are enforced contracts
+test.test_collections.TestOneTrickPonyABCs.test_Iterator	compile-blocked	Lib/test/test_collections.py:1146	upstream:1147:30	Imre: expected None, got int; annotations are enforced contracts
+test.test_collections.TestOneTrickPonyABCs.test_Reversible	compile-blocked	Lib/test/test_collections.py:1002	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_collections.TestOneTrickPonyABCs.test_Sized	compile-blocked	Lib/test/test_collections.py:1323	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.Sized
+test.test_collections.TestOneTrickPonyABCs.test_direct_subclassing	compile-blocked	Lib/test/test_collections.py:1379	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.Hashable
+test.test_collections.TestOneTrickPonyABCs.test_registration	compile-blocked	Lib/test/test_collections.py:1386	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.Hashable
+test.test_collections.TestUserObjects.test_dict_copy	compile-blocked	Lib/test/test_collections.py:70	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserDict
+test.test_collections.TestUserObjects.test_dict_missing	compile-blocked	Lib/test/test_collections.py:75	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserDict
+test.test_collections.TestUserObjects.test_dict_protocol	compile-blocked	Lib/test/test_collections.py:62	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserDict
+test.test_collections.TestUserObjects.test_list_copy	compile-blocked	Lib/test/test_collections.py:65	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_collections.TestUserObjects.test_list_protocol	compile-blocked	Lib/test/test_collections.py:59	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_collections.TestUserObjects.test_str_protocol	compile-blocked	Lib/test/test_collections.py:56	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserString
+test.test_defaultdict.TestDefaultDict.test_basic	compile-blocked	Lib/test/test_defaultdict.py:14	upstream:15:14	Imre: a module is not callable
+test.test_defaultdict.TestDefaultDict.test_callable_arg	compile-blocked	Lib/test/test_defaultdict.py:140	upstream:141:9	Imre: unknown class method
+test.test_defaultdict.TestDefaultDict.test_copy	compile-blocked	Lib/test/test_defaultdict.py:73	upstream:74:14	Imre: a module is not callable
+test.test_defaultdict.TestDefaultDict.test_deep_copy	compile-blocked	Lib/test/test_defaultdict.py:108	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""copy"""
+test.test_defaultdict.TestDefaultDict.test_factory_conflict_with_set_value	compile-blocked	Lib/test/test_defaultdict.py:189	upstream:193:9	Imre: local functions require annotated parameters and return types
+test.test_defaultdict.TestDefaultDict.test_keyerror_without_factory	compile-blocked	Lib/test/test_defaultdict.py:119	upstream:120:14	Imre: a module is not callable
+test.test_defaultdict.TestDefaultDict.test_missing	compile-blocked	Lib/test/test_defaultdict.py:50	upstream:51:14	Imre: a module is not callable
+test.test_defaultdict.TestDefaultDict.test_pickling	compile-blocked	Lib/test/test_defaultdict.py:143	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""pickle"""
+test.test_defaultdict.TestDefaultDict.test_recursive_repr	compile-blocked	Lib/test/test_defaultdict.py:128	upstream:130:9	Imre: unsupported statement in the Imre subset
+test.test_defaultdict.TestDefaultDict.test_repr	compile-blocked	Lib/test/test_defaultdict.py:56	upstream:57:14	Imre: a module is not callable
+test.test_defaultdict.TestDefaultDict.test_repr_recursive_factory	compile-blocked	Lib/test/test_defaultdict.py:207	upstream:210:9	Imre: unsupported statement in the Imre subset
+test.test_defaultdict.TestDefaultDict.test_shallow_copy	compile-blocked	Lib/test/test_defaultdict.py:98	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""copy"""
+test.test_defaultdict.TestDefaultDict.test_union	compile-blocked	Lib/test/test_defaultdict.py:151	upstream:152:13	Imre: a module is not callable
+test.test_deque.TestBasic.test_add	compile-blocked	Lib/test/test_deque.py:193	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_basics	compile-blocked	Lib/test/test_deque.py:32	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_big_queue_popleft	compile-blocked	Lib/test/test_deque.py:567	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_big_queue_popright	compile-blocked	Lib/test/test_deque.py:578	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_big_stack_left	compile-blocked	Lib/test/test_deque.py:599	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_big_stack_right	compile-blocked	Lib/test/test_deque.py:588	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_clear	compile-blocked	Lib/test/test_deque.py:497	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_comparisons	compile-blocked	Lib/test/test_deque.py:132	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_container_iterator	compile-blocked	Lib/test/test_deque.py:729	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_contains	compile-blocked	Lib/test/test_deque.py:149	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_contains_count_index_stop_crashes	compile-blocked	Lib/test/test_deque.py:169	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_copy	compile-blocked	Lib/test/test_deque.py:684	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_copy_method	compile-blocked	Lib/test/test_deque.py:702	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_count	compile-blocked	Lib/test/test_deque.py:99	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_deepcopy	compile-blocked	Lib/test/test_deque.py:675	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_delitem	compile-blocked	Lib/test/test_deque.py:397	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_extend	compile-blocked	Lib/test/test_deque.py:185	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_extendleft	compile-blocked	Lib/test/test_deque.py:220	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_gc_doesnt_blowup	compile-blocked	Lib/test/test_deque.py:720	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_getitem	compile-blocked	Lib/test/test_deque.py:232	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_hash	compile-blocked	Lib/test/test_deque.py:541	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_iadd	compile-blocked	Lib/test/test_deque.py:213	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_imul	compile-blocked	Lib/test/test_deque.py:328	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_index	compile-blocked	Lib/test/test_deque.py:252	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_index_bug_24913	compile-blocked	Lib/test/test_deque.py:298	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_init	compile-blocked	Lib/test/test_deque.py:537	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_insert	compile-blocked	Lib/test/test_deque.py:303	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_insert_bug_26194	compile-blocked	Lib/test/test_deque.py:313	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_iterator_pickle	compile-blocked	Lib/test/test_deque.py:634	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_len	compile-blocked	Lib/test/test_deque.py:476	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_long_steadystate_queue_popleft	compile-blocked	Lib/test/test_deque.py:544	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_long_steadystate_queue_popright	compile-blocked	Lib/test/test_deque.py:555	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_maxlen	compile-blocked	Lib/test/test_deque.py:51	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_maxlen_attribute	compile-blocked	Lib/test/test_deque.py:89	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_maxlen_zero	compile-blocked	Lib/test/test_deque.py:74	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_mul	compile-blocked	Lib/test/test_deque.py:359	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_pickle	compile-blocked	Lib/test/test_deque.py:616	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_pickle_recursive	compile-blocked	Lib/test/test_deque.py:625	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_remove	compile-blocked	Lib/test/test_deque.py:506	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_repr	compile-blocked	Lib/test/test_deque.py:530	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_reverse	compile-blocked	Lib/test/test_deque.py:411	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_reversed	compile-blocked	Lib/test/test_deque.py:711	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_reversed_new	compile-blocked	Lib/test/test_deque.py:715	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_rotate	compile-blocked	Lib/test/test_deque.py:423	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_roundtrip_iter_init	compile-blocked	Lib/test/test_deque.py:610	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_setitem	compile-blocked	Lib/test/test_deque.py:385	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestBasic.test_sizeof	fixture-blocked	Lib/test/test_deque.py:748		TestBasic.test_sizeof needs its upstream method decorator
+test.test_deque.TestBasic.test_underflow	compile-blocked	Lib/test/test_deque.py:492	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_add	compile-blocked	Lib/test/seq_tests.py:264	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_bigrepeat	compile-blocked	Lib/test/seq_tests.py:325	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_cmp	compile-blocked	Lib/test/seq_tests.py:357	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_constructors	compile-blocked	Lib/test/seq_tests.py:102	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_contains	compile-blocked	Lib/test/seq_tests.py:218	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_contains_fake	compile-blocked	Lib/test/seq_tests.py:227	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_contains_order	compile-blocked	Lib/test/seq_tests.py:238	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_count	compile-blocked	Lib/test/seq_tests.py:364	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_free_after_iterating	reference-skip			Exhausted deque iterator doesn't free a deque
+test.test_deque.TestSequence.test_getitem	reference-only	Lib/test/test_deque.py:909		Original body is pass; native execution has no collections operation.
+test.test_deque.TestSequence.test_getitemoverwriteiter	compile-blocked	Lib/test/seq_tests.py:310	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_getslice	reference-only	Lib/test/test_deque.py:913		Original body is pass; native execution has no collections operation.
+test.test_deque.TestSequence.test_iadd	compile-blocked	Lib/test/seq_tests.py:290	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_imul	compile-blocked	Lib/test/seq_tests.py:303	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_index	compile-blocked	Lib/test/seq_tests.py:388	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_len	compile-blocked	Lib/test/seq_tests.py:253	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_minmax	compile-blocked	Lib/test/seq_tests.py:259	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_mul	compile-blocked	Lib/test/seq_tests.py:272	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_pickle	compile-blocked	Lib/test/seq_tests.py:435	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_repeat	compile-blocked	Lib/test/seq_tests.py:317	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSequence.test_subscript	reference-only	Lib/test/test_deque.py:917		Original body is pass; native execution has no collections operation.
+test.test_deque.TestSequence.test_truth	compile-blocked	Lib/test/seq_tests.py:151	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSubclass.test_basics	compile-blocked	Lib/test/test_deque.py:797	upstream:798:19	Imre: iterator values require an immediate for, comprehension, list, sum, any, or all consumer
+test.test_deque.TestSubclass.test_bug_31608	fixture-blocked	Lib/test/test_deque.py:882		TestSubclass.test_bug_31608 needs its upstream method decorator
+test.test_deque.TestSubclass.test_copy_pickle	compile-blocked	Lib/test/test_deque.py:819	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""pickle"""
+test.test_deque.TestSubclass.test_pickle_recursive	compile-blocked	Lib/test/test_deque.py:843	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""pickle"""
+test.test_deque.TestSubclass.test_strange_subclass	compile-blocked	Lib/test/test_deque.py:872	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSubclass.test_weakref	compile-blocked	Lib/test/test_deque.py:864	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestSubclassWithKwargs.test_subclass_with_kwargs	compile-blocked	Lib/test/test_deque.py:902	upstream:904:9	Imre: keyword arguments are unsupported for this builtin
+test.test_deque.TestVariousIteratorArgs.test_constructor	compile-blocked	Lib/test/test_deque.py:763	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestVariousIteratorArgs.test_iter_with_altered_data	compile-blocked	Lib/test/test_deque.py:773	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.TestVariousIteratorArgs.test_runtime_error_on_empty_deque	compile-blocked	Lib/test/test_deque.py:779	fixture:1:1	Imre: unsupported sealed standard-library export collections.deque
+test.test_deque.__test__.libreftest	compile-blocked			case.py:1:1: Imre: unsupported sealed standard-library export collections.deque
+test.test_free_threading.test_collections.TestDeque.test_copy_race	reference-skip			GIL enabled
+test.test_ordered_dict.CPythonBuiltinDictTests.test_abc	compile-blocked	Lib/test/test_ordered_dict.py:147	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.MutableMapping
+test.test_ordered_dict.CPythonBuiltinDictTests.test_clear	compile-blocked	Lib/test/test_ordered_dict.py:152	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.CPythonBuiltinDictTests.test_delitem	compile-blocked	Lib/test/test_ordered_dict.py:161	fixture:4:5	Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass
+test.test_ordered_dict.CPythonBuiltinDictTests.test_delitem_hash_collision	compile-blocked	Lib/test/test_ordered_dict.py:521	fixture:4:5	Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass
+test.test_ordered_dict.CPythonBuiltinDictTests.test_detect_deletion_during_iteration	compile-blocked	Lib/test/test_ordered_dict.py:196	fixture:4:5	Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass
+test.test_ordered_dict.CPythonBuiltinDictTests.test_highly_nested	compile-blocked	Lib/test/test_ordered_dict.py:493	fixture:1:1	"Imre: cannot resolve first-party module ""test"" under <work>; external and namespace-package imports are unsupported"
+test.test_ordered_dict.CPythonBuiltinDictTests.test_highly_nested_subclass	compile-blocked	Lib/test/test_ordered_dict.py:504	fixture:1:1	"Imre: cannot resolve first-party module ""test"" under <work>; external and namespace-package imports are unsupported"
+test.test_ordered_dict.CPythonBuiltinDictTests.test_init	compile-blocked	Lib/test/test_ordered_dict.py:36	fixture:4:5	Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass
+test.test_ordered_dict.CPythonBuiltinDictTests.test_override_update	compile-blocked	Lib/test/test_ordered_dict.py:484	fixture:4:5	Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass
+test.test_ordered_dict.CPythonBuiltinDictTests.test_popitem	compile-blocked	Lib/test/test_ordered_dict.py:233	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.CPythonBuiltinDictTests.test_reinsert	compile-blocked	Lib/test/test_ordered_dict.py:424	fixture:4:5	Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass
+test.test_ordered_dict.CPythonBuiltinDictTests.test_setitem	compile-blocked	Lib/test/test_ordered_dict.py:171	fixture:4:5	Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass
+test.test_ordered_dict.CPythonBuiltinDictTests.test_update	compile-blocked	Lib/test/test_ordered_dict.py:68	fixture:4:5	Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass
+test.test_ordered_dict.CPythonGeneralMappingTests.test_bool	compile-blocked	Lib/test/mapping_tests.py:136	upstream:137:29	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_constructor	compile-blocked	Lib/test/mapping_tests.py:133	upstream:134:26	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_get	compile-blocked	Lib/test/mapping_tests.py:270	upstream:271:13	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_getitem	compile-blocked	Lib/test/mapping_tests.py:166	upstream:167:13	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonGeneralMappingTests.test_items	compile-blocked	Lib/test/mapping_tests.py:156	upstream:157:13	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_keys	compile-blocked	Lib/test/mapping_tests.py:142	upstream:143:13	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_len	compile-blocked	Lib/test/mapping_tests.py:162	upstream:163:13	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_pop	compile-blocked	Lib/test/mapping_tests.py:293	upstream:294:13	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_popitem	compile-blocked	Lib/test/test_ordered_dict.py:1023	upstream:1024:13	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_read	compile-blocked	Lib/test/mapping_tests.py:43	upstream:45:13	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_setdefault	compile-blocked	Lib/test/mapping_tests.py:284	upstream:285:13	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_update	compile-blocked	Lib/test/mapping_tests.py:173	upstream:175:13	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_values	compile-blocked	Lib/test/mapping_tests.py:150	upstream:151:13	Imre: unknown class method
+test.test_ordered_dict.CPythonGeneralMappingTests.test_write	compile-blocked	Lib/test/mapping_tests.py:91	upstream:93:13	Imre: unknown class method
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_468	compile-blocked	Lib/test/test_ordered_dict.py:60	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_abc	compile-blocked	Lib/test/test_ordered_dict.py:147	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.MutableMapping
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_clear	compile-blocked	Lib/test/test_ordered_dict.py:152	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_copying	compile-blocked	Lib/test/test_ordered_dict.py:297	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""copy"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_delitem	compile-blocked	Lib/test/test_ordered_dict.py:161	upstream:162:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_delitem_hash_collision	compile-blocked	Lib/test/test_ordered_dict.py:521	upstream:522:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_detect_deletion_during_iteration	compile-blocked	Lib/test/test_ordered_dict.py:196	upstream:197:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_clear	compile-blocked	Lib/test/test_ordered_dict.py:634	upstream:635:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_delitem	compile-blocked	Lib/test/test_ordered_dict.py:625	upstream:626:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_pop	compile-blocked	Lib/test/test_ordered_dict.py:642	upstream:643:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_popitem	compile-blocked	Lib/test/test_ordered_dict.py:651	upstream:652:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_setdefault	compile-blocked	Lib/test/test_ordered_dict.py:660	upstream:661:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_setitem	compile-blocked	Lib/test/test_ordered_dict.py:619	upstream:620:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_update	compile-blocked	Lib/test/test_ordered_dict.py:666	upstream:667:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_equality	compile-blocked	Lib/test/test_ordered_dict.py:281	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_free_after_iterating	compile-blocked	Lib/test/test_ordered_dict.py:683	fixture:1:1	"Imre: cannot resolve first-party module ""test"" under <work>; external and namespace-package imports are unsupported"
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_fromkeys	compile-blocked	Lib/test/test_ordered_dict.py:138	upstream:139:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_highly_nested	compile-blocked	Lib/test/test_ordered_dict.py:493	fixture:1:1	"Imre: cannot resolve first-party module ""test"" under <work>; external and namespace-package imports are unsupported"
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_highly_nested_subclass	compile-blocked	Lib/test/test_ordered_dict.py:504	fixture:1:1	"Imre: cannot resolve first-party module ""test"" under <work>; external and namespace-package imports are unsupported"
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_init	compile-blocked	Lib/test/test_ordered_dict.py:36	upstream:37:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_init_calls	compile-blocked	Lib/test/test_ordered_dict.py:114	upstream:116:9	Imre: unsupported statement in the Imre subset
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_linked_list_by_clear	compile-blocked	Lib/test/test_ordered_dict.py:833	upstream:834:9	Imre: unsupported statement in the Imre subset
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_linked_list_by_delete_key	compile-blocked	Lib/test/test_ordered_dict.py:846	upstream:847:9	Imre: unsupported statement in the Imre subset
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_size_by_clear	compile-blocked	Lib/test/test_ordered_dict.py:808	upstream:809:9	Imre: unsupported statement in the Imre subset
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_size_by_delete_key	compile-blocked	Lib/test/test_ordered_dict.py:820	upstream:821:9	Imre: unsupported statement in the Imre subset
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_size_by_delete_key_in_dict_eq	compile-blocked	Lib/test/test_ordered_dict.py:860	upstream:861:9	Imre: unsupported statement in the Imre subset
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue24347	compile-blocked	Lib/test/test_ordered_dict.py:560	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue24348	compile-blocked	Lib/test/test_ordered_dict.py:582	upstream:583:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue24667	compile-blocked	Lib/test/test_ordered_dict.py:594	upstream:606:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_iterators	compile-blocked	Lib/test/test_ordered_dict.py:179	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_iterators_empty	compile-blocked	Lib/test/test_ordered_dict.py:220	upstream:221:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_iterators_pickling	compile-blocked	Lib/test/test_ordered_dict.py:936	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""pickle"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_key_change_during_iteration	compile-blocked	Lib/test/test_ordered_dict.py:919	upstream:920:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_merge_operator	compile-blocked	Lib/test/test_ordered_dict.py:689	upstream:690:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_move_to_end	compile-blocked	Lib/test/test_ordered_dict.py:436	upstream:437:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_move_to_end_issue25406	compile-blocked	Lib/test/test_ordered_dict.py:455	upstream:456:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_ordered_dict_items_result_gc	fixture-blocked	Lib/test/test_ordered_dict.py:733		OrderedDictTests.test_ordered_dict_items_result_gc needs its upstream method decorator
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_overridden_init	compile-blocked	Lib/test/test_ordered_dict.py:127	upstream:131:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_override_update	compile-blocked	Lib/test/test_ordered_dict.py:484	upstream:485:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_pickle_recursive	compile-blocked	Lib/test/test_ordered_dict.py:361	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""pickle"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_pop	compile-blocked	Lib/test/test_ordered_dict.py:255	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_popitem	compile-blocked	Lib/test/test_ordered_dict.py:233	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_popitem_last	compile-blocked	Lib/test/test_ordered_dict.py:244	upstream:245:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_reduce_not_too_fat	compile-blocked	Lib/test/test_ordered_dict.py:350	upstream:351:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_reference_loop	compile-blocked	Lib/test/test_ordered_dict.py:672	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""gc"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_reinsert	compile-blocked	Lib/test/test_ordered_dict.py:424	upstream:425:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_repr	compile-blocked	Lib/test/test_ordered_dict.py:374	upstream:375:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_repr_recursive	compile-blocked	Lib/test/test_ordered_dict.py:382	upstream:383:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_repr_recursive_values	compile-blocked	Lib/test/test_ordered_dict.py:390	upstream:391:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_setdefault	compile-blocked	Lib/test/test_ordered_dict.py:404	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_setitem	compile-blocked	Lib/test/test_ordered_dict.py:171	upstream:172:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_sizeof	compile-blocked	Lib/test/test_ordered_dict.py:469	upstream:470:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_sizeof_exact	fixture-blocked	Lib/test/test_ordered_dict.py:887		CPythonOrderedDictTests.test_sizeof_exact needs its upstream method decorator
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_sorted_iterators	compile-blocked	Lib/test/test_ordered_dict.py:207	upstream:208:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_update	compile-blocked	Lib/test/test_ordered_dict.py:68	upstream:69:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_views	compile-blocked	Lib/test/test_ordered_dict.py:476	upstream:477:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_weakref_list_is_not_traversed	fixture-blocked	Lib/test/test_ordered_dict.py:954		CPythonOrderedDictTests.test_weakref_list_is_not_traversed needs its upstream method decorator
+test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_yaml_linkage	compile-blocked	Lib/test/test_ordered_dict.py:340	upstream:341:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonOrderedDictTests.test_468	compile-blocked	Lib/test/test_ordered_dict.py:60	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_abc	compile-blocked	Lib/test/test_ordered_dict.py:147	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_clear	compile-blocked	Lib/test/test_ordered_dict.py:152	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_copying	compile-blocked	Lib/test/test_ordered_dict.py:297	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_delitem	compile-blocked	Lib/test/test_ordered_dict.py:161	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_delitem_hash_collision	compile-blocked	Lib/test/test_ordered_dict.py:521	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_detect_deletion_during_iteration	compile-blocked	Lib/test/test_ordered_dict.py:196	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_dict_clear	compile-blocked	Lib/test/test_ordered_dict.py:634	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_dict_delitem	compile-blocked	Lib/test/test_ordered_dict.py:625	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_dict_pop	compile-blocked	Lib/test/test_ordered_dict.py:642	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_dict_popitem	compile-blocked	Lib/test/test_ordered_dict.py:651	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_dict_setdefault	compile-blocked	Lib/test/test_ordered_dict.py:660	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_dict_setitem	compile-blocked	Lib/test/test_ordered_dict.py:619	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_dict_update	compile-blocked	Lib/test/test_ordered_dict.py:666	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_equality	compile-blocked	Lib/test/test_ordered_dict.py:281	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_free_after_iterating	compile-blocked	Lib/test/test_ordered_dict.py:683	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_fromkeys	compile-blocked	Lib/test/test_ordered_dict.py:138	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_highly_nested	compile-blocked	Lib/test/test_ordered_dict.py:493	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_highly_nested_subclass	compile-blocked	Lib/test/test_ordered_dict.py:504	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_init	compile-blocked	Lib/test/test_ordered_dict.py:36	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_init_calls	compile-blocked	Lib/test/test_ordered_dict.py:114	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_linked_list_by_clear	compile-blocked	Lib/test/test_ordered_dict.py:833	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_linked_list_by_delete_key	compile-blocked	Lib/test/test_ordered_dict.py:846	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_size_by_clear	compile-blocked	Lib/test/test_ordered_dict.py:808	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_size_by_delete_key	compile-blocked	Lib/test/test_ordered_dict.py:820	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_size_by_delete_key_in_dict_eq	compile-blocked	Lib/test/test_ordered_dict.py:860	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_issue24347	compile-blocked	Lib/test/test_ordered_dict.py:560	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_issue24348	compile-blocked	Lib/test/test_ordered_dict.py:582	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_issue24667	compile-blocked	Lib/test/test_ordered_dict.py:594	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_iterators	compile-blocked	Lib/test/test_ordered_dict.py:179	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_iterators_empty	compile-blocked	Lib/test/test_ordered_dict.py:220	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_iterators_pickling	compile-blocked	Lib/test/test_ordered_dict.py:936	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_key_change_during_iteration	compile-blocked	Lib/test/test_ordered_dict.py:919	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_merge_operator	compile-blocked	Lib/test/test_ordered_dict.py:689	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_move_to_end	compile-blocked	Lib/test/test_ordered_dict.py:436	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_move_to_end_issue25406	compile-blocked	Lib/test/test_ordered_dict.py:455	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_ordered_dict_items_result_gc	fixture-blocked	Lib/test/test_ordered_dict.py:733		OrderedDictTests.test_ordered_dict_items_result_gc needs its upstream method decorator
+test.test_ordered_dict.CPythonOrderedDictTests.test_overridden_init	compile-blocked	Lib/test/test_ordered_dict.py:127	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_override_update	compile-blocked	Lib/test/test_ordered_dict.py:484	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_pickle_recursive	compile-blocked	Lib/test/test_ordered_dict.py:361	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_pop	compile-blocked	Lib/test/test_ordered_dict.py:255	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_popitem	compile-blocked	Lib/test/test_ordered_dict.py:233	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_popitem_last	compile-blocked	Lib/test/test_ordered_dict.py:244	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_reduce_not_too_fat	compile-blocked	Lib/test/test_ordered_dict.py:350	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_reference_loop	compile-blocked	Lib/test/test_ordered_dict.py:672	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_reinsert	compile-blocked	Lib/test/test_ordered_dict.py:424	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_repr	compile-blocked	Lib/test/test_ordered_dict.py:374	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_repr_recursive	compile-blocked	Lib/test/test_ordered_dict.py:382	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_repr_recursive_values	compile-blocked	Lib/test/test_ordered_dict.py:390	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_setdefault	compile-blocked	Lib/test/test_ordered_dict.py:404	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_setitem	compile-blocked	Lib/test/test_ordered_dict.py:171	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_sizeof	compile-blocked	Lib/test/test_ordered_dict.py:469	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_sizeof_exact	fixture-blocked	Lib/test/test_ordered_dict.py:887		CPythonOrderedDictTests.test_sizeof_exact needs its upstream method decorator
+test.test_ordered_dict.CPythonOrderedDictTests.test_sorted_iterators	compile-blocked	Lib/test/test_ordered_dict.py:207	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_update	compile-blocked	Lib/test/test_ordered_dict.py:68	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_views	compile-blocked	Lib/test/test_ordered_dict.py:476	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictTests.test_weakref_list_is_not_traversed	fixture-blocked	Lib/test/test_ordered_dict.py:954		CPythonOrderedDictTests.test_weakref_list_is_not_traversed needs its upstream method decorator
+test.test_ordered_dict.CPythonOrderedDictTests.test_yaml_linkage	compile-blocked	Lib/test/test_ordered_dict.py:340	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.CPythonOrderedDictWithSlotsCopyingTests.test_copying	compile-blocked	Lib/test/test_ordered_dict.py:297	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""copy"""
+test.test_ordered_dict.CPythonSubclassMappingTests.test_bool	compile-blocked	Lib/test/mapping_tests.py:136	upstream:137:29	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_constructor	compile-blocked	Lib/test/mapping_tests.py:133	upstream:134:26	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_get	compile-blocked	Lib/test/mapping_tests.py:270	upstream:271:13	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_getitem	compile-blocked	Lib/test/mapping_tests.py:166	upstream:167:13	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.CPythonSubclassMappingTests.test_items	compile-blocked	Lib/test/mapping_tests.py:156	upstream:157:13	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_keys	compile-blocked	Lib/test/mapping_tests.py:142	upstream:143:13	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_len	compile-blocked	Lib/test/mapping_tests.py:162	upstream:163:13	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_pop	compile-blocked	Lib/test/mapping_tests.py:293	upstream:294:13	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_popitem	compile-blocked	Lib/test/test_ordered_dict.py:1050	upstream:1051:13	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_read	compile-blocked	Lib/test/mapping_tests.py:43	upstream:45:13	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_setdefault	compile-blocked	Lib/test/mapping_tests.py:284	upstream:285:13	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_update	compile-blocked	Lib/test/mapping_tests.py:173	upstream:175:13	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_values	compile-blocked	Lib/test/mapping_tests.py:150	upstream:151:13	Imre: unknown class method
+test.test_ordered_dict.CPythonSubclassMappingTests.test_write	compile-blocked	Lib/test/mapping_tests.py:91	upstream:93:13	Imre: unknown class method
+test.test_ordered_dict.CSimpleLRUCacheTests.test_add_after_full	compile-blocked	Lib/test/test_ordered_dict.py:1082	upstream:1083:13	Imre: unknown class method
+test.test_ordered_dict.CSimpleLRUCacheTests.test_change_order_on_get	compile-blocked	Lib/test/test_ordered_dict.py:1111	upstream:1112:13	Imre: unknown class method
+test.test_ordered_dict.CSimpleLRUCacheTests.test_pop	compile-blocked	Lib/test/test_ordered_dict.py:1099	upstream:1100:13	Imre: unknown class method
+test.test_ordered_dict.CSimpleLRUCacheTests.test_popitem	compile-blocked	Lib/test/test_ordered_dict.py:1091	upstream:1092:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_bool	compile-blocked	Lib/test/mapping_tests.py:136	upstream:137:29	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_constructor	compile-blocked	Lib/test/mapping_tests.py:133	upstream:134:26	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_get	compile-blocked	Lib/test/mapping_tests.py:270	upstream:271:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_getitem	compile-blocked	Lib/test/mapping_tests.py:166	upstream:167:13	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_items	compile-blocked	Lib/test/mapping_tests.py:156	upstream:157:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_keys	compile-blocked	Lib/test/mapping_tests.py:142	upstream:143:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_len	compile-blocked	Lib/test/mapping_tests.py:162	upstream:163:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_pop	compile-blocked	Lib/test/mapping_tests.py:293	upstream:294:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_popitem	compile-blocked	Lib/test/test_ordered_dict.py:1011	upstream:1012:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_read	compile-blocked	Lib/test/mapping_tests.py:43	upstream:45:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_setdefault	compile-blocked	Lib/test/mapping_tests.py:284	upstream:285:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_update	compile-blocked	Lib/test/mapping_tests.py:173	upstream:175:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_values	compile-blocked	Lib/test/mapping_tests.py:150	upstream:151:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonGeneralMappingTests.test_write	compile-blocked	Lib/test/mapping_tests.py:91	upstream:93:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_468	compile-blocked	Lib/test/test_ordered_dict.py:60	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_abc	compile-blocked	Lib/test/test_ordered_dict.py:147	fixture:1:1	Imre: unsupported sealed standard-library export collections.abc.MutableMapping
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_clear	compile-blocked	Lib/test/test_ordered_dict.py:152	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_copying	compile-blocked	Lib/test/test_ordered_dict.py:297	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""copy"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_delitem	compile-blocked	Lib/test/test_ordered_dict.py:161	upstream:162:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_delitem_hash_collision	compile-blocked	Lib/test/test_ordered_dict.py:521	upstream:522:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_detect_deletion_during_iteration	compile-blocked	Lib/test/test_ordered_dict.py:196	upstream:197:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_dict_clear	compile-blocked	Lib/test/test_ordered_dict.py:634	upstream:635:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_dict_delitem	compile-blocked	Lib/test/test_ordered_dict.py:625	upstream:626:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_dict_pop	compile-blocked	Lib/test/test_ordered_dict.py:642	upstream:643:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_dict_popitem	compile-blocked	Lib/test/test_ordered_dict.py:651	upstream:652:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_dict_setdefault	compile-blocked	Lib/test/test_ordered_dict.py:660	upstream:661:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_dict_setitem	compile-blocked	Lib/test/test_ordered_dict.py:619	upstream:620:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_dict_update	compile-blocked	Lib/test/test_ordered_dict.py:666	upstream:667:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_equality	compile-blocked	Lib/test/test_ordered_dict.py:281	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_free_after_iterating	compile-blocked	Lib/test/test_ordered_dict.py:683	fixture:1:1	"Imre: cannot resolve first-party module ""test"" under <work>; external and namespace-package imports are unsupported"
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_fromkeys	compile-blocked	Lib/test/test_ordered_dict.py:138	upstream:139:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_highly_nested	compile-blocked	Lib/test/test_ordered_dict.py:493	fixture:1:1	"Imre: cannot resolve first-party module ""test"" under <work>; external and namespace-package imports are unsupported"
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_highly_nested_subclass	compile-blocked	Lib/test/test_ordered_dict.py:504	fixture:1:1	"Imre: cannot resolve first-party module ""test"" under <work>; external and namespace-package imports are unsupported"
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_init	compile-blocked	Lib/test/test_ordered_dict.py:36	upstream:37:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_init_calls	compile-blocked	Lib/test/test_ordered_dict.py:114	upstream:116:9	Imre: unsupported statement in the Imre subset
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_issue119004_attribute_error	compile-blocked	Lib/test/test_ordered_dict.py:767	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""operator"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_issue24347	compile-blocked	Lib/test/test_ordered_dict.py:560	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_issue24348	compile-blocked	Lib/test/test_ordered_dict.py:582	upstream:583:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_issue24667	compile-blocked	Lib/test/test_ordered_dict.py:594	upstream:606:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_iterators	compile-blocked	Lib/test/test_ordered_dict.py:179	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_iterators_empty	compile-blocked	Lib/test/test_ordered_dict.py:220	upstream:221:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_merge_operator	compile-blocked	Lib/test/test_ordered_dict.py:689	upstream:690:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_move_to_end	compile-blocked	Lib/test/test_ordered_dict.py:436	upstream:437:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_move_to_end_issue25406	compile-blocked	Lib/test/test_ordered_dict.py:455	upstream:456:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_ordered_dict_items_result_gc	fixture-blocked	Lib/test/test_ordered_dict.py:733		OrderedDictTests.test_ordered_dict_items_result_gc needs its upstream method decorator
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_overridden_init	compile-blocked	Lib/test/test_ordered_dict.py:127	upstream:131:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_override_update	compile-blocked	Lib/test/test_ordered_dict.py:484	upstream:485:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_pickle_recursive	compile-blocked	Lib/test/test_ordered_dict.py:361	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""pickle"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_pop	compile-blocked	Lib/test/test_ordered_dict.py:255	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_popitem	compile-blocked	Lib/test/test_ordered_dict.py:233	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_popitem_last	compile-blocked	Lib/test/test_ordered_dict.py:244	upstream:245:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_reduce_not_too_fat	compile-blocked	Lib/test/test_ordered_dict.py:350	upstream:351:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_reference_loop	compile-blocked	Lib/test/test_ordered_dict.py:672	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""gc"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_reinsert	compile-blocked	Lib/test/test_ordered_dict.py:424	upstream:425:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_repr	compile-blocked	Lib/test/test_ordered_dict.py:374	upstream:375:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_repr_recursive	compile-blocked	Lib/test/test_ordered_dict.py:382	upstream:383:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_repr_recursive_values	compile-blocked	Lib/test/test_ordered_dict.py:390	upstream:391:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_setdefault	compile-blocked	Lib/test/test_ordered_dict.py:404	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_setitem	compile-blocked	Lib/test/test_ordered_dict.py:171	upstream:172:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_sizeof	compile-blocked	Lib/test/test_ordered_dict.py:469	upstream:470:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_sorted_iterators	compile-blocked	Lib/test/test_ordered_dict.py:207	upstream:208:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_update	compile-blocked	Lib/test/test_ordered_dict.py:68	upstream:69:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_views	compile-blocked	Lib/test/test_ordered_dict.py:476	upstream:477:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_yaml_linkage	compile-blocked	Lib/test/test_ordered_dict.py:340	upstream:341:23	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonOrderedDictTests.test_468	compile-blocked	Lib/test/test_ordered_dict.py:60	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_abc	compile-blocked	Lib/test/test_ordered_dict.py:147	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_clear	compile-blocked	Lib/test/test_ordered_dict.py:152	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_copying	compile-blocked	Lib/test/test_ordered_dict.py:297	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_delitem	compile-blocked	Lib/test/test_ordered_dict.py:161	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_delitem_hash_collision	compile-blocked	Lib/test/test_ordered_dict.py:521	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_detect_deletion_during_iteration	compile-blocked	Lib/test/test_ordered_dict.py:196	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_dict_clear	compile-blocked	Lib/test/test_ordered_dict.py:634	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_dict_delitem	compile-blocked	Lib/test/test_ordered_dict.py:625	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_dict_pop	compile-blocked	Lib/test/test_ordered_dict.py:642	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_dict_popitem	compile-blocked	Lib/test/test_ordered_dict.py:651	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_dict_setdefault	compile-blocked	Lib/test/test_ordered_dict.py:660	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_dict_setitem	compile-blocked	Lib/test/test_ordered_dict.py:619	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_dict_update	compile-blocked	Lib/test/test_ordered_dict.py:666	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_equality	compile-blocked	Lib/test/test_ordered_dict.py:281	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_free_after_iterating	compile-blocked	Lib/test/test_ordered_dict.py:683	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_fromkeys	compile-blocked	Lib/test/test_ordered_dict.py:138	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_highly_nested	compile-blocked	Lib/test/test_ordered_dict.py:493	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_highly_nested_subclass	compile-blocked	Lib/test/test_ordered_dict.py:504	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_init	compile-blocked	Lib/test/test_ordered_dict.py:36	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_init_calls	compile-blocked	Lib/test/test_ordered_dict.py:114	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_issue119004_attribute_error	compile-blocked	Lib/test/test_ordered_dict.py:767	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_issue24347	compile-blocked	Lib/test/test_ordered_dict.py:560	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_issue24348	compile-blocked	Lib/test/test_ordered_dict.py:582	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_issue24667	compile-blocked	Lib/test/test_ordered_dict.py:594	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_iterators	compile-blocked	Lib/test/test_ordered_dict.py:179	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_iterators_empty	compile-blocked	Lib/test/test_ordered_dict.py:220	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_merge_operator	compile-blocked	Lib/test/test_ordered_dict.py:689	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_move_to_end	compile-blocked	Lib/test/test_ordered_dict.py:436	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_move_to_end_issue25406	compile-blocked	Lib/test/test_ordered_dict.py:455	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_ordered_dict_items_result_gc	fixture-blocked	Lib/test/test_ordered_dict.py:733		OrderedDictTests.test_ordered_dict_items_result_gc needs its upstream method decorator
+test.test_ordered_dict.PurePythonOrderedDictTests.test_overridden_init	compile-blocked	Lib/test/test_ordered_dict.py:127	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_override_update	compile-blocked	Lib/test/test_ordered_dict.py:484	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_pickle_recursive	compile-blocked	Lib/test/test_ordered_dict.py:361	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_pop	compile-blocked	Lib/test/test_ordered_dict.py:255	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_popitem	compile-blocked	Lib/test/test_ordered_dict.py:233	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_popitem_last	compile-blocked	Lib/test/test_ordered_dict.py:244	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_reduce_not_too_fat	compile-blocked	Lib/test/test_ordered_dict.py:350	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_reference_loop	compile-blocked	Lib/test/test_ordered_dict.py:672	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_reinsert	compile-blocked	Lib/test/test_ordered_dict.py:424	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_repr	compile-blocked	Lib/test/test_ordered_dict.py:374	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_repr_recursive	compile-blocked	Lib/test/test_ordered_dict.py:382	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_repr_recursive_values	compile-blocked	Lib/test/test_ordered_dict.py:390	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_setdefault	compile-blocked	Lib/test/test_ordered_dict.py:404	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_setitem	compile-blocked	Lib/test/test_ordered_dict.py:171	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_sizeof	compile-blocked	Lib/test/test_ordered_dict.py:469	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_sorted_iterators	compile-blocked	Lib/test/test_ordered_dict.py:207	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_update	compile-blocked	Lib/test/test_ordered_dict.py:68	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_views	compile-blocked	Lib/test/test_ordered_dict.py:476	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictTests.test_yaml_linkage	compile-blocked	Lib/test/test_ordered_dict.py:340	fixture:1:1	Imre: unsupported sealed standard-library export collections.OrderedDict
+test.test_ordered_dict.PurePythonOrderedDictWithSlotsCopyingTests.test_copying	compile-blocked	Lib/test/test_ordered_dict.py:297	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""copy"""
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_bool	compile-blocked	Lib/test/mapping_tests.py:136	upstream:137:29	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_constructor	compile-blocked	Lib/test/mapping_tests.py:133	upstream:134:26	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_get	compile-blocked	Lib/test/mapping_tests.py:270	upstream:271:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_getitem	compile-blocked	Lib/test/mapping_tests.py:166	upstream:167:13	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_items	compile-blocked	Lib/test/mapping_tests.py:156	upstream:157:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_keys	compile-blocked	Lib/test/mapping_tests.py:142	upstream:143:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_len	compile-blocked	Lib/test/mapping_tests.py:162	upstream:163:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_pop	compile-blocked	Lib/test/mapping_tests.py:293	upstream:294:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_popitem	compile-blocked	Lib/test/test_ordered_dict.py:1036	upstream:1037:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_read	compile-blocked	Lib/test/mapping_tests.py:43	upstream:45:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_setdefault	compile-blocked	Lib/test/mapping_tests.py:284	upstream:285:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_update	compile-blocked	Lib/test/mapping_tests.py:173	upstream:175:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_values	compile-blocked	Lib/test/mapping_tests.py:150	upstream:151:13	Imre: unknown class method
+test.test_ordered_dict.PurePythonSubclassMappingTests.test_write	compile-blocked	Lib/test/mapping_tests.py:91	upstream:93:13	Imre: unknown class method
+test.test_ordered_dict.PySimpleLRUCacheTests.test_add_after_full	compile-blocked	Lib/test/test_ordered_dict.py:1082	upstream:1083:13	Imre: unknown class method
+test.test_ordered_dict.PySimpleLRUCacheTests.test_change_order_on_get	compile-blocked	Lib/test/test_ordered_dict.py:1111	upstream:1112:13	Imre: unknown class method
+test.test_ordered_dict.PySimpleLRUCacheTests.test_pop	compile-blocked	Lib/test/test_ordered_dict.py:1099	upstream:1100:13	Imre: unknown class method
+test.test_ordered_dict.PySimpleLRUCacheTests.test_popitem	compile-blocked	Lib/test/test_ordered_dict.py:1091	upstream:1092:13	Imre: unknown class method
+test.test_userdict.UserDictTest.test_all	compile-blocked	Lib/test/test_userdict.py:27	upstream:29:13	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_bool	compile-blocked	Lib/test/mapping_tests.py:311	upstream:312:9	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_clear	compile-blocked	Lib/test/mapping_tests.py:370	upstream:371:13	Imre: unknown class method
+test.test_userdict.UserDictTest.test_constructor	compile-blocked	Lib/test/mapping_tests.py:306	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserDict
+test.test_userdict.UserDictTest.test_contains	compile-blocked	Lib/test/mapping_tests.py:339	upstream:340:13	Imre: unknown class method
+test.test_userdict.UserDictTest.test_copy	compile-blocked	Lib/test/mapping_tests.py:470	upstream:471:13	Imre: unknown class method
+test.test_userdict.UserDictTest.test_data	compile-blocked	Lib/test/test_userdict.py:168	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserDict
+test.test_userdict.UserDictTest.test_eq	compile-blocked	Lib/test/mapping_tests.py:636	upstream:637:26	Imre: unknown class method
+test.test_userdict.UserDictTest.test_fromkeys	compile-blocked	Lib/test/mapping_tests.py:566	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserDict
+test.test_userdict.UserDictTest.test_get	compile-blocked	Lib/test/mapping_tests.py:478	upstream:479:9	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_getitem	compile-blocked	Lib/test/mapping_tests.py:538	upstream:539:9	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_init	compile-blocked	Lib/test/test_userdict.py:154	upstream:156:35	Imre: argument unpacking is unsupported
+test.test_userdict.UserDictTest.test_items	compile-blocked	Lib/test/mapping_tests.py:333	upstream:334:9	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_keys	compile-blocked	Lib/test/mapping_tests.py:318	upstream:319:9	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_len	compile-blocked	Lib/test/mapping_tests.py:351	upstream:352:9	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_missing	compile-blocked	Lib/test/test_userdict.py:196	upstream:198:9	Imre: unknown class method
+test.test_userdict.UserDictTest.test_mixed_ior	compile-blocked	Lib/test/test_userdict.py:278	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserDict
+test.test_userdict.UserDictTest.test_mixed_or	compile-blocked	Lib/test/test_userdict.py:247	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserDict
+test.test_userdict.UserDictTest.test_mutatingiteration	compile-blocked	Lib/test/mapping_tests.py:594	upstream:595:13	Imre: unknown class method
+test.test_userdict.UserDictTest.test_pop	compile-blocked	Lib/test/mapping_tests.py:575	upstream:576:9	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_popitem	compile-blocked	Lib/test/mapping_tests.py:500	upstream:501:9	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_read	compile-blocked	Lib/test/mapping_tests.py:43	upstream:45:13	Imre: unknown class method
+test.test_userdict.UserDictTest.test_repr	compile-blocked	Lib/test/mapping_tests.py:607	upstream:608:13	Imre: unknown class method
+test.test_userdict.UserDictTest.test_repr_deep	fixture-blocked	Lib/test/mapping_tests.py:628		TestHashMappingProtocol.test_repr_deep needs its upstream method decorator
+test.test_userdict.UserDictTest.test_setdefault	compile-blocked	Lib/test/mapping_tests.py:654	upstream:655:9	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_update	compile-blocked	Lib/test/test_userdict.py:187	upstream:189:17	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_values	compile-blocked	Lib/test/mapping_tests.py:328	upstream:329:9	Imre: name is not a local value; globals and first-class functions are unsupported
+test.test_userdict.UserDictTest.test_write	compile-blocked	Lib/test/mapping_tests.py:91	upstream:93:13	Imre: unknown class method
+test.test_userlist.UserListTest.test_add	compile-blocked	Lib/test/seq_tests.py:264	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_append	compile-blocked	Lib/test/list_tests.py:246	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_bigrepeat	compile-blocked	Lib/test/seq_tests.py:325	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_clear	compile-blocked	Lib/test/list_tests.py:404	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_cmp	compile-blocked	Lib/test/seq_tests.py:357	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_constructor_exception_handling	compile-blocked	Lib/test/list_tests.py:559	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_constructors	compile-blocked	Lib/test/seq_tests.py:102	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_contains	compile-blocked	Lib/test/seq_tests.py:218	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_contains_fake	compile-blocked	Lib/test/seq_tests.py:227	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_contains_order	compile-blocked	Lib/test/seq_tests.py:238	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_copy	compile-blocked	Lib/test/list_tests.py:421	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_count	compile-blocked	Lib/test/seq_tests.py:364	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_data	compile-blocked	Lib/test/test_userlist.py:19	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_delitem	compile-blocked	Lib/test/list_tests.py:129	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_delslice	compile-blocked	Lib/test/list_tests.py:205	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_exhausted_iterator	compile-blocked	Lib/test/list_tests.py:566	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_extend	compile-blocked	Lib/test/list_tests.py:255	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_extendedslicing	compile-blocked	Lib/test/list_tests.py:518	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_free_after_iterating	compile-blocked	Lib/test/seq_tests.py:442	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_getitem	compile-blocked	Lib/test/seq_tests.py:155	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_getitem_error	compile-blocked	Lib/test/list_tests.py:34	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_getitemoverwriteiter	compile-blocked	Lib/test/test_userlist.py:120	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_getslice	compile-blocked	Lib/test/test_userlist.py:35	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_iadd	compile-blocked	Lib/test/list_tests.py:498	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_implementation	compile-blocked	Lib/test/test_userlist.py:127	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_imul	compile-blocked	Lib/test/list_tests.py:511	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_index	compile-blocked	Lib/test/list_tests.py:375	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_init	compile-blocked	Lib/test/list_tests.py:15	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_insert	compile-blocked	Lib/test/list_tests.py:288	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_len	compile-blocked	Lib/test/seq_tests.py:253	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_minmax	compile-blocked	Lib/test/seq_tests.py:259	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_mixed_add	compile-blocked	Lib/test/test_userlist.py:51	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_mixed_cmp	compile-blocked	Lib/test/test_userlist.py:114	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_mixed_iadd	compile-blocked	Lib/test/test_userlist.py:82	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_mul	compile-blocked	Lib/test/seq_tests.py:272	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_pickle	compile-blocked	Lib/test/seq_tests.py:435	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_pop	compile-blocked	Lib/test/list_tests.py:303	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_remove	compile-blocked	Lib/test/list_tests.py:316	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_repeat	compile-blocked	Lib/test/seq_tests.py:317	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_repr	compile-blocked	Lib/test/list_tests.py:46	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_repr_deep	fixture-blocked	Lib/test/list_tests.py:65		CommonTest.test_repr_deep needs its upstream method decorator
+test.test_userlist.UserListTest.test_reverse	compile-blocked	Lib/test/list_tests.py:394	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_reversed	compile-blocked	Lib/test/list_tests.py:82	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_set_subscript	compile-blocked	Lib/test/list_tests.py:71	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_setitem	compile-blocked	Lib/test/list_tests.py:92	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_setitem_error	compile-blocked	Lib/test/list_tests.py:40	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_setslice	compile-blocked	Lib/test/list_tests.py:151	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_slice	compile-blocked	Lib/test/list_tests.py:493	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_slice_assign_iterator	compile-blocked	Lib/test/list_tests.py:197	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_slice_type	compile-blocked	Lib/test/test_userlist.py:45	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_sort	compile-blocked	Lib/test/list_tests.py:445	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_subscript	compile-blocked	Lib/test/seq_tests.py:333	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_truth	compile-blocked	Lib/test/seq_tests.py:151	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userlist.UserListTest.test_userlist_copy	compile-blocked	Lib/test/test_userlist.py:164	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userstring.UserStringTest.test___contains__	compile-blocked	Lib/test/string_tests.py:1292	upstream:1293:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_adaptive_find	compile-blocked	Lib/test/string_tests.py:411	upstream:418:13	Imre: unknown class method
+test.test_userstring.UserStringTest.test_add	compile-blocked	Lib/test/string_tests.py:105	upstream:106:13	Imre: unknown class method
+test.test_userstring.UserStringTest.test_additional_rsplit	compile-blocked	Lib/test/string_tests.py:926	upstream:927:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_additional_split	compile-blocked	Lib/test/string_tests.py:890	upstream:891:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_capitalize	compile-blocked	Lib/test/string_tests.py:881	upstream:882:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_capitalize_nonascii	compile-blocked	Lib/test/string_tests.py:1174	upstream:1177:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_center	compile-blocked	Lib/test/string_tests.py:1014	upstream:1015:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_cmp	compile-blocked	Lib/test/string_tests.py:135	upstream:136:13	Imre: unknown class method
+test.test_userstring.UserStringTest.test_count	compile-blocked	Lib/test/string_tests.py:142	upstream:143:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_count_keyword	compile-blocked	Lib/test/string_tests.py:196	upstream:197:26	Imre: str.replace requires old and new strings
+test.test_userstring.UserStringTest.test_data	compile-blocked	Lib/test/test_userstring.py:52	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserString
+test.test_userstring.UserStringTest.test_encode_default_args	compile-blocked	Lib/test/test_userstring.py:136	upstream:137:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_encode_explicit_none_args	compile-blocked	Lib/test/test_userstring.py:143	upstream:144:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_endswith	compile-blocked	Lib/test/string_tests.py:1240	upstream:1241:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_expandtabs	compile-blocked	Lib/test/string_tests.py:461	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""struct"""
+test.test_userstring.UserStringTest.test_extended_getslice	compile-blocked	Lib/test/string_tests.py:1331	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""string"""
+test.test_userstring.UserStringTest.test_find	compile-blocked	Lib/test/string_tests.py:202	upstream:203:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_find_etc_raise_correct_error_messages	compile-blocked	Lib/test/string_tests.py:1557	upstream:1561:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_find_many_lengths	compile-blocked	Lib/test/string_tests.py:397	upstream:398:61	Imre: iteration requires a concrete list, dictionary, set, string, bytes, or range
+test.test_userstring.UserStringTest.test_find_periodic_pattern	compile-blocked	Lib/test/string_tests.py:369	fixture:1:1	"Imre: standard-library imports and shadowing are unsupported: ""random"""
+test.test_userstring.UserStringTest.test_find_shift_table_overflow	compile-blocked	Lib/test/string_tests.py:433	upstream:435:13	Imre: unsupported numeric operator
+test.test_userstring.UserStringTest.test_find_with_memory	compile-blocked	Lib/test/string_tests.py:423	upstream:428:13	Imre: unknown class method
+test.test_userstring.UserStringTest.test_fixtype	compile-blocked	Lib/test/string_tests.py:50	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserString
+test.test_userstring.UserStringTest.test_floatformatting	compile-blocked	Lib/test/string_tests.py:1461	upstream:1464:22	Imre: arithmetic requires int or float operands
+test.test_userstring.UserStringTest.test_formatting	compile-blocked	Lib/test/string_tests.py:1394	upstream:1395:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_formatting_c_limits	fixture-blocked	Lib/test/string_tests.py:1448		StringLikeTest.test_formatting_c_limits needs its upstream method decorator
+test.test_userstring.UserStringTest.test_hash	compile-blocked	Lib/test/string_tests.py:1165	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserString
+test.test_userstring.UserStringTest.test_implementation	compile-blocked	Lib/test/test_userstring.py:150	fixture:1:1	"Imre: cannot resolve first-party module ""test"" under <work>; external and namespace-package imports are unsupported"
+test.test_userstring.UserStringTest.test_index	compile-blocked	Lib/test/string_tests.py:292	upstream:293:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_inplace_rewrites	compile-blocked	Lib/test/string_tests.py:1470	upstream:1472:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_isalnum	compile-blocked	Lib/test/string_tests.py:1098	upstream:1099:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_isalpha	compile-blocked	Lib/test/string_tests.py:1088	upstream:1089:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_isascii	compile-blocked	Lib/test/string_tests.py:1109	upstream:1110:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_isdigit	compile-blocked	Lib/test/string_tests.py:1124	upstream:1125:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_islower	compile-blocked	Lib/test/string_tests.py:1043	upstream:1044:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_isspace	compile-blocked	Lib/test/string_tests.py:1077	upstream:1078:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_istitle	compile-blocked	Lib/test/string_tests.py:1063	upstream:1064:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_isupper	compile-blocked	Lib/test/string_tests.py:1053	upstream:1054:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_join	compile-blocked	Lib/test/string_tests.py:1355	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserList
+test.test_userstring.UserStringTest.test_ljust	compile-blocked	Lib/test/string_tests.py:998	upstream:999:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_lower	compile-blocked	Lib/test/string_tests.py:451	upstream:452:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_mixed_add	compile-blocked	Lib/test/test_userstring.py:63	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserString
+test.test_userstring.UserStringTest.test_mixed_cmp	compile-blocked	Lib/test/test_userstring.py:118	upstream:119:13	Imre: unknown class method
+test.test_userstring.UserStringTest.test_mixed_iadd	compile-blocked	Lib/test/test_userstring.py:92	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserString
+test.test_userstring.UserStringTest.test_mul	compile-blocked	Lib/test/string_tests.py:1343	upstream:1344:9	Imre: unknown function or unsupported builtin arguments
+test.test_userstring.UserStringTest.test_none_arguments	compile-blocked	Lib/test/string_tests.py:1519	upstream:1522:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_partition	compile-blocked	Lib/test/string_tests.py:1489	upstream:1491:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_removeprefix	compile-blocked	Lib/test/string_tests.py:845	upstream:846:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_removesuffix	compile-blocked	Lib/test/string_tests.py:863	upstream:864:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_replace	compile-blocked	Lib/test/string_tests.py:638	upstream:639:14	Imre: unknown field; dynamic attributes and first-class methods are unsupported
+test.test_userstring.UserStringTest.test_replace_overflow	reference-skip			only applies to 32-bit platforms
+test.test_userstring.UserStringTest.test_replace_uses_two_way_maxcount	compile-blocked	Lib/test/string_tests.py:824	upstream:829:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_replacement_on_buffer_boundary	compile-blocked	Lib/test/string_tests.py:815	upstream:821:23	Imre: unknown function or unsupported builtin arguments
+test.test_userstring.UserStringTest.test_rfind	compile-blocked	Lib/test/string_tests.py:249	upstream:250:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_rindex	compile-blocked	Lib/test/string_tests.py:330	upstream:331:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_rjust	compile-blocked	Lib/test/string_tests.py:1006	upstream:1007:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_rmod	compile-blocked	Lib/test/test_userstring.py:124	fixture:1:1	Imre: unsupported sealed standard-library export collections.UserString
+test.test_userstring.UserStringTest.test_rpartition	compile-blocked	Lib/test/string_tests.py:1504	upstream:1506:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_rsplit	compile-blocked	Lib/test/string_tests.py:560	upstream:562:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_slice	compile-blocked	Lib/test/string_tests.py:1318	upstream:1319:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_split	compile-blocked	Lib/test/string_tests.py:490	upstream:492:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_splitlines	compile-blocked	Lib/test/string_tests.py:1142	upstream:1143:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_startswith	compile-blocked	Lib/test/string_tests.py:1192	upstream:1193:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_strip	compile-blocked	Lib/test/string_tests.py:983	upstream:985:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_strip_whitespace	compile-blocked	Lib/test/string_tests.py:966	upstream:967:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_subscript	compile-blocked	Lib/test/string_tests.py:1303	upstream:1304:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_swapcase	compile-blocked	Lib/test/string_tests.py:1022	upstream:1023:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_title	compile-blocked	Lib/test/string_tests.py:1133	upstream:1134:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_upper	compile-blocked	Lib/test/string_tests.py:456	upstream:457:9	Imre: unknown class method
+test.test_userstring.UserStringTest.test_zfill	compile-blocked	Lib/test/string_tests.py:1027	upstream:1028:9	Imre: unknown class method
