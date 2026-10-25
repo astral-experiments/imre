@@ -94,6 +94,7 @@ impl Type {
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::StringIO
+            | Self::HandlerLock
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -167,6 +168,7 @@ impl Type {
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::StringIO
+            | Self::HandlerLock
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -327,6 +329,7 @@ fn emit_program(
         entry_allocas: String::new(),
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
+        uses_string_interning: false,
         tuple_literals: BTreeMap::new(),
         static_functions: BTreeSet::new(),
         regex_literals: BTreeMap::new(),
@@ -523,6 +526,7 @@ struct Emitter<'a, 'module> {
     entry_allocas: String,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
+    uses_string_interning: bool,
     tuple_literals: BTreeMap<usize, Vec<String>>,
     static_functions: BTreeSet<String>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
@@ -784,6 +788,7 @@ impl Emitter<'_, '_> {
             | Type::PurePath(_)
             | Type::TextIO
             | Type::StringIO
+            | Type::HandlerLock
             | Type::EventLoop
             | Type::Coroutine(_)
             | Type::Task(_)
@@ -1147,8 +1152,11 @@ impl Emitter<'_, '_> {
         self.instruction(format!("load i64, ptr {element}"))
     }
 
-    fn directory_pointer(&mut self, value: &Value) -> String {
-        if self.module.types.payload(value.ty).is_some() {
+    /// Convert an admitted optional object or literal None to a nullable runtime pointer.
+    fn optional_object_pointer(&mut self, value: &Value) -> String {
+        if value.ty == Type::None {
+            "null".into()
+        } else if self.module.types.payload(value.ty).is_some() {
             self.instruction(format!("inttoptr i64 {} to ptr", value.operand))
         } else {
             value.operand.clone()
@@ -1160,7 +1168,7 @@ impl Emitter<'_, '_> {
             self.module.types.payload(value.ty).unwrap_or(value.ty),
             Type::DirectoryContext(_)
         ) {
-            let pointer = self.directory_pointer(value);
+            let pointer = self.optional_object_pointer(value);
             let frame = self.instruction("load ptr, ptr %directory_frame");
             let prepared = self.instruction(format!(
                 "call ptr @imre_prepare_directory_frame(ptr {frame}, ptr {pointer}, i64 {})",
@@ -1858,7 +1866,7 @@ impl Emitter<'_, '_> {
         self.with_directory_frame(|out, frame| {
             for &slot in &directory_slots {
                 let value = out.borrow_slot(slot);
-                let pointer = out.directory_pointer(&value);
+                let pointer = out.optional_object_pointer(&value);
                 out.line(format!(
                     "call void @imre_error_frame_keep_directory(ptr {frame}, ptr {pointer})"
                 ));
@@ -3515,6 +3523,7 @@ impl Emitter<'_, '_> {
                 | Type::TimeoutExpired
                 | Type::TextIO
                 | Type::StringIO
+                | Type::HandlerLock
                 | Type::CompletedProcess(..)
                 | Type::BinaryIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
@@ -4120,6 +4129,16 @@ impl Emitter<'_, '_> {
                 let name = match operation {
                     Get => "imre_log_get",
                     HandlerRename => "imre_log_handler_rename",
+                    LockNew => "imre_log_lock_new",
+                    LockAcquire => "imre_log_lock_acquire",
+                    LockAcquireInt => "imre_log_lock_acquire_int",
+                    LockRelease => "imre_log_lock_release",
+                    LockCount => "imre_log_lock_count",
+                    LockOwned => "imre_log_lock_owned",
+                    LockLocked => "imre_log_lock_locked",
+                    LockEnter => "imre_log_lock_enter",
+                    LockExit => "imre_log_lock_exit",
+                    LockReset => "imre_log_lock_reset",
                     HandlerLookup => "imre_log_handler_lookup",
                     PrintActiveException => "imre_log_print_active_exception",
                     AddLevel => "imre_log_add_level",
@@ -4287,6 +4306,35 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
+            Builtin::WarningFormat { entry, environment } => {
+                let line = self.optional_object_pointer(&args[5].value);
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(*entry)));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_warning_format(ptr {}, ptr {}, ptr {}, ptr {}, i64 {}, ptr {line}, ptr {}, ptr {}, i32 {}, ptr @{layout})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand,
+                    args[3].value.operand, args[4].value.operand, args[6].value.operand,
+                    args[7].value.operand, u32::from(*environment)));
+                Value {
+                    ty: Type::Str,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::WarningWrite { stdout } => {
+                let file = self.optional_object_pointer(&args[0].value);
+                self.checked_line(format!(
+                    "call void @imre_warning_write(ptr {file}, ptr {}, i32 {})",
+                    args[1].value.operand,
+                    u32::from(*stdout)
+                ));
+                Value {
+                    ty: Type::None,
+                    operand: "0".into(),
+                    small_integer: false,
+                }
+            }
             Builtin::WarningFilter { category, invalid } => {
                 let append = self.instruction(format!("zext i1 {} to i32", args[6].value.operand));
                 self.checked_line(format!(
@@ -4726,6 +4774,22 @@ impl Emitter<'_, '_> {
                 )
             }
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
+            Builtin::SysIntern => {
+                self.uses_string_interning = true;
+                self.call("imre_sys_intern", Type::Str, &[&args[0].value])
+            }
+            Builtin::SysIsInterned => {
+                self.uses_string_interning = true;
+                let found = self.instruction(format!(
+                    "call i32 @imre_sys_is_interned(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {found}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::DocCaptureStart => {
                 self.checked_line("call void @imre_doctest_capture_start()");
@@ -6526,6 +6590,7 @@ impl Emitter<'_, '_> {
                     | Type::PurePath(_)
                     | Type::TextIO
                     | Type::StringIO
+                    | Type::HandlerLock
                     | Type::EventLoop
                     | Type::Coroutine(_)
                     | Type::Task(_)
@@ -6798,6 +6863,7 @@ impl Emitter<'_, '_> {
             | Type::PurePath(_)
             | Type::TextIO
             | Type::StringIO
+            | Type::HandlerLock
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -6885,6 +6951,7 @@ impl Emitter<'_, '_> {
             | Type::PurePath(_)
             | Type::TextIO
             | Type::StringIO
+            | Type::HandlerLock
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -7492,6 +7559,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::PurePath(_)
         | Type::TextIO
         | Type::StringIO
+        | Type::HandlerLock
         | Type::EventLoop
         | Type::Coroutine(_)
         | Type::Task(_)
@@ -7676,6 +7744,8 @@ declare i32 @imre_async_cancel(ptr)
 declare double @imre_wall_time()
 declare void @imre_warning_filter(ptr, ptr, ptr, ptr, ptr, i64, i32, i32, i32)
 declare void @imre_warning_reset()
+declare ptr @imre_warning_format(ptr, ptr, ptr, ptr, i64, ptr, ptr, ptr, i32, ptr)
+declare void @imre_warning_write(ptr, ptr, i32)
 declare void @imre_time_sleep(double)
 declare ptr @imre_str_percent_int(ptr,i64)
 declare ptr @imre_str_percent_text(ptr,ptr)
@@ -8311,6 +8381,9 @@ declare void @imre_print_int(i64)
 declare void @imre_print_bool(i32)
 declare void @imre_print_none()
 declare ptr @imre_str_static_literal(ptr, i64)
+declare ptr @imre_str_interned_literal(ptr, i64)
+declare ptr @imre_sys_intern(ptr)
+declare i32 @imre_sys_is_interned(ptr)
 declare ptr @imre_regex_compile(ptr, i64)
 declare ptr @imre_regex_spelling(ptr)
 declare ptr @imre_unittest_compile_pattern(ptr)
@@ -8362,6 +8435,16 @@ declare ptr @imre_logrecord_message(ptr)
 declare ptr @imre_logrecord_repr(ptr)
 declare ptr @imre_log_get(i64)
 declare void @imre_log_handler_rename(ptr, i64, i64)
+declare ptr @imre_log_lock_new()
+declare i1 @imre_log_lock_acquire(ptr, i1, double)
+declare i1 @imre_log_lock_acquire_int(ptr, i1, i64)
+declare void @imre_log_lock_release(ptr)
+declare i1 @imre_log_lock_enter(i64)
+declare void @imre_log_lock_exit(i64)
+declare i1 @imre_log_lock_owned(ptr)
+declare i1 @imre_log_lock_locked(ptr)
+declare i64 @imre_log_lock_count(ptr)
+declare void @imre_log_lock_reset(ptr)
 declare i64 @imre_log_handler_lookup(ptr)
 declare void @imre_log_print_active_exception()
 declare void @imre_log_add_level(i64, ptr)

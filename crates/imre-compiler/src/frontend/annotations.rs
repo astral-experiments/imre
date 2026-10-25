@@ -38,7 +38,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 }
 
 pub(super) fn builtin_type(name: &str) -> Option<Expr> {
-    is_builtin_type(name).then(|| Expr {
+    (is_builtin_type(name) || super::warnings::is_warning_class(name)).then(|| Expr {
         ty: Type::BuiltinClass,
         kind: ExprKind::Builtin(Builtin::ClassNameView, vec![unpacking::string(name)]),
     })

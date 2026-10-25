@@ -526,6 +526,7 @@ struct CheckedFile<'db> {
 pub(crate) enum CheckedDiagnostic {
     AbstractClassCall(TextRange),
     Decorator(TextRange),
+    OptionalLockContext(TextRange),
     Call(TextRange),
     DictDeletion(TextRange),
     DeferredName(TextRange),
@@ -543,6 +544,7 @@ impl CheckedDiagnostic {
         let (range, kind) = match self {
             Self::AbstractClassCall(range) => (range, 9),
             Self::Decorator(range) => (range, 0),
+            Self::OptionalLockContext(range) => (range, 7),
             Self::Call(range) => (range, 1),
             Self::Keyword(range) => (range, 2),
             Self::CheckedIndexRead(range) => (range, 3),
@@ -566,6 +568,9 @@ impl CheckedDiagnostic {
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
             Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
+            Self::OptionalLockContext(expr) => {
+                diagnostic == "invalid-context-manager" && expr == range
+            }
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::RepeatedKeyword(keyword) => {
                 diagnostic == "parameter-already-assigned" && keyword == range

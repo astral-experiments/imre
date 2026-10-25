@@ -213,6 +213,8 @@ impl Builtin {
             Self::TimeSleep
             | Self::PercentFormat
             | Self::WarningFilter { .. }
+            | Self::WarningFormat { .. }
+            | Self::WarningWrite { .. }
             | Self::WarningReset => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
@@ -225,6 +227,11 @@ impl Builtin {
                         | crate::ir::LogOperation::DictConfigTyped
                         | crate::ir::LogOperation::FileConfig
                         | crate::ir::LogOperation::CheckLevel
+                        | crate::ir::LogOperation::LockAcquire
+                        | crate::ir::LogOperation::LockAcquireInt
+                        | crate::ir::LogOperation::LockEnter
+                        | crate::ir::LogOperation::LockExit
+                        | crate::ir::LogOperation::LockRelease
                 ),
                 PreservesLists,
             ),
@@ -410,6 +417,8 @@ impl Builtin {
             | Self::Sha256Digest { .. }
             | Self::Sha256Copy
             | Self::ActiveException
+            | Self::SysIntern
+            | Self::SysIsInterned
             | Self::ExceptionRecord
             | Self::ExceptionCause
             // A fresh exception retains its cause without replacing any existing owner.
@@ -881,6 +890,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
+                | "imre_log_lock_acquire"
+                | "imre_log_lock_acquire_int"
+                | "imre_log_lock_enter"
+                | "imre_log_lock_exit"
+                | "imre_log_lock_release"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"

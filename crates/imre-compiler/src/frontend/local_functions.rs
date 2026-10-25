@@ -299,6 +299,7 @@ impl Checker<'_> {
         mut signature: Signature,
     ) -> Result<Function, String> {
         signature.id = self.helpers.reserve();
+        let omitted_free = self.unbound_assert_captures();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -308,6 +309,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.returns = signature.returns;
         helper.asynchronous = signature.asynchronous;

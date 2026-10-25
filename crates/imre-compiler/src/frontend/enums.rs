@@ -434,6 +434,7 @@ impl Checker<'_> {
                 .iter()
                 .all(|ty| matches!(ty, Type::Popen(..) | Type::ActivePopen))
             || types == [Type::StringIO; 2]
+            || types == [Type::HandlerLock; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
             || types == [Type::PathInfo; 2]

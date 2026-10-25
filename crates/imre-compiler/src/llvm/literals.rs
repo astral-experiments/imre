@@ -236,6 +236,19 @@ ready:
             if lazy_constructor(ty).is_some() {
                 continue;
             }
+            // Stock CPython interns ASCII name characters and its Latin-1
+            // character singletons. Distinct equal dynamic strings stay distinct.
+            let init = if ty == Type::Str
+                && self.uses_string_interning
+                && (bytes
+                    .iter()
+                    .all(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                    || matches!(bytes.as_slice(), [_] | [0xc2..=0xc3, 0x80..=0xbf]))
+            {
+                "imre_str_interned_literal"
+            } else {
+                init
+            };
             let bytes_name = self.output.string_name(*id, "str");
             let root = self.output.string_name(*id, "literal");
             writeln!(
