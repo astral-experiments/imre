@@ -171,6 +171,8 @@ impl Checker<'_> {
                         | Type::None
                 )
             })
+            || types == [Type::NativeModule; 2]
+            || types == [Type::ModuleNamespace; 2]
             || types == [Type::LogRecord; 2]
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]

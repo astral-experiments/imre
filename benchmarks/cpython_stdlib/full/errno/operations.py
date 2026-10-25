@@ -25,6 +25,18 @@ def main() -> None:
     print(DOMAIN == errno.EDOM)
     print(ERANGE == errno.ERANGE)
     print(ERANGE + 1)
+    print(mod is errno)
+    print(vars(mod) is errno.__dict__)
+    key_dict = "errorcode"
+    print(getattr(mod, key_dict) == reverse)
+    print(reverse == getattr(mod, key_dict))
+    try:
+        for existing in reverse.values():
+            print(existing)
+            reverse[-93] = "new errno"
+    except RuntimeError as changed:
+        print(str(changed))
+    del reverse[-93]
     print(module_name)
     print(errno.__name__)
     print(errno.__package__)

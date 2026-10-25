@@ -4127,7 +4127,11 @@ impl Emitter<'_, '_> {
                     Op::ItemEq => {
                         let i = usize::from(args[0].value.ty != Type::ModuleMember);
                         let other = &args[1 - i].value;
-                        let kind = representation_kind(other.ty, &self.module.types);
+                        let kind = if other.ty == Type::ModuleMember {
+                            16
+                        } else {
+                            representation_kind(other.ty, &self.module.types)
+                        };
                         let word = self.word(other);
                         format!(
                             "call i32 @imre_errno_member_equal(ptr {}, i32 {kind}, i64 {word})",

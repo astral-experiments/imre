@@ -517,13 +517,20 @@ pub unsafe extern "C" fn imre_errno_member_equal(
     word: usize,
 ) -> u32 {
     let a = with_member(left, Clone::clone);
-    let eq = if kind == 5 {
+    let eq = if kind == 16 {
         with_member(word as *const Object, |b| {
             if let (Some(a), Some(b)) = (a.scalar(), b.scalar()) {
                 return scalar_equal(a, b);
             }
             match (&a, b) {
-                (Member::Dictionary(a), Member::Dictionary(b)) => Rc::ptr_eq(a, b),
+                // SAFETY: both dictionary members remain rooted through value comparison.
+                (Member::Dictionary(a), Member::Dictionary(b)) => unsafe {
+                    values::equal(
+                        Rc::as_ptr(a) as usize,
+                        Rc::as_ptr(b) as usize,
+                        WordKind::new(5),
+                    )
+                },
                 (Member::Loader, Member::Loader)
                 | (Member::Spec, Member::Spec)
                 | (Member::Class, Member::Class) => true,
@@ -532,6 +539,9 @@ pub unsafe extern "C" fn imre_errno_member_equal(
                 _ => false,
             }
         })
+    } else if kind == 5 {
+        // SAFETY: the compiler supplies a live dict[int,str], and the member owns its dictionary.
+        matches!(&a, Member::Dictionary(d) if unsafe { values::equal(Rc::as_ptr(d) as usize,word,WordKind::new(5)) })
     } else {
         a.scalar().is_some_and(|a| scalar_equal(a, (kind, word)))
     };
