@@ -5,11 +5,15 @@
 use crate::StrOwner;
 mod arrays;
 mod constants;
+mod deep;
+mod deep_values;
 pub(in crate::objects) mod document;
 mod elements;
+mod keys;
 mod values;
 mod writer;
 
+use std::cell::Cell;
 use std::fmt;
 use std::rc::Rc;
 
@@ -22,6 +26,7 @@ use super::{Key, check_depth};
 use crate::objects::words::Words;
 use crate::objects::{Object, Storage, object};
 use crate::{Error, Int, Kind, StorageCell, Str, finish};
+use keys::{KeyMemo, ObjectFields};
 
 #[derive(Clone)]
 pub(super) enum Node {
@@ -29,18 +34,20 @@ pub(super) enum Node {
     Bool(bool),
     Integer(Int),
     Float(f64),
+    /// The default decoder reuses a single NaN object, observable in container equality.
+    ConstantNan,
     String(StrOwner),
     Datetime(Str),
     Array(Vec<usize>),
     Deferred(Rc<arrays::Deferred>),
-    Object(Vec<(Str, usize)>),
+    Object(ObjectFields),
 }
 
 impl Node {
     fn truth(&self) -> bool {
         match self {
             Self::Null => false,
-            Self::Datetime(_) => true,
+            Self::Datetime(_) | Self::ConstantNan => true,
             Self::Bool(value) => *value,
             Self::Array(items) => !items.is_empty(),
             Self::Deferred(array) => array.truth(),
@@ -57,7 +64,7 @@ impl Node {
             Self::Datetime(_) => "datetime",
             Self::Bool(_) => "bool",
             Self::Integer(_) => "int",
-            Self::Float(_) => "float",
+            Self::Float(_) | Self::ConstantNan => "float",
             Self::String(_) => "str",
             Self::Array(_) | Self::Deferred(_) => "list",
             Self::Object(_) => "dict",
@@ -99,8 +106,11 @@ impl Node {
 #[derive(Clone)]
 pub(super) enum Nodes {
     Document(Rc<Vec<Node>>),
+    /// The iterative parser emits every subtree contiguously in postorder.
+    Deep(Rc<Vec<Node>>),
     /// Keep aliases of a mutable root array without enlarging every scalar view.
     Root(Rc<Vec<Node>>, Rc<Object>),
+    DeepRoot(Rc<Vec<Node>>, Rc<Object>),
     /// Computed scalars and missing defaults do not need a second allocation.
     Single(Node),
 }
@@ -109,7 +119,10 @@ impl std::ops::Deref for Nodes {
     type Target = [Node];
     fn deref(&self) -> &[Node] {
         match self {
-            Self::Document(nodes) | Self::Root(nodes, _) => nodes,
+            Self::Document(nodes)
+            | Self::Deep(nodes)
+            | Self::Root(nodes, _)
+            | Self::DeepRoot(nodes, _) => nodes,
             Self::Single(node) => std::slice::from_ref(node),
         }
     }
@@ -118,7 +131,7 @@ impl std::ops::Deref for Nodes {
 impl Nodes {
     pub(super) fn root_items(&self) -> Option<&Rc<Object>> {
         match self {
-            Self::Root(_, items) => Some(items),
+            Self::Root(_, items) | Self::DeepRoot(_, items) => Some(items),
             _ => None,
         }
     }
@@ -126,7 +139,20 @@ impl Nodes {
     fn child(&self) -> Self {
         match self {
             Self::Root(nodes, _) => Self::Document(Rc::clone(nodes)),
+            Self::DeepRoot(nodes, _) => Self::Deep(Rc::clone(nodes)),
             _ => self.clone(),
+        }
+    }
+
+    fn deep(&self) -> bool {
+        matches!(self, Self::Deep(_) | Self::DeepRoot(..))
+    }
+
+    fn copied(nodes: Vec<Node>, deep: bool) -> Self {
+        if deep {
+            Self::Deep(Rc::new(nodes))
+        } else {
+            Self::Document(Rc::new(nodes))
         }
     }
 }
@@ -177,7 +203,7 @@ impl View {
         let mut nodes = Vec::new();
         let index = self.copy_to(self.index, &mut nodes);
         Some(Self {
-            nodes: Nodes::Document(Rc::new(nodes)),
+            nodes: Nodes::copied(nodes, self.nodes.deep()),
             index,
         })
     }
@@ -201,6 +227,9 @@ impl View {
     /// Preserve nested array elements and object lookups when concatenating
     /// values borrowed from two independently owned documents.
     fn copy_to(&self, index: usize, destination: &mut Vec<Node>) -> usize {
+        if self.nodes.deep() && !(index == self.index && self.nodes.root_items().is_some()) {
+            return deep_values::copy(self, index, destination);
+        }
         let node = match (&self.nodes[index], self.nodes.root_items()) {
             (Node::Array(_), Some(items)) if index == self.index => {
                 // SAFETY: the list roots all immutable JSON views while their children are copied.
@@ -226,10 +255,12 @@ impl View {
                     .collect(),
             ),
             (Node::Object(fields), _) => Node::Object(
-                fields
-                    .iter()
-                    .map(|(key, i)| (key.clone(), self.copy_to(*i, destination)))
-                    .collect(),
+                fields.with_entries(
+                    fields
+                        .iter()
+                        .map(|(key, i)| (key.clone(), self.copy_to(*i, destination)))
+                        .collect(),
+                ),
             ),
             (scalar, _) => scalar.clone(),
         };
@@ -260,6 +291,7 @@ impl View {
         };
         let float = |node: &Node| match node {
             Node::Float(v) => Some(Ok(*v)),
+            Node::ConstantNan => Some(Ok(f64::NAN)),
             _ => integer(node).map(|v| crate::floats::int_to_float(&v)),
         };
         let node = if let (Some(a), Some(b)) = (integer(left), integer(right)) {
@@ -279,7 +311,7 @@ impl View {
             let index = nodes.len();
             nodes.push(Node::Array(items));
             return Ok(Self {
-                nodes: Nodes::Document(Rc::new(nodes)),
+                nodes: Nodes::copied(nodes, self.nodes.deep() || other.nodes.deep()),
                 index,
             });
         } else {
@@ -358,11 +390,17 @@ impl View {
                 Self::children(&self.nodes, children)
             } as usize),
             (7, Node::Bool(value)) => Ok(usize::from(*value) + usize::from(optional)),
-            (8, Node::Float(value)) => Ok(if optional {
-                Rc::into_raw(Rc::new(*value)) as usize
-            } else {
-                value.to_bits() as usize
-            }),
+            (8, Node::Float(_) | Node::ConstantNan) => {
+                let value = match node {
+                    Node::Float(v) => *v,
+                    _ => f64::NAN,
+                };
+                Ok(if optional {
+                    Rc::into_raw(Rc::new(value)) as usize
+                } else {
+                    value.to_bits() as usize
+                })
+            }
             (1..=3 | 5..=8, _) => {
                 let expected = [
                     "", "dict", "str", "int", "", "list", "list", "bool", "float",
@@ -381,20 +419,27 @@ impl View {
 /// would discard. Array children stay in the same immutable document arena.
 #[derive(Clone, Copy)]
 struct Source<'a> {
+    refused: &'a Cell<bool>,
     text: &'a str,
-    original: Option<&'a str>,
-    shared: Option<(&'a Rc<str>, usize)>,
+    original: Option<(&'a str, &'a Rc<String>)>,
+    shared: Option<(&'a StrOwner, usize)>,
+    keys: &'a KeyMemo,
 }
 
 impl Source<'_> {
     fn token<'a>(&'a self, raw: &'a str) -> &'a str {
-        if let Some(original) = self.original {
+        if let Some((original, _)) = self.original {
             let offset = raw.as_ptr() as usize - self.text.as_ptr() as usize;
             &original[offset..offset + raw.len()]
         } else {
             raw
         }
     }
+}
+
+fn allocation_error(refused: &Cell<bool>) -> serde_json::Error {
+    refused.set(true);
+    serde_json::Error::custom("JSON storage allocation failed")
 }
 
 fn push_node(
@@ -404,10 +449,10 @@ fn push_node(
 ) -> Result<usize, serde_json::Error> {
     let raw = raw.get();
     let node = match raw.as_bytes()[0] {
-        b'{' => Node::Object(
+        b'{' => Node::Object(source.keys.fields(
             serde_json::Deserializer::from_str(raw).deserialize_map(Fields(nodes, source))?,
-        ),
-        b'[' => match arrays::Deferred::new(raw, source) {
+        )),
+        b'[' => match arrays::Deferred::new(raw, source)? {
             Some(array) => Node::Deferred(array),
             None => push_array(nodes, raw, source)?,
         },
@@ -417,14 +462,20 @@ fn push_node(
         b't' => Node::Bool(true),
         b'f' => Node::Bool(false),
         b'n' => Node::Null,
+        _ => number(source.token(raw)),
+    };
+    let index = nodes.len();
+    nodes.push(node);
+    Ok(index)
+}
+
+fn number(raw: &str) -> Node {
+    match raw {
+        "NaN" => Node::ConstantNan,
+        "Infinity" => Node::Float(f64::INFINITY),
+        "-Infinity" => Node::Float(f64::NEG_INFINITY),
         _ if raw.contains(['.', 'e', 'E']) => {
-            let value = match source.token(raw) {
-                "NaN" => f64::NAN,
-                "Infinity" => f64::INFINITY,
-                "-Infinity" => f64::NEG_INFINITY,
-                _ => raw.parse().expect("validated JSON float"),
-            };
-            Node::Float(value)
+            Node::Float(raw.parse().expect("validated JSON float"))
         }
         _ => Node::Integer(
             raw.parse::<i64>()
@@ -437,10 +488,7 @@ fn push_node(
                     )
                 }),
         ),
-    };
-    let index = nodes.len();
-    nodes.push(node);
-    Ok(index)
+    }
 }
 
 fn push_array(
@@ -521,9 +569,12 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
             && let Some(fields) = root_fields(source, &mut nodes)
         {
             let index = nodes.len();
-            nodes.push(Node::Object(fields));
+            nodes.push(Node::Object(source.keys.fields(fields)));
             index
         } else {
+            if source.refused.get() {
+                return Err(allocation_error(source.refused));
+            }
             // Preserve the original error location if a validated field cannot be decoded.
             nodes.clear();
             let raw = serde_json::from_str::<&RawValue>(text)?;
@@ -558,23 +609,44 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
     .into_handle())
 }
 
-pub(super) fn loads(text: &str) -> Result<*const Object, Error> {
-    check_depth(text).map_err(|message| Error::new(Kind::ValueError, message))?;
+pub(super) fn loads(
+    text: &str,
+    owner: impl FnOnce() -> Option<StrOwner>,
+) -> Result<*const Object, Error> {
+    if check_depth(text).is_err() {
+        return deep::loads(text, owner);
+    }
+    let keys = KeyMemo::default();
+    let refused = Cell::new(false);
     build(Source {
+        refused: &refused,
         text,
         original: None,
         shared: None,
+        keys: &keys,
     })
     .or_else(|error| {
-        if let Some(patched) = constants::normalize(text, &error) {
+        if refused.get() {
+            return Err(Error::allocation());
+        }
+        if let Some(patched) = constants::normalize(text, &error)? {
+            let patched = Rc::new(patched);
             build(Source {
+                refused: &refused,
                 text: &patched,
-                original: Some(text),
+                original: Some((text, &patched)),
                 shared: None,
+                keys: &keys,
             })
-            .map_err(|error| super::syntax::decode_error(text, error))
+            .map_err(|error| {
+                if refused.get() {
+                    Error::allocation()
+                } else {
+                    super::syntax::decode_error(text, error, owner)
+                }
+            })
         } else {
-            Err(super::syntax::decode_error(text, error))
+            Err(super::syntax::decode_error(text, error, owner))
         }
     })
 }
@@ -584,17 +656,19 @@ pub(super) fn loads(text: &str) -> Result<*const Object, Error> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_json_loads(text: *const Str) -> *const Object {
     // SAFETY: text is a live immutable string for the entire parse.
-    let text = unsafe { &*text };
+    let source = unsafe { &*text };
     // The str entry rejects its BOM before scanning. The binary entry already
     // consumed its encoding marker; a second one is ordinary invalid JSON.
-    let result = if text.starts_with('\u{feff}') {
-        Err(super::syntax::error_at(
-            text,
+    // SAFETY: the caller roots this immutable string while the error takes its own reference.
+    let owner = || unsafe { StrOwner::acquire_word(text as usize) };
+    let result = if source.starts_with('\u{feff}') {
+        Err(super::syntax::at_error(
+            owner(),
             0,
             "Unexpected UTF-8 BOM (decode using utf-8-sig)",
         ))
     } else {
-        loads(text)
+        loads(source, || Some(owner()))
     };
     finish(result, std::ptr::null())
 }
@@ -702,6 +776,18 @@ pub unsafe extern "C" fn imre_json_add(a: *const Object, b: *const Object) -> *c
 }
 
 /// # Safety
+/// The compiler roots both JSON operands for the duration of the comparison.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_json_equal(left: *const Object, right: *const Object) -> u32 {
+    // SAFETY: both views admit simultaneous immutable borrows, including on alias.
+    unsafe {
+        with_view(left, |a| {
+            with_view(right, |b| u32::from(a.equal_operand(b)))
+        })
+    }
+}
+
+/// # Safety
 /// The caller roots a JSON view. Python bools also satisfy isinstance(value, int).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_json_is_int(value: *const Object) -> u32 {
@@ -785,7 +871,7 @@ pub unsafe extern "C" fn imre_json_add_fields(
 /// Creates one separate read-only dictionary for a dataclass default factory.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_json_empty_object() -> *const Object {
-    View::single(Node::Object(Vec::new())).into_handle()
+    View::single(Node::Object(KeyMemo::default().fields(Vec::new()))).into_handle()
 }
 
 pub(super) fn keys(fields: &[(Str, usize)]) -> impl Iterator<Item = &Str> {
@@ -806,9 +892,18 @@ pub unsafe extern "C" fn imre_json_iter(value: *const Object) -> *const Object {
             let mut items = Words::new(5);
             match &view.nodes[view.index] {
                 Node::Array(children) => return Ok(view.array(children)),
-                Node::Object(fields) => items.values.extend(keys(fields).map(|name| {
-                    View::single(Node::String(StrOwner::new(name.clone()))).into_handle() as usize
-                })),
+                Node::Object(fields) => {
+                    for name in keys(fields) {
+                        items
+                            .values
+                            .try_reserve(1)
+                            .map_err(|_| Error::allocation())?;
+                        let key = fields.owner(name)?;
+                        items
+                            .values
+                            .push(View::single(Node::String(key)).into_handle() as usize);
+                    }
+                }
                 Node::String(text) => items.values.extend(text.chars().map(|ch| {
                     View::single(Node::String(StrOwner::new(Str::new(
                         ch.encode_utf8(&mut [0; 4]),

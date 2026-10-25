@@ -210,7 +210,7 @@ pub unsafe extern "C" fn imre_str_slice(
     };
     if !slice.reverse && slice.stride == 1 && slice.len() == length {
         // SAFETY: a full slice may share immutable storage; acquire its new owner.
-        return StrOwner::into_raw(unsafe { StrOwner::acquire_word(value as usize) });
+        return StrOwner::into_raw(unsafe { crate::StrOwner::acquire_word(value as usize) });
     }
     let result = if !slice.reverse && slice.stride == 1 {
         let selected = if slice.len() == 0 {
@@ -415,7 +415,7 @@ impl StringIterator {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_iter(value: *const Str) -> *const Object {
     // SAFETY: the rooted source acquires an independent owner for the cursor.
-    let owner = unsafe { StrOwner::acquire_word(value as usize) };
+    let owner = unsafe { crate::StrOwner::acquire_word(value as usize) };
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::StringIterator(
         StringIterator {
             owner,
@@ -432,7 +432,7 @@ pub unsafe extern "C" fn imre_str_iter(value: *const Str) -> *const Object {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_reverse_iter(value: *const Str) -> *const Object {
     // SAFETY: the rooted source acquires an independent owner for this cursor.
-    let owner: StrOwner = unsafe { StrOwner::acquire_word(value as usize) };
+    let owner: StrOwner = unsafe { crate::StrOwner::acquire_word(value as usize) };
     let position = owner.len();
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::StringIterator(
         StringIterator {
@@ -540,7 +540,7 @@ mod tests {
     fn clear_error(kind: Kind, expected: &str) {
         assert_eq!(imre_error_pending(), 1);
         // SAFETY: taking pending transfers one exception owner; reading its
-        // message acquires a separate string owner. Both transferred owners are consumed below.
+        // message acquires a separate string owner. Each is released by its matching owner.
         unsafe {
             let error = Rc::from_raw(imre_error_take());
             assert_eq!(imre_exception_matches(Rc::as_ptr(&error), kind as u32), 1);
@@ -782,7 +782,7 @@ mod tests {
     fn unicode_indexing_and_slicing_use_code_points_and_preserve_error_messages() {
         let source = StrOwner::new(Str::new("aé\0e\u{301}🦀"));
         // SAFETY: every argument stays rooted; each nonnull result transfers one
-        // string reference and each failing call clears pending before reuse.
+        // string reference to StrOwner and each failing call clears pending before reuse.
         unsafe {
             for (position, expected) in ["a", "é", "\0", "e", "\u{301}", "🦀"]
                 .into_iter()

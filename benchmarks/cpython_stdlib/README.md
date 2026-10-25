@@ -2,12 +2,30 @@
 
 The `upstream` directory contains the complete, unmodified CPython 3.14.5 test modules and packages used by these benchmarks. The [manifest](UPSTREAM.json) records the release commit and each unmodified Git blob. [Upstream source](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test) · [CPython license](upstream/LICENSE)
 
+## Native string line boundaries and whitespace
+
+With CPython 3.14.5's `Lib/test` on the import path, run
+`tests/text_line_methods_upstream.py --compiler ... --runtime ...`. It runs the
+unmodified `StrTest.test_splitlines` assertions on 11 native results and
+`StrTest.test_isspace` on 12 native results plus six direct CPython literals.
+The original Unicode invariant checks native results for all 1,112,064 Unicode
+scalars; its 2,048 surrogate code points run on CPython. Both compiler modes
+and optimization levels 0 and 3 are checked.
+
 ## Native regex substitution tests
 
 The text suite also compiles three complete CPython `ReTests` methods:
 `test_bug_449964`, `test_bug_449000`, and `test_bug_114660`. Their six native
 assertions check capture references and replacement escapes in `re.sub`.
 Run `tests/text.py` with the compiler, runtime, Python oracle and clang paths.
+
+## Native CSV reader tests
+
+`native_csv.py` compiles 18 complete, unchanged reader methods from CPython's
+`TestDialectExcel`. A nineteenth multiline method supplies its original fixture
+from CPython because it assigns a reserved builtin name. A typed file fixture compares every native row and field
+against the original expected values. A second fixture compares errors, physical
+line counts, Unicode, input mutation and incremental consumption with CPython.
 
 ## Native SHA-256 tests
 
@@ -81,9 +99,13 @@ This run records what upstream passes and skips on the host. Native compatibilit
 
 `native_zip_members.py` drives the original stored and deflated bad-CRC test methods. The host makes fixtures and runs unittest assertions; the child opens its own `BytesIO`, reads members, checks CRCs, and returns the sequence of reads and errors. A separate control checks duplicate entries, metadata, independent readers and caller-owned stream lifetimes.
 
+## Native Base64 cases
+
+`native_base64.py` runs CPython's unchanged `BaseXYTestCase.test_b64encode`. Its exact-bytes URL-safe call runs in Imre; the other encoders, non-bytes buffers, and type errors run in CPython and are recorded separately. Additional native controls check output padding and strict ASCII decode errors against CPython.
+
 ## Native Counter cases
 
-`native_counter.py` compiles the complete CPython `TestCounter.test_total`, `test_invariant_for_the_in_operator` and `test_eq` methods into standalone executables. The typed assertion adapters compare both native operands and count every executed assertion. The three tests must execute 1, 6 and 2 assertions respectively. The manifest pins the entire upstream `test_collections.py` file. The typed subset uses integer counts, so the upstream `test_update`, which also stores `None`, is outside this gate.
+`native_counter.py` compiles seven complete CPython `TestCounter` methods into standalone executables: `test_total`, `test_invariant_for_the_in_operator` and the five comparison methods. The native assertion adapters count every executed assertion: one for the total, six for membership and two per comparison method. The manifest pins the entire upstream `test_collections.py` file. The typed subset uses integer counts, so the upstream `test_update`, which also stores `None`, is outside this gate.
 
 ```sh
 python3 benchmarks/cpython_stdlib/native_counter.py \

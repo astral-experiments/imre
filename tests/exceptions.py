@@ -9,6 +9,9 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "warning_hierarchy": (Path(__file__).parent / "fixtures/exceptions/warning_hierarchy.py").read_text(),
+    "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
+    "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
     "classvar_exception_constructor": """
 from typing import ClassVar
 
@@ -885,6 +888,25 @@ except KeyError:
 }
 
 REJECTED = {
+    "explicit_base_missing_inherited_field": """
+        class Parent(Exception):
+            def __init__(self, text: str):
+                super().__init__(text)
+                self.text = text
+        class Child(Parent):
+            def __init__(self, text: str):
+                BaseException.__init__(self, text)
+        print(Child("error"))
+    """,
+    "explicit_base_shadowed": """
+        class Problem(Exception):
+            def __init__(self, Exception: str):
+                Exception.__init__(self, "wrong receiver")
+        print(Problem("shadow"))
+    """,
+    "import_error_unsupported_argument": "ImportError([1, 2])",
+    "import_error_expanded_keywords": "ImportError(**{'name': 'pkg'})",
+    "import_error_unnarrowed_field": "def f(e: Exception) -> None:\n    print(e.name)\n",
     "handler_uninitialized": """
 try:
     value = int(input())

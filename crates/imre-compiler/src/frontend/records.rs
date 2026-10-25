@@ -597,19 +597,29 @@ impl Checker<'_> {
             )
         });
         self.class = context.map(|context| context.class);
+        let lexical_base = context.and_then(|context| {
+            let classes = &self.classes.declarations;
+            let origin = classes.definitions[context.class].method_origins[context.index];
+            classes.definitions[classes.ids[&origin]]
+                .bases
+                .first()
+                .copied()
+        });
+        self.super_method_base = context
+            .filter(|context| {
+                let classes = &self.classes.declarations;
+                matches!(
+                    context.kind(classes),
+                    MethodKind::Instance | MethodKind::Property | MethodKind::PropertySetter
+                ) && classes.definitions[context.class].initializer != Some(context.index)
+            })
+            .and(lexical_base);
         self.super_initializer = context.and_then(|context| {
             let record = &self.classes.declarations.definitions[context.class];
             if record.methods[context.index].name.as_str() != "__init__" {
                 return None;
             }
-            let owner = self.classes.declarations.ids[&record.method_origins[context.index]];
-            Some(
-                self.classes.declarations.definitions[owner]
-                    .bases
-                    .first()
-                    .copied()
-                    .map_or(BaseInitializer::Object, BaseInitializer::Record),
-            )
+            Some(lexical_base.map_or(BaseInitializer::Object, BaseInitializer::Record))
         });
         self.class_receiver = context.and_then(|context| {
             let declaration = &self.classes.declarations.definitions[context.class];
@@ -637,6 +647,11 @@ impl Checker<'_> {
     /// Static receiver attributes must not accidentally resolve through an
     /// identically named module import or global binding.
     pub(super) fn resolve(&self, expression: &ast::Expr) -> Option<Binding> {
+        if let ast::Expr::Attribute(attr) = expression
+            && let Some(binding) = self.fixed_class_binding(attr)
+        {
+            return Some(binding);
+        }
         let mut root = expression;
         while let ast::Expr::Attribute(attribute) = root {
             root = &attribute.value;
@@ -646,13 +661,50 @@ impl Checker<'_> {
         } else {
             let binding = self.graph.resolve(self.module, expression);
             if let Some(Binding::Definition(definition)) = binding
-                && self.classes.declarations.ids.contains_key(&definition)
+                && (self.classes.declarations.ids.contains_key(&definition)
+                    || self.types.namedtuple(definition).is_some())
             {
                 // Static dispatch and constant folding can erase the class name from the IR.
                 self.class_reads.borrow_mut().insert(definition);
             }
             binding
         }
+    }
+
+    /// Resolve a read from an initialized local or a class name. A receiver
+    /// expression with effects must still be evaluated by ordinary attribute lowering.
+    fn fixed_class_binding(&self, attr: &ast::ExprAttribute) -> Option<Binding> {
+        if let ast::Expr::Attribute(parent) = &*attr.value {
+            let Binding::IntrinsicModule(module) = self.fixed_class_binding(parent)? else {
+                return None;
+            };
+            return module.symbol(attr.attr.as_str());
+        }
+        let name = attr.value.as_name_expr()?.id.as_str();
+        let class = if self.is_class_receiver(&attr.value) {
+            self.class?
+        } else if let Some(&slot) = self.names.get(name) {
+            if !self.assigned.contains(&slot) {
+                return None;
+            }
+            let Type::Class(class) = self.locals[slot] else {
+                return None;
+            };
+            class
+        } else {
+            let Binding::Definition(id) = self.graph.resolve(self.module, &attr.value)? else {
+                return None;
+            };
+            *self.classes.declarations.ids.get(&id)?
+        };
+        let owner = &self.classes.declarations.definitions[class];
+        let crate::classes::ClassValue::Binding(binding) =
+            owner.static_bindings.get(attr.attr.as_str())?
+        else {
+            return None;
+        };
+        self.class_reads.borrow_mut().insert(owner.definition);
+        Some(*binding)
     }
 
     /// The class binding is usable in static dispatch, never as a runtime value.
@@ -706,17 +758,17 @@ impl Checker<'_> {
             return Ok(None);
         }
         let direct = |checker: &mut Self, id: usize| -> Result<Expr, String> {
-            match checker.classes.declarations.definitions[id].exception_aliases[attr.attr.as_str()]
+            match &checker.classes.declarations.definitions[id].exception_aliases
+                [attr.attr.as_str()]
             {
-                crate::classes::ExceptionAlias::Builtin(kind) => {
-                    checker.simple_exception(call, kind)
+                crate::classes::ExceptionAlias::Builtin { kind, .. } => {
+                    checker.simple_exception(call, *kind)
                 }
                 crate::classes::ExceptionAlias::Named(def) => {
-                    if let Some(&layout) = checker.classes.declarations.ids.get(&def) {
+                    if let Some(&layout) = checker.classes.declarations.ids.get(def) {
                         checker.construct(call, layout)
                     } else {
-                        checker
-                            .simple_exception(call, checker.classes.declarations.exceptions[&def])
+                        checker.simple_exception(call, checker.classes.declarations.exceptions[def])
                     }
                 }
             }
@@ -794,6 +846,27 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        let owner = &self.classes.declarations.definitions[class];
+        let literal = match owner.static_bindings.get(attribute.attr.as_str()) {
+            Some(crate::classes::ClassValue::String(value)) => Some(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Str(value.clone()),
+            }),
+            Some(crate::classes::ClassValue::Strings { owner, ordinal, .. }) => {
+                Some(self.globals.class_tuple(*owner, *ordinal).ok_or_else(|| {
+                    error(
+                        self.source,
+                        attribute,
+                        "class tuple is read before its declaration",
+                    )
+                })?)
+            }
+            _ => None,
+        };
+        if let Some(literal) = literal {
+            self.class_reads.borrow_mut().insert(owner.definition);
+            return Ok(self.evaluated_receiver(receiver, literal));
+        }
         if self.classes.has_concrete_subclasses(class)
             && let Some(receiver) = receiver
         {
@@ -811,8 +884,18 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        if self.mock_implementation_method(class, attribute.attr.as_str()) {
+            return Err(error(
+                self.source,
+                attribute,
+                "private native mock operations cannot be accessed directly",
+            ));
+        }
         if attribute.attr.starts_with("__")
-            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+            && !matches!(
+                attribute.attr.as_str(),
+                "__str__" | "__post_init__" | "__copy__"
+            )
         {
             return Err(error(
                 self.source,
@@ -836,12 +919,20 @@ impl Checker<'_> {
                         .map_err(|message| error(self.source, attribute, message))?;
                 }
                 self.calls.insert(signature.id);
+                if let Some(&(ready, value)) = self
+                    .classes
+                    .cached_properties
+                    .get(&(class, signature.method.unwrap().index))
+                {
+                    return Ok(self.cached_property(receiver, &signature, ready, value));
+                }
                 Ok(Expr {
                     ty: signature.returns,
                     kind: ExprKind::Call(signature.id, ir::CallArgs::positional(vec![receiver])),
                 })
             }
             MethodKind::Instance => self.callable_value(&signature, receiver, expected, attribute),
+            MethodKind::PropertySetter => unreachable!("setters are resolved only on assignment"),
             MethodKind::Class | MethodKind::Static => {
                 let value = self.callable_value(&signature, None, expected, attribute)?;
                 Ok(self.evaluated_receiver(receiver, value))
@@ -876,6 +967,20 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
+        if self.mock_implementation_method(class, attribute.attr.as_str()) {
+            return Err(error(
+                self.source,
+                attribute,
+                "private native mock operations cannot be accessed directly",
+            ));
+        }
+        if attribute.attr.as_str() == "get"
+            && self.classes.declarations.definitions[class].mapping
+            && !self.classes.methods[class].contains_key("get")
+            && let Some(value) = &receiver
+        {
+            return self.mapping_get(call, value.clone());
+        }
         if call
             .arguments
             .keywords
@@ -889,13 +994,63 @@ impl Checker<'_> {
             ));
         }
         if attribute.attr.starts_with("__")
-            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+            && !matches!(
+                attribute.attr.as_str(),
+                "__str__" | "__post_init__" | "__copy__"
+            )
+            && !(self.classes.declarations.definitions[class].mapping
+                && matches!(
+                    attribute.attr.as_str(),
+                    "__getitem__" | "__len__" | "__contains__"
+                ))
         {
             return Err(error(
                 self.source,
                 call,
                 "special methods cannot be called directly",
             ));
+        }
+        if matches!(attribute.attr.as_str(), "assertEqual" | "assertListEqual")
+            && let Some(receiver) = &receiver
+            && let Some(checked) =
+                self.unittest_equality(call, attribute.attr.as_str(), class, receiver)?
+        {
+            return Ok(checked);
+        }
+        if matches!(
+            attribute.attr.as_str(),
+            "assertRaises" | "assertRaisesRegex"
+        ) && !self.classes.methods[class].contains_key(attribute.attr.as_str())
+            && let Some(receiver) = &receiver
+            && let Some(context) =
+                self.unittest_assert_raises(call, class, receiver, attribute.attr.as_str())?
+        {
+            return Ok(context);
+        }
+        if self.native_mock(class)
+            && let Some(object) = &receiver
+        {
+            match attribute.attr.as_str() {
+                "assert_any_call" => {
+                    return self.mock_arguments(call, class, object.clone(), "_assert_any_call");
+                }
+                "assert_called_with" => {
+                    return self.mock_arguments(call, class, object.clone(), "_assert_called_with");
+                }
+                "assert_called_once_with" => {
+                    return self.mock_arguments(
+                        call,
+                        class,
+                        object.clone(),
+                        "_assert_called_once_with",
+                    );
+                }
+                name if !self.classes.methods[class].contains_key(name) => {
+                    let child = self.mock_child(class, object.clone(), attribute)?;
+                    return self.mock_arguments(call, class, child, "_record");
+                }
+                _ => {}
+            }
         }
         let signature = self.classes.methods[class]
             .get(attribute.attr.as_str())
@@ -1004,6 +1159,9 @@ impl Checker<'_> {
             .abstract_methods
             .is_empty()
         {
+            if self.classes.declarations.definitions[class].mapping {
+                return self.abstract_mapping_call(class, call);
+            }
             return Err(error(
                 self.source,
                 call,
@@ -1025,6 +1183,7 @@ impl Checker<'_> {
         let materialized = self.immediate_constructor_input(call, class);
         let call = materialized.as_ref().unwrap_or(call);
         let signature = self.classes.methods[class]["__init__"].clone();
+        let mut scope = calls::ArgumentScope::default();
         let normalization = self.normalized_record_input(class);
         let args = if let Some((field, wrapper, template)) = normalization {
             let params = &signature.params[1..];
@@ -1040,16 +1199,16 @@ impl Checker<'_> {
         } else if self.inference.is_some() {
             self.infer_call(call, &signature, None, 1)?.1
         } else {
-            self.arguments(call, &signature.params[1..], None)?
+            self.held_arguments(call, &signature.params[1..], None, &mut scope)?
         };
         self.calls.insert(signature.id);
-        let record = Expr {
+        let record = scope.finish(Expr {
             ty: Type::Class(class),
             kind: ExprKind::Construct {
                 initializer: signature.id,
                 args,
             },
-        };
+        });
         let decl = &self.classes.declarations.definitions[class];
         if let Some(&kind) = self.classes.declarations.exceptions.get(&decl.definition) {
             let text = self.classes.methods[class].get("__str__").map(|m| m.id);
@@ -1062,6 +1221,7 @@ impl Checker<'_> {
                     Builtin::NamedException {
                         kind,
                         message_field: decl.fields.len() - 1,
+                        tuple_args: self.exception_tuple_slot(class),
                         text,
                         repr,
                         dataclass_repr: decl.dataclass.is_some_and(|d| d.repr),
@@ -1071,6 +1231,110 @@ impl Checker<'_> {
             });
         }
         Ok(record)
+    }
+
+    /// Install the native message slot used by the exception's args and formatting.
+    fn set_exception_message(&mut self, class: usize, message: &ast::Expr) -> Result<Expr, String> {
+        let ty = self.types.optional(Type::Str);
+        let message_value = self.expr_expected(message, Type::Str)?;
+        let value = self.coerce(message_value, ty, message)?;
+        Ok(self.store_exception_arguments(class, value))
+    }
+
+    /// Materialize all base arguments before exposing the tuple through the exception.
+    fn set_exception_arguments(
+        &mut self,
+        class: usize,
+        nodes: &[ast::Expr],
+    ) -> Result<Expr, String> {
+        let mut values = Vec::with_capacity(nodes.len());
+        for node in nodes {
+            let value = Self::string_value(self.expr(node)?);
+            if !self.boxable_value(value.ty) {
+                return Err(error(
+                    self.source,
+                    node,
+                    "unsupported native exception argument type",
+                ));
+            }
+            values.push(value);
+        }
+        let tuple = Expr {
+            ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
+            kind: ExprKind::Tuple(values),
+        };
+        let args = Expr {
+            ty: Type::ObjectValue,
+            kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![tuple]),
+        };
+        Ok(self.store_exception_arguments(class, args))
+    }
+
+    fn store_exception_arguments(&self, class: usize, value: Expr) -> Expr {
+        let field = self.classes.fields[class].len() - 1;
+        Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body: vec![Statement::SetField(self.local(0), field, value)],
+                value: Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                }),
+                clear: Vec::new(),
+            },
+        }
+    }
+
+    pub(super) fn explicit_exception_initializer(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        if self.super_initializer.is_some()
+            && self.names.get("self") == Some(&0)
+            && let Some(class) = self.class
+            && self
+                .classes
+                .declarations
+                .exceptions
+                .contains_key(&self.classes.declarations.definitions[class].definition)
+            && let Some((base, args)) =
+                crate::classes::explicit_message_initializer(&self.graph.modules[self.module], call)
+            && !self.names.contains_key(base)
+        {
+            return self.set_exception_arguments(class, args).map(Some);
+        }
+        Ok(None)
+    }
+
+    /// Start lookup after the declaring class and bind that implementation to the same object.
+    pub(super) fn call_super_method(
+        &mut self,
+        call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
+        base: usize,
+    ) -> Result<Expr, String> {
+        let signature = self.classes.methods[base]
+            .get(method.attr.as_str())
+            .filter(|sig| {
+                sig.method.unwrap().kind(&self.classes.declarations) == MethodKind::Instance
+            })
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    method,
+                    "super() requires a known base instance method",
+                )
+            })?
+            .clone();
+        if !self.assigned.contains(&0) {
+            return Err(error(
+                self.source,
+                method,
+                "super() requires a bound first argument",
+            ));
+        }
+        let receiver = self.coerce(self.local(0), Type::Class(base), method)?;
+        self.source_call(call, &signature, Some(receiver), 1)
     }
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -1085,6 +1349,9 @@ impl Checker<'_> {
                 .bindings
                 .contains_key("super")
         {
+            if self.exception_tuple_slot(class) && call.arguments.keywords.is_empty() {
+                return self.set_exception_arguments(class, &call.arguments.args);
+            }
             let [message] = call.arguments.args.as_ref() else {
                 return Err(error(
                     self.source,
@@ -1099,21 +1366,7 @@ impl Checker<'_> {
                     "exception messages do not accept keyword arguments",
                 ));
             }
-            let ty = self.types.optional(Type::Str);
-            let message_value = self.expr_expected(message, Type::Str)?;
-            let value = self.coerce(message_value, ty, message)?;
-            let field = self.classes.fields[class].len() - 1;
-            return Ok(Expr {
-                ty: Type::None,
-                kind: ExprKind::Scope {
-                    body: vec![Statement::SetField(self.local(0), field, value)],
-                    value: Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    }),
-                    clear: Vec::new(),
-                },
-            });
+            return self.set_exception_message(class, message);
         }
         // An initializer defined at the root of a checked record lineage finds
         // object.__init__, including when that initializer runs on a subclass.
@@ -1163,16 +1416,17 @@ impl Checker<'_> {
             ty: Type::Class(base),
             kind: ExprKind::Builtin(Builtin::RecordView, vec![self.local(self.names["self"])]),
         };
+        let mut scope = calls::ArgumentScope::default();
         let args = if self.inference.is_some() {
             self.infer_call(call, &signature, Some(receiver), 1)?.1
         } else {
-            self.arguments(call, &signature.params[1..], Some(receiver))?
+            self.held_arguments(call, &signature.params[1..], Some(receiver), &mut scope)?
         };
         self.calls.insert(signature.id);
-        Ok(Expr {
+        Ok(scope.finish(Expr {
             ty: Type::None,
             kind: ExprKind::Call(signature.id, args),
-        })
+        }))
     }
 
     fn immediate_constructor_input(

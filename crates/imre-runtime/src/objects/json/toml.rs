@@ -136,7 +136,7 @@ fn convert(
                 );
             }
             Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-                Box::new(result),
+                crate::objects::mappings::TableOwner::new(result),
             ))))) as usize
         }
         (RECORD, DeValue::Table(values)) => {

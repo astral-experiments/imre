@@ -417,6 +417,37 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
     }
 }
 
+/// Parse a decimal field or item index, including Python's Unicode decimal digits.
+pub(super) fn format_index(name: &str) -> crate::Result<Option<usize>> {
+    let mut index = 0isize;
+    // A decimal prefix can overflow before a nondigit makes this a named field.
+    for ch in name.chars() {
+        let Some(digit) = crate::integer_text::decimal_digit(ch) else {
+            return Ok(None);
+        };
+        index = index
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(isize::from(digit)))
+            .ok_or_else(|| {
+                Error::new(Kind::ValueError, "Too many decimal digits in format string")
+            })?;
+    }
+    Ok(Some(index as usize))
+}
+
+/// Both keyword-only formatters have an empty tuple of positional arguments.
+pub(super) fn check_keyword_field(name: &str) -> crate::Result<()> {
+    if let Some(index) = format_index(name)? {
+        return Err(Error::new(
+            Kind::IndexError,
+            compact_str::format_compact!(
+                "Replacement index {index} out of range for positional args tuple"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Substitutes plain named fields in encounter order. A missing field can raise
 /// before a malformed brace later in the same template.
 fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> crate::Result<Str> {
@@ -478,27 +509,7 @@ fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> 
             tail = &spec[end..];
         }
         rest = tail.strip_prefix('}').ok_or_else(unmatched)?;
-        if name
-            .chars()
-            .all(|ch| crate::integer_text::decimal_digit(ch).is_some())
-        {
-            let index = name
-                .chars()
-                .try_fold(0isize, |index, ch| {
-                    index
-                        .checked_mul(10)?
-                        .checked_add(crate::integer_text::decimal_digit(ch)? as isize)
-                })
-                .ok_or_else(|| {
-                    Error::new(Kind::ValueError, "Too many decimal digits in format string")
-                })?;
-            return Err(Error::new(
-                Kind::IndexError,
-                compact_str::format_compact!(
-                    "Replacement index {index} out of range for positional args tuple"
-                ),
-            ));
-        }
+        check_keyword_field(name)?;
         let text = field(name).ok_or_else(|| Error::string_key(Str::new(name)))?;
         if !supported {
             return Err(Error::new(
@@ -540,12 +551,12 @@ pub unsafe extern "C" fn imre_str_format(
 /// Unicode scalar boundaries, including both ends, exactly as Python str.replace.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_replace(
-    input: *const Str,
+    value: *const Str,
     old: *const Str,
     new: *const Str,
 ) -> *const Str {
     // SAFETY: inputs remain immutable and rooted through both sizing and copying.
-    let (value, old, new) = unsafe { (&*input, &*old, &*new) };
+    let (value, old, new) = unsafe { (&*value, &*old, &*new) };
     let count = if old == new {
         0
     } else {
@@ -553,7 +564,9 @@ pub unsafe extern "C" fn imre_str_replace(
     };
     if count == 0 {
         // SAFETY: the caller roots the input; the unchanged result takes its own owner.
-        return StrOwner::into_raw(unsafe { StrOwner::acquire_word(input as usize) });
+        return StrOwner::into_raw(unsafe {
+            crate::StrOwner::acquire_word(std::ptr::from_ref(value) as usize)
+        });
     }
     let length = value
         .len()
@@ -607,6 +620,36 @@ pub extern "C" fn imre_float_format(value: f64, precision: u32, flags: u32) -> *
         result.push('%');
     }
     StrOwner::into_raw(StrOwner::new(result))
+}
+
+/// Suspend the current native thread, rounding a positive timeout up to nanoseconds.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_time_sleep(seconds: f64) {
+    let error = if seconds.is_nan() {
+        Some(Error::new(
+            Kind::ValueError,
+            "Invalid value NaN (not a number)",
+        ))
+    } else if !seconds.is_finite() || seconds.abs() >= i64::MAX as f64 / 1e9 {
+        Some(Error::new(
+            Kind::OverflowError,
+            "timestamp out of range for platform time_t",
+        ))
+    } else if seconds < 0.0 {
+        Some(Error::new(
+            Kind::ValueError,
+            "sleep length must be non-negative",
+        ))
+    } else {
+        None
+    };
+    if let Some(e) = error {
+        e.raise();
+        return;
+    }
+    let duration = std::time::Duration::from_secs(seconds.trunc() as u64)
+        + std::time::Duration::from_nanos((seconds.fract() * 1e9).ceil() as u64);
+    std::thread::sleep(duration);
 }
 
 /// Seconds since the Unix epoch, including the subsecond fraction.

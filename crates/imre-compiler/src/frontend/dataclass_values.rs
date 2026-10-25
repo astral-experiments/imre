@@ -25,6 +25,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         Type::Exception
         | Type::NamedException(_)
         | Type::StringKeys
+        | Type::ImportException
         | Type::TimeoutExpired
         | Type::EventLoop
         | Type::Coroutine(_)
@@ -33,15 +34,23 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::GeneratorContext
         | Type::DirectoryContext(_)
         | Type::Semaphore
+        | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::NativeModule
+        | Type::ModuleNamespace
+        | Type::LogFormatter
+        | Type::LogRecord
         | Type::Logger
         | Type::TimedFileHandler
         | Type::ClockTime
         | Type::Sha256
+        | Type::JsonDecoder
+        | Type::CsvReader
         | Type::RegexPattern
         | Type::RegexMatch
-        | Type::ExitCode
+        | Type::ObjectValue
         | Type::TextIO
+        | Type::StringIO
         | Type::BinaryIO
         | Type::Iterator
         | Type::Callable(_) => false,
@@ -130,10 +139,14 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
         Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::LogFormatter
+            | Type::LogRecord
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::StringKeys
+            | Type::CsvReader
     ) || types
         .children(ty)
         .into_iter()

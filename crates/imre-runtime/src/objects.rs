@@ -7,20 +7,32 @@
 //! only after mutable storage access ends.
 
 use crate::StrOwner;
+mod annotations;
 mod argparse;
 mod args;
 mod asyncio;
+mod boxed_values;
+mod builtins;
 mod bytes;
 mod contexts;
+mod copying;
+mod csv;
 mod deferred_diff;
+mod deque;
 mod difflib;
+mod errno;
 pub(crate) mod exceptions;
 mod files;
+mod fnmatch;
 mod hashlib;
+mod inspect;
 mod itertools;
 mod json;
+mod linecache;
 mod logging;
 mod mappings;
+mod namespaces;
+mod os;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
@@ -34,8 +46,11 @@ mod tempdirs;
 mod text;
 mod unions;
 mod values;
+mod warnings;
 mod words;
 mod zipfile;
+
+pub(crate) use files::errno_error;
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
@@ -43,27 +58,59 @@ use super::{
 };
 use num_traits::ToPrimitive;
 use std::rc::Rc;
+
+/// Literal constructors share the same empty and Latin-1 owners as chr and indexing.
+pub(crate) fn literal_string(text: &str) -> StrOwner {
+    self::text::owned_string(text)
+}
 use words::{OwnedWord, Words};
+
+// All C ints fit in the immediate representation. Heap integers cannot fit.
+fn c_int(word: usize) -> exceptions::Result<libc::c_int> {
+    (word & 1 != 0)
+        .then_some((word as i64) >> 1)
+        .and_then(|n| libc::c_int::try_from(n).ok())
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C int",
+            )
+        })
+}
 
 /// An opaque allocation for runtime-managed containers and resource state.
 #[repr(transparent)]
 pub struct Object(StorageCell<Storage>);
 
 enum Storage {
+    Plain,
+    StrDescriptor(u32),
     Sequence(Words),
-    Dictionary(Box<mappings::Mapping>),
-    Set(Box<mappings::Set>),
+    Deque(Box<deque::Deque>),
+    DequeIterator(deque::DequeIterator),
+    Dictionary(mappings::TableOwner<mappings::Mapping>),
+    FunctionCache(Box<mappings::FunctionCache>),
+    Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
+    RegexIterator(regexes::FindIter),
     Repeat(itertools::Repeat),
+    IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
+    SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
+    NativeModule(errno::Module),
+    ModuleNamespace(Rc<errno::Registry>),
+    ModuleMember(errno::Member),
+    CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
+    ObjectValue(OwnedWord),
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),
+    Popen(Box<processes::Popen>),
     AsyncProcess(Box<processes::AsyncProcess>),
     AsyncTask(Rc<asyncio::Task>),
     GeneratorContext(Rc<contexts::Manager>),
@@ -76,14 +123,18 @@ enum Storage {
         text: paths::PathText,
         name: std::cell::OnceCell<StrOwner>,
     },
+    PathInfo(Box<paths::Info>),
     PurePath(Box<paths::PurePath>),
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
     Logger(StrOwner),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
+    LogRecord(Box<logging::record::Record>),
+    LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
+    JsonDecoder(Rc<Object>),
 }
 
 /// Acquires a reference without consuming the caller's live Rc handle.
@@ -153,6 +204,25 @@ pub unsafe extern "C" fn imre_object_release(value: *const Object) {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_seq_new(kind: u32) -> *const Object {
     Rc::into_raw(Words::new(kind).into_object())
+}
+
+/// Remember a mock history's `_CallList` identity across aliases and resets.
+/// Copies get the ordinary list representation from their fresh sequence storage.
+///
+/// # Safety
+/// The caller roots a native sequence of recorded mock calls.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_mock_call_list(value: *const Object, mark: bool) -> bool {
+    // SAFETY: the caller roots the list and only the copied flag escapes the borrow.
+    unsafe {
+        object(value).0.with(|storage| {
+            let flag = &storage.sequence_storage().mock_call_list;
+            if mark {
+                flag.set(true);
+            }
+            flag.get()
+        })
+    }
 }
 
 /// Tests string membership with the list and needle rooted for the whole read.
@@ -352,6 +422,34 @@ pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind
     i32::from(appended)
 }
 
+/// Publish an empty typed list before releasing the elements of the old buffer.
+///
+/// # Safety
+/// The caller keeps the mutable list rooted for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_clear(value: *const Object) {
+    // SAFETY: only the detached buffer escapes; no element destructor runs under the borrow.
+    let previous = unsafe {
+        object(value).0.with_mut(|storage| {
+            let Storage::Sequence(words) = storage else {
+                unreachable!("a typed list owns sequence storage")
+            };
+            if words.is_sorting_empty() {
+                return None;
+            }
+            // A deferred diff is a list of strings. Clearing it discards its plan
+            // without materializing values that no observer can access.
+            let kind = if words.plan().is_some() {
+                3
+            } else {
+                words.kind.raw()
+            };
+            Some(std::mem::replace(words, Words::new(kind)))
+        })
+    };
+    drop(previous);
+}
+
 /// # Safety
 /// The sequence is rooted. Success transfers its removed owner's exact word;
 /// check pending before interpreting zero, which may also be a valid element.
@@ -444,7 +542,7 @@ pub unsafe extern "C" fn imre_str_concat(a: *const Str, b: *const Str) -> *const
     if left.is_empty() || right.is_empty() {
         let retained = if left.is_empty() { b } else { a };
         // SAFETY: the caller roots the original immutable string handle.
-        return StrOwner::into_raw(unsafe { StrOwner::acquire_word(retained as usize) });
+        return StrOwner::into_raw(unsafe { crate::StrOwner::acquire_word(retained as usize) });
     }
     let Some(mut result) = concatenated_length(left.len(), [right.len()])
         .and_then(|length| Str::try_with_capacity(length).ok())
@@ -867,7 +965,7 @@ unsafe fn concat_size(initial: usize, parts: &[StringPart]) -> Option<(usize, Op
     )?;
     let shared = handle.filter(|&(_, size)| size == length).map(|(data, _)| {
         // SAFETY: the sentinel selected a live Str handle which the caller roots.
-        unsafe { StrOwner::acquire_word(data as usize) }
+        unsafe { crate::StrOwner::acquire_word(data as usize) }
     });
     Some((length, shared))
 }
@@ -1096,7 +1194,7 @@ impl LineIterator {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_splitlines_iter(value: *const Str) -> *const Object {
     // SAFETY: acquire a strong reference while the caller still roots the input.
-    let owner: StrOwner = unsafe { StrOwner::acquire_word(value as usize) };
+    let owner: StrOwner = unsafe { crate::StrOwner::acquire_word(value as usize) };
     let offsets = LineOffsets::new(&owner);
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LineIterator(
         LineIterator { owner, offsets },
@@ -1110,10 +1208,48 @@ pub unsafe extern "C" fn imre_str_splitlines_iter(value: *const Str) -> *const O
 /// `value` must be rooted. Returns an owned string sequence or null on error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_splitlines(value: *const Str) -> *const Object {
+    // SAFETY: the receiver stays rooted through the default collector.
+    unsafe { split_string_lines::<false>(value) }
+}
+
+/// Splits at the same boundaries as the no-argument and fused paths. The
+/// caller truth-tests the flag before entering the collector.
+///
+/// # Safety
+/// The immutable receiver stays rooted throughout the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_splitlines_options(
+    value: *const Str,
+    keep: u32,
+) -> *const Object {
+    // SAFETY: both paths use the same rooted source and return a fresh list.
+    unsafe {
+        if keep == 0 {
+            imre_str_splitlines(value)
+        } else {
+            split_string_lines::<true>(value)
+        }
+    }
+}
+
+/// Reuse the collector and its ownership logic for either boundary policy.
+/// The caller roots `value` until the list owns every returned slice.
+unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(StrOwner::from_raw(value)) };
     finish(
-        split_lines(&value, |range| owned_line(&value, range)),
+        split_lines(&value, |mut range| {
+            // The shared scanner has already found the boundary. Its first
+            // scalar supplies the width; only CRLF has two scalars. This
+            // branch disappears from the legacy no-argument specialization.
+            if KEEP && let Some(ending) = value[range.end..].chars().next() {
+                range.end += ending.len_utf8();
+                if ending == '\r' && value.as_bytes().get(range.end) == Some(&b'\n') {
+                    range.end += 1;
+                }
+            }
+            owned_line(&value, range)
+        }),
         std::ptr::null(),
     )
 }
@@ -1928,7 +2064,7 @@ mod tests {
             let view = imre_seq_data_readonly(sequence);
             assert_eq!(StrOwner::strong_count(&text), 2);
             let word = view.read();
-            let saved = StrOwner::acquire_word(word);
+            let saved = crate::StrOwner::acquire_word(word);
             assert_eq!(StrOwner::strong_count(&text), 3);
             imre_object_release(sequence);
             drop(text);

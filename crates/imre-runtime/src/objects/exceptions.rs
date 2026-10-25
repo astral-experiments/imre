@@ -6,6 +6,11 @@
 //! attributes can introduce ownership cycles.
 
 use crate::StrOwner;
+mod imports;
+pub(super) use imports::imre_exception_field_repr;
+mod tree;
+pub(super) use tree::append_tree_entries;
+
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 use std::rc::Rc;
@@ -15,6 +20,9 @@ use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
 use super::words::{OwnedWord, WordKind};
 use super::{Object, Storage, StorageCell, Str, acquire_rc, fail, object};
+
+mod os;
+pub(super) use os::Filename;
 
 #[repr(C)]
 pub struct NamedDescriptor {
@@ -42,6 +50,11 @@ pub(crate) enum Kind {
     RuntimeError = 10,
     EOFError = 11,
     OSError = 12,
+    // Module-specific OSError subclasses have stable, separately assigned ABI IDs.
+    ShutilError = 64,
+    SameFileError = 65,
+    SpecialFileError = 66,
+    CsvError = 67,
     TypeError = 13,
     AttributeError = 14,
     MemoryError = 15,
@@ -67,13 +80,24 @@ pub(crate) enum Kind {
     StopIteration = 35,
     BadZipFile = 36,
     NotImplementedError = 37,
+    UnicodeEncodeError = 38,
     NameError = 39,
     UnboundLocalError = 40,
+    ImportError = 41,
+    ModuleNotFoundError = 42,
+    RecursionError = 43,
+    // Warning exception identities use a separate block from module errors and filter categories.
+    Warning = 80,
+    RuntimeWarning = 81,
 }
 
 impl Kind {
     fn from_raw(kind: u32) -> Self {
-        match kind {
+        Self::try_from_raw(kind).unwrap_or_else(|| fail("SystemError", "invalid exception kind"))
+    }
+
+    fn try_from_raw(kind: u32) -> Option<Self> {
+        Some(match kind {
             0 => Self::BaseException,
             1 => Self::Exception,
             2 => Self::ArithmeticError,
@@ -87,6 +111,10 @@ impl Kind {
             10 => Self::RuntimeError,
             11 => Self::EOFError,
             12 => Self::OSError,
+            64 => Self::ShutilError,
+            65 => Self::SameFileError,
+            66 => Self::SpecialFileError,
+            67 => Self::CsvError,
             13 => Self::TypeError,
             14 => Self::AttributeError,
             15 => Self::MemoryError,
@@ -112,10 +140,16 @@ impl Kind {
             35 => Self::StopIteration,
             36 => Self::BadZipFile,
             37 => Self::NotImplementedError,
+            38 => Self::UnicodeEncodeError,
             39 => Self::NameError,
             40 => Self::UnboundLocalError,
-            _ => fail("SystemError", "invalid exception kind"),
-        }
+            41 => Self::ImportError,
+            42 => Self::ModuleNotFoundError,
+            43 => Self::RecursionError,
+            80 => Self::Warning,
+            81 => Self::RuntimeWarning,
+            _ => return None,
+        })
     }
 
     fn name(self) -> &'static str {
@@ -133,12 +167,16 @@ impl Kind {
             Self::RuntimeError => "RuntimeError",
             Self::EOFError => "EOFError",
             Self::OSError => "OSError",
+            Self::ShutilError => "Error",
+            Self::SameFileError => "SameFileError",
+            Self::SpecialFileError => "SpecialFileError",
             Self::TypeError => "TypeError",
             Self::AttributeError => "AttributeError",
             Self::MemoryError => "MemoryError",
             Self::SystemError => "SystemError",
             Self::UnicodeError => "UnicodeError",
             Self::UnicodeDecodeError => "UnicodeDecodeError",
+            Self::UnicodeEncodeError => "UnicodeEncodeError",
             Self::UnsupportedOperation => "UnsupportedOperation",
             Self::FileNotFoundError => "FileNotFoundError",
             Self::PermissionError => "PermissionError",
@@ -149,6 +187,7 @@ impl Kind {
             Self::CalledProcessError => "CalledProcessError",
             Self::TimeoutExpired => "TimeoutExpired",
             Self::BadGzipFile => "BadGzipFile",
+            Self::CsvError => "_csv.Error",
             Self::ZlibError => "error",
             Self::TomlDecodeError => "TOMLDecodeError",
             Self::JsonDecodeError => "JSONDecodeError",
@@ -160,12 +199,18 @@ impl Kind {
             Self::NotImplementedError => "NotImplementedError",
             Self::NameError => "NameError",
             Self::UnboundLocalError => "UnboundLocalError",
+            Self::ImportError => "ImportError",
+            Self::ModuleNotFoundError => "ModuleNotFoundError",
+            Self::RecursionError => "RecursionError",
+            Self::Warning => "Warning",
+            Self::RuntimeWarning => "RuntimeWarning",
         }
     }
 
     fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
+            Self::Warning => matches!(self, Self::Warning | Self::RuntimeWarning),
             Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::Exception => !matches!(
                 self,
@@ -185,16 +230,25 @@ impl Kind {
                     | Self::TomlDecodeError
                     | Self::UnicodeError
                     | Self::UnicodeDecodeError
+                    | Self::UnicodeEncodeError
                     | Self::UnsupportedOperation
             ),
-            Self::UnicodeError => matches!(self, Self::UnicodeError | Self::UnicodeDecodeError),
+            Self::UnicodeError => matches!(
+                self,
+                Self::UnicodeError | Self::UnicodeDecodeError | Self::UnicodeEncodeError
+            ),
+            Self::ImportError => matches!(self, Self::ImportError | Self::ModuleNotFoundError),
             Self::SubprocessError => {
                 matches!(
                     self,
                     Self::SubprocessError | Self::CalledProcessError | Self::TimeoutExpired
                 )
             }
-            Self::RuntimeError => matches!(self, Self::RuntimeError | Self::NotImplementedError),
+            Self::RuntimeError => matches!(
+                self,
+                Self::RuntimeError | Self::NotImplementedError | Self::RecursionError
+            ),
+            Self::ShutilError => matches!(self, Self::ShutilError | Self::SameFileError),
             Self::OSError => matches!(
                 self,
                 Self::OSError
@@ -205,6 +259,9 @@ impl Kind {
                     | Self::NotADirectoryError
                     | Self::FileExistsError
                     | Self::BadGzipFile
+                    | Self::ShutilError
+                    | Self::SameFileError
+                    | Self::SpecialFileError
             ),
             _ => self == expected,
         }
@@ -255,8 +312,12 @@ enum Payload {
     Message(StrOwner),
     /// Some builtins render a human message that differs from their original arguments.
     Arguments(Box<BuiltinArguments>),
+    Json(Rc<JsonError>),
+    Tree(Rc<tree::Errors>),
     Key(OwnedWord),
     Exit(Option<OwnedWord>),
+    Import(Box<imports::Import>),
+    Positional(imports::Positional),
     Process(Box<super::processes::ProcessError>),
     Timeout(Box<super::processes::TimeoutError>),
     Group(Box<[GroupMember]>),
@@ -267,6 +328,15 @@ enum Payload {
 struct BuiltinArguments {
     message: StrOwner,
     args: smallvec::SmallVec<[OwnedWord; 5]>,
+    os_paths: Option<Box<os::Filenames>>,
+}
+
+struct JsonError {
+    msg: StrOwner,
+    doc: StrOwner,
+    pos: usize,
+    lineno: usize,
+    colno: usize,
 }
 
 impl From<StrOwner> for Payload {
@@ -376,6 +446,7 @@ pub(crate) struct Error {
     kind: Kind,
     // A missing payload uses the preallocated MemoryError when raised.
     payload: Option<Payload>,
+    cause: Option<Rc<Object>>,
 }
 
 impl Error {
@@ -386,6 +457,7 @@ impl Error {
         Self {
             kind: Kind::SystemExit,
             payload: Some(Payload::Exit(Some(code))),
+            cause: None,
         }
     }
 
@@ -393,6 +465,7 @@ impl Error {
         Self {
             kind,
             payload: Some(Payload::Message(StrOwner::new(message.into()))),
+            cause: None,
         }
     }
 
@@ -407,8 +480,33 @@ impl Error {
         unsafe { OwnedWord::from_owned(value.into_raw(), WordKind::new(2)) }
     }
 
-    /// OSError retains its errno and strerror as args; a filename appears only in its message.
-    pub(super) fn from_errno(kind: Kind, errno: i32, description: &str, message: String) -> Self {
+    /// Store errno and strerror in args and retain original path values separately.
+    pub(super) fn from_errno(
+        kind: Kind,
+        errno: i32,
+        description: &str,
+        filename: Option<Filename>,
+        filename2: Option<Filename>,
+    ) -> Self {
+        let mut message = format!("[Errno {errno}] {description}");
+        let os_paths = filename.map(|first| {
+            let paths = Box::new(os::Filenames {
+                first,
+                second: filename2,
+            });
+            paths.append_message(&mut message);
+            paths
+        });
+        Self::errno_arguments(kind, errno, description, message, os_paths)
+    }
+
+    fn errno_arguments(
+        kind: Kind,
+        errno: i32,
+        description: &str,
+        message: String,
+        os_paths: Option<Box<os::Filenames>>,
+    ) -> Self {
         let args = [
             Self::int_arg(crate::Int::small(i64::from(errno)).unwrap()),
             Self::string_arg(description),
@@ -418,7 +516,9 @@ impl Error {
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
                 message: StrOwner::new(message.into()),
                 args: args.into_iter().collect(),
+                os_paths,
             }))),
+            cause: None,
         }
     }
 
@@ -445,7 +545,9 @@ impl Error {
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
                 message: StrOwner::new(message.into()),
                 args: args.into_iter().collect(),
+                os_paths: None,
             }))),
+            cause: None,
         }
     }
 
@@ -453,10 +555,40 @@ impl Error {
         self.kind == kind
     }
 
+    pub(super) fn json_decode(
+        msg: &str,
+        doc: StrOwner,
+        pos: usize,
+        lineno: usize,
+        colno: usize,
+    ) -> Self {
+        Self {
+            kind: Kind::JsonDecodeError,
+            payload: Some(Payload::Json(Rc::new(JsonError {
+                msg: StrOwner::new(Str::from(msg)),
+                doc,
+                pos,
+                lineno,
+                colno,
+            }))),
+            cause: None,
+        }
+    }
+
     pub(crate) fn allocation() -> Self {
         Self {
             kind: Kind::MemoryError,
             payload: None,
+            cause: None,
+        }
+    }
+
+    /// Use Python's argument-free MemoryError when an operation exhausts memory.
+    pub(super) fn memory_error() -> Self {
+        Self {
+            kind: Kind::MemoryError,
+            payload: Some(Payload::Empty),
+            cause: None,
         }
     }
 
@@ -464,6 +596,7 @@ impl Error {
         Self {
             kind: Kind::KeyError,
             payload: Some(Payload::Key(key)),
+            cause: None,
         }
     }
 
@@ -477,16 +610,38 @@ impl Error {
         Self::new(Kind::IndexError, "list index out of range")
     }
 
+    /// Copytree aggregates only OS failures; language errors still escape intact.
+    pub(super) fn into_os_message(self) -> Result<StrOwner> {
+        if !self.kind.matches(Kind::OSError) {
+            return Err(self);
+        }
+        let error = self.into_object();
+        // SAFETY: this fresh exception owns its payload throughout the read.
+        Ok(unsafe { error.0.with(Storage::exception_message) })
+    }
+
+    /// Retain the original exception when a native operation translates an error.
+    pub(super) fn with_cause(mut self, cause: Self) -> Self {
+        self.cause = Some(cause.into_object());
+        self
+    }
+
+    fn into_object(self) -> Rc<Object> {
+        match self.payload {
+            Some(Payload::Empty) if self.kind == Kind::MemoryError && self.cause.is_none() => {
+                MEMORY_ERROR.with_borrow(Rc::clone)
+            }
+            Some(payload) => exception_with_cause(self.kind, payload, self.cause),
+            None => SEQUENCE_ALLOCATION_ERROR.with_borrow(Rc::clone),
+        }
+    }
+
     /// Installs this error only after any runtime storage access has ended.
     /// Keep exception allocation and cleanup out of successful access paths.
     #[cold]
     #[inline(never)]
     pub(crate) fn raise(self) {
-        if let Some(payload) = self.payload {
-            replace_pending(Some(new_exception(self.kind, payload)));
-        } else {
-            sequence_allocation_failed();
-        }
+        replace_pending(Some(self.into_object()));
     }
 
     /// Returns a failure sentinel after installing the owned exception.
@@ -506,6 +661,8 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 }
 
 thread_local! {
+    static MEMORY_ERROR: RefCell<Rc<Object>> =
+        RefCell::new(new_exception(Kind::MemoryError, Payload::Empty));
     static RECORD_ALLOCATION_ERROR: RefCell<Rc<Object>> = RefCell::new(new_exception(
         Kind::MemoryError, StrOwner::new(Str::new("record allocation failed")),
     ));
@@ -525,6 +682,7 @@ thread_local! {
 /// Prepare allocation errors and exception state before generated code starts.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_record_error_init() {
+    MEMORY_ERROR.with(|_| ());
     RECORD_ALLOCATION_ERROR.with(|_| ());
     SEQUENCE_ALLOCATION_ERROR.with(|_| ());
     PENDING.with(|_| ());
@@ -625,9 +783,13 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
     }
     PENDING.with_borrow(|slot| {
         let Some(pending) = slot.as_ref() else { return };
-        if let Some(template) = [&RECORD_ALLOCATION_ERROR, &SEQUENCE_ALLOCATION_ERROR]
-            .into_iter()
-            .find(|template| template.with_borrow(|cached| Rc::ptr_eq(cached, pending)))
+        if let Some(template) = [
+            &RECORD_ALLOCATION_ERROR,
+            &SEQUENCE_ALLOCATION_ERROR,
+            &MEMORY_ERROR,
+        ]
+        .into_iter()
+        .find(|template| template.with_borrow(|cached| Rc::ptr_eq(cached, pending)))
         {
             // Move the spare into the cache. Existing aliases keep the exact pending
             // exception and its traceback, including an alias saved before a re-raise.
@@ -656,17 +818,45 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
 }
 
 fn new_exception(kind: Kind, payload: impl Into<Payload>) -> Rc<Object> {
+    exception_with_cause(kind, payload.into(), None)
+}
+
+fn exception_with_cause(kind: Kind, payload: Payload, cause: Option<Rc<Object>>) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
         kind,
-        payload: payload.into(),
-        suppress_context: false,
-        details: None,
+        payload,
+        suppress_context: cause.is_some(),
+        details: cause.map(|cause| {
+            Rc::new(ExceptionDetails {
+                cause: Some(cause),
+                ..Default::default()
+            })
+        }),
     }))))
 }
 
 pub(super) fn kind_of(error: &Object) -> Kind {
     // SAFETY: the task holds an immutable exact exception throughout the read.
     unsafe { error.0.with(Storage::exception_kind) }
+}
+
+/// PEP 479 converts a StopIteration escaping the generator into RuntimeError.
+pub(super) fn generator_stop(cause: Rc<Object>) -> Rc<Object> {
+    let error = new_exception(
+        Kind::RuntimeError,
+        Payload::Message(StrOwner::new("generator raised StopIteration".into())),
+    );
+    // SAFETY: the fresh wrapper has not escaped and cannot occur in its cause.
+    unsafe {
+        error.0.with_mut(|storage| {
+            let Storage::Exception(value) = storage else {
+                unreachable!()
+            };
+            value.details_mut().cause = Some(cause);
+            value.suppress_context = true;
+        });
+    }
+    error
 }
 
 pub(super) fn task_group_errors(errors: Vec<Rc<Object>>) -> Rc<Object> {
@@ -795,7 +985,7 @@ pub(super) fn active_exception() -> Option<Rc<Object>> {
     ACTIVE.with(|active| active.borrow().clone())
 }
 
-/// Uses Ruff's Python repr rules and its pinned Unicode printable categories.
+/// Quote and escape a string with CPython 3.14's Unicode 16 printability rules.
 pub(crate) fn string_repr(value: &str) -> Str {
     let mut result = String::new();
     push_string_repr(value, &mut result);
@@ -804,26 +994,109 @@ pub(crate) fn string_repr(value: &str) -> Str {
 
 pub(super) fn push_string_repr(value: &str, out: &mut String) {
     let escaped = UnicodeEscape::new_repr(value);
+    let extra = if value.is_ascii() {
+        0
+    } else {
+        value
+            .chars()
+            .filter(|&ch| crate::integer_text::newer_printable(ch))
+            .fold(0usize, |extra, ch| {
+                let width = if ch <= '\u{ffff}' { 6 } else { 10 };
+                extra.saturating_add(width - ch.len_utf8())
+            })
+    };
     if out.is_empty()
-        && let Some(size) = escaped.layout().len.and_then(|body| body.checked_add(2))
+        && let Some(size) = escaped
+            .layout()
+            .len
+            .and_then(|body| body.checked_add(2)?.checked_add(extra))
     {
         out.reserve_exact(size);
     }
-    write_escaped_string(&escaped, out).expect("writing to a String cannot fail");
+    write_escaped_string(&escaped, out, extra != 0).expect("writing to a String cannot fail");
 }
 
 pub(crate) fn write_string_repr(value: &str, out: &mut impl std::fmt::Write) -> std::fmt::Result {
-    write_escaped_string(&UnicodeEscape::new_repr(value), out)
+    write_escaped_string(&UnicodeEscape::new_repr(value), out, !value.is_ascii())
+}
+
+/// Render the portable spelling into a container repr without first copying the whole path.
+/// A literal backslash is the only character whose quoted spelling starts with two backslashes.
+pub(super) fn push_windows_path_repr(value: &str, out: &mut String) {
+    struct PosixSeparators<'a> {
+        out: &'a mut String,
+        escape: bool,
+    }
+
+    impl std::fmt::Write for PosixSeparators<'_> {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            for ch in text.chars() {
+                if self.escape {
+                    if ch == '\\' {
+                        self.out.push('/');
+                    } else {
+                        self.out.push('\\');
+                        self.out.push(ch);
+                    }
+                    self.escape = false;
+                } else if ch == '\\' {
+                    self.escape = true;
+                } else {
+                    self.out.push(ch);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    let mut writer = PosixSeparators { out, escape: false };
+    write_escaped_string(
+        &UnicodeEscape::new_repr(value),
+        &mut writer,
+        !value.is_ascii(),
+    )
+    .unwrap();
+    debug_assert!(!writer.escape);
 }
 
 fn write_escaped_string(
     escaped: &UnicodeEscape<'_>,
     out: &mut impl std::fmt::Write,
+    correct_printability: bool,
 ) -> std::fmt::Result {
     let quote = escaped.layout().quote.as_char();
     out.write_char(quote)?;
-    escaped.write_body(out)?;
+    if correct_printability {
+        escaped.write_body(&mut Unicode16Repr(out))?;
+    } else {
+        escaped.write_body(out)?;
+    }
     out.write_char(quote)
+}
+
+/// Stream Ruff's escaped body, escaping characters first assigned after Unicode 16.
+struct Unicode16Repr<'a, W>(&'a mut W);
+
+impl<W: std::fmt::Write> std::fmt::Write for Unicode16Repr<'_, W> {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        let mut start = 0;
+        if !text.is_ascii() {
+            for (i, ch) in text
+                .char_indices()
+                .filter(|&(_, ch)| crate::integer_text::newer_printable(ch))
+            {
+                self.0.write_str(&text[start..i])?;
+                let code = u32::from(ch);
+                if code <= 0xffff {
+                    write!(self.0, "\\u{code:04x}")?;
+                } else {
+                    write!(self.0, "\\U{code:08x}")?;
+                }
+                start = i + ch.len_utf8();
+            }
+        }
+        self.0.write_str(&text[start..])
+    }
 }
 
 /// Acquires nullable exception input without retaining a storage reference.
@@ -851,16 +1124,23 @@ impl Storage {
 
     fn exception_message(&self) -> StrOwner {
         match &self.exception().payload {
+            Payload::Import(err) => err.message(),
+            Payload::Positional(args) => args.message(),
             Payload::Exit(code) => exit_text(code.as_ref(), ""),
             Payload::Empty => StrOwner::new(Str::new("")),
             Payload::Message(message) => StrOwner::clone(message),
             Payload::Arguments(arguments) => StrOwner::clone(&arguments.message),
+            Payload::Json(e) => StrOwner::new(Str::from(format!(
+                "{}: line {} column {} (char {})",
+                e.msg, e.lineno, e.colno, e.pos
+            ))),
             Payload::Process(process) => StrOwner::new(process.message()),
             Payload::Timeout(timeout) => StrOwner::new(timeout.message()),
             Payload::Key(key) if key.kind == WordKind::new(3) => {
                 // SAFETY: this owned kind-3 word is a live string.
                 StrOwner::new(string_repr(unsafe { &*(key.word as *const Str) }))
             }
+            Payload::Tree(errors) => errors.message(),
             Payload::Key(key) => {
                 let mut message = String::new();
                 // SAFETY: the exception owns the immutable key and its exact kind.
@@ -878,13 +1158,42 @@ impl Storage {
     }
 }
 
+/// # Safety
+/// The caller roots an exception and supplies the field selector emitted by the
+/// compiler. On success, string and integer fields transfer independent owners.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_json_error_field(value: *const Object, field: u32) -> usize {
+    // SAFETY: the exception stays live until the field has been acquired.
+    let result = unsafe {
+        object(value).0.with(|storage| {
+            let exception = storage.exception();
+            if let Payload::Json(e) = &exception.payload {
+                return Ok(match field {
+                    0 => StrOwner::into_raw(e.msg.clone()) as usize,
+                    1 => StrOwner::into_raw(e.doc.clone()) as usize,
+                    2 => crate::Int::from_usize(e.pos).into_raw(),
+                    3 => crate::Int::from_usize(e.lineno).into_raw(),
+                    4 => crate::Int::from_usize(e.colno).into_raw(),
+                    _ => unreachable!("invalid JSON exception field"),
+                });
+            }
+            let name = ["msg", "doc", "pos", "lineno", "colno"][field as usize];
+            Err(Error::new(
+                Kind::AttributeError,
+                format!("'{}' object has no attribute '{name}'", exception.name()),
+            ))
+        })
+    };
+    finish(result, 0)
+}
+
 fn exit_text(code: Option<&OwnedWord>, missing: &str) -> StrOwner {
     let Some(code) = code else {
         return StrOwner::new(Str::new(missing));
     };
     if code.kind == WordKind::new(3) {
         // SAFETY: the exit payload roots this string.
-        return unsafe { StrOwner::acquire_word(code.word) };
+        return unsafe { crate::StrOwner::acquire_word(code.word) };
     }
     let mut text = String::new();
     // SAFETY: the payload owns a scalar with this exact word kind.
@@ -893,10 +1202,10 @@ fn exit_text(code: Option<&OwnedWord>, missing: &str) -> StrOwner {
 }
 
 /// Construct SystemExit with its original code. Kind 4 denotes an omitted
-/// argument; 0, 1, 2 and 3 represent None, bool, int and str respectively.
+/// argument; 0, 1, 2, 3 and 6 represent None, bool, int, str and tuple.
 ///
 /// # Safety
-/// The caller roots the scalar or immutable string described by `kind`.
+/// The caller roots the scalar, string or tuple described by `kind`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_new(kind: u32, word: usize) -> *const Object {
     let code = (kind != 4).then(|| {
@@ -925,13 +1234,21 @@ pub unsafe extern "C" fn imre_system_exit_code(value: *const Object) -> *const O
     Rc::into_raw(unsafe { acquire_rc(value as usize) })
 }
 
-unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
+pub(super) unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
     // SAFETY: a code view keeps its immutable typed exit payload alive.
     unsafe {
-        (*value).0.with(|s| match &s.exception().payload {
-            Payload::Exit(Some(code)) => (code.kind, code.word),
-            Payload::Exit(None) => (WordKind::new(0), 0),
-            _ => unreachable!("checked SystemExit code view"),
+        (*value).0.with(|s| match s {
+            Storage::ObjectValue(v) => (v.kind, v.word),
+            Storage::ModuleMember(m) => {
+                let (kind, word) = m.scalar().expect("non-scalar module metadata was handled");
+                (WordKind::new(kind), word)
+            }
+            Storage::Exception(e) => match &e.payload {
+                Payload::Exit(Some(code)) => (code.kind, code.word),
+                Payload::Exit(None) => (WordKind::new(0), 0),
+                _ => unreachable!("checked SystemExit code view"),
+            },
+            _ => unreachable!("checked exception field"),
         })
     }
 }
@@ -942,6 +1259,11 @@ unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
 /// The caller roots a code view from `imre_system_exit_code`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32 {
+    // SAFETY: the caller roots the boxed value and any typed index throughout this borrow.
+    if let Some(kind) = unsafe { super::errno::with_nonscalar_member(object(value), |m| m.kind()) }
+    {
+        return kind;
+    }
     // SAFETY: the code view roots its typed payload.
     unsafe { exit_word(value).0.raw() }
 }
@@ -952,33 +1274,61 @@ pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32
 /// `value` is a rooted code view returned by `imre_system_exit_code`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *const Str {
+    // SAFETY: the caller roots the boxed value and any typed index throughout this borrow.
+    if let Some(text) = unsafe { super::errno::with_nonscalar_member(object(value), |m| m.text(0)) }
+    {
+        return text;
+    }
     // SAFETY: the caller roots the immutable exit payload.
     unsafe {
-        (*value).0.with(|s| {
-            let Payload::Exit(code) = &s.exception().payload else {
-                unreachable!()
-            };
-            StrOwner::into_raw(exit_text(code.as_ref(), "None"))
-        })
+        let (kind, word) = exit_word(value);
+        super::boxed_values::checked_text(kind, word, false)
     }
 }
 
-/// Compare the original exit code against a scalar or a second code view.
+/// Compare the original exit code against a scalar, tuple or a second code view.
 ///
 /// # Safety
 /// `value` is a rooted code view. `word` is rooted with kind 0 (None), 1
-/// (bool), 2 (int), 3 (str), or 5 (another code view).
+/// (bool), 2 (int), 3 (str), 5 (another object view), 6 (tuple), 8 (bytes), or
+/// 17 (a concrete integer-to-string dictionary).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_equal(
     value: *const Object,
     kind: u32,
     word: usize,
 ) -> u32 {
-    fn numeric(kind: WordKind, word: usize) -> (WordKind, usize) {
-        if kind == WordKind::new(1) {
-            (WordKind::new(2), (word << 1) | 1)
-        } else {
-            (kind, word)
+    // The compiler uses 5 for a second boxed view and 17 for a concrete
+    // dict[int, str]. Other representation tags are scalar/tuple word kinds.
+    // SAFETY: both inputs stay rooted while we compare their borrowed fields.
+    unsafe {
+        if super::errno::with_nonscalar_member(object(value), |_| ()).is_some() {
+            let (other, payload) = if kind == 5 {
+                if super::errno::with_nonscalar_member(object(word as *const Object), |_| ())
+                    .is_some()
+                {
+                    (16, word)
+                } else {
+                    let (other, payload) = exit_word(word as *const Object);
+                    (other.raw(), payload)
+                }
+            } else {
+                (if kind == 17 { 5 } else { kind }, word)
+            };
+            return super::errno::imre_errno_member_equal(value, other, payload);
+        }
+        if kind == 17 {
+            return 0;
+        }
+        if kind == 5
+            && super::errno::with_nonscalar_member(object(word as *const Object), |_| ()).is_some()
+        {
+            let (other, payload) = exit_word(value);
+            return super::errno::imre_errno_member_equal(
+                word as *const Object,
+                other.raw(),
+                payload,
+            );
         }
     }
     // SAFETY: both code views and all inferred scalar arguments remain rooted.
@@ -989,16 +1339,21 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
         } else {
             (WordKind::new(kind), word)
         };
-        (numeric(k, w), numeric(j, v))
+        ((k, w), (j, v))
     };
     // SAFETY: matching immutable scalar kinds describe both words.
-    u32::from(left_kind == right_kind && unsafe { super::values::equal(left, right, left_kind) })
+    u32::from(unsafe { super::boxed_values::equal((left_kind, left), (right_kind, right)) })
 }
 
 /// # Safety
 /// `value` is a rooted immutable exit code.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u32 {
+    // SAFETY: the caller roots the boxed value and any typed index throughout this borrow.
+    if let Some(bit) = unsafe { super::errno::with_nonscalar_member(object(value), |m| m.truth()) }
+    {
+        return bit;
+    }
     // SAFETY: the code view roots the scalar described by the stored word kind.
     let (kind, word) = unsafe { exit_word(value) };
     u32::from(match kind.raw() {
@@ -1007,6 +1362,12 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
+        // SAFETY: the view owns this integer list through the length read.
+        4 => unsafe { (&*(word as *const super::List)).0.with(|v| !v.is_empty()) },
+        // SAFETY: the view owns this exact byte buffer.
+        8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
+        // SAFETY: the tuple remains rooted while its immutable length is read.
+        6 => unsafe { super::records::descriptor(word as *const usize) }.length != 0,
         _ => unreachable!(),
     })
 }
@@ -1150,12 +1511,13 @@ pub unsafe extern "C" fn imre_exception_argument(
 ///
 /// # Safety
 /// The descriptor and method addresses are static. The compiler supplies a rooted
-/// complete record, its string argument (or null), and unary record-to-str methods.
+/// complete record and unary record-to-str methods. When flag 4 is set, the
+/// argument is a rooted view of the positional tuple; otherwise it is a string or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_named_exception_record_new(
     descriptor: *const NamedDescriptor,
     record: *const usize,
-    message: *const Str,
+    argument: *const (),
     text: Option<Formatter>,
     repr: Option<Formatter>,
     display_flags: u32,
@@ -1163,7 +1525,20 @@ pub unsafe extern "C" fn imre_named_exception_record_new(
     // SAFETY: the fresh exception cannot yet alias user code and its payload
     // acquires the exact native record before the caller releases that owner.
     unsafe {
-        let value = imre_named_exception_new(descriptor, message);
+        let tuple = display_flags & 4 != 0;
+        let value = imre_named_exception_new(
+            descriptor,
+            if tuple {
+                std::ptr::null()
+            } else {
+                argument.cast()
+            },
+        );
+        let positional = tuple.then(|| {
+            let (kind, word) = exit_word(argument.cast());
+            debug_assert_eq!(kind.raw(), 6);
+            imports::Positional(kind.acquire(word))
+        });
         let payload = NamedPayload {
             record: WordKind::new(6).acquire(record as usize),
             text,
@@ -1175,6 +1550,9 @@ pub unsafe extern "C" fn imre_named_exception_record_new(
             let Storage::Exception(e) = s else {
                 unreachable!()
             };
+            if let Some(args) = positional {
+                e.payload = Payload::Positional(args);
+            }
             e.details_mut().layout = Some(Rc::new(payload));
         });
         value
@@ -1240,6 +1618,9 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
             }
             let e = s.exception();
             let arg = match &e.payload {
+                Payload::Import(err) => err.args.repr_args(),
+                Payload::Positional(args) => args.repr_args(),
+                Payload::Tree(errors) => errors.message().as_ref().clone(),
                 Payload::Empty => Str::new(""),
                 Payload::Arguments(arguments) => {
                     let mut result = String::new();
@@ -1294,7 +1675,7 @@ pub unsafe extern "C" fn imre_exception_new(kind: u32, message: *const Str) -> *
         Payload::Key(unsafe { WordKind::new(3).acquire(message as usize) })
     } else {
         // SAFETY: the non-null argument is a rooted StrOwner.
-        Payload::Message(unsafe { StrOwner::acquire_word(message as usize) })
+        Payload::Message(unsafe { crate::StrOwner::acquire_word(message as usize) })
     };
     Rc::into_raw(new_exception(kind, payload))
 }
@@ -1331,6 +1712,32 @@ pub unsafe extern "C" fn imre_exception_matches(value: *const Object, expected_k
             u32::from(expected_kind < 256 && e.kind.matches(Kind::from_raw(expected_kind)))
         })
     }
+}
+
+/// Match the categories retained by a previously constructed assertion context.
+///
+/// # Safety
+/// Both arguments must be live handles of their declared types. A category lookup
+/// only reads the exception and cannot run Python or mutate the list during the borrow.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_matches_any(
+    value: *const Object,
+    kinds: *const crate::List,
+) -> u32 {
+    // SAFETY: the pointers are independently rooted throughout these readonly operations.
+    u32::from(unsafe {
+        (*kinds).0.with(|entries| {
+            entries.iter().any(|entry| {
+                entry
+                    .as_small()
+                    .and_then(|n| u32::try_from(n).ok())
+                    .is_some_and(|kind| {
+                        (kind >= 256 || Kind::try_from_raw(kind).is_some())
+                            && imre_exception_matches(value, kind) != 0
+                    })
+            })
+        })
+    })
 }
 
 /// Returns an owned string containing Python's str(exception) representation.
@@ -1476,13 +1883,13 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
             Some((status, message))
         })
     };
+    let stderr = crate::sys::flush_stderr();
+    let stdout = crate::flush_stdout();
     if let Some((status, message)) = exit {
-        let _ = crate::flush_stdout();
-        let _ = crate::sys::flush_stderr();
         if let Some(text) = message {
-            let _ = writeln!(io::stderr().lock(), "{text}");
+            let _ = crate::sys::write_stderr(&text, true);
         }
-        return status;
+        return status_after_flush(status, stdout, stderr.and(crate::sys::flush_stderr()));
     }
     let mut chain = Vec::new();
     let mut current = Some(pending.clone());
@@ -1503,27 +1910,72 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
             // SAFETY: display transfers one owned string.
             unsafe { StrOwner::from_raw(message) }
         };
-        chain.push((name, message));
+        // Traceback suggestions decorate only uncaught output. The owned exception's
+        // message, positional arguments, str() and repr() stay independent.
+        // SAFETY: the owned exception stays live; this read does not invoke callbacks.
+        let suggestion = unsafe {
+            exception
+                .0
+                .with(|storage| match &storage.exception().payload {
+                    Payload::Import(fields) => fields.suggestion(),
+                    _ => None,
+                })
+        };
+        chain.push((name, message, suggestion));
         current = cause;
     }
     drop(pending);
-    let _ = crate::flush_stdout();
-    let _ = crate::sys::flush_stderr();
-    let mut stderr = io::stderr().lock();
-    for (index, (name, message)) in chain.into_iter().rev().enumerate() {
+    let mut diagnostic = crate::sys::stderr_writer();
+    for (index, (name, message, suggestion)) in chain.into_iter().rev().enumerate() {
         if index != 0 {
             let _ = writeln!(
-                stderr,
+                diagnostic,
                 "\nThe above exception was the direct cause of the following exception:\n"
             );
         }
-        if message.is_empty() {
-            let _ = writeln!(stderr, "{name}");
+        if let Some(hint) = suggestion {
+            let _ = writeln!(diagnostic, "{name}: {message}. Did you mean: '{hint}'?");
+        } else if message.is_empty() {
+            let _ = writeln!(diagnostic, "{name}");
         } else {
-            let _ = writeln!(stderr, "{name}: {message}");
+            let _ = writeln!(diagnostic, "{name}: {message}");
         }
     }
-    1
+    drop(diagnostic);
+    status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()))
+}
+
+/// CPython reports a stdout flush error, silently records a stderr flush error,
+/// and uses status 120 if either stream could not be finalized.
+pub(crate) fn status_after_flush(
+    status: i32,
+    stdout: io::Result<()>,
+    stderr: io::Result<()>,
+) -> i32 {
+    if let Err(error) = stdout {
+        let broken_pipe = error.kind() == io::ErrorKind::BrokenPipe;
+        let error = super::files::errno_error(error);
+        let name = if broken_pipe {
+            "BrokenPipeError"
+        } else {
+            error.kind.name()
+        };
+        let exception = error.into_object();
+        // SAFETY: the owned OS exception roots its arguments throughout formatting.
+        let message = unsafe { exception.0.with(Storage::exception_message) };
+        let mut diagnostic = io::stderr().lock();
+        let _ = writeln!(diagnostic, "Exception ignored while flushing sys.stdout:");
+        if message.is_empty() {
+            let _ = writeln!(diagnostic, "{name}");
+        } else {
+            let _ = writeln!(diagnostic, "{name}: {message}");
+        }
+        120
+    } else if stderr.is_err() {
+        120
+    } else {
+        status
+    }
 }
 
 #[cfg(test)]
@@ -1960,6 +2412,23 @@ mod tests {
             );
             drop(take_error(Kind::RuntimeError));
             assert_eq!((key, value), (17, 19));
+        }
+    }
+
+    #[test]
+    fn windows_path_repr_preserves_other_escapes() {
+        for raw in [
+            r"\\server\share\folder",
+            "C:\\one'\t\\two\"\n",
+            "C:\\'\0\\\r\\𐐀\\\u{1faea}",
+            r"C:\x00\next",
+        ] {
+            let mut rendered = String::from("prefix ");
+            push_windows_path_repr(raw, &mut rendered);
+            assert_eq!(
+                &rendered[7..],
+                string_repr(&raw.replace('\\', "/")).as_str()
+            );
         }
     }
 

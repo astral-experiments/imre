@@ -21,6 +21,22 @@ impl Emitter<'_, '_> {
     /// source preserves its absent zero word when transitioning into a union.
     pub(super) fn union_inject(&mut self, value: Value, returns: Type) -> Value {
         let source = self.module.types.payload(value.ty).unwrap_or(value.ty);
+        // Words 1 and 2 are not tagged live addresses. Reuse optional bool's
+        // encoding so widening bool | None preserves absence as well.
+        if source == Type::Bool {
+            self.forget(&value);
+            let operand = if value.ty == source {
+                let word = self.word(&value);
+                self.instruction(format!("add i64 {word}, 1"))
+            } else {
+                value.operand
+            };
+            return Value {
+                ty: returns,
+                operand,
+                small_integer: false,
+            };
+        }
         let tag = tag(source);
         let word = self.word(&value);
         let operand = if source == Type::Int {
@@ -52,6 +68,27 @@ impl Emitter<'_, '_> {
     /// Local flow proves the member before projection. An integer may need to
     /// recover its immediate representation; other owners transfer unchanged.
     pub(super) fn union_project(&mut self, value: Value, returns: Type) -> Value {
+        if returns == Type::Bool || self.module.types.payload(returns) == Some(Type::Bool) {
+            self.forget(&value);
+            let operand = if returns == Type::Bool {
+                self.instruction(format!("icmp eq i64 {}, 2", value.operand))
+            } else {
+                value.operand
+            };
+            return Value {
+                ty: returns,
+                operand,
+                small_integer: false,
+            };
+        }
+        if matches!(
+            self.module.types.payload(returns).unwrap_or(returns),
+            Type::Union(_)
+        ) {
+            // A narrowed union still uses the original member tags and optional zero.
+            self.forget(&value);
+            return self.decode_word(value.operand, returns);
+        }
         let word = if returns == Type::Int {
             self.instruction(format!(
                 "call i64 @imre_union_into_int(i64 {})",
@@ -66,8 +103,18 @@ impl Emitter<'_, '_> {
         self.decode_word(word, returns)
     }
 
-    /// Nullable exceptions are tested only on the present edge. Other exact
-    /// categories need no object inspection; finite union members test their tag.
+    /// A record's header retains its actual descriptor through base-class views.
+    pub(super) fn exact_record_test(&mut self, value: &Value, class: usize) -> String {
+        let layout = self.output.global_ref(format!("layout_class_{class}"));
+        let matched = self.instruction(format!(
+            "call i32 @imre_record_has_type(ptr {}, ptr @{layout})",
+            value.operand
+        ));
+        self.instruction(format!("icmp ne i32 {matched}, 0"))
+    }
+
+    /// Inspect exception and record layouts only after proving the payload is present
+    /// and selecting its tag if it is part of a finite union.
     pub(super) fn instance_test(&mut self, value: &Value, classes: &[InstanceType]) -> String {
         if let Some(payload) = self.module.types.payload(value.ty) {
             let present = self.instruction(format!("icmp ne i64 {}, 0", value.operand));
@@ -84,14 +131,28 @@ impl Emitter<'_, '_> {
                 "phi i1 [ false, %{absent} ], [ {result}, %{inspected} ]"
             ));
         }
-        if value.ty == Type::ExitCode {
+        // Frontend class tests include every descendant. If they include the
+        // declared base, all layouts which can reach this view already match.
+        if matches!(value.ty, Type::Class(_)) && classes.iter().any(|class| class.accepts(value.ty))
+        {
+            return "true".to_owned();
+        }
+        if value.ty == Type::ObjectValue {
             // The view retains its heterogeneous payload. None is not a class
             // accepted by this subset, and bool is also an instance of int.
-            let mask = [Type::None, Type::Bool, Type::Int, Type::Str]
-                .iter()
-                .enumerate()
-                .filter(|(_, ty)| classes.iter().any(|class| class.accepts(**ty)))
-                .fold(0, |mask, (kind, _)| mask | 1 << kind);
+            let mask = [
+                (0, Type::None),
+                (1, Type::Bool),
+                (2, Type::Int),
+                (3, Type::Str),
+                (4, Type::ListInt),
+                (5, Type::Dict(0)),
+                (6, Type::Tuple(0)),
+                (8, Type::Bytes),
+            ]
+            .iter()
+            .filter(|(_, ty)| classes.iter().any(|class| class.accepts(*ty)))
+            .fold(0, |mask, (kind, _)| mask | 1 << *kind);
             let kind = self.instruction(format!(
                 "call i32 @imre_system_exit_code_kind(ptr {})",
                 value.operand
@@ -116,24 +177,37 @@ impl Emitter<'_, '_> {
                     _ => "false".into(),
                 }
             } else if let Some(members) = self.module.types.members(value.ty) {
-                match (class.accepts(members[0]), class.accepts(members[1])) {
-                    (true, true) => "true".to_owned(),
-                    (false, false) => "false".to_owned(),
-                    (first, _) => {
-                        let selected = members[usize::from(!first)];
-                        let bits = self.instruction(format!("and i64 {}, 7", value.operand));
-                        let found =
-                            self.instruction(format!("icmp eq i64 {bits}, {}", tag(selected)));
-                        if let InstanceType::Exception(kind) = class
-                            && kind != 0
-                            && selected == Type::Exception
-                        {
+                let accepts_tag = |ty| {
+                    class.accepts(ty)
+                        || matches!(
+                            (class, ty),
+                            (InstanceType::Exact(Type::Class(_)), Type::Class(_))
+                        )
+                };
+                if members.iter().copied().all(accepts_tag) {
+                    "true".to_owned()
+                } else {
+                    let mut matched = None;
+                    let bits = self.instruction(format!("and i64 {}, 7", value.operand));
+                    for selected in members.into_iter().filter(|&ty| accepts_tag(ty)) {
+                        let found = if selected == Type::Bool {
+                            // Exclude zero (None) and every tagged integer owner.
+                            let offset = self.instruction(format!("sub i64 {}, 1", value.operand));
+                            self.instruction(format!("icmp ult i64 {offset}, 2"))
+                        } else {
+                            self.instruction(format!("icmp eq i64 {bits}, {}", tag(selected)))
+                        };
+                        let current = if matches!(
+                            (class, selected),
+                            (InstanceType::Exception(1..), Type::Exception)
+                                | (InstanceType::Exact(Type::Class(_)), Type::Class(_))
+                        ) {
                             let (inspect, end) = (self.label(), self.label());
                             let other = self.current.clone();
                             self.branch(&found, &inspect, &end);
                             self.start(&inspect);
                             let word = self.instruction(format!("and i64 {}, -8", value.operand));
-                            let payload = self.decode_word(word, Type::Exception);
+                            let payload = self.decode_word(word, selected);
                             let matches = self.instance_test(&payload, &[class]);
                             let inspected = self.current.clone();
                             self.jump(&end);
@@ -143,13 +217,25 @@ impl Emitter<'_, '_> {
                             ))
                         } else {
                             found
-                        }
+                        };
+                        matched = Some(match matched {
+                            None => current,
+                            Some(prior) => self.instruction(format!("or i1 {prior}, {current}")),
+                        });
                     }
+                    matched.unwrap_or_else(|| "false".to_owned())
                 }
+            } else if let (InstanceType::Exact(Type::Class(class)), Type::Class(_)) =
+                (class, value.ty)
+            {
+                self.exact_record_test(value, class)
             } else if let InstanceType::Exception(kind) = class
                 && matches!(
                     value.ty,
-                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+                    Type::Exception
+                        | Type::ImportException
+                        | Type::TimeoutExpired
+                        | Type::NamedException(_)
                 )
             {
                 let matched = self.instruction(format!(

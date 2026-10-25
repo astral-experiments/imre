@@ -1,0 +1,32 @@
+{
+  "module": "test.test_fnmatch",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 24,
+  "reference": {
+    "test.test_fnmatch.FilterFalseTestCase.test_case": "pass",
+    "test.test_fnmatch.FilterFalseTestCase.test_filterfalse": "pass",
+    "test.test_fnmatch.FilterFalseTestCase.test_mix_bytes_str": "pass",
+    "test.test_fnmatch.FilterFalseTestCase.test_sep": "pass",
+    "test.test_fnmatch.FilterTestCase.test_case": "pass",
+    "test.test_fnmatch.FilterTestCase.test_filter": "pass",
+    "test.test_fnmatch.FilterTestCase.test_mix_bytes_str": "pass",
+    "test.test_fnmatch.FilterTestCase.test_sep": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_bytes": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_case": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_char_set": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_fnmatch": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_fnmatchcase": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_mix_bytes_str": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_range": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_sep": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_sep_in_char_set": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_sep_in_range": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_slow_fnmatch": "pass",
+    "test.test_fnmatch.FnmatchTestCase.test_warnings": "pass",
+    "test.test_fnmatch.TranslateTestCase.test_star_indices_locations": "pass",
+    "test.test_fnmatch.TranslateTestCase.test_translate": "pass",
+    "test.test_fnmatch.TranslateTestCase.test_translate_expressions": "pass",
+    "test.test_fnmatch.TranslateTestCase.test_translate_wildcards": "pass"
+  }
+}

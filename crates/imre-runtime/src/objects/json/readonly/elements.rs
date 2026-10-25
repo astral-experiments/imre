@@ -5,15 +5,16 @@ use std::fmt;
 use serde::Deserializer;
 use serde::de::{DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor};
 
-use super::{Int, Key, Node, Str};
+use super::{Int, Key, KeyMemo, Node, Str};
 
 /// Nested arrays retain their lazy source spans. Floating-point callbacks also
 /// fall back because Serde can report an out-of-range integer as a float.
-pub(super) fn parse(text: &str, nodes: &mut Vec<Node>) -> Option<Node> {
+pub(super) fn parse(text: &str, nodes: &mut Vec<Node>, keys: &KeyMemo) -> Option<Node> {
     let start = nodes.len();
     let value = serde_json::Deserializer::from_str(text).deserialize_seq(&mut Elements {
         nodes,
         entered: false,
+        keys,
     });
     if let Ok(array) = value {
         Some(array)
@@ -26,6 +27,7 @@ pub(super) fn parse(text: &str, nodes: &mut Vec<Node>) -> Option<Node> {
 struct Elements<'a> {
     nodes: &'a mut Vec<Node>,
     entered: bool,
+    keys: &'a KeyMemo,
 }
 
 impl<'de> DeserializeSeed<'de> for &mut Elements<'_> {
@@ -80,7 +82,7 @@ impl<'de> Visitor<'de> for &mut Elements<'_> {
         while let Some(key) = map.next_key_seed(Key)? {
             fields.push((Str::new(key.as_ref()), map.next_value_seed(&mut *self)?));
         }
-        Ok(Node::Object(fields))
+        Ok(Node::Object(self.keys.fields(fields)))
     }
 }
 
@@ -91,12 +93,17 @@ mod tests {
     #[test]
     fn exact_integer_rows_do_not_confuse_string_brackets_with_nested_arrays() {
         let mut nodes = vec![Node::Null];
-        let row = parse(r#"[{"v":18446744073709551615,"name":"[row]"}]"#, &mut nodes);
+        let keys = KeyMemo::default();
+        let row = parse(
+            r#"[{"v":18446744073709551615,"name":"[row]"}]"#,
+            &mut nodes,
+            &keys,
+        );
         assert!(matches!(row, Some(Node::Array(items)) if items.len() == 1));
         assert!(matches!(&nodes[1], Node::Integer(n) if n.big().as_ref() == &u64::MAX.into()));
         let before = nodes.len();
         for raw in ["[0,[1]]", "[0,0.5]", "[0,18446744073709551616]", "[0,NaN]"] {
-            assert!(parse(raw, &mut nodes).is_none());
+            assert!(parse(raw, &mut nodes, &keys).is_none());
             assert_eq!(nodes.len(), before);
         }
     }

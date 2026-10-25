@@ -24,6 +24,7 @@ REJECTED = {
     "tomllib_key_equality": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys()\nprint(keys == keys)",
     "tomllib_key_argument": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys('x')",
     "integer_segment": "Path(1)",
+    "missing_nested_walk_option": "def option(required: bool) -> bool:\n    return required\nPath('a').relative_to(walk_up=option())",
     "bytes_segment": "Path(b'file')",
     "keyword_segment": "Path(path='file')",
     "expanded_segments": "Path(*['a', 'b'])",
@@ -31,7 +32,6 @@ REJECTED = {
     "joinpath_type": "Path('a').joinpath('b', 1)",
     "joinpath_keyword": "Path('a').joinpath(child='b')",
     "with_name_type": "Path('a').with_name(Path('b'))",
-    "write_bytes_type": "Path('a').write_bytes('data')",
     "open_update": "Path('a').open('r+')",
     "open_binary_encoding": "Path('a').open('rb', encoding='utf-8')",
     "open_dynamic_mode": "mode = 'r'\nPath('a').open(mode)",
@@ -51,26 +51,10 @@ REJECTED = {
     "which_mode_type": "import shutil\nshutil.which('tool', mode='x')",
     "path_constructor_value": "constructor = Path\nprint(constructor('a'))",
     "subclass": "class Custom(Path):\n    pass",
-    "escaped_iterdir": "values = Path('.').iterdir()",
-    "escaped_glob": "values = Path('.').glob('*.json')",
     "reversed_iterator": "for value in reversed(Path('.').iterdir()):\n    print(value)",
     "iterdir_arguments": "for value in Path('.').iterdir(1):\n    print(value)",
-    "glob_dynamic_pattern": "pattern = '*.json'\nfor value in Path('.').glob(pattern):\n    print(value)",
-    "glob_empty": "for value in Path('.').glob(''):\n    print(value)",
-    "glob_dot": "for value in Path('.').glob('.'):\n    print(value)",
-    "glob_recursive": "for value in Path('.').glob('**'):\n    print(value)",
-    "glob_nested": "for value in Path('.').glob('sub/*.json'):\n    print(value)",
-    "glob_trailing_separator": "for value in Path('.').glob('*/'):\n    print(value)",
-    "glob_absolute": "for value in Path('.').glob('/tmp'):\n    print(value)",
-    "glob_options": "for value in Path('.').glob('*', case_sensitive=False):\n    print(value)",
-    "predicate_options": "print(Path('.').exists(follow_symlinks=False))",
-    "write_non_utf8_encoding": "Path('a').write_text('data', encoding='latin-1')",
-    "read_encoding": "Path('a').read_text(encoding='latin-1')",
-    "read_dynamic_encoding": "encoding = 'utf-8'\nPath('a').read_text(encoding=encoding)",
-    "write_bytes": "Path('a').write_text(b'data', encoding='utf-8')",
-    "read_errors": "Path('a').read_text(encoding='utf-8', errors='ignore')",
-    "read_default_errors": "Path('a').read_text(errors='ignore')",
-    "write_newline": "Path('a').write_text('data', encoding='utf-8', newline='')",
+    "predicate_positional": "print(Path('.').exists(False))",
+    "predicate_unknown_keyword": "print(Path('.').is_dir(follow_links=False))",
     "read_argument": "Path('a').read_text(1, encoding='utf-8')",
     "unsupported_method": "Path('.').expanduser()",
     "resolve_integer_strict": "Path('.').resolve(strict=1)",
@@ -101,7 +85,7 @@ print(Path('input.txt').is_file())
 """
 
 
-def seed(directory: Path) -> None:
+def seed(directory: Path, *, stat_clock: bool = False) -> None:
     directory.mkdir()
     for name, data in {
         "input.txt": "alpha\r\néλ🙂\rzero\0tail\n".encode(),
@@ -138,6 +122,10 @@ def seed(directory: Path) -> None:
     (directory / "trailing-link").symlink_to("input.txt/")
     (directory / "absolute-link").symlink_to("/tmp", target_is_directory=True)
     (directory / "command").touch(mode=0o755)
+    if stat_clock:
+        timestamp = directory / "stat-clock"
+        timestamp.touch()
+        os.utime(timestamp, ns=(-1, 6_100_000_000_123_456_789))
     (directory / "denied").mkdir()
     (directory / "denied" / "secret.json").write_text("secret")
     (directory / "denied").chmod(0)
@@ -170,6 +158,8 @@ def main() -> None:
     parser.add_argument("--target")
     parser.add_argument("--lto-linker", type=Path)
     parser.add_argument("--opt-levels", nargs="+", choices=["0", "1", "2", "3"], default=["0", "3"])
+    parser.add_argument("--fixture", action="append", choices=sorted(p.stem for p in FIXTURES.glob("*.py")) + ["imported"],
+                        help="limit the positive filesystem comparisons to these fixtures")
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
     assert len(set(args.opt_levels)) == len(args.opt_levels)
@@ -204,11 +194,13 @@ def main() -> None:
         sources = [*sorted(FIXTURES.glob("*.py")), FIXTURES / "imported/main.py"]
         for source in sources:
             name = source.stem if source.parent == FIXTURES else "imported"
+            if args.fixture and name not in args.fixture:
+                continue
             runner = files.run_with_failing_output if name == "failures" else subprocess.run
             project = temporary / name
             project.mkdir()
             reference_dir = project / "cpython"
-            seed(reference_dir)
+            seed(reference_dir, stat_clock=name == "path_stat")
             reference = files.run([args.python, "-E", "-B", str(source)], reference_dir, limit_descriptors=name == "cleanup", runner=runner)
             files.check_result(reference, None, f"CPython {name}")
             stdout = reference.stdout
@@ -218,11 +210,12 @@ def main() -> None:
                 built = files.run([compiler, "build", str(source), "--module-root", str(source.parent), "-o", str(binary), "--opt-level", level, *flags], temporary)
                 assert built.returncode == 0 and not built.stderr, (name, level, built.stderr.decode())
                 native_dir = project / f"imre-O{level}"
-                seed(native_dir)
+                seed(native_dir, stat_clock=name == "path_stat")
                 actual = files.run([str(binary)], native_dir, limit_descriptors=name == "cleanup", runner=runner)
                 files.check_result(actual, None, f"Imre {name} O{level}")
                 assert actual.stdout == stdout, (name, level, actual.stdout, stdout)
                 assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
+                binary.unlink()
                 checks += 1
         source = temporary / "invalid_names.py"
         source.write_text(INVALID_NAMES)
@@ -237,6 +230,7 @@ def main() -> None:
                 actual = files.run([str(binary)], temporary, limit_descriptors=True)
                 files.check_result(actual, None, "invalid filename boundary")
                 assert actual.stdout == (b"invalid directory entry\ninvalid glob entry\n" * 4 + b"True\n"), actual.stdout
+                binary.unlink()
                 checks += 1
     print(f"Passed {checks} path checks ({len(REJECTED) + 1} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize}; CPython 3.14+ oracle)")
 

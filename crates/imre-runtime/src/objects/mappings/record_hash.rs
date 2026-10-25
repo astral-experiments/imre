@@ -72,7 +72,7 @@ unsafe fn prepare(record: *const usize) -> Result<(), Error> {
             unsafe {
                 field.0.with(|storage| match storage {
                     Storage::Json(view) => view.toml_table(name, &mut text),
-                    Storage::Document(value) => value.view().toml_table(name, &mut text),
+                    Storage::Document(value) => value.view()?.toml_table(name, &mut text),
                     _ => unreachable!("checked TOML projection"),
                 })
             }?;

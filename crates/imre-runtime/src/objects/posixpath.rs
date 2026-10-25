@@ -11,8 +11,8 @@ use super::exceptions::{Error, Kind};
 use super::{Bytes, Str};
 
 enum Spelling<'a> {
-    Text(&'a str),
-    Bytes(&'a [u8]),
+    Text(&'a Str),
+    Bytes(&'a Bytes),
 }
 
 impl<'a> Spelling<'a> {
@@ -36,6 +36,21 @@ impl<'a> Spelling<'a> {
 
     /// All split offsets are adjacent to ASCII delimiters or at an endpoint.
     fn slice(&self, range: Range<usize>) -> *const () {
+        if range == (0..self.bytes().len()) {
+            // SAFETY: borrow obtained both typed references from rooted Rc payloads.
+            return unsafe {
+                match self {
+                    Self::Text(text) => StrOwner::into_raw(crate::StrOwner::acquire_word(
+                        std::ptr::from_ref(*text) as usize,
+                    ))
+                    .cast(),
+                    Self::Bytes(bytes) => Rc::into_raw(super::acquire_rc::<Bytes>(
+                        std::ptr::from_ref(*bytes) as usize,
+                    ))
+                    .cast(),
+                }
+            };
+        }
         match self {
             Self::Text(s) => StrOwner::into_raw(StrOwner::new(Str::from(&s[range]))).cast(),
             Self::Bytes(b) => Rc::into_raw(Rc::new(b[range].to_vec())).cast(),

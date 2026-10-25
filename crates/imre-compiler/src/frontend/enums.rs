@@ -148,7 +148,102 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        // A comparison with a bool singleton only observes whether the other
+        // operand is that same singleton; integer object identity is irrelevant.
+        if let Some(union) = [left.ty, right.ty]
+            .into_iter()
+            .find(|&ty| self.types.is_bool_or_int(ty))
+            && (left.ty == Type::Bool || right.ty == Type::Bool)
+        {
+            return Ok(Self::identity_result(
+                vec![
+                    self.coerce(left, union, node)?,
+                    self.coerce(right, union, node)?,
+                ],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
+        // Python's empty built-in tuple is a singleton. Each operand still
+        // executes exactly once, even when it raises before returning the tuple.
+        if [left.ty, right.ty] == [self.types.tuple(Vec::new()); 2] {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(left), Statement::Expr(right)],
+                    value: Box::new(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(op == ast::CmpOp::Is),
+                    }),
+                    clear: Vec::new(),
+                },
+            });
+        }
+        // Python has exactly two bool singletons. Restrict this to exact bools:
+        // False and the integer zero can compare equal without being identical.
+        if left.ty == Type::Bool && right.ty == Type::Bool {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
+            && [&left, &right].iter().any(|value| {
+                matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::WrapperAttributes(_), _)
+                )
+            });
+        // Namespace owners and their backing dictionaries are distinct rooted
+        // objects. Optional storage preserves their pointer words and None tag.
+        let namespace = types
+            .iter()
+            .any(|ty| matches!(ty, Type::SimpleNamespace(_)))
+            && types
+                .iter()
+                .all(|ty| matches!(ty, Type::SimpleNamespace(_) | Type::Dict(_) | Type::None));
+        if wrapper_attributes || namespace {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
+        if types == [Type::BuiltinClass; 2] {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Compare(
+                    vec![left, right],
+                    vec![if op == ast::CmpOp::Is {
+                        Compare::Equal
+                    } else {
+                        Compare::NotEqual
+                    }],
+                ),
+            });
+        }
+        if types
+            .iter()
+            .any(|ty| matches!(ty, Type::PlainObject | Type::StrDescriptor(_)))
+            && (types == [left.ty, right.ty] || types[0] == types[1])
+        {
+            if types[0] == types[1] {
+                return Ok(Self::identity_result(
+                    vec![left, right],
+                    op == ast::CmpOp::IsNot,
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(left), Statement::Expr(right)],
+                    value: Box::new(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(op == ast::CmpOp::IsNot),
+                    }),
+                    clear: vec![],
+                },
+            });
+        }
         if types.contains(&Type::StringIterable) && types == [left.ty, right.ty] {
             // Both operands must reach identity with the same pointer tag.
             let left = self.coerce(left, Type::StringIterable, node)?;
@@ -158,24 +253,67 @@ impl Checker<'_> {
                 op == ast::CmpOp::IsNot,
             ));
         }
+        if let (Type::Class(a), Type::Class(b)) = (left.ty, right.ty)
+            && self.native_mock(a)
+            && self.native_mock(b)
+        {
+            return Ok(Self::identity_result(
+                vec![self.mock_node(left, a), self.mock_node(right, b)],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if !(types
             .iter()
             .all(|ty| matches!(ty, Type::StrEnum(_) | Type::Enum(_)))
             || types.iter().all(|ty| {
                 matches!(
                     ty,
-                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_) | Type::None
+                    Type::Exception
+                        | Type::ImportException
+                        | Type::TimeoutExpired
+                        | Type::NamedException(_)
+                        | Type::None
                 )
             })
+            || types == [Type::NativeModule; 2]
+            || types == [Type::ModuleNamespace; 2]
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::ForwardRef(_) | Type::Callable(_)))
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes))
+            || (types[0] == types[1]
+                && self
+                    .types
+                    .members(types[0])
+                    .is_some_and(|members| members == [Type::Str, Type::Bytes]))
+            || types.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) | Type::Class(_)
+                )
+            })
+            || types == [Type::Str; 2]
+            || types == [Type::LogRecord; 2]
+            || types.iter().all(|ty| matches!(ty, Type::Cursor(_)))
+            || types == [Type::Path; 2]
+            || (types.iter().all(|ty| matches!(ty, Type::Tuple(_)))
+                && types
+                    .iter()
+                    .any(|ty| self.types.struct_sequence_fields(*ty).is_some()))
             || types == [Type::Logger; 2]
+            || types == [Type::StringIO; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
+            || types == [Type::PathInfo; 2]
+            || types == [Type::JsonDecoder; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(
                 self.source,
                 node,
-                "identity comparisons require None, exceptions, enum members, loggers, or hash objects",
+                "identity comparisons require supported stable object identities",
             ));
         }
         Ok(Self::identity_result(

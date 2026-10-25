@@ -11,10 +11,10 @@ mod groupby;
 /// successful `next` owns `value`, and its consumer clears that transient owner.
 pub(super) struct Prepared {
     pub evaluate: Vec<Statement>,
-    acquire: Vec<Statement>,
-    next: Vec<Statement>,
+    pub(super) acquire: Vec<Statement>,
+    pub(super) next: Vec<Statement>,
     pub(super) value: usize,
-    ready: usize,
+    pub(super) ready: usize,
     /// An empty tuple has no element type or executable item assignment.
     elementless: bool,
     /// Enclosing slots a later pull may replace, after constructor arguments.
@@ -108,12 +108,14 @@ impl Checker<'_> {
 pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Expr) -> bool {
     matches!(expression, ast::Expr::Generator(_))
         || matches!(expression, ast::Expr::Call(call)
-            if checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
+            if checker.generator_signature(call).is_some()
+            || checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
             || checker.is_builtin_iter(call)
             || matches!(&*call.func, ast::Expr::Name(name)
-                if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
+                if checker.resolve(&call.func).is_none()
+                    && matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
             || matches!(&*call.func, ast::Expr::Attribute(attribute)
-                if matches!(attribute.attr.as_str(), "iterdir" | "glob")))
+                if matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob" | "walk")))
 }
 
 pub(super) fn integer(value: i64) -> Expr {
@@ -205,8 +207,13 @@ impl Checker<'_> {
         if self.is_builtin_iter(call) && call.arguments.args.len() != 1 {
             return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Repeat)) {
-            let cursor = self.repeat_cursor(call)?;
+        if matches!(
+            self.resolve(&call.func),
+            Some(Binding::Intrinsic(
+                Intrinsic::Repeat | Intrinsic::Count | Intrinsic::Islice | Intrinsic::Cycle
+            ))
+        ) {
+            let cursor = self.call(call)?;
             let element = self.types.cursor_element(cursor.ty).unwrap();
             return Ok(Some(Iteration::Prepared(
                 self.prepare_cursor(cursor, element),
@@ -214,6 +221,35 @@ impl Checker<'_> {
         }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain)) {
             return Ok(Some(Iteration::Prepared(self.chain_input(call, element)?)));
+        }
+        if let Some((signature, element)) = self.generator_signature(call) {
+            let frame = self.source_call(call, &signature, None, 0)?;
+            let handle = self.hidden(Type::GeneratorContext);
+            let value = self.hidden(element);
+            let ready = self.hidden(Type::Bool);
+            let op = |kind, ty| contexts::op(kind, ty, vec![self.local(handle)]);
+            let next = vec![
+                Statement::Clear(value),
+                Statement::Assign(ready, op(ir::ProcessOperation::GeneratorNext, Type::Bool)),
+                Statement::If(
+                    self.local(ready),
+                    vec![Statement::Assign(
+                        value,
+                        op(ir::ProcessOperation::GeneratorTake, element),
+                    )],
+                    Vec::new(),
+                ),
+            ];
+            return Ok(Some(Iteration::Prepared(Prepared {
+                evaluate: vec![Statement::Assign(handle, frame)],
+                acquire: Vec::new(),
+                next,
+                value,
+                ready,
+                elementless: false,
+                writes: HashSet::new(),
+                clear: vec![handle, value, ready],
+            })));
         }
         if self.resolve(&call.func).is_some() {
             return Ok(None);
@@ -263,15 +299,18 @@ impl Checker<'_> {
             return Ok(Some(Iteration::Prepared(input)));
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && matches!(attribute.attr.as_str(), "iterdir" | "glob")
+            && matches!(
+                attribute.attr.as_str(),
+                "iterdir" | "glob" | "rglob" | "walk"
+            )
             && self.class_reference(&attribute.value).is_none()
         {
             let receiver = self.expr(&attribute.value)?;
             if receiver.ty == Type::Path {
-                let iterator =
-                    self.path_iterator(receiver, call, attribute.attr.as_str() == "glob")?;
+                let iterator = self.path_iterator(receiver, call, attribute.attr.as_str())?;
+                let item = self.types.cursor_element(iterator.ty).unwrap();
                 return Ok(Some(Iteration::Prepared(
-                    self.prepare_path_iterator(iterator),
+                    self.prepare_cursor(iterator, item),
                 )));
             }
             if let Type::Class(class) = receiver.ty {
@@ -313,7 +352,11 @@ impl Checker<'_> {
                         self.callback_input(call, element, false)?,
                     )));
                 };
-                if !matches!(converter.id.as_str(), "int" | "str") {
+                if !matches!(converter.id.as_str(), "int" | "str" | "ord")
+                    || (converter.id == "ord"
+                        && (self.names.contains_key("ord")
+                            || self.resolve(&call.arguments.args[0]).is_some()))
+                {
                     return Ok(Some(Iteration::Prepared(
                         self.callback_input(call, element, false)?,
                     )));
@@ -322,7 +365,9 @@ impl Checker<'_> {
                 let source = self.expansion_input(source, None)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
                 let item = self.local(input.value);
-                let converted = if converter.id == "int" {
+                let converted = if converter.id == "ord" {
+                    self.ordinal(item, call)?
+                } else if converter.id == "int" {
                     self.consumer_value(item, true, call)?
                 } else {
                     match item.ty {
@@ -330,7 +375,7 @@ impl Checker<'_> {
                             paths::operation(ir::PathOperation::Text, Type::Str, vec![item])
                         }
                         Type::Str => item,
-                        Type::Class(_) | Type::CompletedProcess(_) => {
+                        Type::Class(_) | Type::CompletedProcess(..) => {
                             self.record_text(item, call)?
                         }
                         Type::Int | Type::Bool | Type::Float | Type::None | Type::Bytes => Expr {
@@ -628,7 +673,7 @@ impl Checker<'_> {
         })
     }
 
-    fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
+    pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
         let iterator = self.hidden(cursor.ty);
         let value = self.hidden(element);
         let ready = self.hidden(Type::Bool);
@@ -652,23 +697,32 @@ impl Checker<'_> {
         }
     }
 
-    /// Method evaluation creates the iterator at Python's observable point.
-    /// Runtime iterdir snapshots eagerly; glob waits for the first pull. Private
-    /// nullable results own every yielded path until the consumer acquires it.
-    fn prepare_path_iterator(&mut self, expression: Expr) -> Prepared {
-        let iterator = self.hidden(Type::Iterator);
-        let optional = self.hidden(self.types.optional(Type::Path));
-        let value = self.hidden(Type::Path);
+    pub(super) fn prepare_csv_reader(&mut self, reader: Expr) -> Prepared {
+        self.prepare_pull_iterator(
+            reader,
+            self.types.list(Type::Str),
+            Builtin::CsvNext { required: false },
+        )
+    }
+
+    fn prepare_pull_iterator(
+        &mut self,
+        expression: Expr,
+        element: Type,
+        operation: Builtin,
+    ) -> Prepared {
+        let iterator = self.hidden(expression.ty);
+        let optional = self.hidden(self.types.optional(element));
+        let value = self.hidden(element);
         let ready = self.hidden(Type::Bool);
         let done = self.hidden(Type::Bool);
         let pull = vec![
             Statement::Assign(
                 optional,
-                paths::operation(
-                    ir::PathOperation::Next,
-                    self.locals[optional],
-                    vec![self.local(iterator)],
-                ),
+                Expr {
+                    ty: self.locals[optional],
+                    kind: ExprKind::Builtin(operation, vec![self.local(iterator)]),
+                },
             ),
             Statement::Assign(
                 ready,
@@ -682,7 +736,7 @@ impl Checker<'_> {
                 vec![Statement::Assign(
                     value,
                     Expr {
-                        ty: Type::Path,
+                        ty: element,
                         kind: ExprKind::Unwrap(Box::new(self.local(optional))),
                     },
                 )],
@@ -710,6 +764,51 @@ impl Checker<'_> {
             writes: HashSet::new(),
             clear: vec![iterator, optional, value, ready, done],
         }
+    }
+
+    /// Consume one prepared iterator into a fresh set and release the partial
+    /// result if evaluating the source or pulling an element raises.
+    pub(super) fn collect_set(
+        &mut self,
+        source: Prepared,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let element = self.locals[source.value];
+        if !self.types.hashable_key(element) {
+            return Err(error(
+                self.source,
+                node,
+                "set() requires hashable iterator elements",
+            ));
+        }
+        let ty = self.types.set(element);
+        let result = self.hidden(ty);
+        let empty = Expr {
+            ty,
+            kind: ExprKind::Set {
+                element,
+                values: Vec::new(),
+            },
+        };
+        let body = self.expand_items_after(
+            Iteration::Prepared(source),
+            node,
+            vec![Statement::Assign(result, empty)],
+            |checker, value| {
+                Ok(vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::SetAdd, vec![checker.local(result), value]),
+                })])
+            },
+        )?;
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(self.local(result)),
+                clear: vec![result],
+            },
+        })
     }
 
     fn may_own_file(&self, ty: Type, opaque_callables: bool) -> bool {
@@ -947,7 +1046,10 @@ impl Checker<'_> {
         node: &impl Ranged,
         reverse: bool,
     ) -> Result<Prepared, String> {
-        if !reverse && matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
+        if !reverse && iterable.ty == Type::CsvReader {
+            return Ok(self.prepare_csv_reader(iterable));
+        }
+        if !reverse && matches!(iterable.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
             return Ok(self.prepare_file_lines(iterable));
         }
         let mapping = self.types.mapping(iterable.ty);
@@ -980,6 +1082,7 @@ impl Checker<'_> {
         });
         let element = self.types.element(iterable.ty)
             .or(set_element)
+            .or_else(|| self.types.deque_element(iterable.ty))
             .or((iterable.ty == Type::Str).then_some(Type::Str))
             .or((iterable.ty == Type::Bytes).then_some(Type::Int))
             .or(tuple_element)
@@ -991,6 +1094,11 @@ impl Checker<'_> {
                 node,
                 "reversed requires a list, tuple, string, bytes, or range",
             ));
+        }
+        if matches!(element, Type::Callable(_))
+            && let ExprKind::Tuple(values) = iterable.kind
+        {
+            return Ok(self.prepare_callable_tuple(values, element, reverse));
         }
         let ty = iterable.ty;
         let source = self.hidden(ty);
@@ -1118,6 +1226,8 @@ impl Checker<'_> {
                 }
             } else if ty == Type::Bytes {
                 Builtin::BytesIter
+            } else if self.types.deque_element(ty).is_some() {
+                Builtin::DequeIter { reverse }
             } else if set_element.is_some() {
                 Builtin::SetIter
             } else {
@@ -1188,6 +1298,84 @@ impl Checker<'_> {
             writes: HashSet::new(),
             clear,
         })
+    }
+
+    /// The iterator cannot expose its tuple literal. Keep each callable (including its
+    /// bound receiver) in its own local until exhaustion, with ordinary loop exits.
+    fn prepare_callable_tuple(
+        &mut self,
+        items: Vec<Expr>,
+        element: Type,
+        reverse: bool,
+    ) -> Prepared {
+        let mut slots = Vec::new();
+        let evaluate = items
+            .into_iter()
+            .map(|item| {
+                let slot = self.hidden(element);
+                slots.push(slot);
+                Statement::Assign(slot, item)
+            })
+            .collect();
+        let cursor = self.hidden(Type::Int);
+        let value = self.hidden(element);
+        let ready = self.hidden(Type::Bool);
+        let release = slots.iter().rev().copied().map(Statement::Clear).collect();
+        let mut clear = slots.clone();
+        clear.extend([cursor, value, ready]);
+        if reverse {
+            slots.reverse();
+        }
+        let (last, prefix) = slots
+            .split_last()
+            .expect("a homogeneous callable tuple is nonempty");
+        let item = prefix
+            .iter()
+            .enumerate()
+            .rev()
+            .fold(self.local(*last), |next, (i, &slot)| Expr {
+                ty: element,
+                kind: ExprKind::Conditional(
+                    Box::new(compare(
+                        Compare::Equal,
+                        self.local(cursor),
+                        integer(i as i64),
+                    )),
+                    Box::new(self.local(slot)),
+                    Box::new(next),
+                ),
+            });
+        Prepared {
+            evaluate,
+            acquire: vec![Statement::Assign(cursor, integer(0))],
+            next: vec![
+                Statement::Clear(value),
+                Statement::Assign(
+                    ready,
+                    compare(
+                        Compare::Less,
+                        self.local(cursor),
+                        integer(slots.len() as i64),
+                    ),
+                ),
+                Statement::If(
+                    self.local(ready),
+                    vec![
+                        Statement::Assign(value, item),
+                        Statement::Assign(
+                            cursor,
+                            binary(Binary::Add, self.local(cursor), integer(1)),
+                        ),
+                    ],
+                    release,
+                ),
+            ],
+            value,
+            ready,
+            elementless: false,
+            writes: HashSet::new(),
+            clear,
+        }
     }
 
     /// Obtains one element from each source in order. Strict mismatch checking
@@ -1726,7 +1914,7 @@ impl Checker<'_> {
             step.push(Statement::If(
                 self.local(input.ready),
                 vec![Statement::If(
-                    self.truth_value(operation),
+                    self.test_truth(operation, call)?,
                     vec![Statement::Assign(ready, boolean(true))],
                     vec![Statement::Clear(input.value)],
                 )],
@@ -2071,10 +2259,13 @@ impl Checker<'_> {
             clear.push(captured);
             body.push(Statement::Assign(captured, iterable.clone()));
             for (index, ty) in fields.into_iter().enumerate() {
-                let value = self.truth_value(Expr {
-                    ty,
-                    kind: ExprKind::Field(Box::new(self.local(captured)), index),
-                });
+                let value = self.test_truth(
+                    Expr {
+                        ty,
+                        kind: ExprKind::Field(Box::new(self.local(captured)), index),
+                    },
+                    call,
+                )?;
                 body.push(Statement::If(
                     if all {
                         self.local(result)
@@ -2087,7 +2278,7 @@ impl Checker<'_> {
             }
         } else {
             body.extend(self.expand_items(input, call, |checker, value| {
-                let value = checker.truth_value(value);
+                let value = checker.test_truth(value, call)?;
                 let deciding = if all { not(value) } else { value };
                 Ok(vec![Statement::If(
                     deciding,

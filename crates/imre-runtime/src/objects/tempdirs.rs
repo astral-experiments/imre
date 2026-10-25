@@ -248,9 +248,9 @@ fn open_directory(parent: &OwnedFd, name: &CStr) -> io::Result<OwnedFd> {
     }
 }
 
-struct Entry {
-    name: CString,
-    directory: bool,
+pub(super) struct Entry {
+    pub(super) name: CString,
+    pub(super) directory: bool,
 }
 
 fn file_type_at(parent: &OwnedFd, name: &CStr) -> rustix::io::Result<FileType> {
@@ -289,8 +289,15 @@ fn reset_entry_permissions(parent: &OwnedFd, name: &CStr) -> io::Result<()> {
 /// Snapshot names as native bytes; cleanup must remove undecodable filenames too.
 /// Close the scan descriptor before descending, while retaining the directory fd.
 fn entries(descriptor: &OwnedFd) -> io::Result<std::vec::IntoIter<Entry>> {
+    scan_entries(descriptor, Dir::read_from(descriptor)?)
+}
+
+pub(super) fn scan_entries(
+    descriptor: &OwnedFd,
+    scan: Dir,
+) -> io::Result<std::vec::IntoIter<Entry>> {
     let mut result = Vec::new();
-    for entry in Dir::read_from(descriptor)? {
+    for entry in scan {
         let entry = entry?;
         let name = entry.file_name();
         if matches!(name.to_bytes(), b"." | b"..") {
