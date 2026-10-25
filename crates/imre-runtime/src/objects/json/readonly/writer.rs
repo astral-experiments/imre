@@ -70,7 +70,7 @@ impl View {
         let mut values = Vec::new();
         let mut tables = Vec::new();
         for (name, child) in entries(&self.nodes[index]) {
-            let (view, child) = self.resolved(child);
+            let (view, child) = self.try_resolved(child)?;
             match &view.nodes[child] {
                 Node::Object(_) => tables.push((name, view, child, false)),
                 Node::Array(items)
@@ -127,7 +127,10 @@ impl View {
 
     fn literal(&self, index: usize, depth: usize, out: &mut String) -> Result<(), Error> {
         match &self.nodes[index] {
-            Node::Deferred(array) => return array.view().literal(array.view().index, depth, out),
+            Node::Deferred(array) => {
+                let view = array.try_view()?;
+                return view.literal(view.index, depth, out);
+            }
             Node::Null => {
                 return Err(Error::new(
                     Kind::TypeError,
