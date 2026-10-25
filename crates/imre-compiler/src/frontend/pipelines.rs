@@ -55,35 +55,34 @@ impl Checker<'_> {
         if let Some(element) = self.types.cursor_element(value.ty) {
             return Ok(Some(self.prepare_cursor(value.clone(), element)));
         }
-        let (function, mut args, returns) = match (&value.kind, value.ty) {
-            (ExprKind::Call(id, args), _) if self.classes.generators.contains(id) => {
-                (*id, args.clone(), value.ty)
-            }
-            (_, Type::Class(class))
-                if let Some(method) = self.classes.methods[class].get("__iter__") =>
-            {
-                (
-                    method.id,
-                    ir::CallArgs::positional(vec![value.clone()]),
-                    method.returns,
-                )
-            }
-            _ => return Ok(None),
-        };
-        self.calls.insert(function);
         let mut evaluate = Vec::new();
         let mut roots = Vec::new();
-        for arg in &mut args.values {
-            let slot = self.hidden(arg.ty);
+        let mut capture = |checker: &mut Self, arg: &mut Expr| {
+            let slot = checker.hidden(arg.ty);
             evaluate.push(Statement::Assign(
                 slot,
-                std::mem::replace(arg, self.local(slot)),
+                std::mem::replace(arg, checker.local(slot)),
             ));
             roots.push(slot);
-        }
-        let call = Expr {
-            ty: returns,
-            kind: ExprKind::Call(function, args),
+        };
+        let call = match (&value.kind, value.ty) {
+            (ExprKind::Call(id, args), _) if self.classes.generators.contains(id) => {
+                let mut args = args.clone();
+                for arg in &mut args.values {
+                    capture(self, arg);
+                }
+                self.calls.insert(*id);
+                Expr {
+                    ty: value.ty,
+                    kind: ExprKind::Call(*id, args),
+                }
+            }
+            (_, Type::Class(class)) if self.classes.has_record_iterator(class) => {
+                let mut receiver = value.clone();
+                capture(self, &mut receiver);
+                self.record_primitive(receiver, "__iter__", &[], node)?
+            }
+            _ => return Ok(None),
         };
         let mut prepared = self.prepare_container(call, false, node, false)?;
         let started = self.hidden(Type::Bool);
@@ -1914,7 +1913,7 @@ impl Checker<'_> {
             step.push(Statement::If(
                 self.local(input.ready),
                 vec![Statement::If(
-                    self.truth_value(operation),
+                    self.test_truth(operation, call)?,
                     vec![Statement::Assign(ready, boolean(true))],
                     vec![Statement::Clear(input.value)],
                 )],
@@ -2259,10 +2258,13 @@ impl Checker<'_> {
             clear.push(captured);
             body.push(Statement::Assign(captured, iterable.clone()));
             for (index, ty) in fields.into_iter().enumerate() {
-                let value = self.truth_value(Expr {
-                    ty,
-                    kind: ExprKind::Field(Box::new(self.local(captured)), index),
-                });
+                let value = self.test_truth(
+                    Expr {
+                        ty,
+                        kind: ExprKind::Field(Box::new(self.local(captured)), index),
+                    },
+                    call,
+                )?;
                 body.push(Statement::If(
                     if all {
                         self.local(result)
@@ -2275,7 +2277,7 @@ impl Checker<'_> {
             }
         } else {
             body.extend(self.expand_items(input, call, |checker, value| {
-                let value = checker.truth_value(value);
+                let value = checker.test_truth(value, call)?;
                 let deciding = if all { not(value) } else { value };
                 Ok(vec![Statement::If(
                     deciding,
