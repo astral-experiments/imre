@@ -674,6 +674,12 @@ pub(crate) enum Builtin {
     ImportErrorReset,
     ImportErrorRejectReset,
     ExceptionTupleView,
+    /// Acquire the underlying typed owner for an unannotated exception field.
+    BoxExceptionField,
+    /// A new, completely initialized record for a proven forwarding constructor.
+    ExceptionRecordFields,
+    /// Check the return type of __str__ or __repr__ before crossing the formatter ABI.
+    ExceptionFormatterResult(bool),
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,

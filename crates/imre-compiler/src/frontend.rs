@@ -29,6 +29,7 @@ mod dispatch;
 mod doctest;
 mod documents;
 mod enums;
+mod exception_forwarders;
 mod expandtabs;
 mod expansions;
 mod fixed_tuples;
@@ -170,7 +171,9 @@ impl ClassInfo {
                     .fields
                     .iter()
                     .map(|field| {
-                        if field.name == crate::classes::EXCEPTION_ARGS_SLOT {
+                        if field.name == crate::classes::EXCEPTION_ARGS_SLOT
+                            || class.forwarder.is_some()
+                        {
                             return Ok(Type::ExceptionField);
                         }
                         annotation_in_class(
@@ -594,6 +597,9 @@ pub(crate) fn lower_with_owners(
         }
         let mut instance_signatures = HashMap::<_, Signature>::new();
         for (index, method) in class.methods.iter().enumerate() {
+            if class.forwarder.is_some() && method.name.as_str() == "__init__" {
+                continue;
+            }
             let module_id = class.method_origins[index].module;
             let module = &graph.modules[module_id];
             let context = records::MethodContext {
@@ -1844,6 +1850,7 @@ struct Checker<'a> {
     class_receiver: Option<String>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
+    exception_formatter: Option<bool>,
     initializing: bool,
 }
 
@@ -1903,6 +1910,7 @@ impl<'a> Checker<'a> {
             class_receiver: None,
             iterator_source: None,
             super_initializer: None,
+            exception_formatter: None,
             initializing: false,
         }
     }
@@ -3814,7 +3822,20 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::Return(return_) if !self.module_scope => {
                 let value = if let Some(value) = &return_.value {
-                    if self.inferred_returns.is_some() {
+                    if let Some(repr) = self.exception_formatter {
+                        let value = self.expr(value)?;
+                        if value.ty == Type::ExceptionField {
+                            Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Builtin(
+                                    Builtin::ExceptionFormatterResult(repr),
+                                    vec![value],
+                                ),
+                            }
+                        } else {
+                            self.coerce(value, Type::Str, statement)?
+                        }
+                    } else if self.inferred_returns.is_some() {
                         self.expr(value)?
                     } else {
                         self.expr_expected(value, self.returns)?
@@ -5617,7 +5638,8 @@ impl<'a> Checker<'a> {
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
-                    let field = self.classes.fields[class].len() - 1;
+                    let field =
+                        self.classes.declarations.definitions[class].exception_argument_slot();
                     if self.classes.fields[class][field] == Type::ExceptionField {
                         return Ok(Expr {
                             ty: Type::ExceptionField,

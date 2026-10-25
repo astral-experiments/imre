@@ -114,6 +114,39 @@ fn view(kind: WordKind, word: usize) -> *const Object {
     )))))
 }
 
+/// Retain a Python argument independently for a stored exception attribute.
+///
+/// # Safety
+/// The word has the stated representation and remains rooted through acquisition.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_box_field(word: usize, kind: u32) -> *const Object {
+    view(WordKind::new(kind), word)
+}
+
+/// Verify the formatter's result before using it as a native UTF-8 string.
+///
+/// # Safety
+/// The field view is rooted and the caller checks pending errors.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_formatter_result(
+    value: *const Object,
+    repr: u32,
+) -> *const Str {
+    // SAFETY: the field view retains this exact value through the check.
+    let (kind, word) = unsafe { exit_word(value) };
+    if kind.raw() == 3 {
+        // SAFETY: representation 3 is a live native string.
+        Rc::into_raw(unsafe { acquire_rc(word) })
+    } else {
+        let hook = if repr == 0 { "__str__" } else { "__repr__" };
+        Error::new(
+            Kind::TypeError,
+            format!("{hook} returned non-string (type {})", type_name(kind)),
+        )
+        .returning(std::ptr::null())
+    }
+}
+
 /// # Safety
 /// The caller roots the compiler-described positional tuple and three exact typed fields.
 /// A non-null descriptor is the static identity of a marker subclass.

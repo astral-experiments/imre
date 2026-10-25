@@ -26,6 +26,16 @@ pub(super) fn executable_method(
 ) -> Result<ast::StmtFunctionDef, String> {
     let mut method = method.clone();
     method.decorator_list.clear();
+    if classes.definitions[context.class].forwarder.is_some()
+        && matches!(method.name.as_str(), "__str__" | "__repr__")
+    {
+        method.returns = Some(Box::new(
+            ruff_python_parser::parse_expression("str")
+                .expect("static annotation")
+                .expr()
+                .clone(),
+        ));
+    }
     let origin = classes.definitions[context.class].method_origins[context.index].module;
     if iterator_result(&method, graph, origin) {
         let Some(ast::Stmt::Expr(stmt)) = method.body.last() else {
@@ -597,6 +607,15 @@ impl Checker<'_> {
             )
         });
         self.class = context.map(|context| context.class);
+        self.exception_formatter = context.and_then(|ctx| {
+            let class = &self.classes.declarations.definitions[ctx.class];
+            class.forwarder.as_ref()?;
+            match class.methods[ctx.index].name.as_str() {
+                "__str__" => Some(false),
+                "__repr__" => Some(true),
+                _ => None,
+            }
+        });
         self.super_initializer = context.and_then(|context| {
             let record = &self.classes.declarations.definitions[context.class];
             if record.methods[context.index].name.as_str() != "__init__" {
@@ -1031,6 +1050,12 @@ impl Checker<'_> {
 
     pub(super) fn construct(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
         if self.classes.declarations.definitions[class]
+            .forwarder
+            .is_some()
+        {
+            return self.forwarding_exception(call, class);
+        }
+        if self.classes.declarations.definitions[class]
             .enum_members
             .as_ref()
             .is_some_and(|members| members.plain)
@@ -1141,29 +1166,34 @@ impl Checker<'_> {
                 args,
             },
         };
+        Ok(self.wrap_exception_record(class, record))
+    }
+
+    /// Attach the concrete class and display methods after the complete constructor succeeds.
+    pub(super) fn wrap_exception_record(&mut self, class: usize, record: Expr) -> Expr {
         let decl = &self.classes.declarations.definitions[class];
         if let Some(&kind) = self.classes.declarations.exceptions.get(&decl.definition) {
             let text = self.classes.methods[class].get("__str__").map(|m| m.id);
             let repr = self.classes.methods[class].get("__repr__").map(|m| m.id);
             self.calls.extend(text);
             self.calls.extend(repr);
-            return Ok(Expr {
+            return Expr {
                 ty: Type::NamedException(class),
                 kind: ExprKind::Builtin(
                     Builtin::NamedException {
                         kind,
-                        message_field: decl.fields.len() - 1,
-                        tuple_args: self.classes.fields[class].last()
-                            == Some(&Type::ExceptionField),
+                        message_field: decl.exception_argument_slot(),
+                        tuple_args: self.classes.fields[class][decl.exception_argument_slot()]
+                            == Type::ExceptionField,
                         text,
                         repr,
                         dataclass_repr: decl.dataclass.is_some_and(|d| d.repr),
                     },
                     vec![record],
                 ),
-            });
+            };
         }
-        Ok(record)
+        record
     }
 
     /// Install the native message slot used by the exception's args and formatting.
@@ -1204,7 +1234,7 @@ impl Checker<'_> {
     }
 
     fn store_exception_arguments(&self, class: usize, value: Expr) -> Expr {
-        let field = self.classes.fields[class].len() - 1;
+        let field = self.classes.declarations.definitions[class].exception_argument_slot();
         Expr {
             ty: Type::None,
             kind: ExprKind::Scope {
@@ -1241,6 +1271,7 @@ impl Checker<'_> {
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         if let Some(class) = self.class
+            && !matches!(self.super_initializer, Some(BaseInitializer::Record(_)))
             && self
                 .classes
                 .declarations
@@ -1251,7 +1282,9 @@ impl Checker<'_> {
                 .bindings
                 .contains_key("super")
         {
-            if self.classes.fields[class].last() == Some(&Type::ExceptionField)
+            if self.classes.fields[class]
+                [self.classes.declarations.definitions[class].exception_argument_slot()]
+                == Type::ExceptionField
                 && call.arguments.keywords.is_empty()
             {
                 return self.set_exception_arguments(class, &call.arguments.args);

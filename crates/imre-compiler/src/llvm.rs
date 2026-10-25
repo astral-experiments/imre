@@ -4914,6 +4914,34 @@ impl Emitter<'_, '_> {
             Builtin::ExceptionTupleView => {
                 self.call("imre_exception_tuple_view", returns, &[&args[0].value])
             }
+            Builtin::BoxExceptionField => {
+                let value = &args[0].value;
+                let word = self.word(value);
+                let kind = representation_kind(value.ty, &self.module.types);
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @imre_exception_box_field(i64 {word}, i32 {kind})"
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::ExceptionRecordFields => {
+                let record = self.record(returns);
+                for (i, value) in args.iter().enumerate() {
+                    self.set_field(&record, i, &value.value);
+                }
+                record
+            }
+            Builtin::ExceptionFormatterResult(repr) => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @imre_exception_formatter_result(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*repr)
+                )),
+                small_integer: false,
+            },
             Builtin::ExceptionFieldRepr => {
                 self.call("imre_exception_field_repr", returns, &[&args[0].value])
             }
@@ -7158,6 +7186,8 @@ declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
 declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_exception_tuple_view(ptr)
+declare ptr @imre_exception_box_field(i64, i32)
+declare ptr @imre_exception_formatter_result(ptr, i32)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
