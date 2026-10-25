@@ -163,6 +163,18 @@ pub(super) struct ArgumentScope {
 }
 
 impl ArgumentScope {
+    /// Evaluate an unused argument in source order, including iterator
+    /// construction, without pulling any items before the call raises.
+    pub(super) fn discard(
+        &mut self,
+        checker: &mut Checker<'_>,
+        argument: &ast::Expr,
+    ) -> Result<(), String> {
+        let input = checker.expansion_input(argument, None)?;
+        checker.capture_consumer_input(input, &mut self.body, &mut self.clear);
+        Ok(())
+    }
+
     pub(super) fn hold(&mut self, checker: &mut Checker<'_>, value: Expr) -> Expr {
         let slot = checker.hidden(value.ty);
         self.body.push(Statement::Assign(slot, value));
