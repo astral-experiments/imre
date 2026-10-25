@@ -26,6 +26,7 @@ mod counter;
 mod csv;
 mod dataclass_values;
 mod dispatch;
+mod doctest;
 mod documents;
 mod enums;
 mod expansions;
@@ -789,6 +790,8 @@ pub(crate) fn lower_with_owners(
                 &globals,
             );
             checker.returns = signature.returns;
+            checker.interactive_names =
+                module.is_doctest_case() && definition.name.as_str() == "_run_case";
             checker.asynchronous = signature.asynchronous;
             checker.method_context(signature.method);
             checker.generator_item = classes.producer_items.get(&signature.id).copied();
@@ -1766,6 +1769,8 @@ enum Iteration {
 }
 
 struct Checker<'a> {
+    /// Doctest prompts share an exec-style namespace until the case ends.
+    interactive_names: bool,
     /// A later local assignment shadows builtin iter throughout a function.
     local_iter: bool,
     context_method: bool,
@@ -1827,6 +1832,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            interactive_names: false,
             local_iter: false,
             zip_sum_rhs: None,
             asynchronous: false,
@@ -3365,7 +3371,9 @@ impl<'a> Checker<'a> {
         if self.block_depth == 0 && !self.module_scope {
             self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
-            let mut names: Vec<_> = unbound_locals::candidates(statements).into_iter().collect();
+            let mut names: Vec<_> = unbound_locals::candidates(statements, self.interactive_names)
+                .into_iter()
+                .collect();
             names.sort_unstable();
             for name in names {
                 // Arguments enter already bound; deletion and nonordinary stores were excluded.
@@ -4674,6 +4682,12 @@ impl<'a> Checker<'a> {
                 &format!("no native implementation for {symbol}"),
             ));
         }
+        if let Some(target @ (Binding::Module(_) | Binding::IntrinsicModule(_))) =
+            self.resolve(expression)
+            && let Some(module) = self.module_docs(target, expression)?
+        {
+            return Ok(module);
+        }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
             | Intrinsic::IntConstant(level)
@@ -5853,6 +5867,9 @@ impl<'a> Checker<'a> {
         }
         if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
+        }
+        if let Some(suite) = self.doctest_suite(call)? {
+            return Ok(suite);
         }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
