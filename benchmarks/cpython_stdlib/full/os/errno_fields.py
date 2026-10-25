@@ -37,6 +37,11 @@ try:
     os.open("missing-name", os.O_RDONLY)
 except FileNotFoundError as error:
     inspect(error)
+path = "missing-" + "built-in-open"
+try:
+    open(path)
+except FileNotFoundError as error:
+    print(error.filename is path)
 try:
     os.close(-1)
 except OSError as error:
