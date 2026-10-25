@@ -4083,11 +4083,17 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
-            Builtin::WarningFilter(category) => {
+            Builtin::WarningFilter { category, invalid } => {
+                let append = self.instruction(format!("zext i1 {} to i32", args[6].value.operand));
                 self.checked_line(format!(
-                    "call void @imre_warning_simplefilter(ptr {}, i32 {category})",
-                    args[0].value.operand
+                    "call void @imre_warning_filter(ptr {}, ptr {}, ptr {}, ptr {}, ptr {}, i64 {}, i32 {append}, i32 {category}, i32 {invalid})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand,
+                    args[3].value.operand, args[4].value.operand, args[5].value.operand
                 ));
+                none()
+            }
+            Builtin::WarningReset => {
+                self.void_call("imre_warning_reset", &[]);
                 none()
             }
             Builtin::TimeSleep => {
@@ -6950,7 +6956,8 @@ declare void @imre_async_loop_signal(ptr, i64, ptr)
 declare void @imre_async_loop_close(ptr)
 declare i32 @imre_async_cancel(ptr)
 declare double @imre_wall_time()
-declare void @imre_warning_simplefilter(ptr, i32)
+declare void @imre_warning_filter(ptr, ptr, ptr, ptr, ptr, i64, i32, i32, i32)
+declare void @imre_warning_reset()
 declare void @imre_time_sleep(double)
 declare ptr @imre_str_percent_int(ptr,i64)
 declare ptr @imre_str_percent_text(ptr,ptr)
