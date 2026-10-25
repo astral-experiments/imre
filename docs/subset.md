@@ -9,7 +9,10 @@ Module functions with annotated results can use `functools.cache` or
 positional arguments with immutable key types. Bounded caches evict the least
 recently used key; zero disables storage, and `None` keeps all results.
 `cache_clear()` resets entries and counters. `cache_info()` supports unpacking
-and indexing the four snapshot fields.
+and indexing the four snapshot fields. `cache_parameters()` returns a fresh
+dictionary containing `maxsize` and `typed`. Applying a second cache to a
+cached callable copies its public parameters; the outer wrapper still uses
+its own capacity for eviction and for `cache_info()`.
 
 `functools.partial` retains positional arguments for a synchronous callable with
 a fixed signature. Calls fill positional `functools.Placeholder` slots first.
@@ -540,7 +543,7 @@ Imports are resolved statically from `.py` files and packages with `__init__.py`
 
 Closed built-in generic aliases such as `Pair = tuple[str, int]` can be shared between modules. `typing.NewType("Name", str)` can annotate values and its positional constructor returns the original value. Imports and type aliases under a sealed `if TYPE_CHECKING:` introduce annotation-only names.
 
-The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes its trailing LF. A preceding CR remains part of the value, matching CPython's piped input on both hosts. `int(str)` accepts signed decimal digits, optional underscores between digits, and surrounding Python numeric whitespace. Decimal classification is pinned to Unicode 16, matching CPython 3.14; mixed decimal digit families are accepted, while superscripts and other numeric lookalikes are rejected. Other bases remain unsupported. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. `text.splitlines()` recognizes LF, CR, CRLF, vertical tab, form feed, U+001C through U+001E, U+0085, U+2028, and U+2029. It returns no elements for empty input and no extra element for a final line break; U+001F remains ordinary text. Additional string operations and their accepted signatures are listed under [native text operations](#native-text-operations). Retained line endings, general formatting protocols, and arbitrary codecs remain unsupported. CPython's configurable integer conversion digit limit is not reproduced.
+The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes its trailing LF. A preceding CR remains part of the value, matching CPython's piped input on both hosts. `int(str)` accepts signed decimal digits, optional underscores between digits, and surrounding Python numeric whitespace. Decimal classification is pinned to Unicode 16, matching CPython 3.14; mixed decimal digit families are accepted, while superscripts and other numeric lookalikes are rejected. Other bases remain unsupported. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. `text.splitlines()` recognizes LF, CR, CRLF, vertical tab, form feed, U+001C through U+001E, U+0085, U+2028, and U+2029. It returns no elements for empty input and no extra element for a final line break; U+001F remains ordinary text. Additional string operations and their accepted signatures are listed under [native text operations](#native-text-operations). `text.splitlines(keepends)` accepts a positional or keyword flag and truth-tests it before scanning, even for empty input. A true flag includes each original line ending (CRLF stays together); a final separator adds no trailing empty item. `text.isspace()` requires a nonempty string and checks Python’s Unicode whitespace characters, including U+001C through U+001F. General formatting protocols and arbitrary codecs remain unsupported. CPython's configurable integer conversion digit limit is not reproduced.
 
 `typing.cast("T", value)` returns the original value; the quoted type adds no runtime check or conversion.
 
@@ -596,6 +599,8 @@ Raw prefixes apply only to their own literal text. Expressions inside a raw f-st
 A string template can substitute named `str` and `int` arguments, as in `url.format(filename=file, line=42)`. The template may be computed at runtime. Arguments evaluate once in call order, including unused arguments. Repeated fields reuse their value and `{{` and `}}` produce literal braces. An empty specification and `!s` are supported. A missing name raises `KeyError` and an unmatched brace raises `ValueError`. Positional call arguments, field traversal, and the rest of the format mini-language are outside this subset.
 
 `textwrap.dedent(text)` removes the common prefix of spaces and tabs on nonblank lines. Each tab counts as a distinct character. Whitespace-only lines become empty as in Python 3.14. Interpolation happens before dedenting, so newlines in field values participate in the common-prefix calculation.
+
+`textwrap.indent(text, prefix, predicate=None)` preserves line endings, including CRLF and Unicode line separators. By default it prefixes lines that contain a non-whitespace character. An optional `Callable[[str], bool]` receives each complete line, including its terminator. Errors raised by the predicate stop iteration.
 
 ## Immutable bytes
 
@@ -748,7 +753,7 @@ Use `group = parser.add_argument_group(title, description)` to place arguments i
 
 A subcommand is optional by default. With `add_subparsers(dest="command")`, the namespace contains `command=None` when omitted. Without `dest`, no command field is added. Use `required=True` or set the group's `required` attribute to require a selection. Each literal `add_parser("name", aliases=["alias"], help="...")` introduces a child parser with its own options. The destination retains the spelling the caller used; child help uses its canonical name. A `match args.command` case or `if args.command == "alias"` branch selects the child's concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
-Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()`. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested subcommands are outside this grammar.
+Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()` or `parse_known_args()`. The latter returns the namespace and a list of unrecognized arguments in order. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested subcommands are outside this grammar.
 
 ## Standard logging
 
@@ -828,6 +833,10 @@ remain available when the program accesses them.
 `_opcode.ENABLE_SPECIALIZATION` and `_opcode.ENABLE_SPECIALIZATION_FT` are both the integer `0`: Imre emits native code and does not specialize CPython bytecode at runtime. Other `_opcode` operations are unsupported.
 
 `sys.exception()` returns the actual exception being handled, or `None` outside a handler. Nested handlers restore their caller’s active exception. Exception identity can be compared with `is` and `is not`.
+
+`sys._jit.is_available()`, `is_enabled()` and `is_active()` all return `False`:
+Imre compiles before launch and cannot switch a running frame into a JIT.
+`PYTHON_JIT` therefore does not change these predicates.
 
 `sys.exit()` raises `SystemExit` through the ordinary exception and `finally` paths. It accepts an optional `None`, boolean, integer or string. An uncaught string prints to stderr and exits with status 1. An omitted or `None` code exits with status 0. A caught `SystemExit.code` preserves the scalar for printing, truth tests, equality, and type tests.
 

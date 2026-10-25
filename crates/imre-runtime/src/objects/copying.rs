@@ -158,10 +158,14 @@ impl Graph {
                         out.update_header();
                         Ok(Storage::Sequence(out))
                     }
-                    Storage::Dictionary(map) => Ok(Storage::Dictionary(Box::new(
-                        map.copy_values(|value| self.copy(value))?,
+                    Storage::Dictionary(map) => {
+                        Ok(Storage::Dictionary(super::mappings::TableOwner::new(
+                            map.copy_values(|value| self.copy(value))?,
+                        )))
+                    }
+                    Storage::Set(set) => Ok(Storage::Set(super::mappings::TableOwner::new(
+                        set.copy_keys()?,
                     ))),
-                    Storage::Set(set) => Ok(Storage::Set(Box::new(set.copy_keys()?))),
                     _ => unreachable!("deep-copy admission requires an exact builtin container"),
                 })
             }?;
