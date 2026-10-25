@@ -1,4 +1,5 @@
 use super::*;
+use crate::StrOwner;
 
 #[test]
 fn prefix_handles_mismatches_in_every_word_and_tail_byte() {
@@ -26,7 +27,7 @@ fn words(rows: &[String]) -> Words {
     for row in rows {
         result
             .values
-            .push(Rc::into_raw(Rc::new(Str::new(row))) as usize);
+            .push(StrOwner::into_raw(StrOwner::new(Str::new(row))) as usize);
     }
     result.update_header();
     result

@@ -1,4 +1,5 @@
 //! A log record owns one native Python value per attribute, including user-supplied extras.
+use crate::StrOwner;
 use std::cell::Cell;
 use std::collections::HashMap;
 thread_local! {static FLAGS:Cell<u8> = const {Cell::new(31)};}
@@ -24,7 +25,7 @@ fn owned(word: usize, kind: u32) -> OwnedWord {
 }
 
 pub(super) fn string(s: &str) -> OwnedWord {
-    owned(Rc::into_raw(Rc::new(Str::from(s))) as usize, 3)
+    owned(StrOwner::into_raw(StrOwner::new(Str::from(s))) as usize, 3)
 }
 fn integer(n: usize) -> OwnedWord {
     owned(Int::from_usize(n).into_raw(), 2)
@@ -124,7 +125,7 @@ pub(super) fn brace_item(value: &OwnedWord, key: &str) -> Result<OwnedWord> {
         return unsafe {
             object(value.word as *const Object)
                 .0
-                .with_mut(|s| s.dictionary_mut().logging_item(&key))
+                .with_mut(|s| s.dictionary_mut().subscript_value(&key))
         }?
         .ok_or_else(|| {
             Error::new(
@@ -272,7 +273,10 @@ impl Record {
             2 => {
                 // SAFETY: level owns this Int until lookup finishes.
                 let number = unsafe { Int::borrow(level.word) };
-                owned(Rc::into_raw(super::levels::level_name(&number)) as usize, 3)
+                owned(
+                    StrOwner::into_raw(super::levels::level_name(&number)) as usize,
+                    3,
+                )
             }
             3 => {
                 // SAFETY: level is a rooted exact string.
@@ -454,6 +458,19 @@ fn star_integer(args: &mut impl Iterator<Item = OwnedWord>) -> Result<Int> {
     }
 }
 
+/// An exact scalar supplies its Python class name in a rejected conversion.
+fn scalar_name(kind: WordKind) -> Option<&'static str> {
+    Some(match kind.raw() {
+        0 => "NoneType",
+        1 => "bool",
+        2 => "int",
+        3 => "str",
+        7 => "float",
+        8 => "bytes",
+        _ => return None,
+    })
+}
+
 /// The full format supplies the Unicode character offset for invalid conversions.
 fn percent_value_in<'a>(
     fmt: &'a str,
@@ -554,12 +571,12 @@ fn percent_value_in<'a>(
                 // SAFETY: this arm has an integer descriptor and a live owner.
                 2 => unsafe { Int::borrow(value.word) }.big().into_owned(),
                 7 if "diu".contains(c) => {
-                    num_traits::FromPrimitive::from_f64(f64::from_bits(value.word as u64).trunc())
-                        .ok_or_else(|| {
-                        Error::new(Kind::ValueError, "cannot convert float to integer")
-                    })?
+                    crate::floats::float_to_integer(f64::from_bits(value.word as u64))?
                 }
-                3 => {
+                _ => {
+                    let Some(name) = scalar_name(value.kind) else {
+                        return Err(Error::new(Kind::TypeError, "format requires a number"));
+                    };
                     let required = if "diu".contains(c) {
                         "a real number"
                     } else {
@@ -567,10 +584,9 @@ fn percent_value_in<'a>(
                     };
                     return Err(Error::new(
                         Kind::TypeError,
-                        format!("%{c} format: {required} is required, not str"),
+                        format!("%{c} format: {required} is required, not {name}"),
                     ));
                 }
-                _ => return Err(Error::new(Kind::TypeError, "format requires a number")),
             };
             let mut digits = n.to_str_radix(if c == 'o' {
                 8
@@ -641,6 +657,11 @@ fn percent_value_in<'a>(
                         Error::new(Kind::OverflowError, "%c arg not in range(0x110000)")
                     })?
                     .to_string()
+            } else if let Some(name) = scalar_name(value.kind) {
+                return Err(Error::new(
+                    Kind::TypeError,
+                    format!("%c requires an int or a unicode character, not {name}"),
+                ));
             } else {
                 return Err(Error::new(Kind::TypeError, "%c requires int or char"));
             }
@@ -654,8 +675,13 @@ fn percent_value_in<'a>(
                     crate::floats::int_to_float(&n)?
                 }
                 1 => value.word as f64,
-                3 => return Err(Error::new(Kind::TypeError, "must be real number, not str")),
-                _ => return Err(Error::new(Kind::TypeError, "must be real number")),
+                _ => {
+                    let message = scalar_name(value.kind).map_or_else(
+                        || "must be real number".to_owned(),
+                        |name| format!("must be real number, not {name}"),
+                    );
+                    return Err(Error::new(Kind::TypeError, message));
+                }
             };
             let precision = precision.unwrap_or(6);
             let spec = format!("%{flags}{width}.{precision}{c}");
@@ -855,7 +881,7 @@ pub unsafe extern "C" fn imre_logrecord_message(record: *const Object) -> *const
     // SAFETY: this only reads owned values from the live record.
     let result = unsafe { with_record(record, Record::message) };
     finish(
-        result.map(|s| Rc::into_raw(Rc::new(Str::from(s.as_str())))),
+        result.map(|s| StrOwner::into_raw(StrOwner::new(Str::from(s.as_str())))),
         std::ptr::null(),
     )
 }
@@ -866,7 +892,7 @@ pub unsafe extern "C" fn imre_logrecord_message(record: *const Object) -> *const
 pub unsafe extern "C" fn imre_logrecord_repr(record: *const Object) -> *const Str {
     // SAFETY: display only reads the live record and its rooted fields.
     let text = unsafe { with_record(record, Record::repr) };
-    Rc::into_raw(Rc::new(Str::from(text.as_str())))
+    StrOwner::into_raw(StrOwner::new(Str::from(text.as_str())))
 }
 
 /// Reads the current module flag selected by a compiler-emitted mask.
@@ -920,7 +946,8 @@ pub unsafe extern "C" fn imre_str_percent_tuple(
 
 fn percent(fmt: &Str, value: OwnedWord) -> *const Str {
     finish(
-        format_arguments(fmt.as_str(), &value).map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
+        format_arguments(fmt.as_str(), &value)
+            .map(|s| StrOwner::into_raw(StrOwner::new(Str::from(s)))),
         std::ptr::null(),
     )
 }

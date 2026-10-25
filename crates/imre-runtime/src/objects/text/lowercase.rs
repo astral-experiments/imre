@@ -1,5 +1,5 @@
 //! Default Unicode 16 case conversion, as used by Python 3.14.
-use std::rc::Rc;
+use crate::StrOwner;
 use std::sync::LazyLock;
 
 use compact_str::ReserveError;
@@ -36,9 +36,18 @@ fn is_final_sigma(before: &str, after: &str) -> bool {
         && !after.chars().find(significant).is_some_and(is_cased)
 }
 
-fn case_chars(source: &str, capitalize: bool) -> impl Iterator<Item = char> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Case {
+    Lower,
+    Upper,
+    Capitalize,
+}
+
+fn case_chars(source: &str, case: Case) -> impl Iterator<Item = char> {
     source.char_indices().flat_map(move |(i, ch)| {
-        let mapping = if capitalize && i == 0 {
+        let mapping = if case == Case::Upper {
+            unicode_case_mapping::to_uppercase(ch)
+        } else if case == Case::Capitalize && i == 0 {
             unicode_case_mapping::to_titlecase(ch)
         } else if ch == 'Σ' && is_final_sigma(&source[..i], &source[i + ch.len_utf8()..]) {
             ['ς' as u32, 0, 0]
@@ -57,23 +66,29 @@ fn case_chars(source: &str, capitalize: bool) -> impl Iterator<Item = char> {
 
 /// Yield the same Unicode mapping as str.lower() without storing the result.
 pub(in crate::objects) fn lowercase_chars(source: &str) -> impl Iterator<Item = char> {
-    case_chars(source, false)
+    case_chars(source, Case::Lower)
 }
 
 /// CPython titlecases just the first code point for capitalize, then lowercases
 /// the rest in the context of the original string (not of the suffix alone).
-fn convert(source: &str, capitalize: bool) -> Result<Str, ReserveError> {
+fn convert(source: &str, case: Case) -> Result<Str, ReserveError> {
     if source.is_ascii() {
         let mut result = Str::try_new(source)?;
         let ascii = result.as_mut_str();
-        ascii.make_ascii_lowercase();
-        if capitalize && let Some(first) = ascii.get_mut(..1) {
-            first.make_ascii_uppercase();
+        if case == Case::Upper {
+            ascii.make_ascii_uppercase();
+        } else {
+            ascii.make_ascii_lowercase();
+            if case == Case::Capitalize
+                && let Some(first) = ascii.get_mut(..1)
+            {
+                first.make_ascii_uppercase();
+            }
         }
         return Ok(result);
     }
     let mut result = Str::try_with_capacity(source.len())?;
-    for ch in case_chars(source, capitalize) {
+    for ch in case_chars(source, case) {
         result.try_reserve(ch.len_utf8())?;
         result.push(ch);
     }
@@ -82,7 +97,7 @@ fn convert(source: &str, capitalize: bool) -> Result<Str, ReserveError> {
 
 /// Lowercase a full string with the runtime's pinned Unicode data.
 pub(in crate::objects) fn lowercase(source: &str) -> Result<Str, ReserveError> {
-    convert(source, false)
+    convert(source, Case::Lower)
 }
 
 /// Lowercase an exact native string, setting a pending MemoryError on allocation failure.
@@ -95,7 +110,23 @@ pub unsafe extern "C" fn imre_str_lower(value: *const Str) -> *const Str {
     let source = unsafe { &*value };
     finish(
         lowercase(source)
-            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
+            .map_err(|_| Error::allocation()),
+        std::ptr::null(),
+    )
+}
+
+/// Uppercase a native string with the runtime's pinned Unicode data.
+///
+/// # Safety
+/// The caller roots the immutable input string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_upper(value: *const Str) -> *const Str {
+    // SAFETY: the caller roots the string throughout conversion.
+    let source = unsafe { &*value };
+    finish(
+        convert(source, Case::Upper)
+            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
             .map_err(|_| Error::allocation()),
         std::ptr::null(),
     )
@@ -110,8 +141,8 @@ pub unsafe extern "C" fn imre_str_capitalize(value: *const Str) -> *const Str {
     // SAFETY: the caller roots the string.
     let source = unsafe { &*value };
     finish(
-        convert(source, true)
-            .map(|s| Rc::into_raw(Rc::new(s)))
+        convert(source, Case::Capitalize)
+            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
             .map_err(|_| Error::allocation()),
         std::ptr::null(),
     )
