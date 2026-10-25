@@ -8,7 +8,7 @@ fn tag(ty: Type) -> u8 {
         Type::Bytes => 1,
         Type::List(_) => 2,
         Type::Exception => 3,
-        Type::Class(_) => 4,
+        Type::Class(_) | Type::Tuple(_) => 4,
         Type::Enum(_) => 5,
         Type::Path => 6,
         Type::Int => 7,
@@ -102,7 +102,20 @@ impl Emitter<'_, '_> {
         }
         let mut result = "false".to_owned();
         for &class in classes {
-            let current = if let Some(members) = self.module.types.members(value.ty) {
+            let current = if value.ty == Type::StringIterable {
+                match class {
+                    InstanceType::Tuple | InstanceType::List => {
+                        let tag = if matches!(class, InstanceType::List) {
+                            2
+                        } else {
+                            4
+                        };
+                        let bits = self.instruction(format!("and i64 {}, 7", value.operand));
+                        self.instruction(format!("icmp eq i64 {bits}, {tag}"))
+                    }
+                    _ => "false".into(),
+                }
+            } else if let Some(members) = self.module.types.members(value.ty) {
                 match (class.accepts(members[0]), class.accepts(members[1])) {
                     (true, true) => "true".to_owned(),
                     (false, false) => "false".to_owned(),

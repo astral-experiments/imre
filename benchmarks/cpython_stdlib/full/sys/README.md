@@ -14,7 +14,7 @@ Use a test-enabled checkout of the pinned release to reproduce the reference:
 "$CPYTHON" -B -m test --single-process --randseed 1 --junit-xml /tmp/sys.xml test_sys
 ```
 
-To run the encoding cases against the compiler and runtime under test:
+To run the selected full methods against the compiler and runtime under test:
 
 ```sh
 for opt in 0 3; do
@@ -24,6 +24,7 @@ for opt in 0 3; do
 done
 ```
 
+- `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
 - `test_43581`: the complete method, both stream attributes, equality and assertion execute in the native binary.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.
 - `test_ioencoding_nonascii`: the original subprocess source executes as a native program. CPython owns the fixture, process pipes and expected filesystem bytes. The default Linux reference skips this test because the locale and filesystem codec names differ in case; `-X utf8` satisfies its unchanged decorator.

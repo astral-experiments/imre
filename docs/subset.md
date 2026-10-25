@@ -67,6 +67,12 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 An immediate `map(int, source)` converts each item using the ordinary checked `int` conversion. Inputs may yield exact integers, floats, booleans, or strings. Conversion proceeds lazily as the enclosing consumer iterates; input expressions, iterator creation, the optional sum start, and conversion failures retain Python evaluation order. Mutable sources remain live and keep the existing dictionary/set mutation checks. User callbacks follow the exact callable contract below. A map cannot escape into storage, and user-defined iteration protocols remain unsupported.
 
+`itertools.repeat(object[, times])` retains the original object. Aliases, `iter(it)`,
+`next(it[, default])`, and ordinary loop and list consumers share its position.
+Omitting `times` repeats forever; a nonpositive integer exhausts immediately.
+`operator.length_hint(it[, default])` returns the remaining finite count or the
+default for an unbounded repeat. A finite repeat's repr shows the current count.
+
 `itertools.chain` accepts a fixed number of positional iterables with one exact
 element type. A loop, comprehension, or immediate consumer can use the chain.
 It evaluates source expressions left to right, then acquires each iterator on
@@ -147,7 +153,7 @@ def has_positive(values: list[int]) -> bool:
     return any(value > 0 for value in reversed(values))
 ```
 
-A generator expression evaluates its leftmost iterable and acquires that iterator immediately. Its remaining iterables, filters, and element expression run only as the consumer requests values. Enclosing local bindings remain live between requests; generator targets have private scope. Assignment expressions write to the enclosing scope, but a delayed write does not prove the target initialized after a possibly empty or short-circuited consumer. `yield`, `yield from`, async clauses, and user-defined iteration protocols remain unsupported.
+A generator expression evaluates its leftmost iterable and acquires that iterator immediately. Its remaining iterables, filters, and element expression run only as the consumer requests values. Enclosing local bindings remain live between requests; generator targets have private scope. Assignment expressions write to the enclosing scope, but a delayed write does not prove the target initialized after a possibly empty or short-circuited consumer. A top-level `Iterator[T]` function can also be called directly in a loop or comprehension if its final statement is a `for` loop ending in `yield value`. Arguments are evaluated at creation, the producer starts on first pull, and stopping early releases its suspended frame. Yielded values may not own finalizable resources. Escaping generators, other yield positions, `yield from`, and async clauses remain unsupported.
 
 `zip` evaluates its arguments in source order and pulls inputs from left to right for each fixed tuple. It stops at the shortest input by default. Its optional `strict` keyword is truth-tested at construction; a true value raises `ValueError` when exhaustion reveals unequal lengths. Later inputs are probed only when required to detect a mismatch. A consumer that stops early can therefore finish before a mismatch becomes observable. Zero inputs produce an empty iteration.
 
@@ -267,6 +273,8 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 `urllib.parse.unquote(string)` is a sealed native import for one positional or named string argument. It decodes percent escapes with the default UTF-8 replacement behavior. Byte inputs, configurable `encoding`/`errors`, and other URL parsing APIs remain unsupported.
 
 ## Fixed regular expressions
+
+Word escapes (`\w`, `\W`) use Python's Unicode alphanumeric characters plus underscore, including inside character classes.
 
 `re.compile` accepts a literal string and an optional literal `0`, `re.VERBOSE`, `re.UNICODE`, or their bitwise union. Unicode matching is already the default for text.
 `re.search(pattern, text)` accepts a literal or a compiled `re.Pattern[str]`.
@@ -500,6 +508,12 @@ Numeric fields additionally accept literal `f`, `%`, `.Nf`, and `.N%` specificat
 
 Integer and boolean fields support decimal `d` and the `+`, `-`, and space sign options with or without `d`. For example, `f"{change:+}"` produces `+0`, `+3`, or `-3`. Decimal formatting preserves arbitrary integer precision and formats booleans as zero or one.
 
+Integer and boolean fields also accept `x` or `X` with a literal width up to
+1000, including zero padding (for example, `f"{code:04x}"`). `chr(int)` returns
+a one-character native string for Unicode scalar values. Out-of-range integers
+raise `ValueError`; isolated surrogate code points cannot be represented by a
+native string.
+
 Dynamic specifications, width, alignment, other numeric presentation types, `!a`, and debug `=` fields are rejected, including `f"{quantity=!s}"`. Records support a statically resolved `__str__` method. Custom `__format__` and `__repr__` methods are unsupported.
 
 Raw prefixes apply only to their own literal text. Expressions inside a raw f-string still follow their ordinary string rules, and adjacent parts keep their individual prefixes. Surrogate escapes in non-raw literal text or field expressions are rejected consistently with ordinary strings; tabs and form feeds inside literal text remain data.
@@ -631,13 +645,13 @@ if args.output:
     args.output.write_text(args.input.read_text())
 ```
 
-Each positional declaration consumes one `str` or `Path`. A final positional with `nargs="+"` consumes one or more values and stores them in a list. Named options accept one or more ASCII spellings, such as `-v` and `--verbose`, with `required`, `nargs="+"` or `action="store_true"`. A list, tuple or `[member.value for member in Mode]` over a sealed enum supplies constant string choices. Omitted options with a nominal enum member as the default keep that member. Explicit values are strings. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2.
+Positional and named arguments accept `nargs="?"`, `"*"`, `"+"`, or a positive integer. A fixed count (including `1`), `"*"`, or `"+"` produces a list. An earlier positional reserves enough values for the following positionals. A named option with `nargs="?"` uses its `const` when present without a value and its default when omitted. Named options accept one or more ASCII spellings, such as `-v` and `--verbose`, with `required` or `action="store_true"`. A list, tuple or `[member.value for member in Mode]` over a sealed enum supplies constant string choices. Omitted options with a nominal enum member as the default keep that member. Explicit values are strings. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2.
 
 Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser.
 
 A parser can require a subcommand with `add_subparsers(dest="command", required=True)`. Each literal `add_parser("name", help="...")` introduces a child parser with its own options. The namespace carries the selected command and that child's fields. A `match args.command` case or `if args.command == "name"` branch selects its concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
-Keep each builder local. Declare parent options first, followed by each subparser and its options, then assign or return `parse_args()`. Dynamic declarations, a variadic positional before a subcommand, and nested or optional subcommands are outside this grammar.
+Keep each builder local. Declare parent options first, followed by each subparser and its options, then assign or return `parse_args()`. Dynamic declarations and nested or optional subcommands are outside this grammar.
 
 ## Standard logging
 
@@ -701,7 +715,9 @@ remain available when the program accesses them.
 
 `sys.getdefaultencoding()` and `sys.getfilesystemencoding()` return the native text encoding (`"utf-8"`). The native standard streams expose that encoding as `.encoding`, including through `sys.__stdin__`, `sys.__stdout__` and `sys.__stderr__`.
 
-`sys.platform` gives the target platform name. `sys.stdout.write(text)` and `sys.stderr.write(text)` return the number of Unicode characters written. Each stream’s `flush()` flushes that stream.
+`sys.platform` gives the target platform name; `os.name` gives its OS interface (`posix` or `nt`). `sys.stdout.write(text)` and `sys.stderr.write(text)` return the number of Unicode characters written. Each stream’s `flush()` flushes that stream.
+
+`sys.exception()` returns the actual exception being handled, or `None` outside a handler. Nested handlers restore their caller’s active exception. Exception identity can be compared with `is` and `is not`.
 
 `sys.exit()` raises `SystemExit` through the ordinary exception and `finally` paths. It accepts an optional `None`, boolean, integer or string. An uncaught string prints to stderr and exits with status 1. An omitted or `None` code exits with status 0. A caught `SystemExit.code` preserves the scalar for printing, truth tests, equality, and type tests.
 
@@ -788,7 +804,9 @@ class Counter:
 
 Ordinary class bodies contain field annotations without defaults, typed methods, and optional docstrings. An instance method's first positional parameter is named `self`; its exact class type is inferred, or an explicit annotation must name that class. Other parameter and return types follow the same inference rules as direct functions; an initializer must return `None`. Method calls use the receiver's exact class and a fixed implementation. Passing or returning an instance preserves its identity, and aliases observe field replacement. Ordinary classes use identity for `==` and `!=`; distinct nominal classes compare unequal.
 
-An ordinary class requires `__init__(...) -> None`, including a class with no fields. Its body contains only straight-line `self.field = expression` assignments, docstrings, and `pass`. Every declared field must be assigned exactly once. Assignment values may use constructor arguments and checked expressions, but cannot read or pass the receiver; a partially initialized object never escapes construction. Local assignments, conditionals, loops, explicit returns, and direct later calls to `__init__` are rejected.
+An ordinary class requires `__init__(...) -> None`, including a class with no fields. Its body may make straight-line local and field assignments, check assertions, and initialize inherited fields with `super().__init__`. Every declared field must be assigned exactly once. Expressions may use constructor arguments, locals and already initialized fields; the receiver itself cannot escape or be rebound. Conditionals, loops, explicit returns, and direct later calls to `__init__` are rejected.
+
+When a checked guard narrows an optional record stored in a mutable field, each subsequent attribute read checks the current field; clearing it through an alias produces the usual `AttributeError`.
 
 `@property` marks a read-only getter with only `self`. Each access calls it again, preserving mutation, ownership, and exceptions. Setters and deleters are unsupported. `@classmethod` binds a first positional parameter named `cls` to the declaring class; `cls(...)` and `cls.method(...)` resolve statically. `@staticmethod` has no implicit parameter. Class/static methods work through either a class or an instance, and an instance expression still evaluates before arguments. `Class.method(instance, ...)` also supports unbound instance methods. `typing.Self`, including aliases and quoted annotations, means the owning class in method annotations; it is not a runtime type object or a stored class value.
 
@@ -818,7 +836,7 @@ print(snapshot.count)
 
 Dataclass fields may use exact scalar literal defaults or `field(default_factory=list)`, `dict`, or `set`. Each omitted factory field gets a fresh container; explicit arguments retain their identity. Optional container factories preserve the distinction between an omitted value and explicit `None`. `kw_only` works at class and field level, including a field override. Fields also accept `compare` and `repr` flags. Flags require literal booleans; custom factories and mutable literal defaults are rejected.
 
-Class options `init`, `eq`, `repr`, `frozen`, `kw_only`, and `slots` are supported. A mutable dataclass may retain an explicit initializer under the ordinary constructor rules; `init=False` requires one. Both values of `slots` keep the language's fixed-layout contract. Frozen records reject field assignments at compile time; their referenced containers remain mutable. The generated initializer calls an instance method `__post_init__(self) -> None` after assigning every field and default factory. An explicit initializer controls its own calls. Explicit frozen initializers, `InitVar`, `ClassVar`, `field(init=False)`, custom metadata, generated ordering, custom hashes, and weak-reference slots are unsupported. `match_args` is accepted without adding positional class patterns or runtime `__match_args__` access. Frozen records do not add class-valued dictionary keys or set members.
+Class options `init`, `eq`, `repr`, `frozen`, `kw_only`, and `slots` are supported. A mutable dataclass may retain an explicit initializer under the ordinary constructor rules; `init=False` requires one. Both values of `slots` keep the language's fixed-layout contract. Frozen records reject field assignments at compile time; their referenced containers remain mutable. Dataclasses accept exact string lists and fixed tuples of strings for `Iterable[str]` fields. They preserve the original container for representation, identity, truth, iteration, and length. The generated initializer calls an instance method `__post_init__(self) -> None` after assigning every field and default factory. An explicit initializer controls its own calls. Explicit frozen initializers, `InitVar`, `ClassVar`, `field(init=False)`, custom metadata, generated ordering, custom hashes, and weak-reference slots are unsupported. `match_args` is accepted without adding positional class patterns or runtime `__match_args__` access. Frozen records do not add class-valued dictionary keys or set members.
 
 Generated equality follows modern CPython: an object equals itself; otherwise instances of the same dataclass compare selected fields in declaration order. `eq=False` preserves identity equality. Distinct records containing the same scalar NaN compare unequal. Compared container fields containing floats are rejected because native unboxed floats cannot preserve Python container NaN identity; use `field(compare=False)` or `@dataclass(eq=False)` for such storage. Nested record fields preserve their own identity and equality behavior.
 
@@ -843,7 +861,7 @@ A function returning `Sequence[T]` can return an exact `list[T]`.
 
 `dict[K, V]` accepts exact `int`, `str`, `bytes`, `Path`, or immutable fixed-tuple keys and one concrete value type. Tuple keys may recursively contain `int`, `bool`, `str`, `bytes`, `Path`, `None`, and nullable forms of those immutable fields. Floats, records, mutable containers, and the `str | bytes` union are excluded from keys. Keys use value equality under one exact type; booleans cannot stand in for integer keys, and a bare `bool` is not a key type. Nonempty literals infer these types from their first entry; `{}` and `dict()` require a concrete contextual type. Duplicate keys keep the first insertion position and the last value. Replacing a value keeps its position, while deletion and reinsertion move the key to the end. `mapping[key]`, assignment, `del mapping[key]`, integer augmented assignment, `len`, and single `in`/`not in` comparisons are supported. Missing required reads and deletes report `KeyError`.
 
-`mapping.get(key)` returns `V | None`, flattened when `V` is already optional or `None`. A default must fit `V | None`; a guaranteed `V` default gives a `V` result. Defaults are evaluated eagerly even when the key exists. Container literals in defaults receive the dictionary's declared value type. Dictionaries are invariant in their key and value types.
+`mapping.get(key)` returns `V | None`, flattened when `V` is already optional or `None`. A default must fit `V | None`; a guaranteed `V` default gives a `V` result. `mapping.pop(key)` removes and returns a stored `V`, raising `KeyError` on a miss. With a default, it follows the same result typing as `get`. Defaults are evaluated eagerly even when the key exists. Container literals in defaults receive the dictionary's declared value type. Dictionaries are invariant in their key and value types.
 
 `collections.Counter[K]` uses exact string or integer keys and arbitrary-precision integer counts. `Counter(iterable)` counts each key, and `Counter(mapping)` copies integer counts. A bare `Counter` annotation or unconstrained empty `Counter()` uses string keys. `Counter[int]()` and an annotated `Counter[int]` destination select integer keys. String-key counters also accept keyword counts. `update` adds its positional iterable or mapping and then the keyword counts, retaining negative and zero entries. A missing subscription returns zero without inserting. Membership, `get`, key iteration and `items()` inspect the stored entries. Deleting an absent key is a no-op. `total()` and `sum(c.values())` sum all counts. Equality between counters with the same key type treats absent keys as zero. Frozen dataclasses can hold independently created counters with `field(default_factory=Counter)`.
 
@@ -903,7 +921,7 @@ preserve the field before the value reads it. Reading other stored fields or
 `Path.name` satisfies that requirement. A call that can mutate the row does
 not. Ordinary f-strings render a `str | None` field as its text or `"None"`.
 
-Capturing an outer local preserves its value and shared object identity; field and indexed reads still occur where written inside the body. Mutations through aliases retain the existing list/dictionary/set iteration behavior. A failure propagates through normal handlers and finally blocks, releasing the partial result and temporary owners without rolling back earlier user-visible mutations. Eager comprehensions do not expose an iterator, closure, callback, or partially built result. Generator expressions use the separate lazy rules above; generator functions, async clauses, and user-defined iteration protocols remain unsupported.
+Capturing an outer local preserves its value and shared object identity; field and indexed reads still occur where written inside the body. Mutations through aliases retain the existing list/dictionary/set iteration behavior. A failure propagates through normal handlers and finally blocks, releasing the partial result and temporary owners without rolling back earlier user-visible mutations. Eager comprehensions do not expose an iterator, closure, callback, or partially built result. Generator expressions use the separate lazy rules above; other generator functions, async clauses, and user-defined iteration protocols remain unsupported.
 
 ## Ownership and errors
 
@@ -930,6 +948,8 @@ Language errors propagate through explicit checked call results and can be caugh
 Exceptions contain an immutable category, message, optional explicit cause, and context-suppression flag. Process status errors additionally retain the original argument list, return code, and captured strings, and format their message from the current argument list. A cause can be attached only while raising a freshly constructed exception, and cause attributes cannot be written, so cause chains remain acyclic. Deep uniquely owned cause chains are released iteratively. There are no traceback, frame, or implicit context references. Exited function frames release their owners during propagation; implicit file closure can therefore happen before CPython releases locals retained by a traceback. A source-defined exception can inherit from one known exception class. A subclass with a docstring or `pass` uses the inherited constructor and matches its ancestor handlers. A failing `asyncio.TaskGroup` can raise an exception group. Full traceback objects, implicit exception context, attaching causes to existing instances and `except*` remain unsupported.
 
 ## Exceptions and cleanup
+
+An explicitly typed local assigned in a `try` body may be read after a handled exception. When a simple assignment did not complete on that path and no earlier value exists, the read raises `UnboundLocalError` (a `NameError`). A successfully assigned `None` remains an ordinary value.
 
 User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent

@@ -1,0 +1,546 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "execution": "native body, JSON calls and assertions",
+  "fixture_execution": "original CPython module/class/instance hooks; native child instance",
+  "routines": {
+    "test.test_json.test_unicode.TestUnicode.test_encoding3": {
+      "source_assertions": 1,
+      "fixture_ids": [
+        "test.test_json.test_unicode.TestCUnicode.test_encoding3",
+        "test.test_json.test_unicode.TestPyUnicode.test_encoding3"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding3": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "5b2ffef4ab26a3d32a23e1bd494cb6916df6c19ea05d548b897bf45eb3be70d8"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding3": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "5b2ffef4ab26a3d32a23e1bd494cb6916df6c19ea05d548b897bf45eb3be70d8"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding3": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "5b2ffef4ab26a3d32a23e1bd494cb6916df6c19ea05d548b897bf45eb3be70d8"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding3": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "5b2ffef4ab26a3d32a23e1bd494cb6916df6c19ea05d548b897bf45eb3be70d8"
+            }
+          ]
+        }
+      }
+    },
+    "test.test_json.test_unicode.TestUnicode.test_encoding5": {
+      "source_assertions": 1,
+      "fixture_ids": [
+        "test.test_json.test_unicode.TestCUnicode.test_encoding5",
+        "test.test_json.test_unicode.TestPyUnicode.test_encoding5"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding5": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "0e4cad4c2c0915e6981b5986be8cce712930fcbfcb6dae1858b362951cf8ed28"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding5": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "0e4cad4c2c0915e6981b5986be8cce712930fcbfcb6dae1858b362951cf8ed28"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding5": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "0e4cad4c2c0915e6981b5986be8cce712930fcbfcb6dae1858b362951cf8ed28"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding5": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "0e4cad4c2c0915e6981b5986be8cce712930fcbfcb6dae1858b362951cf8ed28"
+            }
+          ]
+        }
+      }
+    },
+    "test.test_json.test_unicode.TestUnicode.test_encoding7": {
+      "source_assertions": 1,
+      "fixture_ids": [
+        "test.test_json.test_unicode.TestCUnicode.test_encoding7",
+        "test.test_json.test_unicode.TestPyUnicode.test_encoding7"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding7": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "9226827c666dcca00a5d47cbf68ff5fb0170a530a4c187815af81e5f3c54b4e4"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding7": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "9226827c666dcca00a5d47cbf68ff5fb0170a530a4c187815af81e5f3c54b4e4"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding7": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "9226827c666dcca00a5d47cbf68ff5fb0170a530a4c187815af81e5f3c54b4e4"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding7": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "9226827c666dcca00a5d47cbf68ff5fb0170a530a4c187815af81e5f3c54b4e4"
+            }
+          ]
+        }
+      }
+    },
+    "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_encode": {
+      "source_assertions": 2,
+      "fixture_ids": [
+        "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode",
+        "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a4ff14d220a222271bc45a147e425b7ab469963871ef68c53df2ae0d6a5e2334"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a4ff14d220a222271bc45a147e425b7ab469963871ef68c53df2ae0d6a5e2334"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a4ff14d220a222271bc45a147e425b7ab469963871ef68c53df2ae0d6a5e2334"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a4ff14d220a222271bc45a147e425b7ab469963871ef68c53df2ae0d6a5e2334"
+            }
+          ]
+        }
+      }
+    },
+    "test.test_json.test_unicode.TestUnicode.test_big_unicode_encode": {
+      "source_assertions": 2,
+      "fixture_ids": [
+        "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode",
+        "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "312d22753592d963049f9f5923aefba7962e689ac391c5a5403a542b33704beb"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "312d22753592d963049f9f5923aefba7962e689ac391c5a5403a542b33704beb"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "312d22753592d963049f9f5923aefba7962e689ac391c5a5403a542b33704beb"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "312d22753592d963049f9f5923aefba7962e689ac391c5a5403a542b33704beb"
+            }
+          ]
+        }
+      }
+    },
+    "test.test_json.test_unicode.TestUnicode.test_big_unicode_decode": {
+      "source_assertions": 2,
+      "fixture_ids": [
+        "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode",
+        "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "6679b8621c748ef5687cc97219b616856b50f04eaf3fac79128f6f77af37d78a"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "6679b8621c748ef5687cc97219b616856b50f04eaf3fac79128f6f77af37d78a"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "6679b8621c748ef5687cc97219b616856b50f04eaf3fac79128f6f77af37d78a"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "6679b8621c748ef5687cc97219b616856b50f04eaf3fac79128f6f77af37d78a"
+            }
+          ]
+        }
+      }
+    },
+    "test.test_json.test_unicode.TestUnicode.test_unicode_decode": {
+      "source_assertions": 55295,
+      "fixture_ids": [
+        "test.test_json.test_unicode.TestCUnicode.test_unicode_decode",
+        "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_unicode.TestCUnicode.test_unicode_decode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "237e9a7a3b7e959c362d72a8d0aff95a56f3cf40c9a08e9a3415c6ebddd1860f"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "237e9a7a3b7e959c362d72a8d0aff95a56f3cf40c9a08e9a3415c6ebddd1860f"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_unicode.TestCUnicode.test_unicode_decode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "237e9a7a3b7e959c362d72a8d0aff95a56f3cf40c9a08e9a3415c6ebddd1860f"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "237e9a7a3b7e959c362d72a8d0aff95a56f3cf40c9a08e9a3415c6ebddd1860f"
+            }
+          ]
+        }
+      }
+    },
+    "test.test_json.test_unicode.TestUnicode.test_encoding4": {
+      "source_assertions": 1,
+      "fixture_ids": [
+        "test.test_json.test_unicode.TestCUnicode.test_encoding4",
+        "test.test_json.test_unicode.TestPyUnicode.test_encoding4"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding4": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "ec6540364cc3b15307be8adcd74d31e39180e86d479f2f05c9fd4f5b78d797b8"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding4": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "ec6540364cc3b15307be8adcd74d31e39180e86d479f2f05c9fd4f5b78d797b8"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding4": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "ec6540364cc3b15307be8adcd74d31e39180e86d479f2f05c9fd4f5b78d797b8"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding4": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "ec6540364cc3b15307be8adcd74d31e39180e86d479f2f05c9fd4f5b78d797b8"
+            }
+          ]
+        }
+      }
+    },
+    "test.test_json.test_unicode.TestUnicode.test_encoding6": {
+      "source_assertions": 1,
+      "fixture_ids": [
+        "test.test_json.test_unicode.TestCUnicode.test_encoding6",
+        "test.test_json.test_unicode.TestPyUnicode.test_encoding6"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding6": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "df8c1f4528fa857ee4364fc3d2906f592e5b993d7be4d7aae83d66c58340037a"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding6": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "df8c1f4528fa857ee4364fc3d2906f592e5b993d7be4d7aae83d66c58340037a"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_unicode.TestCUnicode.test_encoding6": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "df8c1f4528fa857ee4364fc3d2906f592e5b993d7be4d7aae83d66c58340037a"
+            }
+          ],
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding6": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "df8c1f4528fa857ee4364fc3d2906f592e5b993d7be4d7aae83d66c58340037a"
+            }
+          ]
+        }
+      }
+    },
+    "test.test_json.test_decode.TestDecode.test_bytes": {
+      "source_assertions": 1,
+      "fixture_ids": [
+        "test.test_json.test_decode.TestCDecode.test_bytes",
+        "test.test_json.test_decode.TestPyDecode.test_bytes"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_decode.TestCDecode.test_bytes": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "939b1fdada99a994d290cf38aa265264e408d31cd7babfab605cdbdd87526416"
+            }
+          ],
+          "test.test_json.test_decode.TestPyDecode.test_bytes": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "939b1fdada99a994d290cf38aa265264e408d31cd7babfab605cdbdd87526416"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_decode.TestCDecode.test_bytes": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "939b1fdada99a994d290cf38aa265264e408d31cd7babfab605cdbdd87526416"
+            }
+          ],
+          "test.test_json.test_decode.TestPyDecode.test_bytes": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "939b1fdada99a994d290cf38aa265264e408d31cd7babfab605cdbdd87526416"
+            }
+          ]
+        }
+      }
+    },
+    "test.test_json.test_dump.TestDump.test_dumps": {
+      "source_assertions": 1,
+      "fixture_ids": [
+        "test.test_json.test_dump.TestCDump.test_dumps",
+        "test.test_json.test_dump.TestPyDump.test_dumps"
+      ],
+      "levels": {
+        "0": {
+          "test.test_json.test_dump.TestCDump.test_dumps": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a216aa875b97021b67945207e0f40e1cad8aa3c05523cd5b852874f541a884ad"
+            }
+          ],
+          "test.test_json.test_dump.TestPyDump.test_dumps": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a216aa875b97021b67945207e0f40e1cad8aa3c05523cd5b852874f541a884ad"
+            }
+          ]
+        },
+        "3": {
+          "test.test_json.test_dump.TestCDump.test_dumps": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a216aa875b97021b67945207e0f40e1cad8aa3c05523cd5b852874f541a884ad"
+            }
+          ],
+          "test.test_json.test_dump.TestPyDump.test_dumps": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "a216aa875b97021b67945207e0f40e1cad8aa3c05523cd5b852874f541a884ad"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

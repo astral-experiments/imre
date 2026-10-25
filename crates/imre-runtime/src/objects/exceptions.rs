@@ -66,6 +66,8 @@ pub(crate) enum Kind {
     StopIteration = 35,
     BadZipFile = 36,
     NotImplementedError = 37,
+    NameError = 39,
+    UnboundLocalError = 40,
 }
 
 impl Kind {
@@ -109,6 +111,8 @@ impl Kind {
             35 => Self::StopIteration,
             36 => Self::BadZipFile,
             37 => Self::NotImplementedError,
+            39 => Self::NameError,
+            40 => Self::UnboundLocalError,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -153,12 +157,15 @@ impl Kind {
             Self::StopIteration => "StopIteration",
             Self::BadZipFile => "BadZipFile",
             Self::NotImplementedError => "NotImplementedError",
+            Self::NameError => "NameError",
+            Self::UnboundLocalError => "UnboundLocalError",
         }
     }
 
     fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
+            Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::Exception => !matches!(
                 self,
                 Self::BaseException | Self::SystemExit | Self::CancelledError
@@ -659,6 +666,25 @@ fn new_exception(kind: Kind, payload: impl Into<Payload>) -> Rc<Object> {
 pub(super) fn kind_of(error: &Object) -> Kind {
     // SAFETY: the task holds an immutable exact exception throughout the read.
     unsafe { error.0.with(Storage::exception_kind) }
+}
+
+/// PEP 479 converts a StopIteration escaping the generator into RuntimeError.
+pub(super) fn generator_stop(cause: Rc<Object>) -> Rc<Object> {
+    let error = new_exception(
+        Kind::RuntimeError,
+        Payload::Message(Rc::new("generator raised StopIteration".into())),
+    );
+    // SAFETY: the fresh wrapper has not escaped and cannot occur in its cause.
+    unsafe {
+        error.0.with_mut(|storage| {
+            let Storage::Exception(value) = storage else {
+                unreachable!()
+            };
+            value.details_mut().cause = Some(cause);
+            value.suppress_context = true;
+        });
+    }
+    error
 }
 
 pub(super) fn task_group_errors(errors: Vec<Rc<Object>>) -> Rc<Object> {
