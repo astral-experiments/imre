@@ -24,27 +24,25 @@ TESTS = HERE / "upstream/Lib/test/test_textwrap.py"
 OWNERS = ("DedentTestCase", "IndentTestCase")
 
 
-def native_source(module, observed):
-    source = "import unittest\nfrom textwrap import dedent, indent\n"
+def native_source(observed):
+    data = TESTS.read_bytes()
+    lines = data.splitlines(keepends=True)
+    classes = {node.name: node for node in ast.parse(data).body if isinstance(node, ast.ClassDef)}
+    source = b"import unittest\nfrom textwrap import dedent, indent\n"
     for name in OWNERS:
-        cls = getattr(module, name)
-        source += f"\nclass {name}(unittest.TestCase):\n"
+        cls = classes[name]
+        first_method = next(node for node in cls.body if isinstance(node, ast.FunctionDef))
+        # Compile the original class header and fixtures, including the tuple concatenation.
+        source += b"\n" + b"".join(lines[cls.lineno - 1:first_method.lineno - 1])
         if name == "DedentTestCase":
-            source += method_bytes(TESTS, name, "assertUnchanged").decode()
-        else:
-            # The native compiler does not yet load class-level tuple expressions.
-            # Read the actual upstream class attributes; credit these fixtures as mixed.
-            for attr in ("ROUNDTRIP_CASES", "CASES"):
-                values = getattr(cls, attr)
-                annotation = ", ".join("str" for _ in values)
-                source += f"    @property\n    def {attr}(self) -> tuple[{annotation}]:\n        return {values!r}\n"
+            source += method_bytes(TESTS, name, "assertUnchanged")
         for method in observed[name]:
-            source += "\n" + method_bytes(TESTS, name, method).decode()
-    return (source + "\nif __name__ == '__main__':\n    unittest.main()\n").encode()
+            source += b"\n" + method_bytes(TESTS, name, method)
+    return source + b"\nif __name__ == '__main__':\n    unittest.main()\n"
 
 
 def run_native_cases(tools, directory, module, methods):
-    source = native_source(module, methods)
+    source = native_source(methods)
     binary = tools.build(source, directory)
     expected = {f"{method} (__main__.{cls}.{method}) ... ok" for cls in methods for method in methods[cls]}
     def run(binary):
@@ -70,12 +68,12 @@ def indent(text: str, prefix: str, predicate: None = None) -> str:
             fixture = "Original assertUnchanged helper and native unittest.TestCase/main"
             operation = "textwrap.dedent"
             if cls == "IndentTestCase":
-                fixture = "Native unittest.main and TestCase; original CPython class tuples supplied as native properties"
+                fixture = "Original class tuple declarations and native unittest.TestCase/main"
                 operation = "textwrap.indent and textwrap.dedent" if name.startswith("test_roundtrip_") else "textwrap.indent"
             results[(f"{module.__name__}.{cls}.{name}", 1)] = {
                 "outcome": "pass",
                 "roles": roles(body="imre", assertions="imre", operation="imre",
-                               fixture="imre" if cls == "DedentTestCase" else "mixed"),
+                               fixture="imre"),
                 "evidence": {"operation": operation,
                              "fixture": fixture, "opt_level": tools.level,
                              "method_sha256": hashlib.sha256(method_bytes(TESTS, cls, name)).hexdigest()},

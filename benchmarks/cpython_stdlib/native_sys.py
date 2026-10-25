@@ -48,6 +48,29 @@ def main():
             subprocess.run([args.imre.resolve(), "build", script, *flags, "-o", exe], check=True)
             return exe
 
+        if Path("/dev/full").exists():
+            code = """import sys
+try:
+    sys.stderr.write("probe\\n")
+    sys.stderr.flush()
+except OSError as error:
+    print(str(error))
+"""
+            with open("/dev/full", "wb") as sink:
+                messages = [subprocess.run(cmd, stdout=subprocess.PIPE, stderr=sink).stdout
+                            for cmd in ([args.python, "-c", code], [native(code)])]
+            if not messages[0] or messages[0] != messages[1]:
+                raise AssertionError(("stderr write error", messages))
+
+            recovery = Path(__file__).parent / "full/sys/stream_errno.py"
+            executable = native(recovery.read_text())
+            for mode in ("stdout-write", "stderr-write", "stdout-flush", "stderr-flush"):
+                stock, actual = [subprocess.run([*cmd, mode], capture_output=True, check=True, timeout=10)
+                                 for cmd in ([args.python, recovery], [executable])]
+                if (actual.stdout, actual.stderr) != (stock.stdout, stock.stderr):
+                    raise AssertionError((mode, stock, actual))
+            print("Matched errno, strerror and recovery for four standard stream failures")
+
         def command(argv):
             if len(argv) != 3 or argv[:2] != [sys.executable, "-c"]:
                 raise ValueError(f"unexpected upstream child invocation: {argv!r}")
@@ -85,6 +108,30 @@ def main():
             result = [(p.returncode, p.stdout, p.stderr) for p in outputs]
             if result[0] != result[1]:
                 raise AssertionError((mode, result))
+        code = 'import sys\nsys.stdout.write("out")\nsys.stderr.write("err")'
+        executable = native(code)
+        output = [subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                  for cmd in ([args.python, executable.with_suffix(".py")], [executable])]
+        if output[0] != output[1]:
+            raise AssertionError(("final stream order", output))
+
+        if Path("/dev/full").exists():
+            cases = [
+                ('import sys\nsys.stdout.write("buffered")', "stdout"),
+                ('import sys\nsys.stdout.write("buffered")\nsys.exit(7)', "stdout"),
+                ('import sys\nsys.exit("message")', "stderr"),
+                ('raise ValueError("bad")', "stderr"),
+            ]
+            for code, stream in cases:
+                executable = native(code)
+                with open("/dev/full", "wb") as sink:
+                    pipes = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, stream: sink}
+                    results = [subprocess.run(cmd, **pipes)
+                               for cmd in ([args.python, executable.with_suffix(".py")], [executable])]
+                expected, actual = [(p.returncode, p.stdout, p.stderr) for p in results]
+                if expected[0] != 120 or actual != expected:
+                    raise AssertionError(("final stream flush", stream, expected, actual))
+
         print(f"Matched exit status, stdout, and stderr in {len(modes)} native sys fixture cases")
 
         payloads = Path(__file__).parent / "full/sys/exit_payloads.py"

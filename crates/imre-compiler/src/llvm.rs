@@ -92,6 +92,7 @@ impl Type {
             | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
+            | Self::PathInfo
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -153,6 +154,7 @@ impl Type {
             | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
+            | Self::PathInfo
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -284,7 +286,7 @@ fn emit_program(
             }
         });
     }
-    let (uses_sys_argv, uses_orig_argv) = module.sys_argument_usage();
+    let (uses_sys_argv, uses_orig_argv, uses_linecache) = module.startup_usage();
     let mut emitter = Emitter {
         module,
         output,
@@ -328,6 +330,7 @@ fn emit_program(
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv,
         uses_orig_argv,
+        uses_linecache,
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -513,6 +516,7 @@ struct Emitter<'a, 'module> {
     integer_regions: Vec<Option<integer_regions::Summary>>,
     uses_sys_argv: bool,
     uses_orig_argv: bool,
+    uses_linecache: bool,
     has_extensions: bool,
 }
 
@@ -744,6 +748,7 @@ impl Emitter<'_, '_> {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
+            | Type::PathInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -1719,6 +1724,9 @@ impl Emitter<'_, '_> {
             self.line("call void @imre_record_error_init()");
             self.line("call void @imre_init_literals()");
         }
+        if entry && self.uses_linecache {
+            self.line("call void @imre_linecache_init()");
+        }
         if entry && self.uses_sys_argv {
             self.line("call void @imre_args_init(i32 %argc, ptr %argv)");
         }
@@ -1736,12 +1744,15 @@ impl Emitter<'_, '_> {
                 self.line("call void @imre_extension_clear()");
             }
             self.cleanup_globals();
+            if self.uses_linecache {
+                self.line("call void @imre_linecache_clear()");
+            }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
             }
-            self.void_call("imre_flush_stdout", &[]);
-            self.line("ret i32 0");
+            let status = self.instruction("call i32 @imre_finish_stdio()");
+            self.line(format!("ret i32 {status}"));
         } else {
             let value = self.instruction(format!(
                 "load {}, ptr %function_return",
@@ -1768,6 +1779,9 @@ impl Emitter<'_, '_> {
                 self.line("call void @imre_extension_clear()");
             }
             self.cleanup_globals();
+            if self.uses_linecache {
+                self.line("call void @imre_linecache_clear()");
+            }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
@@ -2414,7 +2428,7 @@ impl Emitter<'_, '_> {
                 }
                 set
             }
-            ExprKind::Tuple(values) => self.tuple(expression.ty, values),
+            ExprKind::Tuple(values) => self.tuple(expression.ty, values, None),
             ExprKind::Present(expression_value) => {
                 let value = self.operand(expression_value);
                 let value = self.own_operand(value);
@@ -3335,6 +3349,7 @@ impl Emitter<'_, '_> {
                 | Type::TimedFileHandler
                 | Type::StrDescriptor(_)
                 | Type::PlainObject
+                | Type::PathInfo
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
@@ -3873,6 +3888,8 @@ impl Emitter<'_, '_> {
                     FileConfig => "imre_log_file_config",
                     Disabled => "imre_log_disabled",
                     Propagate => "imre_log_propagate",
+                    SetPropagate => "imre_log_set_propagate",
+                    HasHandlers => "imre_log_has_handlers",
                     Name => "imre_log_name",
                     Parent => "imre_log_parent",
                     Children => "imre_log_children",
@@ -4603,7 +4620,83 @@ impl Emitter<'_, '_> {
                 small_integer: false,
             },
             Builtin::NewPlainObject => self.call("imre_plain_object_new", returns, &[]),
+            Builtin::Linecache(op, entry, env) => {
+                use crate::ir::LinecacheOperation as Op;
+                let pointer = |i: usize| {
+                    if args[i].value.ty == Type::None {
+                        "null"
+                    } else {
+                        args[i].value.operand.as_str()
+                    }
+                };
+                match op {
+                    Op::Cache => self.call("imre_linecache_cache", returns, &[]),
+                    Op::Clear => self.call("imre_linecache_clear", returns, &[]),
+                    Op::Check => {
+                        self.line(format!(
+                            "call void @imre_linecache_check(ptr {})",
+                            pointer(0)
+                        ));
+                        Value {
+                            ty: Type::None,
+                            operand: "0".into(),
+                            small_integer: false,
+                        }
+                    }
+                    Op::Lazy => Value {
+                        ty: Type::Bool,
+                        operand: "false".into(),
+                        small_integer: false,
+                    },
+                    Op::Getline | Op::Getlines | Op::Update => {
+                        let globals = if *op == Op::Getline { 2 } else { 1 };
+                        let root = globals + 1;
+                        let layout = self
+                            .output
+                            .global_ref(format!("layout_{}", record_name(*entry)));
+                        let list = self.checked_instruction(format!(
+                            "call ptr @imre_linecache_lines(ptr {}, ptr {}, ptr {}, ptr {}, i32 {}, i32 {}, ptr @{layout})",
+                            pointer(0), pointer(globals), pointer(root), pointer(root+1), u32::from(*env), u32::from(*op == Op::Update)
+                        ));
+                        let operand = if *op == Op::Getline {
+                            let index = &args[1].value;
+                            let ty = index.ty.llvm();
+                            let fname = if index.ty == Type::Float {
+                                "imre_linecache_line_float"
+                            } else {
+                                "imre_linecache_line_int"
+                            };
+                            let item = self.instruction(format!(
+                                "call ptr @{fname}(ptr {list}, {ty} {}, ptr {})",
+                                index.operand,
+                                pointer(root + 2)
+                            ));
+                            self.line(format!("call void @imre_object_release(ptr {list})"));
+                            self.check_error();
+                            item
+                        } else {
+                            list
+                        };
+                        Value {
+                            ty: returns,
+                            operand,
+                            small_integer: false,
+                        }
+                    }
+                }
+            }
             Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
+            Builtin::WrapperAttributes(fields) => {
+                let names = fields
+                    .names()
+                    .iter()
+                    .map(|name| Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str((*name).to_owned()),
+                    })
+                    .collect::<Vec<_>>();
+                self.tuple(returns, &names, Some(fields.root()))
+            }
             Builtin::HashAvailable => self.call("imre_hash_algorithms_available", returns, &[]),
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
             Builtin::Sha256Update => {
@@ -5522,6 +5615,15 @@ impl Emitter<'_, '_> {
                 self.release_operand(&args[0]);
                 return none();
             }
+            Builtin::ListClear => {
+                let symbol = if args[0].value.ty == Type::ListInt {
+                    "imre_list_clear"
+                } else {
+                    "imre_seq_clear"
+                };
+                self.void_call(symbol, &[&args[0].value]);
+                none()
+            }
             Builtin::Pop => {
                 if args[0].value.ty == Type::ListInt {
                     self.runtime_call(&LIST_POP, [&args[0].value])
@@ -5684,6 +5786,7 @@ impl Emitter<'_, '_> {
                     | Type::StrDescriptor(_)
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
+                    | Type::PathInfo
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -5933,6 +6036,7 @@ impl Emitter<'_, '_> {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
+            | Type::PathInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6008,6 +6112,7 @@ impl Emitter<'_, '_> {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
+            | Type::PathInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6596,6 +6701,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::StrDescriptor(_)
         | Type::PlainObject
         | Type::SimpleNamespace(_)
+        | Type::PathInfo
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -6828,6 +6934,9 @@ declare ptr @imre_shutil_confstr_cs_path()
 declare ptr @imre_shutil_os_defpath()
 declare void @imre_shutil_rmtree(ptr, i32, i32, i64, i32, ptr, ptr, ptr, ptr)
 declare i64 @imre_shutil_copy(i32, ptr, i32, ptr, i32, i32)
+declare i64 @imre_shutil_copytree(ptr, i32, ptr, i32, i32, i32, i32, i32, ptr, ptr, ptr, i32, ptr, ptr, i32)
+declare ptr @imre_shutil_tree_error_args(ptr, ptr)
+declare ptr @imre_shutil_ignore_patterns_call(ptr, ptr, ptr)
 declare void @imre_os_unlink(ptr, i32, i64, i32)
 declare void @imre_subprocess_check(ptr)
 declare i64 @imre_subprocess_error_field(ptr, i32)
@@ -6863,8 +6972,9 @@ declare void @imre_directory_context_exit(ptr)
 declare ptr @imre_union_path_text(i64)
 declare ptr @imre_sysconfig_scripts()
 declare i32 @imre_path_text_exists(ptr)
-declare i32 @imre_path_exists(ptr)
-declare i32 @imre_path_is_file(ptr)
+declare ptr @imre_path_info(ptr)
+declare ptr @imre_path_info_repr(ptr)
+declare i32 @imre_path_query(ptr, i32, i32)
 declare i32 @imre_path_match(ptr, ptr, i64, i32)
 declare i32 @imre_fnmatch(ptr, ptr, i32, i32)
 declare ptr @imre_fnmatch_filter(ptr, ptr, i32, i32)
@@ -6876,7 +6986,6 @@ declare ptr @imre_pure_path_new(i32)
 declare ptr @imre_path_join_object(ptr, ptr)
 declare ptr @imre_path_prefix(ptr, i32)
 declare ptr @imre_path_as_posix(ptr)
-declare i32 @imre_path_is_dir(ptr)
 declare i32 @imre_path_equal(ptr, ptr)
 declare ptr @imre_path_read_bytes(ptr)
 declare ptr @imre_path_read_text(ptr)
@@ -6941,6 +7050,13 @@ declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_next(ptr, i32)
 declare i64 @imre_csv_line_number(ptr)
 declare ptr @imre_plain_object_new()
+declare void @imre_linecache_init()
+declare ptr @imre_linecache_cache()
+declare void @imre_linecache_clear()
+declare void @imre_linecache_check(ptr)
+declare ptr @imre_linecache_lines(ptr, ptr, ptr, ptr, i32, i32, ptr)
+declare ptr @imre_linecache_line_int(ptr, i64, ptr)
+declare ptr @imre_linecache_line_float(ptr, double, ptr)
 declare ptr @imre_inspect_sentinel()
 declare ptr @imre_inspect_str_descriptor(i32)
 declare ptr @imre_sha256_new(ptr)
@@ -7013,7 +7129,7 @@ declare ptr @imre_exception_current()
 declare ptr @imre_exception_swap_active(ptr)
 declare void @imre_exception_raise(ptr)
 declare void @imre_exception_reraise()
-declare void @imre_flush_stdout()
+declare i32 @imre_finish_stdio()
 declare void @imre_record_error_init()
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
@@ -7056,6 +7172,8 @@ declare ptr @imre_seq_data_readonly(ptr) nounwind
 declare void @imre_seq_set_index(ptr, i64, i64, i32)
 declare i32 @imre_seq_append(ptr, i64, i32)
 declare i64 @imre_seq_pop(ptr)
+declare void @imre_list_clear(ptr)
+declare void @imre_seq_clear(ptr)
 declare i64 @imre_seq_len(ptr) nounwind
 declare i32 @imre_seq_resolve_header(ptr) nounwind
 ; The entry bootstrap can wait for imre run before it returns the layout.
@@ -7162,6 +7280,7 @@ declare ptr @imre_str_split(ptr, ptr, i64, i32)
 declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
+declare ptr @imre_str_expandtabs(ptr, i64)
 declare ptr @imre_str_lower(ptr)
 declare ptr @imre_str_capitalize(ptr)
 declare i32 @imre_str_affix(ptr, ptr, i32)
@@ -7299,6 +7418,8 @@ declare void @imre_log_typed_dict_config(ptr, i64)
 declare void @imre_log_file_config(ptr, i8, i1, i64)
 declare i1 @imre_log_disabled(ptr)
 declare i1 @imre_log_propagate(ptr)
+declare void @imre_log_set_propagate(i1, ptr)
+declare i1 @imre_log_has_handlers(ptr)
 declare i1 @imre_log_is_enabled(ptr, i64)
 declare void @imre_log_routed_emit(ptr, i64, ptr)
 declare ptr @imre_log_name(ptr)
