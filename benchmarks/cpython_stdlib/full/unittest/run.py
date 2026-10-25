@@ -32,6 +32,16 @@ def loader_methods():
 
 
 DEFAULT_LOADER_METHODS = loader_methods()
+# These methods still run on CPython. Keep the native attempt in each report;
+# a different compiler failure must fail the gate.
+LOADER_BLOCKERS = {
+    "test_getTestCaseNames__not_a_TestCase": "5:23: Imre: local class base requires supported native class metadata",
+    "test_getTestCaseNames__testNamePatterns__attribute_access_regression":
+        "6:13: Imre: local class body requires plain methods without defaults or inert class attributes",
+    "test_partial_functions": "6:9: Imre: local functions require annotated parameters and return types",
+    "test_sortTestMethodsUsing__None": "10:9: Imre: unknown field; dynamic attributes and first-class methods are unsupported",
+    "test_sortTestMethodsUsing__getTestCaseNames": "5:9: Imre: local functions require annotated parameters and return types",
+}
 ASSERTIONS = {
     "testAssertTrue": "assertTrue", "testAssertFalse": "assertFalse",
     "testAssertLess": "assertLess", "testAssertLessEqual": "assertLessEqual",
@@ -63,7 +73,7 @@ MOCK_BLOCKERS = {
     "test_reset_sideeffect": (1890, '7:18: Imre: unexpected keyword argument "return_value"'),
 }
 CALLABLE_BLOCKERS = {
-    "testAssertRaisesCallable": (1457, "6:9: Imre: unsupported statement in the Imre subset"),
+    "testAssertRaisesCallable": (1457, "6:29: Imre: local class base requires supported native class metadata"),
     "test_assertRaises": (61, "6:9: Imre: local functions require annotated parameters and return types"),
 }
 
@@ -138,6 +148,7 @@ def run(args, level, root):
     driver = root / "assertions"
     driver.mkdir()
     executions, native_defaults, blocked, measured_blockers = {}, {}, {}, set()
+    expected_loader_blocks = {}
     host = {PREFIX + "test_assertions.TestLongMessage." + name: op for name, op in ASSERTIONS.items()}
     try:
         binary = lang.build((HERE / "assertion_driver.py").read_bytes(), driver)
@@ -172,6 +183,12 @@ def run(args, level, root):
         if default_fixture:
             blob = manifest["files"][path.relative_to(HERE / "upstream").as_posix()]
             native_defaults[case_id, 1] = NativeDefaultMethod(lang, directory, path, blob, ("imre", operation))
+            if module == "test_loader" and method in LOADER_BLOCKERS:
+                diagnostic = f"Compiling <case>/case.py (-O{level})\n<case>/case.py:{LOADER_BLOCKERS[method]}"
+                expected_loader_blocks[case_id, 1] = diagnostic, {
+                    "stage": "compile", "source_blob": blob,
+                    "method_sha256": hashlib.sha256(method_bytes(path, owner, method)).hexdigest(),
+                }
             continue
         fixture = testcase_fixture("bool" if method == "test_stop" else None)
         if module == "testmock.testmock":
@@ -190,7 +207,7 @@ def run(args, level, root):
             if expected:
                 line, diagnostic = expected
                 if observation["reason"].endswith("<case>/case.py:" + diagnostic):
-                    measured_blockers.add(case_id)
+                    measured_blockers.add((case_id, 1))
                 observation["evidence"].update(
                     original_source=f"{path.relative_to(HERE / 'upstream')}:{line}",
                     method_sha256=hashlib.sha256(method_bytes(path, owner, method)).hexdigest(),
@@ -198,9 +215,14 @@ def run(args, level, root):
             blocked[case_id, 1] = observation
     report = run_evidence(load_suite(manifest["module"]), executions, reference, level,
                           preflight=blocked, native_defaults=native_defaults, exceptions=reference_skips(level))
+    for row in report["records"]:
+        expected = expected_loader_blocks.get((row["id"], row["occurrence"]))
+        if (expected and row["classification"] == "blocked" and row["reference"] == "pass"
+                and (row["reason"].strip(), row["evidence"]) == expected):
+            measured_blockers.add((row["id"], row["occurrence"]))
     failures = [r for r in report["records"]
                 if (r["outcome"] not in {"pass", "not-run"}
-                    and not (r["outcome"] == "blocked" and r["id"] in measured_blockers))
+                    and not (r["outcome"] == "blocked" and (r["id"], r["occurrence"]) in measured_blockers))
                 or r["classification"] in {"reference-failure", "reference-disagreement"}]
     for row in failures:
         print(row["id"], row.get("reason", row["reference"]), file=sys.stderr)
