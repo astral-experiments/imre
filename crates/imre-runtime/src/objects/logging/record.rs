@@ -1,7 +1,8 @@
 //! A log record owns one native Python value per attribute, including user-supplied extras.
+use crate::StrOwner;
 use std::cell::Cell;
 use std::collections::HashMap;
-thread_local! {static FLAGS:Cell<u8> = const {Cell::new(15)};}
+thread_local! {static FLAGS:Cell<u8> = const {Cell::new(31)};}
 use num_traits::ToPrimitive;
 use std::rc::Rc;
 use std::sync::OnceLock;
@@ -24,7 +25,7 @@ fn owned(word: usize, kind: u32) -> OwnedWord {
 }
 
 pub(super) fn string(s: &str) -> OwnedWord {
-    owned(Rc::into_raw(Rc::new(Str::from(s))) as usize, 3)
+    owned(StrOwner::into_raw(StrOwner::new(Str::from(s))) as usize, 3)
 }
 fn integer(n: usize) -> OwnedWord {
     owned(Int::from_usize(n).into_raw(), 2)
@@ -124,7 +125,7 @@ pub(super) fn brace_item(value: &OwnedWord, key: &str) -> Result<OwnedWord> {
         return unsafe {
             object(value.word as *const Object)
                 .0
-                .with_mut(|s| s.dictionary_mut().logging_item(&key))
+                .with_mut(|s| s.dictionary_mut().subscript_value(&key))
         }?
         .ok_or_else(|| {
             Error::new(
@@ -272,7 +273,10 @@ impl Record {
             2 => {
                 // SAFETY: level owns this Int until lookup finishes.
                 let number = unsafe { Int::borrow(level.word) };
-                owned(Rc::into_raw(super::levels::level_name(&number)) as usize, 3)
+                owned(
+                    StrOwner::into_raw(super::levels::level_name(&number)) as usize,
+                    3,
+                )
             }
             3 => {
                 // SAFETY: level is a rooted exact string.
@@ -877,7 +881,7 @@ pub unsafe extern "C" fn imre_logrecord_message(record: *const Object) -> *const
     // SAFETY: this only reads owned values from the live record.
     let result = unsafe { with_record(record, Record::message) };
     finish(
-        result.map(|s| Rc::into_raw(Rc::new(Str::from(s.as_str())))),
+        result.map(|s| StrOwner::into_raw(StrOwner::new(Str::from(s.as_str())))),
         std::ptr::null(),
     )
 }
@@ -888,7 +892,7 @@ pub unsafe extern "C" fn imre_logrecord_message(record: *const Object) -> *const
 pub unsafe extern "C" fn imre_logrecord_repr(record: *const Object) -> *const Str {
     // SAFETY: display only reads the live record and its rooted fields.
     let text = unsafe { with_record(record, Record::repr) };
-    Rc::into_raw(Rc::new(Str::from(text.as_str())))
+    StrOwner::into_raw(StrOwner::new(Str::from(text.as_str())))
 }
 
 /// Reads the current module flag selected by a compiler-emitted mask.
@@ -942,7 +946,8 @@ pub unsafe extern "C" fn imre_str_percent_tuple(
 
 fn percent(fmt: &Str, value: OwnedWord) -> *const Str {
     finish(
-        format_arguments(fmt.as_str(), &value).map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
+        format_arguments(fmt.as_str(), &value)
+            .map(|s| StrOwner::into_raw(StrOwner::new(Str::from(s)))),
         std::ptr::null(),
     )
 }

@@ -1,0 +1,12 @@
+{
+  "compiler_commit": "2282db951b2a97e9085767ba1a0140fbed38f92c",
+  "tree": "921a8a8a8266be02d2436121ccd99f1df944b153",
+  "parents": [
+    "8b46c0c1035de24521be547514a9031ec56991ce"
+  ],
+  "binary_sha256": {
+    "imre": "0ea1252952b6b6d7dbbd6060e14cde9075e1f8cbf2d8ef564c2c9e78f93f9f23",
+    "libimre_runtime.a": "1c9614ff3f4ab155e6f78441463e25ad3fa13dfcf91d8f550d63aefbcf808751"
+  },
+  "description": "Partial attributes, reassignment and all-partial unions, #1248"
+}

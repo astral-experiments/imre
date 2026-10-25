@@ -1,17 +1,18 @@
 //! Buffered binary and UTF-8 streams with Python's read and write boundaries.
 
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, IsTerminal, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::mem::MaybeUninit;
 
 use smallvec::SmallVec;
 
 use super::gzip::{GzipError, GzipReader};
 use super::{Bytes, Error, Kind, Result, Str, decode_text, os_error};
+use crate::BinaryOutput;
 
 pub(super) struct Output {
-    raw: BufWriter<File>,
-    text: Option<Vec<u8>>,
+    raw: BinaryOutput<File>,
+    text: Option<crate::text_output::PendingText>,
     line_buffering: bool,
 }
 
@@ -19,15 +20,15 @@ impl Output {
     pub(super) fn new(file: File, capacity: usize, binary: bool) -> Self {
         Self {
             line_buffering: !binary && file.is_terminal(),
-            raw: BufWriter::with_capacity(capacity, file),
-            text: (!binary).then(Vec::new),
+            raw: BinaryOutput::with_capacity(capacity, file),
+            text: (!binary).then(crate::text_output::PendingText::default),
         }
     }
 
     pub(super) fn pipe(file: File, capacity: usize, line_buffering: bool) -> Self {
         // Popen creates TextIOWrapper(write_through=True) around the binary pipe.
         Self {
-            raw: BufWriter::with_capacity(capacity, file),
+            raw: BinaryOutput::with_capacity(capacity, file),
             text: None,
             line_buffering,
         }
@@ -39,42 +40,19 @@ impl Output {
             self.raw.write_all(bytes)?;
             return if flush_line { self.raw.flush() } else { Ok(()) };
         };
-        // TextIOWrapper groups small encoded writes, but forwards a large write
-        // separately after draining any pending text.
-        const CHUNK_SIZE: usize = 8192;
-        if bytes.len() >= CHUNK_SIZE {
-            Self::drain_text(&mut self.raw, pending)?;
-            self.raw.write_all(bytes)?;
-        } else {
-            pending.extend_from_slice(bytes);
-            if pending.len() >= CHUNK_SIZE || flush_line {
-                Self::drain_text(&mut self.raw, pending)?;
-            }
-        }
-        if flush_line {
-            self.raw.flush()?;
-        }
-        Ok(())
-    }
-
-    fn drain_text(raw: &mut BufWriter<File>, pending: &mut Vec<u8>) -> io::Result<()> {
-        let result = raw.write_all(pending);
-        // TextIOWrapper removes the pending text even when the binary write fails.
-        pending.clear();
-        result
+        pending.write(&mut self.raw, bytes, flush_line)
     }
 
     pub(super) fn flush(&mut self) -> io::Result<()> {
         if let Some(pending) = &mut self.text {
-            Self::drain_text(&mut self.raw, pending)?;
+            return pending.flush(&mut self.raw);
         }
         self.raw.flush()
     }
 
     pub(super) fn finish(mut self) -> (File, io::Result<()>) {
         let flushed = self.flush();
-        let (file, _) = self.raw.into_parts();
-        (file, flushed)
+        (self.raw.inner, flushed)
     }
 }
 
@@ -371,10 +349,15 @@ impl TextBuffer {
                 unsafe { str::from_utf8_unchecked(&bytes[..err.valid_up_to()]) }
             }
             Err(err) => {
-                return Err(Error::new(
-                    Kind::UnicodeDecodeError,
-                    format!("invalid UTF-8 at byte {}", err.valid_up_to()),
-                ));
+                // A decoded CR was retained for newline translation, independently
+                // of the UTF-8 decoder's incomplete bytes from the previous chunk.
+                let (source, error) = if self.carry.starts_with(b"\r") {
+                    let source = &bytes[1..];
+                    (source, str::from_utf8(source).unwrap_err())
+                } else {
+                    (bytes, err)
+                };
+                return Err(super::super::bytes::decode_error(source, error));
             }
         };
         let mut text = if eof {

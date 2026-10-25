@@ -77,7 +77,11 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
-                Type::ExceptionField => {
+                Type::Calendar(crate::ir::CalendarType::Delta) => self.instruction(format!(
+                    "call i1 @imre_calendar_truth(ptr {})",
+                    value.operand
+                )),
+                Type::ObjectValue => {
                     let bit = self.instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",
                         value.operand
@@ -98,16 +102,29 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
+                Type::ChainMap(_) => {
+                    let byte = self.instruction(format!(
+                        "call i32 @imre_chainmap_truth(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i32 {byte}, 0"))
+                }
                 Type::List(_) => {
                     let length = self
                         .instruction(format!("call i32 @sequence_header(ptr {})", value.operand));
                     self.instruction(format!("icmp ugt i32 {length}, 1"))
                 }
-                Type::ListInt | Type::Dict(_) | Type::Set(_) | Type::StringKeys => {
+                Type::ListInt
+                | Type::Deque(_)
+                | Type::Dict(_)
+                | Type::ReadOnlyObjectMapping
+                | Type::Set(_)
+                | Type::StringKeys => {
                     let family = match value.ty {
                         Type::ListInt => "list",
-                        Type::Dict(_) => "dict",
+                        Type::Dict(_) | Type::ReadOnlyObjectMapping => "dict",
                         Type::Set(_) | Type::StringKeys => "set",
+                        Type::Deque(_) => "deque",
                         _ => unreachable!(),
                     };
                     // These containers have at least one word per entry, so

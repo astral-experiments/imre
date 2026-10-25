@@ -59,29 +59,52 @@ pub(crate) fn source_docstrings(
     }
 }
 
-/// Sealed namespaces carry the original documentation of their example-bearing
-/// definitions. The audit compares these strings with CPython's actual finder.
-pub(crate) fn sealed(name: IntrinsicModule) -> Option<(&'static str, &'static str, &'static str)> {
+/// Original documentation for a compiler-provided module.
+pub(crate) struct SealedDocs {
+    pub(crate) module: &'static str,
+    entries: &'static [(&'static str, &'static str)],
+}
+
+impl SealedDocs {
+    pub(crate) fn append_to(&self, docs: &mut Vec<(String, String)>) {
+        docs.extend(
+            self.entries
+                .iter()
+                .map(|&(name, text)| (name.into(), text.into())),
+        );
+    }
+}
+
+pub(crate) fn sealed(name: IntrinsicModule) -> Option<SealedDocs> {
+    macro_rules! docs {
+        ($module:literal; $($name:literal),+ $(,)?) => {
+            SealedDocs {
+                module: $module,
+                entries: &[$(($name, include_str!(concat!("../../stdlib/docstrings/", $name, ".txt")))),+],
+            }
+        };
+    }
     Some(match name {
-        IntrinsicModule::Itertools => (
-            "itertools",
-            "itertools.batched",
-            include_str!("../../stdlib/docstrings/itertools.batched.txt"),
-        ),
-        IntrinsicModule::Json => (
-            "json",
-            "json",
-            include_str!("../../stdlib/docstrings/json.txt"),
-        ),
-        IntrinsicModule::JsonEncoder => (
-            "json.encoder",
-            "json.encoder.JSONEncoder.encode",
-            include_str!("../../stdlib/docstrings/json.encoder.JSONEncoder.encode.txt"),
-        ),
-        IntrinsicModule::JsonDecoder => (
-            "json.decoder",
-            "json.decoder",
-            include_str!("../../stdlib/docstrings/json.decoder.txt"),
+        IntrinsicModule::Itertools => docs!("itertools"; "itertools.batched"),
+        IntrinsicModule::Json => docs!("json"; "json"),
+        IntrinsicModule::JsonEncoder => docs!("json.encoder"; "json.encoder.JSONEncoder.encode"),
+        IntrinsicModule::JsonDecoder => docs!("json.decoder"; "json.decoder"),
+        IntrinsicModule::Collections => docs!("collections";
+            "collections.Counter",
+            "collections.Counter.__add__",
+            "collections.Counter.__and__",
+            "collections.Counter.__iadd__",
+            "collections.Counter.__iand__",
+            "collections.Counter.__init__",
+            "collections.Counter.__ior__",
+            "collections.Counter.__isub__",
+            "collections.Counter.__or__",
+            "collections.Counter.__sub__",
+            "collections.Counter.elements",
+            "collections.Counter.most_common",
+            "collections.Counter.subtract",
+            "collections.Counter.update",
+            "collections.namedtuple",
         ),
         _ => return None,
     })
@@ -415,8 +438,8 @@ fn case_program(
             )
         }
         Binding::IntrinsicModule(m) => {
-            let (module, documented, _) = sealed(m).unwrap();
-            let owner = documented
+            let module = sealed(m).unwrap().module;
+            let owner = name
                 .strip_prefix(module)
                 .and_then(|n| n.strip_prefix('.'))
                 .and_then(|n| n.split('.').next());
@@ -500,8 +523,8 @@ impl Loader<'_> {
                         let m = &self.modules[id];
                         source_docstrings(&m.name, &m.parsed.syntax().body, true, &mut docs);
                     }
-                    Binding::IntrinsicModule(module) if let Some((_, n, s)) = sealed(module) => {
-                        docs.push((n.into(), s.into()))
+                    Binding::IntrinsicModule(module) if let Some(catalog) = sealed(module) => {
+                        catalog.append_to(&mut docs);
                     }
                     _ => continue,
                 }

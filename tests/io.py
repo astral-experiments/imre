@@ -25,8 +25,28 @@ print(0)
 print(-17)
 print(1000000000000000000000000000000000000000000000000000000000001)
 ''',
-    "large": "print(" + repr("prefix\0" + "éλ🙂" * 8192 + "\0suffix") + ")\n"
+    # Exceed the 128 KiB binary buffer CPython 3.14 uses for a pipe.
+    "large": "print(" + repr("prefix\0" + "éλ🙂" * 32768 + "\0suffix") + ")\n"
     'for index in range(160):\n    print(index)\nprint("large output finished")\n',
+    "print_errno": """import os
+import sys
+for fd in [1, 2]:
+    saved = os.dup(fd)
+    os.dup2(int(sys.argv[1]), fd)
+    try:
+        if fd == 1:
+            print("x" * 131072)
+        else:
+            print("x", file=sys.stderr)
+    except OSError as error:
+        code = repr(error.errno)
+    else:
+        code = "missing error"
+    finally:
+        os.dup2(saved, fd)
+        os.close(saved)
+    print(code)
+""",
     "division_error": '''print("before division error")
 print(1000000000000000000000000000000000000000000000000000000000001)
 zero = int("0")
@@ -374,6 +394,18 @@ def main() -> None:
                 terminal_message([binaries["terminal_loop"]], args.timeout),
                 reference["terminal_loop"], f"terminal output O{level}",
             )
+            passed += 1
+
+            # A caught print failure on either stream retains the pipe errno.
+            reader, writer = os.pipe()
+            os.close(reader)
+            with os.fdopen(writer, "wb", buffering=0):
+                commands = ([args.python, "-I", str(sources["print_errno"])], [binaries["print_errno"]])
+                reference_run, native_run = [run([*cmd, str(writer)], pass_fds=(writer,)) for cmd in commands]
+                assert reference_run.returncode == native_run.returncode == 0
+                same_output(reference_run.stdout, (str(errno.EPIPE) + "\n").encode() * 2, "reference errno")
+                same_output(native_run.stdout, reference_run.stdout, "print errno")
+                same_output(native_run.stderr, reference_run.stderr, "retained stderr")
             passed += 1
 
             # The large print writes immediately. The smaller buffered writes fail
