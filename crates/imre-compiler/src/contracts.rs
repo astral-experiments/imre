@@ -185,6 +185,7 @@ impl Builtin {
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
+                | ProcessOperation::Call { .. }
                 | ProcessOperation::PopenPid
                 | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
