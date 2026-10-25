@@ -2,6 +2,8 @@
 //! Only their trailing numeric attributes are absent from iteration and equality.
 
 use std::fs::Metadata;
+#[cfg(target_os = "macos")]
+use std::os::darwin::fs::MetadataExt as _;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 
@@ -56,11 +58,22 @@ struct Extra {
     block_size: u64,
     blocks: u64,
     rdev: u64,
+    #[cfg(target_os = "macos")]
+    darwin: DarwinFields,
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct DarwinFields {
+    birthtime: f64,
+    flags: u32,
+    generation: u32,
 }
 
 pub(in crate::objects) const EXTRA_WORDS: usize = size_of::<Extra>() / size_of::<usize>();
 const _: () = assert!(
-    align_of::<Extra>() == align_of::<usize>() && size_of::<Extra>() == 6 * size_of::<usize>()
+    align_of::<Extra>() == align_of::<usize>()
+        && size_of::<Extra>() == EXTRA_WORDS * size_of::<usize>()
 );
 
 fn signed(value: i64) -> Int {
@@ -98,6 +111,14 @@ unsafe fn pack(meta: Metadata, layout: *const RecordDescriptor) -> *mut usize {
             block_size: meta.blksize(),
             blocks: meta.blocks(),
             rdev: meta.rdev(),
+            #[cfg(target_os = "macos")]
+            darwin: DarwinFields {
+                // CPython's POSIX stat packs birthtime via an unsigned long.
+                birthtime: meta.st_birthtime() as u64 as f64
+                    + 1e-9 * meta.st_birthtime_nsec() as f64,
+                flags: meta.st_flags(),
+                generation: meta.st_gen(),
+            },
         });
     }
     result
@@ -118,16 +139,34 @@ unsafe fn timestamp(result: *const usize, index: usize) -> (i64, i64) {
 }
 
 /// # Safety
-/// The caller roots an initialized stat tuple and selects atime, mtime or ctime.
+/// The caller roots an initialized stat tuple and selects a named time attribute.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_stat_time(result: *const usize, index: u32) -> f64 {
+    if index == 3 {
+        #[cfg(target_os = "macos")]
+        // SAFETY: the runtime produced this tuple with the Darwin numeric tail.
+        return unsafe {
+            (*result.add(SEQUENCE_FIELDS).cast::<Extra>())
+                .darwin
+                .birthtime
+        };
+        #[cfg(not(target_os = "macos"))]
+        return absent("st_birthtime").returning(0.0);
+    }
     // SAFETY: the index is fixed by the compiler's named attribute lookup.
     let (seconds, ns) = unsafe { timestamp(result, index as usize) };
     seconds as f64 + 1e-9 * ns as f64
 }
 
+fn absent(name: &str) -> super::Error {
+    super::Error::new(
+        super::Kind::AttributeError,
+        format!("'os.stat_result' object has no attribute '{name}'"),
+    )
+}
+
 /// # Safety
-/// The caller roots an initialized stat tuple and selects one of the six numeric attributes.
+/// The caller roots an initialized stat tuple and selects a named integer attribute.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_stat_extra_int(result: *const usize, index: u32) -> usize {
     if index < 3 {
@@ -141,6 +180,15 @@ pub unsafe extern "C" fn imre_stat_extra_int(result: *const usize, index: u32) -
         3 => extra.block_size,
         4 => extra.blocks,
         5 => extra.rdev,
+        #[cfg(target_os = "macos")]
+        6 => u64::from(extra.darwin.flags),
+        #[cfg(target_os = "macos")]
+        7 => u64::from(extra.darwin.generation),
+        #[cfg(not(target_os = "macos"))]
+        6 => return absent("st_flags").returning(0),
+        #[cfg(not(target_os = "macos"))]
+        7 => return absent("st_gen").returning(0),
+        8 => return absent("st_birthtime_ns").returning(0),
         _ => unreachable!("unknown stat field"),
     };
     Int::from_usize(value as usize).into_raw()

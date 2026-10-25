@@ -18,6 +18,22 @@ print(st.st_atime == st[7] + 1e-9 * (st.st_atime_ns % 1_000_000_000))
 print(st.st_mtime == st[8] + 1e-9 * (st.st_mtime_ns % 1_000_000_000))
 print(st.st_ctime == st[9] + 1e-9 * (st.st_ctime_ns % 1_000_000_000))
 print(st.st_blksize > 0 and st.st_blocks >= 0 and st.st_rdev == 0)
+try:
+    print(st.st_birthtime > 0 and st.st_birthtime == p.lstat().st_birthtime)
+except AttributeError as error:
+    print(str(error))
+try:
+    print(st.st_flags >= 0 and st.st_flags == p.lstat().st_flags)
+except AttributeError as error:
+    print(str(error))
+try:
+    print(st.st_gen >= 0 and st.st_gen == p.lstat().st_gen)
+except AttributeError as error:
+    print(str(error))
+try:
+    print(st.st_birthtime_ns)
+except AttributeError as error:
+    print(str(error))
 print(repr(st).startswith('os.stat_result(st_mode='))
 print(st == (st[0], st[1], st[2], st[3], st[4], st[5], st[6], st[7], st[8], st[9]))
 link = Path('file-link')

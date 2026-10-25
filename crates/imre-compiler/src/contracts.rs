@@ -167,9 +167,9 @@ impl Builtin {
                     | PathOperation::IsAbsolute
                     | PathOperation::Info
                     | PathOperation::InfoRepr
-                    | PathOperation::StatTime(_)
-                    | PathOperation::StatExtraInt(_)
                     | PathOperation::Query(_) => false,
+                    PathOperation::StatTime(index) => *index == 3,
+                    PathOperation::StatExtraInt(index) => *index >= 6,
                 },
                 PreservesLists,
             ),

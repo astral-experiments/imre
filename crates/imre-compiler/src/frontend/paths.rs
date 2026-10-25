@@ -324,6 +324,13 @@ impl Checker<'_> {
                 vec![receiver],
             ));
         }
+        if name == "st_birthtime" {
+            return Ok(operation(
+                PathOperation::StatTime(3),
+                Type::Float,
+                vec![receiver],
+            ));
+        }
         let fields = [
             "st_atime_ns",
             "st_mtime_ns",
@@ -331,6 +338,9 @@ impl Checker<'_> {
             "st_blksize",
             "st_blocks",
             "st_rdev",
+            "st_flags",
+            "st_gen",
+            "st_birthtime_ns",
         ];
         if let Some(index) = fields.iter().position(|field| *field == name) {
             return Ok(operation(

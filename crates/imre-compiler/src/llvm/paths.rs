@@ -35,10 +35,15 @@ impl Emitter<'_, '_> {
                 })
             }
             PathOperation::StatTime(index) => {
-                let operand = self.instruction(format!(
+                let call = format!(
                     "call double @imre_stat_time(ptr {}, i32 {index})",
                     args[0].value.operand
-                ));
+                );
+                let operand = if index == 3 {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
                 Value {
                     ty: returns,
                     operand,
@@ -46,10 +51,15 @@ impl Emitter<'_, '_> {
                 }
             }
             PathOperation::StatExtraInt(index) => {
-                let operand = self.instruction(format!(
+                let call = format!(
                     "call i64 @imre_stat_extra_int(ptr {}, i32 {index})",
                     args[0].value.operand
-                ));
+                );
+                let operand = if index >= 6 {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
                 self.owned(Value {
                     ty: returns,
                     operand,
