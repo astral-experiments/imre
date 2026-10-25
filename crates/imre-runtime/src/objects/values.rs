@@ -97,6 +97,7 @@ pub unsafe extern "C" fn imre_record_equal(left: *const usize, right: *const usi
 }
 
 pub(super) enum Comparison {
+    Error(Error),
     Done(bool),
     Child {
         left: usize,
@@ -257,6 +258,7 @@ pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Res
             }
         };
         match step {
+            Comparison::Error(error) => return Err(error),
             Comparison::Done(false) => return Ok(false),
             Comparison::Done(true) => match pending.pop() {
                 Some(next) => current = next,

@@ -685,13 +685,17 @@ impl<V: Copy> Tables<V> {
         table!(self, table => table.index.len())
     }
     /// Compare live keys in insertion order, ignoring holes left by deletions.
-    fn same_key_order(&self, other: &Self) -> bool {
-        fn same<K: Eq, V>(a: &Table<K, V>, b: &Table<K, V>) -> bool {
-            a.entries.iter().flatten().map(|e| &e.key).eq(b
-                .entries
-                .iter()
-                .flatten()
-                .map(|e| &e.key))
+    fn same_key_order(&self, other: &Self) -> Result<bool, Error> {
+        fn same<K: TableKey, V>(a: &Table<K, V>, b: &Table<K, V>) -> Result<bool, Error> {
+            if a.index.len() != b.index.len() {
+                return Ok(false);
+            }
+            for (left, right) in a.entries.iter().flatten().zip(b.entries.iter().flatten()) {
+                if !left.key.try_eq(&right.key)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
         }
         match (self, other) {
             (Self::Int(a), Self::Int(b)) => same(a, b),
@@ -700,7 +704,7 @@ impl<V: Copy> Tables<V> {
             (Self::Object(a), Self::Object(b)) => same(a, b),
             (Self::Bytes(a), Self::Bytes(b)) => same(a, b),
             (Self::Tuple(a), Self::Tuple(b)) => same(a, b),
-            _ => false,
+            _ => Ok(false),
         }
     }
     #[cfg(test)]
@@ -1145,25 +1149,26 @@ impl Mapping {
         {
             return Comparison::Done(false);
         }
-        if position == 0
-            && self.order_version.is_some()
-            && other.order_version.is_some()
-            && !self.tables.same_key_order(&other.tables)
-        {
-            return Comparison::Done(false);
+        if position == 0 && self.order_version.is_some() && other.order_version.is_some() {
+            match self.tables.same_key_order(&other.tables) {
+                Ok(true) => {}
+                Ok(false) => return Comparison::Done(false),
+                Err(error) => return Comparison::Error(error),
+            }
         }
         let Some((next, key, left)) = self.tables.next(position) else {
             return Comparison::Done(true);
         };
         // SAFETY: table kinds match and both tables retain their entries.
-        match unsafe { other.tables.lookup(key.word) } {
-            Some(right) => Comparison::Child {
+        match unsafe { other.tables.try_lookup(key.word) } {
+            Ok(Some(right)) => Comparison::Child {
                 left,
                 right,
                 kind: self.value_kind,
                 resume: Some(next),
             },
-            None => Comparison::Done(false),
+            Ok(None) => Comparison::Done(false),
+            Err(error) => Comparison::Error(error),
         }
     }
 

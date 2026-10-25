@@ -5,6 +5,10 @@ def put(source: dict[str, int]) -> None:
     source['through base'] = 6
 
 
+def tuple_key(n: int) -> tuple[tuple[int, int], int]:
+    return ((n, n + 1), n)
+
+
 def main() -> None:
     empty: OrderedDict[str, int] = OrderedDict()
     print(empty)
@@ -45,6 +49,17 @@ def main() -> None:
     children.clear()
     print(children)
     print(shallow)
+
+    first: OrderedDict[tuple[tuple[int, int], int], int] = OrderedDict()
+    second: OrderedDict[tuple[tuple[int, int], int], int] = OrderedDict()
+    for i in range(3):
+        first[tuple_key(i)] = i
+        second[tuple_key(i)] = i
+    print(first == second)
+    del second[tuple_key(0)]
+    second[tuple_key(0)] = 0
+    print(first != second)
+    print(first == dict(second))
 
     active = OrderedDict(a=1, b=2, c=3)
     for key in active:
