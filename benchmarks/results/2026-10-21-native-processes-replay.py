@@ -24,8 +24,8 @@ if sys.flags.optimize:
 sys.dont_write_bytecode = True
 PREFIX = '2026-10-21-native-processes'
 REVISION = 'aca68f5631795f01c3cbb2dcdc56fd92866f6620'
-ENGINES = ('relar', 'port', 'original', 'rust')
-COMPUTE_ENGINES = ('relar', 'original', 'rust')
+ENGINES = ('imre', 'port', 'original', 'rust')
+COMPUTE_ENGINES = ('imre', 'original', 'rust')
 
 
 def sha(data):
@@ -186,7 +186,7 @@ def main():
     assert build['revision'] == REVISION and build['source_matches_revision'] and build['input_guards_passed']
     assert all(source[name]['sha256'] == value for name, value in build['source_sha256'].items())
     build_root = Path(manifest['build']['path']).parent
-    for key, name in {'compiler': 'relar', 'normal_runtime': 'normal_runtime.a', 'thinlto_runtime': 'thinlto_runtime.a', 'asan_runtime': 'asan_runtime.a'}.items():
+    for key, name in {'compiler': 'imre', 'normal_runtime': 'normal_runtime.a', 'thinlto_runtime': 'thinlto_runtime.a', 'asan_runtime': 'asan_runtime.a'}.items():
         assert identity(build_root / name)['sha256'] == build['sha256'][key]
 
     def bind(path, expected):
@@ -202,7 +202,7 @@ def main():
 
     assert build['precheck_sources_match'] and build['precheck']['source_guard_passed']
     assert all(step['status'] == 0 for step in build['precheck']['steps'])
-    precheck = retained('/tmp/relar-process-precheck.log', build['precheck_log_sha256']).decode()
+    precheck = retained('/tmp/imre-process-precheck.log', build['precheck_log_sha256']).decode()
     unit_results = re.findall(r'test result: ok\. (\d+) passed; (\d+) failed;', precheck)
     assert unit_results and all(int(failed) == 0 for passed, failed in unit_results)
     assert sum(int(passed) for passed, failed in unit_results) == 261
@@ -226,7 +226,7 @@ def main():
         assert result['returncode'] == 0 and result['seconds'] > 0
         assert result['command'] == language['commands'][name]
         command = result['command']
-        assert option(command, '--compiler') == str(build_root / 'relar')
+        assert option(command, '--compiler') == str(build_root / 'imre')
         runtime = {'ordinary': 'normal', 'process-thinlto': 'thinlto', 'process-asan': 'asan'}[name]
         assert option(command, '--runtime') == str(build_root / (runtime + '_runtime.a'))
         log = retained(result['log'], result['log_sha256']).decode()
@@ -253,7 +253,7 @@ def main():
                 assert f'O{level}: Passed 323 upstream native calls, 289 differential cases, and 2 compile-time type rejections' in log
         elif suite == 'luhn':
             for level in (0, 3):
-                assert f'O{level}: relar: 15 upstream calls, 1144 differential cases' in log
+                assert f'O{level}: imre: 15 upstream calls, 1144 differential cases' in log
         elif suite == 'imports':
             general_checks += int(re.search(r'(\d+) import checks passed', log).group(1))
         else:
@@ -291,7 +291,7 @@ def main():
         if probe['mode'] == 'asan':
             assert probe['generated_llvm_asan'] and probe['runtime_asan']
 
-    context = load('/tmp/relar-process-timing-context.json')
+    context = load('/tmp/imre-process-timing-context.json')
     assert context['revision'] == REVISION and context['status'] == 'passed' and context['cpu'] == 31
     assert context['outside_tool_sandbox'] and context['cwd'] == str(root)
     assert 31 in context['available_cpu_affinity'] and context['idle_probe']['cpu31']['busy_fraction'] < 0.10
@@ -300,7 +300,7 @@ def main():
         assert probe['busy_fraction'] == (sum(values[:8]) - values[3] - values[4]) / sum(values[:8])
     assert [row['mode'] for row in context['windows']] == ['normal', 'thinlto']
     assert all(row['exit_code'] == 0 for row in context['windows'])
-    assert context['commands'] == load('/tmp/relar-process-timing-commands.json')
+    assert context['commands'] == load('/tmp/imre-process-timing-commands.json')
     for row in context['windows']:
         assert row['command'] == context['commands'][row['mode']]
         retained(row['log'])
@@ -348,7 +348,7 @@ def main():
             bind(processes['python'], processes['python_sha256'])
             assert processes['environment'] == {
                 'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8', 'PYTHONHASHSEED': '0',
-                'PYTHON_JIT': '0', 'PYTHONPATH': '', 'RELAR_PROCESS_SENTINEL': 'inherited',
+                'PYTHON_JIT': '0', 'PYTHONPATH': '', 'IMRE_PROCESS_SENTINEL': 'inherited',
                 'TY_MEMORY_REPORT': 'overridden', 'TY_MAX_PARALLELISM': 'overridden',
                 'ASAN_OPTIONS': 'detect_leaks=1:halt_on_error=1'}
             first = validator.case_from_record(processes['results'][0]['case'])
@@ -521,7 +521,7 @@ def main():
             assert identity(asan_path.parent / name)['sha256'] == value
         for command in asan_prep['commands']:
             if len(command) > 1 and command[1] == 'build':
-                assert command[0] == str(build_root / 'relar') and '--sanitize' in command
+                assert command[0] == str(build_root / 'imre') and '--sanitize' in command
                 assert option(command, '--runtime') == str(build_root / 'asan_runtime.a')
                 assert option(command, '--opt-level') == '1'
         sanitizer_step = next(step for step in build['steps'] if step['name'] == 'asan')
@@ -541,7 +541,7 @@ def main():
             compute = item['compute']
             expected = validator.compute_oracle(case) if compute else process_api.oracle(case)
             assert capture['command'] == [str(asan_path.parent / ('memory-compute' if compute else 'memory-report')), *case.arguments]
-            check_capture(validator, case, expected, capture, 'relar', compute=compute, prepared_process=not compute)
+            check_capture(validator, case, expected, capture, 'imre', compute=compute, prepared_process=not compute)
             counts['asan_workload_executions'] += 1
         assert {key: counts[key] for key in audit['counts']} == audit['counts']
 

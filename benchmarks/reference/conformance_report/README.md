@@ -30,7 +30,7 @@ It explicitly selects the pinned compiler's host target and compiler executable,
 overrides inherited compiler wrappers, and copies Cargo's reported executable.
 
 The manifest supplies already resolved canonical path identities, matching the
-Python and Relar offline adapters. The scanner preserves Python whitespace,
+Python and Imre offline adapters. The scanner preserves Python whitespace,
 Unicode scalar column offsets, line splitting, malformed-tag fallback, and
 universal-newline input handling. Ordinary position integers use native `i64`
 storage, with an arbitrary-precision fallback for larger JSON integers. Shared
@@ -42,7 +42,7 @@ complete scan/decode/group/classify/sort/render computation. Inputs and results
 pass through `std::hint::black_box`; stdout contains the sum of report Unicode
 character lengths. `--output` writes the complete final report once after the
 loop. Zero rounds write an empty report and print `0`, providing the same
-preload/startup control as the Python and Relar entrypoints.
+preload/startup control as the Python and Imre entrypoints.
 
 Ordinary file output is quiet and opens the destination only after successful
 rendering. Write, flush, and close failures propagate. The shared validator

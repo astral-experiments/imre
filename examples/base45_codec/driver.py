@@ -63,7 +63,7 @@ def main() -> None:
         cause = error.__cause__
         if cause is None:
             print("None")
-            print("")  # noqa: FURB105 - Relar currently requires one print argument.
+            print("")  # noqa: FURB105 - Imre currently requires one print argument.
         else:
             print(category(cause))
             print(str(cause))

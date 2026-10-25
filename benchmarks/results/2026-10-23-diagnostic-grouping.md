@@ -1,8 +1,10 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Ruff diagnostic grouping and per-file statistics
 
-Relar compiles Ruff’s three original analysis functions, a total of 2,768 bytes of Python. The real changed run produced 1,269 ordered groups from 146 typing-conformance files. The larger run produced 12,690 groups from 1,460 distinct files. All six implementations matched the fields of every grouped record, both sets of per-file statistics, and every byte of both report formats. [Pinned Ruff source](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L549) · [Relar application](../../examples/conformance_report/model.py)
+Imre compiles Ruff’s three original analysis functions, a total of 2,768 bytes of Python. The real changed run produced 1,269 ordered groups from 146 typing-conformance files. The larger run produced 12,690 groups from 1,460 distinct files. All six implementations matched the fields of every grouped record, both sets of per-file statistics, and every byte of both report formats. [Pinned Ruff source](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L549) · [Imre application](../../examples/conformance_report/model.py)
 
-With the default system allocator, Relar took 1.20–1.83× Rust’s time for grouping and 1.30–1.38× for complete report invocations. The largest median on the canonical checkout path across the 32 ordinary and ThinLTO workloads was 1.83× Rust.
+With the default system allocator, Imre took 1.20–1.83× Rust’s time for grouping and 1.30–1.38× for complete report invocations. The largest median on the canonical checkout path across the 32 ordinary and ThinLTO workloads was 1.83× Rust.
 
 A separate native-only control reached 2.28× Rust for 10× grouping on a short checkout path and 2.13× on the canonical path with ThinLTO. With `--allocator jemalloc`, the same grouping code took 1.07–1.17× Rust’s time across both paths and link modes when Rust also used jemalloc. [Linux allocator comparison](2026-10-23-diagnostic-allocator.md)
 
@@ -10,7 +12,7 @@ A separate native-only control reached 2.28× Rust for 10× grouping on a short 
 
 Milliseconds per pass over preloaded diagnostic records. Grouping starts from parsed old, new and expected records. Equivalence and file statistics start from already-grouped cases. Every file-statistics pass resolves the full file list before collecting counts.
 
-| Corpus | Work | Link | Ruff CPython | Typed CPython | Previous Relar | Relar | Codon | Rust | Relar/Rust |
+| Corpus | Work | Link | Ruff CPython | Typed CPython | Previous Imre | Imre | Codon | Rust | Imre/Rust |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
 | 1× | Group diagnostics | Ordinary | 3.891 | 3.482 | 5.865 | 2.218 | 6.803 | 1.758 | 1.26× |
 | 1× | Group diagnostics | ThinLTO | 3.843 | 3.518 | 4.638 | 1.793 | 6.840 | 1.497 | 1.20× |
@@ -25,7 +27,7 @@ Milliseconds per pass over preloaded diagnostic records. Grouping starts from pa
 | 10× | Collect file statistics | Ordinary | 104.72 | 100.10 | 3.706 | 46.450 | 65.361 | 30.958 | 1.50× |
 | 10× | Collect file statistics | ThinLTO | 100.32 | 98.053 | 2.917 | 45.185 | 65.972 | 29.711 | 1.52× |
 
-The previous string-based port skipped filesystem resolution on each statistics pass. Ruff resolves every path and merges aliases that name the same file. The differential checks include a symlink that produced a fifth file row on the previous port and four rows in Ruff, current Relar, and Rust. The independent Rust reference calls the OS to resolve each input path, preserves input order, and handles missing paths through its non-strict resolver. [Previous port](https://github.com/astral-sh/relar/blob/17845276508a0431276b2606f4f076dcd58ecf37/examples/conformance_report/model.py) · [Rust reference](../reference/conformance_report/src/main.rs)
+The previous string-based port skipped filesystem resolution on each statistics pass. Ruff resolves every path and merges aliases that name the same file. The differential checks include a symlink that produced a fifth file row on the previous port and four rows in Ruff, current Imre, and Rust. The independent Rust reference calls the OS to resolve each input path, preserves input order, and handles missing paths through its non-strict resolver. [Previous port](https://github.com/astral-sh/imre/blob/17845276508a0431276b2606f4f076dcd58ecf37/examples/conformance_report/model.py) · [Rust reference](../reference/conformance_report/src/main.rs)
 
 A separate 12-pair run on a second Linux devbox compiled the previous string port with the same final compiler and runtime. Switching that build to Ruff’s source sped up grouping 1.89× at 1× (Ordinary), 1.65× at 10× (Ordinary), 1.81× at 1× (ThinLTO), 1.60× at 10× (ThinLTO). The complete group and file-statistic dumps matched. On that second host, 10× grouping took 2.13× Rust’s time in both link modes.
 
@@ -33,7 +35,7 @@ A separate 12-pair run on a second Linux devbox compiled the previous string por
 
 Grouping sorts string keys that contain the absolute source path. A separate control on the same pinned CPU varied only the root of the checkout. Each row used eight counterbalanced pairs and identical files, diagnostics, and normalized group transcripts.
 
-| Link | Files | Common directory prefix (bytes) | Relar (ms) | Rust (ms) | Relar/Rust |
+| Link | Files | Common directory prefix (bytes) | Imre (ms) | Rust (ms) | Imre/Rust |
 |---|---:|---:|---:|---:|---:|
 | Ordinary | 146 | 70 | 2.175 | 1.747 | 1.24× |
 | Ordinary | 146 | 23 | 2.135 | 1.591 | 1.34× |
@@ -50,7 +52,7 @@ The native-only 10× control exceeded 2× Rust on the short path in both modes a
 
 Milliseconds. A complete invocation reads the manifest, individual source files and two captured GitLab JSON arrays, computes the report, and writes its Markdown. The repeated panel preloads raw input, then reruns annotation scanning, JSON decoding, analysis, and rendering for each pass.
 
-| Corpus | Work | Link | Ruff CPython | Typed CPython | Previous Relar | Relar | Codon | Rust | Relar/Rust |
+| Corpus | Work | Link | Ruff CPython | Typed CPython | Previous Imre | Imre | Codon | Rust | Imre/Rust |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
 | 1× | Changed GitHub | Ordinary | 159.65 | 259.91 | 34.859 | 34.736 | 65.777 | 25.200 | 1.38× |
 | 1× | Changed GitHub | ThinLTO | 160.73 | 261.61 | 31.251 | 31.959 | 66.090 | 24.433 | 1.31× |
@@ -77,14 +79,14 @@ Complete invocations take 0.97–1.03× the previous port’s time. The full mea
 
 Separate fresh processes measured peak resident memory for the changed GitHub report. Values are the median of six observations in MiB, using Linux `ru_maxrss` from GNU time.
 
-| Corpus | Link | Ruff CPython | Typed CPython | Previous Relar | Relar | Codon | Rust |
+| Corpus | Link | Ruff CPython | Typed CPython | Previous Imre | Imre | Codon | Rust |
 |---|---|---:|---:|---:|---:|---:|---:|
 | 1× | Ordinary | 27.0 | 23.8 | 9.5 | 9.7 | 19.5 | 7.7 |
 | 1× | ThinLTO | 27.0 | 23.8 | 10.2 | 10.5 | 19.5 | 8.2 |
 | 10× | Ordinary | 91.7 | 74.1 | 46.7 | 46.2 | 115.0 | 54.7 |
 | 10× | ThinLTO | 91.7 | 74.2 | 47.4 | 47.1 | 115.0 | 55.1 |
 
-A separate live checkout run included both ty processes for every changed GitHub report on 146 files. On a second Linux devbox with CPUs 20 and 21 and two Rayon threads, medians were 797.2 ms for upstream CPython, 716.0 ms for ordinary Relar, and 708.2 ms for Rust (1.01× Relar/Rust). All 12 measurements per engine produced the same 109,258 bytes.
+A separate live checkout run included both ty processes for every changed GitHub report on 146 files. On a second Linux devbox with CPUs 20 and 21 and two Rayon threads, medians were 797.2 ms for upstream CPython, 716.0 ms for ordinary Imre, and 708.2 ms for Rust (1.01× Imre/Rust). All 12 measurements per engine produced the same 109,258 bytes.
 
 ## Native profiles
 
@@ -92,17 +94,17 @@ The 10× ordinary kernel ran on a second Linux devbox under Callgrind and DHAT, 
 
 | Engine | Instructions/pass | Allocations/pass | Allocated MB/pass | Peak live MB |
 |---|---:|---:|---:|---:|
-| Previous Relar | 474,696,986 | 357,848 | 26.67 | 41.10 |
-| Relar | 170,194,324 | 126,670 | 13.47 | 41.50 |
+| Previous Imre | 474,696,986 | 357,848 | 26.67 | 41.10 |
+| Imre | 170,194,324 | 126,670 | 13.47 | 41.50 |
 | Rust | 169,523,366 | 172,695 | 21.50 | 33.13 |
 
 Before the sorted-record gather, the ordinary 10× kernel took 41.58 ms, 2.06× Rust, on the canonical checkout. That earlier source and complete timing panel are included under `intermediate/` in the study.
 
-The source uses three list-factory dictionaries followed by a sorted key union. Relar recognizes the fixed record constructed from each key, gathers the three list owners in one traversal, and keeps each result row’s key and buckets together through sorting. The compiler checks the list-factory dictionary types, generated initializer, assignment order, and absence of user callbacks. [Compiler proof](../../crates/relar-compiler/src/frontend/sorted_rows.rs) · [Runtime](../../crates/relar-runtime/src/objects/mappings/sorted_rows.rs)
+The source uses three list-factory dictionaries followed by a sorted key union. Imre recognizes the fixed record constructed from each key, gathers the three list owners in one traversal, and keeps each result row’s key and buckets together through sorting. The compiler checks the list-factory dictionary types, generated initializer, assignment order, and absence of user callbacks. [Compiler proof](../../crates/imre-compiler/src/frontend/sorted_rows.rs) · [Runtime](../../crates/imre-runtime/src/objects/mappings/sorted_rows.rs)
 
 SipHash's byte-feed function fell from 107.1 million to 21.9 million instructions per 10× pass. The previous port also made 93,120 buffer allocations on one path-normalization stack. In the current port, the largest allocation stack accounts for 34,150 list owners created on first access to a grouping key. Each of the 12,690 final rows still owns a record.
 
-Under Valgrind’s two-level cache simulation, Relar incurred 1.65 million first-level data read misses per 10× pass and Rust incurred 0.55 million. This simulation used 32 KiB eight-way instruction and data caches, a 32 MiB sixteen-way last-level cache, and 64-byte cache lines.
+Under Valgrind’s two-level cache simulation, Imre incurred 1.65 million first-level data read misses per 10× pass and Rust incurred 0.55 million. This simulation used 32 KiB eight-way instruction and data caches, a 32 MiB sixteen-way last-level cache, and 64-byte cache lines.
 
 Codon uses native concrete list and dictionary types, set materialization for dictionary-key union, native JSON and RE2, and Codon’s native `Path` for file resolution. Its benchmark uses signed 64-bit integers. The evidence includes the 20 generated Codon modules, their source transformations, and a separate native-platform build receipt for each link mode. [Codon adapters](../codon_native/README.md)
 
@@ -112,6 +114,6 @@ Ruff is pinned at `de9071547cfec12f689142a7b8ce98edc7aef909` and the Python typi
 
 Measured source `7178431490cd6d8838b67daca89ccbdf03e7ce34`, previous native source `17845276508a0431276b2606f4f076dcd58ecf37`. Both link modes ran serially on CPU 31 of the same AMD EPYC-Milan Linux host. Each of 16 panels per mode ran six engines in 12 balanced orders, after one warmup per engine. Paired panels alternated the order of zero and repeated runs within each observation. Across both modes that is 3,456 measured processes and 288 warmups. Tools were CPython 3.14.5, native Codon 0.20.4, Ohm Rust 1.99.0-7, Clang 18.1.3, and LLD 23.1.1 for ThinLTO. Codon’s compiler flags are identical in both modes and its linked native platform library is rebuilt for each Rust link mode. [Benchmark](../conformance_grouping_benchmark.py)
 
-The grouping probe exchanges the first and last old diagnostic every round and consumes every group’s index and three bucket lengths. The size checksum stays constant per pass on this capture. Callgrind recorded zero calls from the kernel driver to the grouping function in each preload control and four calls in each four-round previous Relar, current Relar, and Rust run. All six engines also produce complete transcripts containing each case key, all source labels, diagnostic fields, positions, expected tags, equivalence and per-file counts. [Timed driver](../conformance_grouping.py) · [Audit](../conformance_grouping_audit.py)
+The grouping probe exchanges the first and last old diagnostic every round and consumes every group’s index and three bucket lengths. The size checksum stays constant per pass on this capture. Callgrind recorded zero calls from the kernel driver to the grouping function in each preload control and four calls in each four-round previous Imre, current Imre, and Rust run. All six engines also produce complete transcripts containing each case key, all source labels, diagnostic fields, positions, expected tags, equivalence and per-file counts. [Timed driver](../conformance_grouping.py) · [Audit](../conformance_grouping_audit.py)
 
 Extract the portable study into an empty directory and run `python3.14 -B tools/replay.py .`. It rechecks the original Ruff source, captures, build receipts, each process observation, all medians and gates, raw profiles, and the real and seeded upstream results. The replay relocates fixture paths while preserving the exact measured path spelling for output comparisons. [Portable study](2026-10-23-diagnostic-grouping-study.tar.xz) · [Ordinary observations](2026-10-23-diagnostic-grouping-ordinary.json.gz) · [ThinLTO observations](2026-10-23-diagnostic-grouping-thinlto.json.gz) · [Replay receipt](2026-10-23-diagnostic-grouping-audit.json)

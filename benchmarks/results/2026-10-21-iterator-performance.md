@@ -1,15 +1,17 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Iterator performance against Rust
 
 The unchanged [telemetry comparator](../../examples/telemetry_comparison/README.md) now takes **1.385–1.723× Rust's time** across the four 4,096-record full-scan ThinLTO cases. All four cases meet the requested **below 2× Rust** target. These are complete-program median comparisons on one shared host.
 
-| Full scan, 4,096 records | Relar ms [p25, p75] | Rust ms [p25, p75] | CPython / Relar | Relar / Rust | <2× |
+| Full scan, 4,096 records | Imre ms [p25, p75] | Rust ms [p25, p75] | CPython / Imre | Imre / Rust | <2× |
 |---|---:|---:|---:|---:|:---:|
 | `report-mixed` | 28.990 [28.635, 29.216] | 20.924 [20.796, 21.240] | 27.663× | 1.385× | yes |
 | `alert-quiet` | 21.533 [21.222, 21.777] | 12.496 [12.264, 12.565] | 45.685× | 1.723× | yes |
 | `within-quiet` | 21.112 [20.752, 21.600] | 12.628 [12.403, 12.832] | 46.330× | 1.672× | yes |
 | `latest-quiet` | 22.296 [22.084, 22.883] | 15.820 [15.501, 16.017] | 37.624× | 1.409× | yes |
 
-The [implementation PR](https://github.com/viarius-experiments/relar/pull/59) continues native Stack 4. The measured compiler/runtime revision is [`1fb6fa42fd2ee811dc6ed07702e3632a9aa62f44`](https://github.com/viarius-experiments/relar/commit/1fb6fa42fd2ee811dc6ed07702e3632a9aa62f44); the Python example and independent Rust reference are unchanged from the [previous comparison](2026-10-20-iterator-pipelines.md).
+The [implementation PR](https://github.com/viarius-experiments/imre/pull/59) continues native Stack 4. The measured compiler/runtime revision is [`1fb6fa42fd2ee811dc6ed07702e3632a9aa62f44`](https://github.com/viarius-experiments/imre/commit/1fb6fa42fd2ee811dc6ed07702e3632a9aa62f44); the Python example and independent Rust reference are unchanged from the [previous comparison](2026-10-20-iterator-pipelines.md).
 
 ## What changed
 
@@ -19,7 +21,7 @@ Recognized pure same-local integer absolute-value conditionals lower through a s
 
 These transformations preserve the checked fallback: arbitrary-precision integers, overflow behavior, left-to-right evaluation, exceptions, mutation through aliases, ownership, lazy iterator pulls, strict-zip exhaustion, and early exits. Unknown or potentially invalidating effects keep ordinary checked/owned operations. The workload has no benchmark-specific compiler entry point.
 
-The useful design ideas from scriptc are [borrowed arguments](https://github.com/vercel-labs/scriptc/blob/139542bcf119e546305682b20ab76ebc0283ea5a/packages/compiler/src/backend/llvm/borrowed-inputs.ts), explicit [reference effects](https://github.com/vercel-labs/scriptc/blob/139542bcf119e546305682b20ab76ebc0283ea5a/packages/compiler/src/backend/llvm/reference-effects.ts), and [guarded dense array access](https://github.com/vercel-labs/scriptc/blob/139542bcf119e546305682b20ab76ebc0283ea5a/packages/compiler/src/backend/llvm/dense-array-access.ts). Relar adapts those concepts to its own Python semantics and Rust runtime; no upstream implementation was copied.
+The useful design ideas from scriptc are [borrowed arguments](https://github.com/vercel-labs/scriptc/blob/139542bcf119e546305682b20ab76ebc0283ea5a/packages/compiler/src/backend/llvm/borrowed-inputs.ts), explicit [reference effects](https://github.com/vercel-labs/scriptc/blob/139542bcf119e546305682b20ab76ebc0283ea5a/packages/compiler/src/backend/llvm/reference-effects.ts), and [guarded dense array access](https://github.com/vercel-labs/scriptc/blob/139542bcf119e546305682b20ab76ebc0283ea5a/packages/compiler/src/backend/llvm/dense-array-access.ts). Imre adapts those concepts to its own Python semantics and Rust runtime; no upstream implementation was copied.
 
 We also inspected Bun's experimental [native-AOT draft PR 45631](https://github.com/oven-sh/bun/pull/45631), specifically its pinned [typed boundary design](https://github.com/oven-sh/bun/blob/2217cacf7da4f9f5a6a9a7ed4df24ab7a5faf19c/docs/bundler/aot-types.mdx) and JavaScriptCore [B3 loop versioning](https://github.com/oven-sh/WebKit/blob/50dd4bf7cc55587ef878676a445c8bcd972ce2ff/Source/JavaScriptCore/b3/B3VersionLoops.cpp). That prototype targets JSC/B3. Released Bun [`--compile`](https://bun.com/docs/bundler/executables) packages code with the Bun runtime, and `--bytecode` moves parsing work to build time; neither is evidence that this Python workload was benchmarked against Bun or scriptc.
 
@@ -27,17 +29,17 @@ We also inspected Bun's experimental [native-AOT draft PR 45631](https://github.
 
 Each process parses aligned timestamp/value files, validates complete alignment with strict zip once, then repeats queries. `report-mixed` performs signed, absolute and squared-error reductions, two threshold predicates, and a reverse search. Quiet cases inspect all records; early/recent cases stop after one pair. Full alignment is checked before those early exits. All engines render the final result once and produce a repetition checksum.
 
-Rust uses contiguous native records, checked `i128` arithmetic, and a `BigInt` fallback. Relar uses the typed Python object/container layout and arbitrary-precision integer runtime. Both preserve the same accepted input, errors and output/filesystem effects. Rust applies `black_box` to each repeated query and result. This is a comparison of those concrete implementations, not a universal language ranking.
+Rust uses contiguous native records, checked `i128` arithmetic, and a `BigInt` fallback. Imre uses the typed Python object/container layout and arbitrary-precision integer runtime. Both preserve the same accepted input, errors and output/filesystem effects. Rust applies `black_box` to each repeated query and result. This is a comparison of those concrete implementations, not a universal language ranking.
 
 Canonical sizes are 16, 256 and 4,096 records per file, generated in that order. Full scans target 8,388,608 source-level inspected pairs per process; early exits target 2,097,152, rounded down to whole queries. Every condition has a complete correctness gate, eight warmup rounds and twelve measured rounds. All six engine permutations occur twice among measured rounds; warmups and cross-round transitions are not fully balanced. CPU affinity is fixed to CPU 0, timing runs outside ptrace, and build/profile processes are excluded by the recorded coactivity guards.
 
 The host reports `AMD EPYC-Milan Processor` on `Linux-6.8.0-146-generic-x86_64-with-glibc2.39`. CPython is 3.14.5 (PGO/LTO build, GIL enabled, JIT disabled); native compilation uses `Ubuntu clang version 18.1.3 (1ubuntu1)` and `rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)`. Exact binaries and target triples are hash-bound in each record.
 
-Values below are median milliseconds. CPython / Relar is a speedup; Relar / Rust is a time ratio. Raw samples and inclusive quartiles are retained. Ordinary and ThinLTO have independent interleaved baselines, with matching native linking modes and ThinLTO import/inline budgets of 1,000; differences between those batches do not isolate linking alone.
+Values below are median milliseconds. CPython / Imre is a speedup; Imre / Rust is a time ratio. Raw samples and inclusive quartiles are retained. Ordinary and ThinLTO have independent interleaved baselines, with matching native linking modes and ThinLTO import/inline budgets of 1,000; differences between those batches do not isolate linking alone.
 
 ### Ordinary linking
 
-| Workload / records | Relar ms | Rust ms | CPython ms | CPython / Relar | Relar / Rust |
+| Workload / records | Imre ms | Rust ms | CPython ms | CPython / Imre | Imre / Rust |
 |---|---:|---:|---:|---:|---:|
 | `report-mixed` / 16 | 36.410 | 26.664 | 1343.778 | 36.907× | 1.366× |
 | `alert-quiet` / 16 | 41.985 | 20.772 | 1228.923 | 29.271× | 2.021× |
@@ -63,7 +65,7 @@ Values below are median milliseconds. CPython / Relar is a speedup; Relar / Rust
 
 ### ThinLTO
 
-| Workload / records | Relar ms | Rust ms | CPython ms | CPython / Relar | Relar / Rust |
+| Workload / records | Imre ms | Rust ms | CPython ms | CPython / Imre | Imre / Rust |
 |---|---:|---:|---:|---:|---:|
 | `report-mixed` / 16 | 33.166 | 19.769 | 1316.997 | 39.710× | 1.678× |
 | `alert-quiet` / 16 | 27.021 | 15.079 | 1235.452 | 45.721× | 1.792× |
@@ -89,14 +91,14 @@ Values below are median milliseconds. CPython / Relar is a speedup; Relar / Rust
 
 ### Empty controls
 
-| Batch / linking | Relar ms | Rust ms | CPython ms | Largest Relar control/workload fraction |
+| Batch / linking | Imre ms | Rust ms | CPython ms | Largest Imre control/workload fraction |
 |---|---:|---:|---:|---:|
 | full-normal | 2.664 | 2.579 | 24.354 | 14.81% |
 | full-thinlto | 2.310 | 2.408 | 24.100 | 15.73% |
 | early-normal | 2.485 | 2.439 | 24.445 | 7.74% |
 | early-thinlto | 2.819 | 2.415 | 23.976 | 16.83% |
 
-Across all conditions, maximum empty-control/workload fractions are 16.83% for Relar, 24.72% for Rust, and 3.06% for CPython. Controls are not subtracted. Empty inputs omit nonempty parsing/alignment, so this control does not estimate all fixed cost. The ratios include process startup, parsing, alignment, queries and final output; warm caches and no `fsync` apply.
+Across all conditions, maximum empty-control/workload fractions are 16.83% for Imre, 24.72% for Rust, and 3.06% for CPython. Controls are not subtracted. Empty inputs omit nonempty parsing/alignment, so this control does not estimate all fixed cost. The ratios include process startup, parsing, alignment, queries and final output; warm caches and no `fsync` apply.
 
 ## CPU and allocations
 
@@ -104,10 +106,10 @@ The six profiles use the exact timed ThinLTO binaries and `alert-quiet-4096`: Ca
 
 | Engine | Guest instructions, 128 queries | Allocated bytes, 128 queries | Allocation blocks | Additional bytes / query, 128→256 | Additional blocks / query |
 |---|---:|---:|---:|---:|---:|
-| Relar | 75,409,166 | 7,100,646 | 168,152 | 40 | 1 |
+| Imre | 75,409,166 | 7,100,646 | 168,152 | 40 | 1 |
 | Rust | 29,401,993 | 2,656,472 | 41,065 | 0 | 0 |
 
-Whole-process Relar guest instructions changed from 162,095,513 in exploratory candidate 003 to 89,422,181 in 005 and 75,409,166 in the final build (+53.48% reduction relative to 003). The final complete-process instruction ratio is 2.565× Rust. These observations do not assign wall-time savings to individual checks or transformations.
+Whole-process Imre guest instructions changed from 162,095,513 in exploratory candidate 003 to 89,422,181 in 005 and 75,409,166 in the final build (+53.48% reduction relative to 003). The final complete-process instruction ratio is 2.565× Rust. These observations do not assign wall-time savings to individual checks or transformations.
 
 ## Exploratory trajectory and historical context
 
@@ -151,11 +153,11 @@ Read the [independent final audit](2026-10-21-iterator-performance-audit.json), 
 The commands below describe the retained machine paths. The archive contains the exact sources and helper scripts; reproduction must select equivalent local paths and rerun all identity checks.
 
 ```sh
-/home/dev-user/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/bin/python3.12 -I -B /tmp/relar-telemetry-final-evidence.py measure --plan /tmp/relar-telemetry-final-v1/plan.json --phase full
+/home/dev-user/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/bin/python3.12 -I -B /tmp/imre-telemetry-final-evidence.py measure --plan /tmp/imre-telemetry-final-v1/plan.json --phase full
 ```
 
 ```sh
-/home/dev-user/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/bin/python3.12 -I -B /tmp/relar-telemetry-final-evidence.py measure --plan /tmp/relar-telemetry-final-v1/plan.json --phase early
+/home/dev-user/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/bin/python3.12 -I -B /tmp/imre-telemetry-final-evidence.py measure --plan /tmp/imre-telemetry-final-v1/plan.json --phase early
 ```
 
 The canonical planned engine/preparation argv, tool versions, optimization flags and target triples are preserved in the linked records. CPython/Clang identities and Python/Rust program sources match the historical input baseline; native Rust binaries are pinned to renamed validation v2; this is one machine and workload, not a portable performance guarantee.

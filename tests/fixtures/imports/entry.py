@@ -14,6 +14,7 @@ def main() -> None:
     print(__name__)
     print(arithmetic.label())
     print(package.operations.label())
+    print(package.operations.EXPORTED_NAME)
     print(labels.label())
     print(words.value(8))
     print(nested.value(9))

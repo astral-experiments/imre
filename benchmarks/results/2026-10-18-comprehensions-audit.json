@@ -3,7 +3,7 @@
   "status": "passed",
   "completed_at_utc": "2026-10-18T13:25:37.244331+00:00",
   "audit_script_sha256": "6fc15ddaa38e6fd12dbace4e434c264cb43a2447d57ad22bc11fcc648df03d21",
-  "audit_script_source": "\"\"\"Audit saved inventory comparisons without running benchmarks or compilers.\n\nStatistics are independently interpolated from integer nanoseconds. Only the\nhashed independent validators are imported; no production statistics helper is.\n\"\"\"\nimport argparse\nimport base64\nfrom collections import Counter\nfrom datetime import datetime, timezone\nfrom fractions import Fraction\nimport hashlib\nimport itertools\nimport json\nimport math\nfrom pathlib import Path\nimport runpy\nimport struct\nimport subprocess\n\nAPPLICATION = 'edbbab93b26ccca638c7bf74336baef0d0fab4cd'\nCOMPILER = '615aa4175280a2a0cedf7f549720a2578e246d4e'\nENGINES = {'inventory': ('cpython', 'relar', 'rust_bigint'), 'control': ('cpython', 'baseline', 'relar')}\nCOUNTS = {'inventory': 6, 'control': 5}\nCHECKS = 0\nFILES = {}\n\n\ndef require(condition, message):\n    global CHECKS\n    CHECKS += 1\n    if not condition:\n        raise AssertionError(message)\n\n\ndef digest(data):\n    return hashlib.sha256(data).hexdigest()\n\n\ndef file_info(path):\n    path = Path(path).resolve(strict=True)\n    stat = path.stat()\n    signature = (stat.st_size, stat.st_mtime_ns)\n    if path not in FILES:\n        with path.open('rb') as stream:\n            FILES[path] = signature, hashlib.file_digest(stream, 'sha256').hexdigest()\n    require(FILES[path][0] == signature, f'file changed during audit: {path}')\n    return {'sha256': FILES[path][1], 'bytes': signature[0]}\n\n\ndef verify_file(path, expected, size=None):\n    result = file_info(path)\n    require(result['sha256'] == expected, f'file hash differs: {path}')\n    if size is not None:\n        require(result['bytes'] == size, f'file size differs: {path}')\n    return result\n\n\ndef verify_committed(root, revision, hashes):\n    names = list(hashes)\n    data = subprocess.run(['git', '-C', str(root), 'cat-file', '--batch'],\n        input=''.join(f'{revision}:{name}\\n' for name in names).encode(), capture_output=True, check=True).stdout\n    offset = 0\n    for name in names:\n        end = data.index(b'\\n', offset)\n        header = data[offset:end].split()\n        require(len(header) == 3 and header[1] == b'blob', f'missing committed file: {revision}:{name}')\n        length = int(header[2]); offset = end + 1\n        require(digest(data[offset:offset + length]) == hashes[name], f'committed source differs: {revision}:{name}')\n        offset += length\n        require(data[offset:offset + 1] == b'\\n', 'invalid Git batch delimiter')\n        offset += 1\n    require(offset == len(data), 'unexpected Git batch remainder')\n\n\ndef decode_files(encoded):\n    result = {}\n    for name, spec in encoded.items():\n        data = base64.b64decode(spec['base64'], validate=True)\n        require(digest(data) == spec['sha256'] and len(data) == spec['bytes'], 'encoded file differs: ' + name)\n        result[name] = data\n    return result\n\n\ndef inventory(files):\n    return {name: {'sha256': digest(data), 'bytes': len(data)} for name, data in sorted(files.items())}\n\n\ndef result_matches(result, expected, label):\n    output = expected['stdout'].encode()\n    require(result['returncode'] == expected['returncode'], label + ': status')\n    require(result['stdout_sha256'] == digest(output) and result['stdout_bytes'] == len(output), label + ': full stdout identity')\n    if expected.get('error_category') is None:\n        require(result['stderr'] == '', label + ': unexpected stderr')\n    else:\n        lines = result['stderr'].strip().splitlines()\n        category = expected['error_category']\n        require(bool(lines) and (lines[-1] == category or lines[-1].startswith(category + ':')), label + ': error category')\n        if expected.get('error_message') is not None:\n            require(lines[-1] == category + ': ' + expected['error_message'], label + ': normalized error message')\n    if 'files' in expected:\n        require(result['files'] == inventory(expected['files']), label + ': complete file inventory')\n        require(result['directories'] == expected['directories'], label + ': complete directory inventory')\n\n\ndef quantile(values, numerator, denominator):\n    ordered = sorted(values)\n    position = Fraction((len(ordered) - 1) * numerator, denominator)\n    left = position.numerator // position.denominator\n    right = min(left + 1, len(ordered) - 1)\n    return Fraction(ordered[left]) + (ordered[right] - ordered[left]) * (position - left)\n\n\ndef statistics(values):\n    return {'median_ns': float(quantile(values, 1, 2)), 'min_ns': min(values), 'max_ns': max(values),\n            'p25_ns': float(quantile(values, 1, 4)), 'p75_ns': float(quantile(values, 3, 4))}\n\n\ndef close(actual, expected, label):\n    require(math.isclose(actual, expected, rel_tol=2e-13, abs_tol=1e-12), label)\n\n\ndef flag(command, name):\n    return command[command.index(name) + 1]\n\n\ndef path_at(root, value):\n    value = Path(value)\n    return value if value.is_absolute() else root / value\n\n\ndef artifact_identities(root, mode, record, session):\n    run = session['runs'][mode]\n    command = run['command']\n    paths = {name: path_at(root, flag(command, option)) for name, option in (\n        ('compiler', '--compiler'), ('runtime', '--runtime'), ('relar_build_record', '--relar-build-record'),\n        ('rust_bigint', '--rust-bigint'), ('rust_record', '--rust-build-record'),\n        ('baseline', '--baseline'), ('baseline_record', '--baseline-record'), ('python', '--python'))}\n    paths['rust_build_script'] = paths['tracked_rust_build_script'] = root / 'benchmarks/reference/inventory_reconciliation/build.py'\n    paths['guard_helpers'] = root / 'benchmarks/reference/dependency_planner/check_boundaries.py'\n    source_hashes = record['relar_build_provenance']['source_sha256']\n    for group, compiler_command in record['method']['compile_commands'].items():\n        require(compiler_command[0] == str(paths['compiler']) and compiler_command[1] == 'build', 'compiler command identity')\n        paths[group + '_binary'] = Path(flag(compiler_command, '-o'))\n        paths[group + '_ir'] = Path(flag(compiler_command, '--emit-llvm'))\n        paths['clang'] = Path(flag(compiler_command, '--clang'))\n        require(flag(compiler_command, '--runtime') == str(paths['runtime']), 'runtime pairing')\n        require(flag(compiler_command, '--opt-level') == '3' and flag(compiler_command, '--target') == 'x86_64-unknown-linux-gnu', 'application build mode')\n        require('--sanitize' not in compiler_command, 'sanitizer in measured application')\n        if mode == 'lto':\n            paths['lto_linker'] = Path(flag(compiler_command, '--lto-linker'))\n            require(paths['lto_linker'].name == 'ld.lld', 'lexical linker flavor')\n        else:\n            require('--lto-linker' not in compiler_command, 'LTO in ordinary application')\n        require(record['compilation'][group]['returncode'] == 0 and record['compilation'][group]['stderr'] == '', 'application compilation failed')\n    committed = {}\n    for name, expected in record['sha256'].items():\n        if name.startswith('harness:'):\n            paths[name] = root / 'benchmarks' / name.split(':', 1)[1]\n        if name.startswith('relar_source:'):\n            relative = name.split(':', 1)[1]\n            paths[name] = root / relative\n            require(source_hashes[relative] == expected, 'compiled source identity field')\n        require(name in paths, 'unmapped artifact: ' + name)\n        verify_file(paths[name], expected)\n        if name.startswith(('harness:', 'relar_source:')) or name in ('guard_helpers', 'tracked_rust_build_script'):\n            committed[str(paths[name].relative_to(root))] = expected\n    verify_committed(root, APPLICATION, committed)\n    for name, spec in record['artifacts'].items():\n        require(file_info(paths[name])['bytes'] == spec['bytes'], 'artifact recorded length: ' + name)\n    for name, expected in record['sources'].items():\n        verify_file(root / 'examples' / name, expected)\n    verify_committed(root, APPLICATION, {'examples/' + name: value for name, value in record['sources'].items()})\n    full_build = json.loads(paths['relar_build_record'].read_text())\n    for key, value in record['relar_build_provenance'].items():\n        require(full_build[key] == value, 'embedded Relar build provenance: ' + key)\n    require(full_build['git_head'] == COMPILER and full_build['compiled_sources_match_commit'] is True, 'compiler source commit')\n    require(all(line.startswith('?? ') and ('inventory' in line) for line in full_build['git_status'].splitlines()), 'compiler build had tracked changes')\n    verify_committed(root, COMPILER, source_hashes)\n    verify_committed(root, APPLICATION, source_hashes)\n    require(set(full_build['source_contents']) == set(source_hashes), 'compiler source snapshot coverage')\n    for name, content in full_build['source_contents'].items():\n        require(digest(content.encode()) == source_hashes[name], 'compiler source snapshot bytes')\n    for name, expected in full_build['sha256'].items():\n        verify_file(root / name, expected)\n    for name, build in full_build['commands'].items():\n        require(build['returncode'] == 0, 'runtime/compiler build failure')\n        verify_file(paths['relar_build_record'].parent / (name + '.log'), build['log_sha256'])\n    require(full_build['runtime_lto_rustflags'] == '-Clinker-plugin-lto', 'runtime ThinLTO flags')\n    baseline = json.loads(paths['baseline_record'].read_text())\n    for key, value in record['baseline_provenance'].items():\n        require(baseline[key] == value, 'embedded baseline provenance: ' + key)\n    require(baseline['git']['dirty'] is False, 'baseline timing checkout dirty')\n    require(baseline['sha256']['incremental_binary'] == record['sha256']['baseline'], 'baseline exact executable')\n    require(baseline['sha256']['incremental_ir'] == record['sha256']['control_ir'], 'unchanged control LLVM IR identity')\n    require({n: v for n, v in baseline['sources'].items() if n.startswith('incremental_planner/')} ==\n            {n: v for n, v in record['sources'].items() if n.startswith('incremental_planner/')}, 'unchanged control sources')\n    for key in ('lto', 'llvm_budget', 'target', 'optimization_level'):\n        require(baseline['options'][key] == record['options'][key], 'baseline build mode: ' + key)\n    for key in ('clang', 'lto_linker'):\n        if key in record['sha256']:\n            require(baseline['sha256'][key] == record['sha256'][key], 'baseline tool mismatch: ' + key)\n    rust = json.loads(paths['rust_record'].read_text())\n    require(rust == record['rust_build_record'] and rust['entrypoint'] == 'inventory', 'Rust build identity')\n    require(rust['binaries']['bigint']['sha256'] == record['sha256']['rust_bigint'], 'Rust executable identity')\n    require(rust['sources'] == record['rust_sources'], 'Rust source identity')\n    require(set(rust['source_contents']) == set(rust['sources']), 'Rust source snapshot coverage')\n    for name, expected in rust['sources'].items():\n        verify_file(root / 'benchmarks/reference/inventory_reconciliation' / name, expected)\n        require(digest(rust['source_contents'][name].encode()) == expected, 'Rust source snapshot')\n    verify_committed(root, APPLICATION, {'benchmarks/reference/inventory_reconciliation/' + name: value for name, value in rust['sources'].items()})\n    require(digest(rust['build_script'].encode()) == rust['build_script_sha256'] == record['sha256']['rust_build_script'], 'Rust build helper snapshot')\n    require(digest(rust['cargo_wrapper']['source'].encode()) == rust['cargo_wrapper']['sha256'], 'Rust wrapper snapshot')\n    env = rust['environment']; thin = mode == 'lto'\n    require(env.get('CARGO_PROFILE_RELEASE_OPT_LEVEL', '3') == '3', 'Rust release optimization')\n    require(rust['llvm_budget'] == (1000 if thin else None), 'Rust LLVM budget')\n    require(env.get('CARGO_PROFILE_RELEASE_LTO') == ('thin' if thin else None), 'Rust LTO mode')\n    require(env.get('CARGO_ENCODED_RUSTFLAGS') == (None if thin else ''), 'Rust encoded flags')\n    require(env['RUSTFLAGS'] == ('-Cllvm-args=-import-instr-limit=1000 -Cllvm-args=-inline-threshold=1000' if thin else ''), 'Rust explicit flags')\n    require('host: x86_64-unknown-linux-gnu' in rust['rustc_verbose'], 'Rust target')\n    require(rust['sources']['Cargo.toml'] == digest((root / 'benchmarks/reference/inventory_reconciliation/Cargo.toml').read_bytes()), 'Rust profile source')\n    for group, engines in ENGINES.items():\n        commands = record['method']['commands'][group]\n        require(tuple(commands) == engines, 'engine command ordering')\n        require(commands['cpython'][0] == str(paths['python']) and commands['cpython'][1:3] == ['-I', '-c'], 'CPython isolation command')\n        require(commands['relar'] == [str(paths[group + '_binary'])], 'Relar executable command')\n        if group == 'inventory':\n            require(commands['rust_bigint'] == [str(paths['rust_bigint'])], 'Rust executable command')\n        else:\n            require(commands['baseline'] == [str(paths['baseline'])], 'control executable command')\n    return paths, baseline\n\n\ndef correctness(record, validator):\n    inv = record['validation']['inventory']; inc = validator['files'].batch.incremental\n    expected_cases = validator['cases']()\n    require(inv['cases'] == len(inv['records']) == len(expected_cases) == 176, 'inventory oracle count')\n    require(inv['engines'] == list(ENGINES['inventory']), 'inventory validation engines')\n    success = 0\n    for item, case in zip(inv['records'], expected_cases):\n        require(item['case'] == validator['case_record'](case), 'inventory oracle captured case')\n        expected = validator['oracle'](case)\n        success += expected['returncode'] == 0\n        require(item['expected'] == {k: v for k, v in expected.items() if k != 'files'}, 'inventory expected status/output')\n        require(decode_files(item['expected_files']) == expected['files'], 'inventory oracle expected file bytes')\n        require(set(item['engines']) == set(ENGINES['inventory']), 'inventory oracle result coverage')\n        for engine, result in item['engines'].items():\n            result_matches(result, expected, 'inventory oracle/' + case.label + '/' + engine)\n    require(success == inv['successful'] == 127 and inv['terminal_errors'] == 49, 'inventory oracle totals')\n    device = inv['device_check']\n    require(device['case'] == 'terminal-report-device-error' and set(device['engines']) == set(ENGINES['inventory']), 'device coverage')\n    device_case = validator['case']('terminal-report-device-error', [('a', 4)], [[('a', 2)]])\n    expected = {'returncode': 1, 'stdout': '', 'error_category': 'OSError', 'error_message': 'report: cannot write', 'files': device_case.files, 'directories': []}\n    for engine, result in device['engines'].items():\n        result_matches(result, expected, 'device/' + engine)\n    control = record['validation']['control']; cases = inc.cases()\n    require(control['oracle_cases'] == len(control['checks']) == len(cases) == 155, 'control oracle count')\n    require(control['passed_by_engine'] == dict.fromkeys(ENGINES['control'], 155), 'control oracle totals')\n    for item, case in zip(control['checks'], cases):\n        oracle = inc.oracle(case.tasks, case.changes)\n        require(item['case'] == case.label and item['input'] == (case.stdin_override or inc.input_text(case.tasks, case.changes)), 'control oracle inputs')\n        require(item['expected_stdout'] == oracle['output'], 'control oracle output')\n        require(set(item['results']) == set(ENGINES['control']), 'control oracle engines')\n        for engine, result in item['results'].items():\n            result_matches(result, {'stdout': oracle['output'], 'returncode': 0}, 'control oracle/' + case.label + '/' + engine)\n    parser = inc.parser_cases()\n    require(control['parser_cases'] == len(control['parser_checks']) == len(parser) == 17, 'parser case count')\n    require(control['parser_passed_by_engine'] == dict.fromkeys(ENGINES['control'], 17), 'parser totals')\n    for item, (label, source, category, output) in zip(control['parser_checks'], parser):\n        require(item['case'] == label and item['input'] == source and item['expected_stdout'] == output and item['expected_error_category'] == category, 'parser captured expectations')\n        require(item['expected_returncode'] == int(category is not None), 'parser status expectation')\n        require(set(item['results']) == set(ENGINES['control']), 'parser engine coverage')\n        for engine, result in item['results'].items():\n            result_matches(result, {'stdout': output, 'returncode': int(category is not None), 'error_category': category}, 'parser/' + label + '/' + engine)\n    return {'inventory': 176 * 3, 'inventory_device': 3, 'control_graph': 155 * 3, 'control_parser': 17 * 3}\n\n\ndef audit_mode(root, mode, session, validator):\n    path = root / f'benchmarks/local/inventory-{mode}-final.json'\n    record = json.loads(path.read_text())\n    run = session['runs'][mode]\n    verify_file(path, run['record_sha256'])\n    verify_file(path.with_suffix('.log'), run['log_sha256'])\n    require(run['returncode'] == 0, 'timing harness failed')\n    require(run['started_at_utc'] <= record['started_at_utc'] <= record['completed_at_utc'] <= run['completed_at_utc'], 'record is outside its session interval')\n    require(record['git'] == {'revision': APPLICATION, 'dirty': False}, 'timing source identity')\n    require(record['example'] == 'inventory_reconciliation', 'comparison example')\n    options = record['options']; thin = mode == 'lto'\n    require(options['samples'] == 30 and options['warmups'] == 2 and options['validation_only'] is False, 'sample settings')\n    require(options['optimization_level'] == 3 and options['target'] == options['requested_target'] == 'x86_64-unknown-linux-gnu', 'target/optimization settings')\n    require(options['lto'] == ('thin' if thin else None) and options['llvm_budget'] == (1000 if thin else None), 'LTO settings')\n    contexts = record['execution']\n    require(set(contexts) == {'before', 'before_samples', 'after'}, 'tracing checkpoint coverage')\n    require(contexts['before'] == contexts['before_samples'] == contexts['after'], 'runtime context changed')\n    require(contexts['before']['tracer_pid'] == 0, 'traced benchmark')\n    require(record['host']['cpu']['affinity'] == [0] and 0 in record['host']['cpu']['allowed_cpus_before_pinning'], 'CPU affinity')\n    require(record['clock']['monotonic'] and not record['clock']['adjustable'] and record['clock']['resolution'] == 1e-9, 'clock properties')\n    for name in ('LD_PRELOAD', 'ASAN_OPTIONS', 'LSAN_OPTIONS', 'UBSAN_OPTIONS'):\n        require(contexts['before']['inherited_environment'][name] is None, 'instrumentation environment: ' + name)\n    python = record['tools']['cpython']\n    require(python['implementation'] == 'cpython' and python['version_number'] == '3.14.5', 'CPython identity')\n    require(python['gil_enabled'] and not python['free_threaded_build'] and not python['jit_enabled'] and not python['debug_build'], 'CPython execution mode')\n    paths, baseline = artifact_identities(root, mode, record, session)\n    validation = correctness(record, validator)\n    rows = []; ordering = {}; measured = warmups = gates = 0\n    baseline_workloads = {w['label']: w for w in baseline['workloads']['incremental']}\n    for group, engines in ENGINES.items():\n        workloads = record['workloads'][group]\n        require(len(workloads) == COUNTS[group], 'workload count: ' + group)\n        cycle = [list(order) for order in itertools.permutations(engines)]\n        require(record['method']['order_cycles'][group] == cycle, 'six-order cycle: ' + group)\n        for workload in workloads:\n            label = group + '/' + workload['label']\n            expected = {'returncode': 0, 'stdout': workload['expected_stdout']}\n            if group == 'inventory':\n                case = validator['case_from_record'](workload['case'])\n                oracle = validator['oracle'](case)\n                require(oracle['returncode'] == 0 and oracle['stdout'] == workload['expected_stdout'], label + ': independent oracle')\n                require(workload['expected_file_inventory'] == inventory(oracle['files']), label + ': expected complete inventory')\n                changed = {name: data for name, data in oracle['files'].items() if case.files.get(name) != data}\n                require(decode_files(workload['expected_changed_files']) == changed, label + ': complete changed bytes')\n                stocks = validator['parse'](case.files['stock.txt'].decode(), 'stock')\n                batches = validator['parse'](case.files['orders.txt'].decode(), 'orders')\n                require(workload['stock_rows'] == len(stocks) and workload['stock_skus'] == len(dict(stocks)) and workload['batches'] == len(batches), label + ': shape metadata')\n                require(workload['request_rows'] == sum(map(len, batches)) and workload['positive_requests'] == sum(quantity > 0 for batch in batches for _, quantity in batch), label + ': request metadata')\n                expected.update(files=oracle['files'], directories=oracle['directories'])\n                require(set(workload['gates']) == set(engines), label + ': correctness gates')\n                for engine, result in workload['gates'].items():\n                    result_matches(result, expected, label + '/gate/' + engine)\n                    gates += 1\n            else:\n                original = baseline_workloads[workload['label']]\n                for key in ('input', 'expected_stdout', 'targets', 'changed', 'affected', 'input_sha256', 'expected_stdout_sha256', 'expected_stdout_bytes'):\n                    require(workload[key] == original[key], label + ': baseline captured control differs: ' + key)\n                require(digest(workload['input'].encode()) == workload['input_sha256'], label + ': input digest')\n                require(digest(workload['expected_stdout'].encode()) == workload['expected_stdout_sha256'] and len(workload['expected_stdout'].encode()) == workload['expected_stdout_bytes'], label + ': output digest')\n                tasks, changes = validator['files'].batch.parse_payload(tuple(workload['input'].removesuffix('\\n').split('\\n')))\n                require(validator['files'].batch.incremental.oracle(tasks, changes)['output'] == workload['expected_stdout'], label + ': independent control oracle')\n            positions = Counter(); adjacent = Counter(); orders = Counter()\n            for phase, count in (('warmups', 2), ('samples', 30)):\n                require(len(workload[phase]) == count, label + ': missing/discarded saved round')\n                for index, sample in enumerate(workload[phase]):\n                    require(sample['index'] == index and sample['order'] == cycle[index % 6], label + ': round order/index')\n                    require(set(sample) == {*engines, 'index', 'order'}, label + ': round engine coverage')\n                    for engine in engines:\n                        require(type(sample[engine]['elapsed_ns']) is int and sample[engine]['elapsed_ns'] > 0, label + ': duration')\n                        result_matches(sample[engine], expected, label + '/' + phase + '/' + engine)\n                    if phase == 'samples':\n                        measured += 3\n                        positions.update((engine, position) for position, engine in enumerate(sample['order']))\n                        adjacent.update(zip(sample['order'], sample['order'][1:]))\n                        orders[tuple(sample['order'])] += 1\n                    else:\n                        warmups += 3\n            require(set(positions) == set(itertools.product(engines, range(3))) and set(positions.values()) == {10}, label + ': position balance')\n            require(set(adjacent) == set(itertools.permutations(engines, 2)) and set(adjacent.values()) == {10}, label + ': within-round predecessor balance')\n            require(len(orders) == 6 and set(orders.values()) == {5}, label + ': permutation balance')\n            ordering[label] = {'positions': {f'{a}@{b}': n for (a, b), n in sorted(positions.items())}, 'within_round_predecessors': {f'{a}->{b}': n for (a, b), n in sorted(adjacent.items())}, 'each_permutation_count': 5}\n            computed = {engine: statistics([sample[engine]['elapsed_ns'] for sample in workload['samples']]) for engine in engines}\n            for engine, values in computed.items():\n                for key, value in values.items():\n                    close(workload['summary'][engine][key.replace('_ns', '_seconds')], value / 1e9, label + ': statistic ' + engine + '/' + key)\n            medians = {engine: values['median_ns'] for engine, values in computed.items()}\n            ratios = {a + '_over_' + b: medians[a] / medians[b] for a, b in itertools.permutations(engines, 2)}\n            expected_ratios = set(ratios) if group == 'inventory' else {'cpython_over_baseline', 'cpython_over_relar', 'baseline_over_relar'}\n            require(set(workload['summary']['ratios_of_medians']) == expected_ratios, label + ': summary ratio coverage')\n            for name, reported in workload['summary']['ratios_of_medians'].items():\n                close(reported, ratios[name], label + ': ratio ' + name)\n            row = {'group': group, 'workload': workload['label'], 'statistics': computed, 'median_ms': {name: value / 1e6 for name, value in medians.items()}, 'ratios_of_medians': ratios}\n            if group == 'control':\n                row['new_vs_baseline_time_change_percent'] = 100 * (medians['relar'] / medians['baseline'] - 1)\n                row['baseline_to_new_time_reduction_percent'] = 100 * (1 - medians['relar'] / medians['baseline'])\n            rows.append(row)\n    require(measured == 11 * 30 * 3 and warmups == 11 * 2 * 3 and gates == 6 * 3, 'total process accounting')\n    return {'mode': mode, 'record_sha256': file_info(path)['sha256'], 'workloads': 11, 'measured_process_runs': measured, 'warmup_process_runs': warmups, 'inventory_gate_runs': gates, 'validation_process_results': validation, 'source_commit': APPLICATION, 'compiler_commit': COMPILER, 'control_llvm_ir_byte_identical_to_baseline': True, 'build_status_note': 'Compiler/runtime build had only then-untracked inventory application/harness/reference additions; every compiled source matches both compiler and clean application commits.', 'artifact_hashes': {name: record['sha256'][name] for name in ('compiler', 'runtime', 'inventory_binary', 'control_binary', 'rust_bigint', 'baseline')}, 'execution': contexts, 'affinity': [0], 'ordering': ordering, 'rows': rows}, record\n\n\ndef bytecode_session(root, session, records):\n    require(session['source_commit'] == APPLICATION and not session['git_status_before'] and not session['git_status_after'], 'session clean source identity')\n    before, after = session['bytecode_before'], session['bytecode_after']\n    require(before == after, 'bytecode changed during timing')\n    require(before['python'] == records[0]['tools']['cpython']['version'] and before['cache_tag'] == 'cpython-314', 'bytecode Python identity')\n    require(before['pycache_prefix'] is None and before['dont_write_bytecode'] is False, 'bytecode policy')\n    require(len(before['files']) == len(records[0]['sources']) == 12, 'bytecode source coverage')\n    for source, item in before['files'].items():\n        path = Path(source)\n        relative = str(path.relative_to(root / 'examples'))\n        require(item['source_sha256'] == records[0]['sources'][relative], 'bytecode source identity')\n        verify_file(path, item['source_sha256'])\n        require(path.stat().st_mtime_ns == item['source_mtime_ns'], 'bytecode source mtime')\n        verify_file(item['cache_path'], item['cache_sha256'], item['cache_bytes'])\n        data = Path(item['cache_path']).read_bytes()\n        require(data[:4].hex() == before['magic'], 'bytecode magic')\n        flags = int.from_bytes(data[4:8], 'little')\n        require(flags == item['flags'] == 0 and item['valid_header'] is True, 'timestamp cache header mode')\n        timestamp, size = struct.unpack('<II', data[8:16])\n        require(timestamp == ((item['source_mtime_ns'] // 1_000_000_000) & 0xffffffff) and size == (path.stat().st_size & 0xffffffff), 'bytecode current source header')\n    require(session['started_at_utc'] <= session['runs']['normal']['started_at_utc'] <= session['runs']['normal']['completed_at_utc'] <= session['runs']['lto']['started_at_utc'] <= session['runs']['lto']['completed_at_utc'] <= session['completed_at_utc'], 'session mode ordering')\n    return {'source_and_cache_files': 12, 'before_after_identical': True, 'timestamp_headers_match_sources': True, 'python_version': before['python'], 'cache_magic': before['magic'], 'runner_source_sha256': digest(session['runner_source'].encode())}\n\n\ndef main():\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[2])\n    args = parser.parse_args(); root = args.root.resolve()\n    session_path = root / 'benchmarks/local/inventory-final-session.json'\n    session = json.loads(session_path.read_text())\n    initial = file_info(session_path)\n    # Verify validator transitive sources before loading them; no benchmark module is imported.\n    normal = json.loads((root / 'benchmarks/local/inventory-normal-final.json').read_text())\n    for name in ('inventory_validate.py', 'manifest_validate.py', 'batch_validate.py', 'incremental_validate.py'):\n        verify_file(root / 'benchmarks' / name, normal['sha256']['harness:' + name])\n    validator = runpy.run_path(str(root / 'benchmarks/inventory_validate.py'))\n    audited, records = zip(*(audit_mode(root, mode, session, validator) for mode in ('normal', 'lto')))\n    require(records[0]['sources'] == records[1]['sources'] and records[0]['rust_sources'] == records[1]['rust_sources'], 'cross-mode source identity')\n    require(records[0]['relar_build_provenance'] == records[1]['relar_build_provenance'] and records[0]['git'] == records[1]['git'], 'cross-mode build identity')\n    require(records[0]['tools']['cpython'] == records[1]['tools']['cpython'] and records[0]['execution'] == records[1]['execution'], 'cross-mode runtime controls')\n    for key in ('rustc_verbose', 'cargo_version', 'tool_sha256', 'cargo_wrapper', 'build_script_sha256'):\n        require(records[0]['rust_build_record'][key] == records[1]['rust_build_record'][key], 'cross-mode Rust tool identity: ' + key)\n    for group in ENGINES:\n        for left, right in zip(records[0]['workloads'][group], records[1]['workloads'][group]):\n            excluded = {'gates', 'warmups', 'samples', 'summary'}\n            require({k: v for k, v in left.items() if k not in excluded} == {k: v for k, v in right.items() if k not in excluded}, 'cross-mode workload/input/output identity')\n    caches = bytecode_session(root, session, records)\n    require(file_info(session_path) == initial, 'session changed during audit')\n    source = Path(__file__).read_text()\n    result = {'schema_version': 1, 'status': 'passed', 'completed_at_utc': datetime.now(timezone.utc).isoformat(), 'audit_script_sha256': digest(source.encode()), 'audit_script_source': source, 'reproduction': 'python3 benchmarks/local/inventory-publication-audit.py', 'method': 'Independent integer-nanosecond median/min/max and inclusive linear-interpolation quartiles, all reported ratios, every recorded process result, exact artifact/build/committed-source identities, and before/after cache headers/hashes. Independent validators reused only after their source hashes were verified. No benchmark/statistics helper, compiler, native executable, or timed workload was executed.', 'session_sha256': initial['sha256'], 'bytecode': caches, 'limits': ['Thirty measured rounds are balanced across all six permutations; the two warmup rounds and cross-round predecessors are not fully balanced.', 'Consecutive saved indices, exact expected counts and reviewed no-filter harness establish completeness of these records; no independent OS process log can rule out earlier unrecorded attempts.', 'The hashed harness compared full stdout and filesystem bytes before storing each result. This audit verifies retained expected bytes and all per-run hashes/lengths/status/stderr; full per-run output file copies are not retained.', 'TracerPid was sampled at three checkpoints and affinity recorded after pinning, not continuously. Shared-host interference and CPU migrations outside those controls cannot be excluded from records alone.', 'Bytecode timestamp headers and before/after bytes are verified; the audit does not independently decompile cache payloads. These are warm-cache whole-process runs, not cold import benchmarks.', 'Rust preserves the eager algorithm and BigInt quantities but uses native containers, borrowed references and direct formatting. No identical-allocation or general language-speed claim follows.', 'The normal and ThinLTO sessions ran sequentially. Their within-mode matched comparisons are stronger than attributing cross-session changes solely to LTO.'], 'assertions_passed': CHECKS, 'distinct_files_hashed': len(FILES), 'modes': list(audited)}\n    output = root / 'benchmarks/local/inventory-publication-audit.json'\n    output.write_text(json.dumps(result, indent=2) + '\\n')\n    lines = ['| Mode | Inventory workload | CPython ms | Relar ms | Rust BigInt ms | CPython / Relar | Relar / Rust |', '|---|---|---:|---:|---:|---:|---:|']\n    for audit in audited:\n        for row in audit['rows']:\n            if row['group'] == 'inventory':\n                med = row['median_ms']; ratio = row['ratios_of_medians']\n                lines.append(f\"| {audit['mode']} | {row['workload']} | {med['cpython']:.3f} | {med['relar']:.3f} | {med['rust_bigint']:.3f} | {ratio['cpython_over_relar']:.3f}x | {ratio['relar_over_rust_bigint']:.3f}x |\")\n    lines += ['', '| Mode | Unchanged control | Baseline ms | Current ms | Current time change |', '|---|---|---:|---:|---:|']\n    for audit in audited:\n        for row in audit['rows']:\n            if row['group'] == 'control':\n                med = row['median_ms']\n                lines.append(f\"| {audit['mode']} | {row['workload']} | {med['baseline']:.3f} | {med['relar']:.3f} | {row['new_vs_baseline_time_change_percent']:+.3f}% |\")\n    output.with_suffix('.md').write_text('\\n'.join(lines) + '\\n')\n    print(json.dumps({'status': 'passed', 'assertions': CHECKS, 'files_hashed': len(FILES), 'script_sha256': digest(source.encode()), 'audit_sha256': file_info(output)['sha256']}, indent=2))\n    print('\\n'.join(lines))\n\n\nif __name__ == '__main__':\n    main()\n",
+  "audit_script_source": "\"\"\"Audit saved inventory comparisons without running benchmarks or compilers.\n\nStatistics are independently interpolated from integer nanoseconds. Only the\nhashed independent validators are imported; no production statistics helper is.\n\"\"\"\nimport argparse\nimport base64\nfrom collections import Counter\nfrom datetime import datetime, timezone\nfrom fractions import Fraction\nimport hashlib\nimport itertools\nimport json\nimport math\nfrom pathlib import Path\nimport runpy\nimport struct\nimport subprocess\n\nAPPLICATION = 'edbbab93b26ccca638c7bf74336baef0d0fab4cd'\nCOMPILER = '615aa4175280a2a0cedf7f549720a2578e246d4e'\nENGINES = {'inventory': ('cpython', 'imre', 'rust_bigint'), 'control': ('cpython', 'baseline', 'imre')}\nCOUNTS = {'inventory': 6, 'control': 5}\nCHECKS = 0\nFILES = {}\n\n\ndef require(condition, message):\n    global CHECKS\n    CHECKS += 1\n    if not condition:\n        raise AssertionError(message)\n\n\ndef digest(data):\n    return hashlib.sha256(data).hexdigest()\n\n\ndef file_info(path):\n    path = Path(path).resolve(strict=True)\n    stat = path.stat()\n    signature = (stat.st_size, stat.st_mtime_ns)\n    if path not in FILES:\n        with path.open('rb') as stream:\n            FILES[path] = signature, hashlib.file_digest(stream, 'sha256').hexdigest()\n    require(FILES[path][0] == signature, f'file changed during audit: {path}')\n    return {'sha256': FILES[path][1], 'bytes': signature[0]}\n\n\ndef verify_file(path, expected, size=None):\n    result = file_info(path)\n    require(result['sha256'] == expected, f'file hash differs: {path}')\n    if size is not None:\n        require(result['bytes'] == size, f'file size differs: {path}')\n    return result\n\n\ndef verify_committed(root, revision, hashes):\n    names = list(hashes)\n    data = subprocess.run(['git', '-C', str(root), 'cat-file', '--batch'],\n        input=''.join(f'{revision}:{name}\\n' for name in names).encode(), capture_output=True, check=True).stdout\n    offset = 0\n    for name in names:\n        end = data.index(b'\\n', offset)\n        header = data[offset:end].split()\n        require(len(header) == 3 and header[1] == b'blob', f'missing committed file: {revision}:{name}')\n        length = int(header[2]); offset = end + 1\n        require(digest(data[offset:offset + length]) == hashes[name], f'committed source differs: {revision}:{name}')\n        offset += length\n        require(data[offset:offset + 1] == b'\\n', 'invalid Git batch delimiter')\n        offset += 1\n    require(offset == len(data), 'unexpected Git batch remainder')\n\n\ndef decode_files(encoded):\n    result = {}\n    for name, spec in encoded.items():\n        data = base64.b64decode(spec['base64'], validate=True)\n        require(digest(data) == spec['sha256'] and len(data) == spec['bytes'], 'encoded file differs: ' + name)\n        result[name] = data\n    return result\n\n\ndef inventory(files):\n    return {name: {'sha256': digest(data), 'bytes': len(data)} for name, data in sorted(files.items())}\n\n\ndef result_matches(result, expected, label):\n    output = expected['stdout'].encode()\n    require(result['returncode'] == expected['returncode'], label + ': status')\n    require(result['stdout_sha256'] == digest(output) and result['stdout_bytes'] == len(output), label + ': full stdout identity')\n    if expected.get('error_category') is None:\n        require(result['stderr'] == '', label + ': unexpected stderr')\n    else:\n        lines = result['stderr'].strip().splitlines()\n        category = expected['error_category']\n        require(bool(lines) and (lines[-1] == category or lines[-1].startswith(category + ':')), label + ': error category')\n        if expected.get('error_message') is not None:\n            require(lines[-1] == category + ': ' + expected['error_message'], label + ': normalized error message')\n    if 'files' in expected:\n        require(result['files'] == inventory(expected['files']), label + ': complete file inventory')\n        require(result['directories'] == expected['directories'], label + ': complete directory inventory')\n\n\ndef quantile(values, numerator, denominator):\n    ordered = sorted(values)\n    position = Fraction((len(ordered) - 1) * numerator, denominator)\n    left = position.numerator // position.denominator\n    right = min(left + 1, len(ordered) - 1)\n    return Fraction(ordered[left]) + (ordered[right] - ordered[left]) * (position - left)\n\n\ndef statistics(values):\n    return {'median_ns': float(quantile(values, 1, 2)), 'min_ns': min(values), 'max_ns': max(values),\n            'p25_ns': float(quantile(values, 1, 4)), 'p75_ns': float(quantile(values, 3, 4))}\n\n\ndef close(actual, expected, label):\n    require(math.isclose(actual, expected, rel_tol=2e-13, abs_tol=1e-12), label)\n\n\ndef flag(command, name):\n    return command[command.index(name) + 1]\n\n\ndef path_at(root, value):\n    value = Path(value)\n    return value if value.is_absolute() else root / value\n\n\ndef artifact_identities(root, mode, record, session):\n    run = session['runs'][mode]\n    command = run['command']\n    paths = {name: path_at(root, flag(command, option)) for name, option in (\n        ('compiler', '--compiler'), ('runtime', '--runtime'), ('imre_build_record', '--imre-build-record'),\n        ('rust_bigint', '--rust-bigint'), ('rust_record', '--rust-build-record'),\n        ('baseline', '--baseline'), ('baseline_record', '--baseline-record'), ('python', '--python'))}\n    paths['rust_build_script'] = paths['tracked_rust_build_script'] = root / 'benchmarks/reference/inventory_reconciliation/build.py'\n    paths['guard_helpers'] = root / 'benchmarks/reference/dependency_planner/check_boundaries.py'\n    source_hashes = record['imre_build_provenance']['source_sha256']\n    for group, compiler_command in record['method']['compile_commands'].items():\n        require(compiler_command[0] == str(paths['compiler']) and compiler_command[1] == 'build', 'compiler command identity')\n        paths[group + '_binary'] = Path(flag(compiler_command, '-o'))\n        paths[group + '_ir'] = Path(flag(compiler_command, '--emit-llvm'))\n        paths['clang'] = Path(flag(compiler_command, '--clang'))\n        require(flag(compiler_command, '--runtime') == str(paths['runtime']), 'runtime pairing')\n        require(flag(compiler_command, '--opt-level') == '3' and flag(compiler_command, '--target') == 'x86_64-unknown-linux-gnu', 'application build mode')\n        require('--sanitize' not in compiler_command, 'sanitizer in measured application')\n        if mode == 'lto':\n            paths['lto_linker'] = Path(flag(compiler_command, '--lto-linker'))\n            require(paths['lto_linker'].name == 'ld.lld', 'lexical linker flavor')\n        else:\n            require('--lto-linker' not in compiler_command, 'LTO in ordinary application')\n        require(record['compilation'][group]['returncode'] == 0 and record['compilation'][group]['stderr'] == '', 'application compilation failed')\n    committed = {}\n    for name, expected in record['sha256'].items():\n        if name.startswith('harness:'):\n            paths[name] = root / 'benchmarks' / name.split(':', 1)[1]\n        if name.startswith('imre_source:'):\n            relative = name.split(':', 1)[1]\n            paths[name] = root / relative\n            require(source_hashes[relative] == expected, 'compiled source identity field')\n        require(name in paths, 'unmapped artifact: ' + name)\n        verify_file(paths[name], expected)\n        if name.startswith(('harness:', 'imre_source:')) or name in ('guard_helpers', 'tracked_rust_build_script'):\n            committed[str(paths[name].relative_to(root))] = expected\n    verify_committed(root, APPLICATION, committed)\n    for name, spec in record['artifacts'].items():\n        require(file_info(paths[name])['bytes'] == spec['bytes'], 'artifact recorded length: ' + name)\n    for name, expected in record['sources'].items():\n        verify_file(root / 'examples' / name, expected)\n    verify_committed(root, APPLICATION, {'examples/' + name: value for name, value in record['sources'].items()})\n    full_build = json.loads(paths['imre_build_record'].read_text())\n    for key, value in record['imre_build_provenance'].items():\n        require(full_build[key] == value, 'embedded Imre build provenance: ' + key)\n    require(full_build['git_head'] == COMPILER and full_build['compiled_sources_match_commit'] is True, 'compiler source commit')\n    require(all(line.startswith('?? ') and ('inventory' in line) for line in full_build['git_status'].splitlines()), 'compiler build had tracked changes')\n    verify_committed(root, COMPILER, source_hashes)\n    verify_committed(root, APPLICATION, source_hashes)\n    require(set(full_build['source_contents']) == set(source_hashes), 'compiler source snapshot coverage')\n    for name, content in full_build['source_contents'].items():\n        require(digest(content.encode()) == source_hashes[name], 'compiler source snapshot bytes')\n    for name, expected in full_build['sha256'].items():\n        verify_file(root / name, expected)\n    for name, build in full_build['commands'].items():\n        require(build['returncode'] == 0, 'runtime/compiler build failure')\n        verify_file(paths['imre_build_record'].parent / (name + '.log'), build['log_sha256'])\n    require(full_build['runtime_lto_rustflags'] == '-Clinker-plugin-lto', 'runtime ThinLTO flags')\n    baseline = json.loads(paths['baseline_record'].read_text())\n    for key, value in record['baseline_provenance'].items():\n        require(baseline[key] == value, 'embedded baseline provenance: ' + key)\n    require(baseline['git']['dirty'] is False, 'baseline timing checkout dirty')\n    require(baseline['sha256']['incremental_binary'] == record['sha256']['baseline'], 'baseline exact executable')\n    require(baseline['sha256']['incremental_ir'] == record['sha256']['control_ir'], 'unchanged control LLVM IR identity')\n    require({n: v for n, v in baseline['sources'].items() if n.startswith('incremental_planner/')} ==\n            {n: v for n, v in record['sources'].items() if n.startswith('incremental_planner/')}, 'unchanged control sources')\n    for key in ('lto', 'llvm_budget', 'target', 'optimization_level'):\n        require(baseline['options'][key] == record['options'][key], 'baseline build mode: ' + key)\n    for key in ('clang', 'lto_linker'):\n        if key in record['sha256']:\n            require(baseline['sha256'][key] == record['sha256'][key], 'baseline tool mismatch: ' + key)\n    rust = json.loads(paths['rust_record'].read_text())\n    require(rust == record['rust_build_record'] and rust['entrypoint'] == 'inventory', 'Rust build identity')\n    require(rust['binaries']['bigint']['sha256'] == record['sha256']['rust_bigint'], 'Rust executable identity')\n    require(rust['sources'] == record['rust_sources'], 'Rust source identity')\n    require(set(rust['source_contents']) == set(rust['sources']), 'Rust source snapshot coverage')\n    for name, expected in rust['sources'].items():\n        verify_file(root / 'benchmarks/reference/inventory_reconciliation' / name, expected)\n        require(digest(rust['source_contents'][name].encode()) == expected, 'Rust source snapshot')\n    verify_committed(root, APPLICATION, {'benchmarks/reference/inventory_reconciliation/' + name: value for name, value in rust['sources'].items()})\n    require(digest(rust['build_script'].encode()) == rust['build_script_sha256'] == record['sha256']['rust_build_script'], 'Rust build helper snapshot')\n    require(digest(rust['cargo_wrapper']['source'].encode()) == rust['cargo_wrapper']['sha256'], 'Rust wrapper snapshot')\n    env = rust['environment']; thin = mode == 'lto'\n    require(env.get('CARGO_PROFILE_RELEASE_OPT_LEVEL', '3') == '3', 'Rust release optimization')\n    require(rust['llvm_budget'] == (1000 if thin else None), 'Rust LLVM budget')\n    require(env.get('CARGO_PROFILE_RELEASE_LTO') == ('thin' if thin else None), 'Rust LTO mode')\n    require(env.get('CARGO_ENCODED_RUSTFLAGS') == (None if thin else ''), 'Rust encoded flags')\n    require(env['RUSTFLAGS'] == ('-Cllvm-args=-import-instr-limit=1000 -Cllvm-args=-inline-threshold=1000' if thin else ''), 'Rust explicit flags')\n    require('host: x86_64-unknown-linux-gnu' in rust['rustc_verbose'], 'Rust target')\n    require(rust['sources']['Cargo.toml'] == digest((root / 'benchmarks/reference/inventory_reconciliation/Cargo.toml').read_bytes()), 'Rust profile source')\n    for group, engines in ENGINES.items():\n        commands = record['method']['commands'][group]\n        require(tuple(commands) == engines, 'engine command ordering')\n        require(commands['cpython'][0] == str(paths['python']) and commands['cpython'][1:3] == ['-I', '-c'], 'CPython isolation command')\n        require(commands['imre'] == [str(paths[group + '_binary'])], 'Imre executable command')\n        if group == 'inventory':\n            require(commands['rust_bigint'] == [str(paths['rust_bigint'])], 'Rust executable command')\n        else:\n            require(commands['baseline'] == [str(paths['baseline'])], 'control executable command')\n    return paths, baseline\n\n\ndef correctness(record, validator):\n    inv = record['validation']['inventory']; inc = validator['files'].batch.incremental\n    expected_cases = validator['cases']()\n    require(inv['cases'] == len(inv['records']) == len(expected_cases) == 176, 'inventory oracle count')\n    require(inv['engines'] == list(ENGINES['inventory']), 'inventory validation engines')\n    success = 0\n    for item, case in zip(inv['records'], expected_cases):\n        require(item['case'] == validator['case_record'](case), 'inventory oracle captured case')\n        expected = validator['oracle'](case)\n        success += expected['returncode'] == 0\n        require(item['expected'] == {k: v for k, v in expected.items() if k != 'files'}, 'inventory expected status/output')\n        require(decode_files(item['expected_files']) == expected['files'], 'inventory oracle expected file bytes')\n        require(set(item['engines']) == set(ENGINES['inventory']), 'inventory oracle result coverage')\n        for engine, result in item['engines'].items():\n            result_matches(result, expected, 'inventory oracle/' + case.label + '/' + engine)\n    require(success == inv['successful'] == 127 and inv['terminal_errors'] == 49, 'inventory oracle totals')\n    device = inv['device_check']\n    require(device['case'] == 'terminal-report-device-error' and set(device['engines']) == set(ENGINES['inventory']), 'device coverage')\n    device_case = validator['case']('terminal-report-device-error', [('a', 4)], [[('a', 2)]])\n    expected = {'returncode': 1, 'stdout': '', 'error_category': 'OSError', 'error_message': 'report: cannot write', 'files': device_case.files, 'directories': []}\n    for engine, result in device['engines'].items():\n        result_matches(result, expected, 'device/' + engine)\n    control = record['validation']['control']; cases = inc.cases()\n    require(control['oracle_cases'] == len(control['checks']) == len(cases) == 155, 'control oracle count')\n    require(control['passed_by_engine'] == dict.fromkeys(ENGINES['control'], 155), 'control oracle totals')\n    for item, case in zip(control['checks'], cases):\n        oracle = inc.oracle(case.tasks, case.changes)\n        require(item['case'] == case.label and item['input'] == (case.stdin_override or inc.input_text(case.tasks, case.changes)), 'control oracle inputs')\n        require(item['expected_stdout'] == oracle['output'], 'control oracle output')\n        require(set(item['results']) == set(ENGINES['control']), 'control oracle engines')\n        for engine, result in item['results'].items():\n            result_matches(result, {'stdout': oracle['output'], 'returncode': 0}, 'control oracle/' + case.label + '/' + engine)\n    parser = inc.parser_cases()\n    require(control['parser_cases'] == len(control['parser_checks']) == len(parser) == 17, 'parser case count')\n    require(control['parser_passed_by_engine'] == dict.fromkeys(ENGINES['control'], 17), 'parser totals')\n    for item, (label, source, category, output) in zip(control['parser_checks'], parser):\n        require(item['case'] == label and item['input'] == source and item['expected_stdout'] == output and item['expected_error_category'] == category, 'parser captured expectations')\n        require(item['expected_returncode'] == int(category is not None), 'parser status expectation')\n        require(set(item['results']) == set(ENGINES['control']), 'parser engine coverage')\n        for engine, result in item['results'].items():\n            result_matches(result, {'stdout': output, 'returncode': int(category is not None), 'error_category': category}, 'parser/' + label + '/' + engine)\n    return {'inventory': 176 * 3, 'inventory_device': 3, 'control_graph': 155 * 3, 'control_parser': 17 * 3}\n\n\ndef audit_mode(root, mode, session, validator):\n    path = root / f'benchmarks/local/inventory-{mode}-final.json'\n    record = json.loads(path.read_text())\n    run = session['runs'][mode]\n    verify_file(path, run['record_sha256'])\n    verify_file(path.with_suffix('.log'), run['log_sha256'])\n    require(run['returncode'] == 0, 'timing harness failed')\n    require(run['started_at_utc'] <= record['started_at_utc'] <= record['completed_at_utc'] <= run['completed_at_utc'], 'record is outside its session interval')\n    require(record['git'] == {'revision': APPLICATION, 'dirty': False}, 'timing source identity')\n    require(record['example'] == 'inventory_reconciliation', 'comparison example')\n    options = record['options']; thin = mode == 'lto'\n    require(options['samples'] == 30 and options['warmups'] == 2 and options['validation_only'] is False, 'sample settings')\n    require(options['optimization_level'] == 3 and options['target'] == options['requested_target'] == 'x86_64-unknown-linux-gnu', 'target/optimization settings')\n    require(options['lto'] == ('thin' if thin else None) and options['llvm_budget'] == (1000 if thin else None), 'LTO settings')\n    contexts = record['execution']\n    require(set(contexts) == {'before', 'before_samples', 'after'}, 'tracing checkpoint coverage')\n    require(contexts['before'] == contexts['before_samples'] == contexts['after'], 'runtime context changed')\n    require(contexts['before']['tracer_pid'] == 0, 'traced benchmark')\n    require(record['host']['cpu']['affinity'] == [0] and 0 in record['host']['cpu']['allowed_cpus_before_pinning'], 'CPU affinity')\n    require(record['clock']['monotonic'] and not record['clock']['adjustable'] and record['clock']['resolution'] == 1e-9, 'clock properties')\n    for name in ('LD_PRELOAD', 'ASAN_OPTIONS', 'LSAN_OPTIONS', 'UBSAN_OPTIONS'):\n        require(contexts['before']['inherited_environment'][name] is None, 'instrumentation environment: ' + name)\n    python = record['tools']['cpython']\n    require(python['implementation'] == 'cpython' and python['version_number'] == '3.14.5', 'CPython identity')\n    require(python['gil_enabled'] and not python['free_threaded_build'] and not python['jit_enabled'] and not python['debug_build'], 'CPython execution mode')\n    paths, baseline = artifact_identities(root, mode, record, session)\n    validation = correctness(record, validator)\n    rows = []; ordering = {}; measured = warmups = gates = 0\n    baseline_workloads = {w['label']: w for w in baseline['workloads']['incremental']}\n    for group, engines in ENGINES.items():\n        workloads = record['workloads'][group]\n        require(len(workloads) == COUNTS[group], 'workload count: ' + group)\n        cycle = [list(order) for order in itertools.permutations(engines)]\n        require(record['method']['order_cycles'][group] == cycle, 'six-order cycle: ' + group)\n        for workload in workloads:\n            label = group + '/' + workload['label']\n            expected = {'returncode': 0, 'stdout': workload['expected_stdout']}\n            if group == 'inventory':\n                case = validator['case_from_record'](workload['case'])\n                oracle = validator['oracle'](case)\n                require(oracle['returncode'] == 0 and oracle['stdout'] == workload['expected_stdout'], label + ': independent oracle')\n                require(workload['expected_file_inventory'] == inventory(oracle['files']), label + ': expected complete inventory')\n                changed = {name: data for name, data in oracle['files'].items() if case.files.get(name) != data}\n                require(decode_files(workload['expected_changed_files']) == changed, label + ': complete changed bytes')\n                stocks = validator['parse'](case.files['stock.txt'].decode(), 'stock')\n                batches = validator['parse'](case.files['orders.txt'].decode(), 'orders')\n                require(workload['stock_rows'] == len(stocks) and workload['stock_skus'] == len(dict(stocks)) and workload['batches'] == len(batches), label + ': shape metadata')\n                require(workload['request_rows'] == sum(map(len, batches)) and workload['positive_requests'] == sum(quantity > 0 for batch in batches for _, quantity in batch), label + ': request metadata')\n                expected.update(files=oracle['files'], directories=oracle['directories'])\n                require(set(workload['gates']) == set(engines), label + ': correctness gates')\n                for engine, result in workload['gates'].items():\n                    result_matches(result, expected, label + '/gate/' + engine)\n                    gates += 1\n            else:\n                original = baseline_workloads[workload['label']]\n                for key in ('input', 'expected_stdout', 'targets', 'changed', 'affected', 'input_sha256', 'expected_stdout_sha256', 'expected_stdout_bytes'):\n                    require(workload[key] == original[key], label + ': baseline captured control differs: ' + key)\n                require(digest(workload['input'].encode()) == workload['input_sha256'], label + ': input digest')\n                require(digest(workload['expected_stdout'].encode()) == workload['expected_stdout_sha256'] and len(workload['expected_stdout'].encode()) == workload['expected_stdout_bytes'], label + ': output digest')\n                tasks, changes = validator['files'].batch.parse_payload(tuple(workload['input'].removesuffix('\\n').split('\\n')))\n                require(validator['files'].batch.incremental.oracle(tasks, changes)['output'] == workload['expected_stdout'], label + ': independent control oracle')\n            positions = Counter(); adjacent = Counter(); orders = Counter()\n            for phase, count in (('warmups', 2), ('samples', 30)):\n                require(len(workload[phase]) == count, label + ': missing/discarded saved round')\n                for index, sample in enumerate(workload[phase]):\n                    require(sample['index'] == index and sample['order'] == cycle[index % 6], label + ': round order/index')\n                    require(set(sample) == {*engines, 'index', 'order'}, label + ': round engine coverage')\n                    for engine in engines:\n                        require(type(sample[engine]['elapsed_ns']) is int and sample[engine]['elapsed_ns'] > 0, label + ': duration')\n                        result_matches(sample[engine], expected, label + '/' + phase + '/' + engine)\n                    if phase == 'samples':\n                        measured += 3\n                        positions.update((engine, position) for position, engine in enumerate(sample['order']))\n                        adjacent.update(zip(sample['order'], sample['order'][1:]))\n                        orders[tuple(sample['order'])] += 1\n                    else:\n                        warmups += 3\n            require(set(positions) == set(itertools.product(engines, range(3))) and set(positions.values()) == {10}, label + ': position balance')\n            require(set(adjacent) == set(itertools.permutations(engines, 2)) and set(adjacent.values()) == {10}, label + ': within-round predecessor balance')\n            require(len(orders) == 6 and set(orders.values()) == {5}, label + ': permutation balance')\n            ordering[label] = {'positions': {f'{a}@{b}': n for (a, b), n in sorted(positions.items())}, 'within_round_predecessors': {f'{a}->{b}': n for (a, b), n in sorted(adjacent.items())}, 'each_permutation_count': 5}\n            computed = {engine: statistics([sample[engine]['elapsed_ns'] for sample in workload['samples']]) for engine in engines}\n            for engine, values in computed.items():\n                for key, value in values.items():\n                    close(workload['summary'][engine][key.replace('_ns', '_seconds')], value / 1e9, label + ': statistic ' + engine + '/' + key)\n            medians = {engine: values['median_ns'] for engine, values in computed.items()}\n            ratios = {a + '_over_' + b: medians[a] / medians[b] for a, b in itertools.permutations(engines, 2)}\n            expected_ratios = set(ratios) if group == 'inventory' else {'cpython_over_baseline', 'cpython_over_imre', 'baseline_over_imre'}\n            require(set(workload['summary']['ratios_of_medians']) == expected_ratios, label + ': summary ratio coverage')\n            for name, reported in workload['summary']['ratios_of_medians'].items():\n                close(reported, ratios[name], label + ': ratio ' + name)\n            row = {'group': group, 'workload': workload['label'], 'statistics': computed, 'median_ms': {name: value / 1e6 for name, value in medians.items()}, 'ratios_of_medians': ratios}\n            if group == 'control':\n                row['new_vs_baseline_time_change_percent'] = 100 * (medians['imre'] / medians['baseline'] - 1)\n                row['baseline_to_new_time_reduction_percent'] = 100 * (1 - medians['imre'] / medians['baseline'])\n            rows.append(row)\n    require(measured == 11 * 30 * 3 and warmups == 11 * 2 * 3 and gates == 6 * 3, 'total process accounting')\n    return {'mode': mode, 'record_sha256': file_info(path)['sha256'], 'workloads': 11, 'measured_process_runs': measured, 'warmup_process_runs': warmups, 'inventory_gate_runs': gates, 'validation_process_results': validation, 'source_commit': APPLICATION, 'compiler_commit': COMPILER, 'control_llvm_ir_byte_identical_to_baseline': True, 'build_status_note': 'Compiler/runtime build had only then-untracked inventory application/harness/reference additions; every compiled source matches both compiler and clean application commits.', 'artifact_hashes': {name: record['sha256'][name] for name in ('compiler', 'runtime', 'inventory_binary', 'control_binary', 'rust_bigint', 'baseline')}, 'execution': contexts, 'affinity': [0], 'ordering': ordering, 'rows': rows}, record\n\n\ndef bytecode_session(root, session, records):\n    require(session['source_commit'] == APPLICATION and not session['git_status_before'] and not session['git_status_after'], 'session clean source identity')\n    before, after = session['bytecode_before'], session['bytecode_after']\n    require(before == after, 'bytecode changed during timing')\n    require(before['python'] == records[0]['tools']['cpython']['version'] and before['cache_tag'] == 'cpython-314', 'bytecode Python identity')\n    require(before['pycache_prefix'] is None and before['dont_write_bytecode'] is False, 'bytecode policy')\n    require(len(before['files']) == len(records[0]['sources']) == 12, 'bytecode source coverage')\n    for source, item in before['files'].items():\n        path = Path(source)\n        relative = str(path.relative_to(root / 'examples'))\n        require(item['source_sha256'] == records[0]['sources'][relative], 'bytecode source identity')\n        verify_file(path, item['source_sha256'])\n        require(path.stat().st_mtime_ns == item['source_mtime_ns'], 'bytecode source mtime')\n        verify_file(item['cache_path'], item['cache_sha256'], item['cache_bytes'])\n        data = Path(item['cache_path']).read_bytes()\n        require(data[:4].hex() == before['magic'], 'bytecode magic')\n        flags = int.from_bytes(data[4:8], 'little')\n        require(flags == item['flags'] == 0 and item['valid_header'] is True, 'timestamp cache header mode')\n        timestamp, size = struct.unpack('<II', data[8:16])\n        require(timestamp == ((item['source_mtime_ns'] // 1_000_000_000) & 0xffffffff) and size == (path.stat().st_size & 0xffffffff), 'bytecode current source header')\n    require(session['started_at_utc'] <= session['runs']['normal']['started_at_utc'] <= session['runs']['normal']['completed_at_utc'] <= session['runs']['lto']['started_at_utc'] <= session['runs']['lto']['completed_at_utc'] <= session['completed_at_utc'], 'session mode ordering')\n    return {'source_and_cache_files': 12, 'before_after_identical': True, 'timestamp_headers_match_sources': True, 'python_version': before['python'], 'cache_magic': before['magic'], 'runner_source_sha256': digest(session['runner_source'].encode())}\n\n\ndef main():\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[2])\n    args = parser.parse_args(); root = args.root.resolve()\n    session_path = root / 'benchmarks/local/inventory-final-session.json'\n    session = json.loads(session_path.read_text())\n    initial = file_info(session_path)\n    # Verify validator transitive sources before loading them; no benchmark module is imported.\n    normal = json.loads((root / 'benchmarks/local/inventory-normal-final.json').read_text())\n    for name in ('inventory_validate.py', 'manifest_validate.py', 'batch_validate.py', 'incremental_validate.py'):\n        verify_file(root / 'benchmarks' / name, normal['sha256']['harness:' + name])\n    validator = runpy.run_path(str(root / 'benchmarks/inventory_validate.py'))\n    audited, records = zip(*(audit_mode(root, mode, session, validator) for mode in ('normal', 'lto')))\n    require(records[0]['sources'] == records[1]['sources'] and records[0]['rust_sources'] == records[1]['rust_sources'], 'cross-mode source identity')\n    require(records[0]['imre_build_provenance'] == records[1]['imre_build_provenance'] and records[0]['git'] == records[1]['git'], 'cross-mode build identity')\n    require(records[0]['tools']['cpython'] == records[1]['tools']['cpython'] and records[0]['execution'] == records[1]['execution'], 'cross-mode runtime controls')\n    for key in ('rustc_verbose', 'cargo_version', 'tool_sha256', 'cargo_wrapper', 'build_script_sha256'):\n        require(records[0]['rust_build_record'][key] == records[1]['rust_build_record'][key], 'cross-mode Rust tool identity: ' + key)\n    for group in ENGINES:\n        for left, right in zip(records[0]['workloads'][group], records[1]['workloads'][group]):\n            excluded = {'gates', 'warmups', 'samples', 'summary'}\n            require({k: v for k, v in left.items() if k not in excluded} == {k: v for k, v in right.items() if k not in excluded}, 'cross-mode workload/input/output identity')\n    caches = bytecode_session(root, session, records)\n    require(file_info(session_path) == initial, 'session changed during audit')\n    source = Path(__file__).read_text()\n    result = {'schema_version': 1, 'status': 'passed', 'completed_at_utc': datetime.now(timezone.utc).isoformat(), 'audit_script_sha256': digest(source.encode()), 'audit_script_source': source, 'reproduction': 'python3 benchmarks/local/inventory-publication-audit.py', 'method': 'Independent integer-nanosecond median/min/max and inclusive linear-interpolation quartiles, all reported ratios, every recorded process result, exact artifact/build/committed-source identities, and before/after cache headers/hashes. Independent validators reused only after their source hashes were verified. No benchmark/statistics helper, compiler, native executable, or timed workload was executed.', 'session_sha256': initial['sha256'], 'bytecode': caches, 'limits': ['Thirty measured rounds are balanced across all six permutations; the two warmup rounds and cross-round predecessors are not fully balanced.', 'Consecutive saved indices, exact expected counts and reviewed no-filter harness establish completeness of these records; no independent OS process log can rule out earlier unrecorded attempts.', 'The hashed harness compared full stdout and filesystem bytes before storing each result. This audit verifies retained expected bytes and all per-run hashes/lengths/status/stderr; full per-run output file copies are not retained.', 'TracerPid was sampled at three checkpoints and affinity recorded after pinning, not continuously. Shared-host interference and CPU migrations outside those controls cannot be excluded from records alone.', 'Bytecode timestamp headers and before/after bytes are verified; the audit does not independently decompile cache payloads. These are warm-cache whole-process runs, not cold import benchmarks.', 'Rust preserves the eager algorithm and BigInt quantities but uses native containers, borrowed references and direct formatting. No identical-allocation or general language-speed claim follows.', 'The normal and ThinLTO sessions ran sequentially. Their within-mode matched comparisons are stronger than attributing cross-session changes solely to LTO.'], 'assertions_passed': CHECKS, 'distinct_files_hashed': len(FILES), 'modes': list(audited)}\n    output = root / 'benchmarks/local/inventory-publication-audit.json'\n    output.write_text(json.dumps(result, indent=2) + '\\n')\n    lines = ['| Mode | Inventory workload | CPython ms | Imre ms | Rust BigInt ms | CPython / Imre | Imre / Rust |', '|---|---|---:|---:|---:|---:|---:|']\n    for audit in audited:\n        for row in audit['rows']:\n            if row['group'] == 'inventory':\n                med = row['median_ms']; ratio = row['ratios_of_medians']\n                lines.append(f\"| {audit['mode']} | {row['workload']} | {med['cpython']:.3f} | {med['imre']:.3f} | {med['rust_bigint']:.3f} | {ratio['cpython_over_imre']:.3f}x | {ratio['imre_over_rust_bigint']:.3f}x |\")\n    lines += ['', '| Mode | Unchanged control | Baseline ms | Current ms | Current time change |', '|---|---|---:|---:|---:|']\n    for audit in audited:\n        for row in audit['rows']:\n            if row['group'] == 'control':\n                med = row['median_ms']\n                lines.append(f\"| {audit['mode']} | {row['workload']} | {med['baseline']:.3f} | {med['imre']:.3f} | {row['new_vs_baseline_time_change_percent']:+.3f}% |\")\n    output.with_suffix('.md').write_text('\\n'.join(lines) + '\\n')\n    print(json.dumps({'status': 'passed', 'assertions': CHECKS, 'files_hashed': len(FILES), 'script_sha256': digest(source.encode()), 'audit_sha256': file_info(output)['sha256']}, indent=2))\n    print('\\n'.join(lines))\n\n\nif __name__ == '__main__':\n    main()\n",
   "reproduction": "python3 benchmarks/local/inventory-publication-audit.py",
   "method": "Independent integer-nanosecond median/min/max and inclusive linear-interpolation quartiles, all reported ratios, every recorded process result, exact artifact/build/committed-source identities, and before/after cache headers/hashes. Independent validators reused only after their source hashes were verified. No benchmark/statistics helper, compiler, native executable, or timed workload was executed.",
   "session_sha256": "2cd618059a715fbbb7e9216a03a5075409699909dc95e8e855bbe0b8e955d1a4",
@@ -135,20 +135,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -157,20 +157,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -179,20 +179,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -201,20 +201,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -223,20 +223,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -245,20 +245,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -270,17 +270,17 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10
           },
           "within_round_predecessors": {
             "baseline->cpython": 10,
-            "baseline->relar": 10,
+            "baseline->imre": 10,
             "cpython->baseline": 10,
-            "cpython->relar": 10,
-            "relar->baseline": 10,
-            "relar->cpython": 10
+            "cpython->imre": 10,
+            "imre->baseline": 10,
+            "imre->cpython": 10
           },
           "each_permutation_count": 5
         },
@@ -292,17 +292,17 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10
           },
           "within_round_predecessors": {
             "baseline->cpython": 10,
-            "baseline->relar": 10,
+            "baseline->imre": 10,
             "cpython->baseline": 10,
-            "cpython->relar": 10,
-            "relar->baseline": 10,
-            "relar->cpython": 10
+            "cpython->imre": 10,
+            "imre->baseline": 10,
+            "imre->cpython": 10
           },
           "each_permutation_count": 5
         },
@@ -314,17 +314,17 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10
           },
           "within_round_predecessors": {
             "baseline->cpython": 10,
-            "baseline->relar": 10,
+            "baseline->imre": 10,
             "cpython->baseline": 10,
-            "cpython->relar": 10,
-            "relar->baseline": 10,
-            "relar->cpython": 10
+            "cpython->imre": 10,
+            "imre->baseline": 10,
+            "imre->cpython": 10
           },
           "each_permutation_count": 5
         },
@@ -336,17 +336,17 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10
           },
           "within_round_predecessors": {
             "baseline->cpython": 10,
-            "baseline->relar": 10,
+            "baseline->imre": 10,
             "cpython->baseline": 10,
-            "cpython->relar": 10,
-            "relar->baseline": 10,
-            "relar->cpython": 10
+            "cpython->imre": 10,
+            "imre->baseline": 10,
+            "imre->cpython": 10
           },
           "each_permutation_count": 5
         },
@@ -358,17 +358,17 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10
           },
           "within_round_predecessors": {
             "baseline->cpython": 10,
-            "baseline->relar": 10,
+            "baseline->imre": 10,
             "cpython->baseline": 10,
-            "cpython->relar": 10,
-            "relar->baseline": 10,
-            "relar->cpython": 10
+            "cpython->imre": 10,
+            "imre->baseline": 10,
+            "imre->cpython": 10
           },
           "each_permutation_count": 5
         }
@@ -385,7 +385,7 @@
               "p25_ns": 26755343.25,
               "p75_ns": 27405240.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 2189894.5,
               "min_ns": 2034785,
               "max_ns": 2499060,
@@ -402,16 +402,16 @@
           },
           "median_ms": {
             "cpython": 26.993612,
-            "relar": 2.1898945,
+            "imre": 2.1898945,
             "rust_bigint": 2.25719
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 12.326444036459291,
+            "cpython_over_imre": 12.326444036459291,
             "cpython_over_rust_bigint": 11.958945414431218,
-            "relar_over_cpython": 0.08112639760844158,
-            "relar_over_rust_bigint": 0.9701861606687961,
+            "imre_over_cpython": 0.08112639760844158,
+            "imre_over_rust_bigint": 0.9701861606687961,
             "rust_bigint_over_cpython": 0.08361941336342836,
-            "rust_bigint_over_relar": 1.0307300191858557
+            "rust_bigint_over_imre": 1.0307300191858557
           }
         },
         {
@@ -425,7 +425,7 @@
               "p25_ns": 27760487.0,
               "p75_ns": 28373817.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 3030054.5,
               "min_ns": 2802946,
               "max_ns": 4236493,
@@ -442,16 +442,16 @@
           },
           "median_ms": {
             "cpython": 27.9769665,
-            "relar": 3.0300545,
+            "imre": 3.0300545,
             "rust_bigint": 2.70383
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 9.233156202305931,
+            "cpython_over_imre": 9.233156202305931,
             "cpython_over_rust_bigint": 10.34716180381163,
-            "relar_over_cpython": 0.10830532681232613,
-            "relar_over_rust_bigint": 1.1206527407418365,
+            "imre_over_cpython": 0.10830532681232613,
+            "imre_over_rust_bigint": 1.1206527407418365,
             "rust_bigint_over_cpython": 0.09664485962050245,
-            "rust_bigint_over_relar": 0.8923370850260284
+            "rust_bigint_over_imre": 0.8923370850260284
           }
         },
         {
@@ -465,7 +465,7 @@
               "p25_ns": 32738150.75,
               "p75_ns": 33911371.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 8152799.0,
               "min_ns": 7929093,
               "max_ns": 9900141,
@@ -482,16 +482,16 @@
           },
           "median_ms": {
             "cpython": 33.07358,
-            "relar": 8.152799,
+            "imre": 8.152799,
             "rust_bigint": 5.9779125
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.056714755263806,
+            "cpython_over_imre": 4.056714755263806,
             "cpython_over_rust_bigint": 5.532630328730974,
-            "relar_over_cpython": 0.24650488395873685,
-            "relar_over_rust_bigint": 1.363820397170417,
+            "imre_over_cpython": 0.24650488395873685,
+            "imre_over_rust_bigint": 1.363820397170417,
             "rust_bigint_over_cpython": 0.1807458551508485,
-            "rust_bigint_over_relar": 0.7332343775432216
+            "rust_bigint_over_imre": 0.7332343775432216
           }
         },
         {
@@ -505,7 +505,7 @@
               "p25_ns": 36293821.25,
               "p75_ns": 37102468.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 12648209.5,
               "min_ns": 11778216,
               "max_ns": 13083976,
@@ -522,16 +522,16 @@
           },
           "median_ms": {
             "cpython": 36.5612145,
-            "relar": 12.6482095,
+            "imre": 12.6482095,
             "rust_bigint": 8.3522155
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.8906237282043756,
+            "cpython_over_imre": 2.8906237282043756,
             "cpython_over_rust_bigint": 4.377427103024341,
-            "relar_over_cpython": 0.3459460981527296,
-            "relar_over_rust_bigint": 1.5143538262392775,
+            "imre_over_cpython": 0.3459460981527296,
+            "imre_over_rust_bigint": 1.5143538262392775,
             "rust_bigint_over_cpython": 0.22844469512904172,
-            "rust_bigint_over_relar": 0.6603476563224225
+            "rust_bigint_over_imre": 0.6603476563224225
           }
         },
         {
@@ -545,7 +545,7 @@
               "p25_ns": 72058992.25,
               "p75_ns": 73350834.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 45991135.0,
               "min_ns": 39714597,
               "max_ns": 48107244,
@@ -562,16 +562,16 @@
           },
           "median_ms": {
             "cpython": 72.49169,
-            "relar": 45.991135,
+            "imre": 45.991135,
             "rust_bigint": 23.031931
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 1.576210067440171,
+            "cpython_over_imre": 1.576210067440171,
             "cpython_over_rust_bigint": 3.147442999894364,
-            "relar_over_cpython": 0.634433201929766,
-            "relar_over_rust_bigint": 1.9968423403144095,
+            "imre_over_cpython": 0.634433201929766,
+            "imre_over_rust_bigint": 1.9968423403144095,
             "rust_bigint_over_cpython": 0.31771822397850014,
-            "rust_bigint_over_relar": 0.500790663244123
+            "rust_bigint_over_imre": 0.500790663244123
           }
         },
         {
@@ -585,7 +585,7 @@
               "p25_ns": 103407020.5,
               "p75_ns": 105511819.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 80636030.5,
               "min_ns": 71007484,
               "max_ns": 82285941,
@@ -602,16 +602,16 @@
           },
           "median_ms": {
             "cpython": 104.3863375,
-            "relar": 80.6360305,
+            "imre": 80.6360305,
             "rust_bigint": 42.3719515
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 1.2945371548268363,
+            "cpython_over_imre": 1.2945371548268363,
             "cpython_over_rust_bigint": 2.463571627093928,
-            "relar_over_cpython": 0.7724768626928787,
-            "relar_over_rust_bigint": 1.903052081516708,
+            "imre_over_cpython": 0.7724768626928787,
+            "imre_over_rust_bigint": 1.903052081516708,
             "rust_bigint_over_cpython": 0.40591472519092836,
-            "rust_bigint_over_relar": 0.5254716934509815
+            "rust_bigint_over_imre": 0.5254716934509815
           }
         },
         {
@@ -632,7 +632,7 @@
               "p25_ns": 49918382.0,
               "p75_ns": 50603384.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 50243802.5,
               "min_ns": 48686570,
               "max_ns": 52602768,
@@ -643,15 +643,15 @@
           "median_ms": {
             "cpython": 113.566179,
             "baseline": 50.3243125,
-            "relar": 50.2438025
+            "imre": 50.2438025
           },
           "ratios_of_medians": {
             "cpython_over_baseline": 2.2566861494630452,
-            "cpython_over_relar": 2.26030223329534,
+            "cpython_over_imre": 2.26030223329534,
             "baseline_over_cpython": 0.44312763661794063,
-            "baseline_over_relar": 1.0016023866824173,
-            "relar_over_cpython": 0.4424187107677542,
-            "relar_over_baseline": 0.998400176852888
+            "baseline_over_imre": 1.0016023866824173,
+            "imre_over_cpython": 0.4424187107677542,
+            "imre_over_baseline": 0.998400176852888
           },
           "new_vs_baseline_time_change_percent": -0.1599823147112045,
           "baseline_to_new_time_reduction_percent": 0.1599823147112045
@@ -674,7 +674,7 @@
               "p25_ns": 74005022.25,
               "p75_ns": 75625497.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 75065582.0,
               "min_ns": 71955265,
               "max_ns": 80976808,
@@ -685,15 +685,15 @@
           "median_ms": {
             "cpython": 194.7865765,
             "baseline": 74.861153,
-            "relar": 75.065582
+            "imre": 75.065582
           },
           "ratios_of_medians": {
             "cpython_over_baseline": 2.6019713655759484,
-            "cpython_over_relar": 2.5948853164157177,
+            "cpython_over_imre": 2.5948853164157177,
             "baseline_over_cpython": 0.3843239834342486,
-            "baseline_over_relar": 0.9972766613599292,
-            "relar_over_cpython": 0.38537348593936605,
-            "relar_over_baseline": 1.0027307754664159
+            "baseline_over_imre": 0.9972766613599292,
+            "imre_over_cpython": 0.38537348593936605,
+            "imre_over_baseline": 1.0027307754664159
           },
           "new_vs_baseline_time_change_percent": 0.2730775466415869,
           "baseline_to_new_time_reduction_percent": -0.2730775466415869
@@ -716,7 +716,7 @@
               "p25_ns": 26177014.5,
               "p75_ns": 26604190.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 26481664.0,
               "min_ns": 25492073,
               "max_ns": 27069709,
@@ -727,15 +727,15 @@
           "median_ms": {
             "cpython": 102.5658185,
             "baseline": 26.280765,
-            "relar": 26.481664
+            "imre": 26.481664
           },
           "ratios_of_medians": {
             "cpython_over_baseline": 3.9026953172786256,
-            "cpython_over_relar": 3.873088129960413,
+            "cpython_over_imre": 3.873088129960413,
             "baseline_over_cpython": 0.25623317187294714,
-            "baseline_over_relar": 0.992413656483218,
-            "relar_over_cpython": 0.25819190435261824,
-            "relar_over_baseline": 1.007644336076214
+            "baseline_over_imre": 0.992413656483218,
+            "imre_over_cpython": 0.25819190435261824,
+            "imre_over_baseline": 1.007644336076214
           },
           "new_vs_baseline_time_change_percent": 0.7644336076213953,
           "baseline_to_new_time_reduction_percent": -0.7644336076213953
@@ -758,7 +758,7 @@
               "p25_ns": 44126357.75,
               "p75_ns": 44951901.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 44688536.5,
               "min_ns": 42212914,
               "max_ns": 46782318,
@@ -769,15 +769,15 @@
           "median_ms": {
             "cpython": 186.227288,
             "baseline": 44.5176035,
-            "relar": 44.6885365
+            "imre": 44.6885365
           },
           "ratios_of_medians": {
             "cpython_over_baseline": 4.183228057188658,
-            "cpython_over_relar": 4.167227270913202,
+            "cpython_over_imre": 4.167227270913202,
             "baseline_over_cpython": 0.2390498405367961,
-            "baseline_over_relar": 0.9961750145923888,
-            "relar_over_cpython": 0.23996771353938204,
-            "relar_over_baseline": 1.0038396720973535
+            "baseline_over_imre": 0.9961750145923888,
+            "imre_over_cpython": 0.23996771353938204,
+            "imre_over_baseline": 1.0038396720973535
           },
           "new_vs_baseline_time_change_percent": 0.3839672097353475,
           "baseline_to_new_time_reduction_percent": -0.3839672097353475
@@ -800,7 +800,7 @@
               "p25_ns": 3585037.25,
               "p75_ns": 3762145.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 3654364.0,
               "min_ns": 3506525,
               "max_ns": 3954387,
@@ -811,15 +811,15 @@
           "median_ms": {
             "cpython": 21.0891805,
             "baseline": 3.659509,
-            "relar": 3.654364
+            "imre": 3.654364
           },
           "ratios_of_medians": {
             "cpython_over_baseline": 5.762844277743271,
-            "cpython_over_relar": 5.770957819199182,
+            "cpython_over_imre": 5.770957819199182,
             "baseline_over_cpython": 0.1735254245654543,
-            "baseline_over_relar": 1.0014079057258665,
-            "relar_over_cpython": 0.1732814606048822,
-            "relar_over_baseline": 0.9985940736858414
+            "baseline_over_imre": 1.0014079057258665,
+            "imre_over_cpython": 0.1732814606048822,
+            "imre_over_baseline": 0.9985940736858414
           },
           "new_vs_baseline_time_change_percent": -0.14059263141585898,
           "baseline_to_new_time_reduction_percent": 0.14059263141585898
@@ -934,20 +934,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -956,20 +956,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -978,20 +978,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -1000,20 +1000,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -1022,20 +1022,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -1044,20 +1044,20 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10,
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10,
             "rust_bigint@0": 10,
             "rust_bigint@1": 10,
             "rust_bigint@2": 10
           },
           "within_round_predecessors": {
-            "cpython->relar": 10,
+            "cpython->imre": 10,
             "cpython->rust_bigint": 10,
-            "relar->cpython": 10,
-            "relar->rust_bigint": 10,
+            "imre->cpython": 10,
+            "imre->rust_bigint": 10,
             "rust_bigint->cpython": 10,
-            "rust_bigint->relar": 10
+            "rust_bigint->imre": 10
           },
           "each_permutation_count": 5
         },
@@ -1069,17 +1069,17 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10
           },
           "within_round_predecessors": {
             "baseline->cpython": 10,
-            "baseline->relar": 10,
+            "baseline->imre": 10,
             "cpython->baseline": 10,
-            "cpython->relar": 10,
-            "relar->baseline": 10,
-            "relar->cpython": 10
+            "cpython->imre": 10,
+            "imre->baseline": 10,
+            "imre->cpython": 10
           },
           "each_permutation_count": 5
         },
@@ -1091,17 +1091,17 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10
           },
           "within_round_predecessors": {
             "baseline->cpython": 10,
-            "baseline->relar": 10,
+            "baseline->imre": 10,
             "cpython->baseline": 10,
-            "cpython->relar": 10,
-            "relar->baseline": 10,
-            "relar->cpython": 10
+            "cpython->imre": 10,
+            "imre->baseline": 10,
+            "imre->cpython": 10
           },
           "each_permutation_count": 5
         },
@@ -1113,17 +1113,17 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10
           },
           "within_round_predecessors": {
             "baseline->cpython": 10,
-            "baseline->relar": 10,
+            "baseline->imre": 10,
             "cpython->baseline": 10,
-            "cpython->relar": 10,
-            "relar->baseline": 10,
-            "relar->cpython": 10
+            "cpython->imre": 10,
+            "imre->baseline": 10,
+            "imre->cpython": 10
           },
           "each_permutation_count": 5
         },
@@ -1135,17 +1135,17 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10
           },
           "within_round_predecessors": {
             "baseline->cpython": 10,
-            "baseline->relar": 10,
+            "baseline->imre": 10,
             "cpython->baseline": 10,
-            "cpython->relar": 10,
-            "relar->baseline": 10,
-            "relar->cpython": 10
+            "cpython->imre": 10,
+            "imre->baseline": 10,
+            "imre->cpython": 10
           },
           "each_permutation_count": 5
         },
@@ -1157,17 +1157,17 @@
             "cpython@0": 10,
             "cpython@1": 10,
             "cpython@2": 10,
-            "relar@0": 10,
-            "relar@1": 10,
-            "relar@2": 10
+            "imre@0": 10,
+            "imre@1": 10,
+            "imre@2": 10
           },
           "within_round_predecessors": {
             "baseline->cpython": 10,
-            "baseline->relar": 10,
+            "baseline->imre": 10,
             "cpython->baseline": 10,
-            "cpython->relar": 10,
-            "relar->baseline": 10,
-            "relar->cpython": 10
+            "cpython->imre": 10,
+            "imre->baseline": 10,
+            "imre->cpython": 10
           },
           "each_permutation_count": 5
         }
@@ -1184,7 +1184,7 @@
               "p25_ns": 26479208.75,
               "p75_ns": 27269338.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 2120369.5,
               "min_ns": 2022012,
               "max_ns": 3238736,
@@ -1201,16 +1201,16 @@
           },
           "median_ms": {
             "cpython": 26.7143445,
-            "relar": 2.1203695,
+            "imre": 2.1203695,
             "rust_bigint": 2.138184
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 12.598910001299302,
+            "cpython_over_imre": 12.598910001299302,
             "cpython_over_rust_bigint": 12.49394088628481,
-            "relar_over_cpython": 0.07937194566013027,
-            "relar_over_rust_bigint": 0.9916683971070778,
+            "imre_over_cpython": 0.07937194566013027,
+            "imre_over_rust_bigint": 0.9916683971070778,
             "rust_bigint_over_cpython": 0.08003879713387689,
-            "rust_bigint_over_relar": 1.0084016017019675
+            "rust_bigint_over_imre": 1.0084016017019675
           }
         },
         {
@@ -1224,7 +1224,7 @@
               "p25_ns": 28699437.5,
               "p75_ns": 30000077.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 3092067.5,
               "min_ns": 2739968,
               "max_ns": 5211888,
@@ -1241,16 +1241,16 @@
           },
           "median_ms": {
             "cpython": 29.368242,
-            "relar": 3.0920675,
+            "imre": 3.0920675,
             "rust_bigint": 2.7443465
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 9.497930430043976,
+            "cpython_over_imre": 9.497930430043976,
             "cpython_over_rust_bigint": 10.701360779333076,
-            "relar_over_cpython": 0.10528609441450394,
-            "relar_over_rust_bigint": 1.1267044813765317,
+            "imre_over_cpython": 0.10528609441450394,
+            "imre_over_rust_bigint": 1.1267044813765317,
             "rust_bigint_over_cpython": 0.09344605986289543,
-            "rust_bigint_over_relar": 0.8875441755395055
+            "rust_bigint_over_imre": 0.8875441755395055
           }
         },
         {
@@ -1264,7 +1264,7 @@
               "p25_ns": 32971170.5,
               "p75_ns": 34086962.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 7227944.0,
               "min_ns": 6954961,
               "max_ns": 7993745,
@@ -1281,16 +1281,16 @@
           },
           "median_ms": {
             "cpython": 33.8475775,
-            "relar": 7.227944,
+            "imre": 7.227944,
             "rust_bigint": 5.6621605
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.682877662029479,
+            "cpython_over_imre": 4.682877662029479,
             "cpython_over_rust_bigint": 5.977855537652103,
-            "relar_over_cpython": 0.21354390871843043,
-            "relar_over_rust_bigint": 1.2765346372643447,
+            "imre_over_cpython": 0.21354390871843043,
+            "imre_over_rust_bigint": 1.2765346372643447,
             "rust_bigint_over_cpython": 0.16728406929565343,
-            "rust_bigint_over_relar": 0.7833708313180069
+            "rust_bigint_over_imre": 0.7833708313180069
           }
         },
         {
@@ -1304,7 +1304,7 @@
               "p25_ns": 35914247.5,
               "p75_ns": 36226997.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 10009004.5,
               "min_ns": 9841933,
               "max_ns": 11066824,
@@ -1321,16 +1321,16 @@
           },
           "median_ms": {
             "cpython": 36.0623925,
-            "relar": 10.0090045,
+            "imre": 10.0090045,
             "rust_bigint": 7.631721
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 3.602994933212389,
+            "cpython_over_imre": 3.602994933212389,
             "cpython_over_rust_bigint": 4.7253289919796595,
-            "relar_over_cpython": 0.27754687934251726,
-            "relar_over_rust_bigint": 1.3115003155906775,
+            "imre_over_cpython": 0.27754687934251726,
+            "imre_over_rust_bigint": 1.3115003155906775,
             "rust_bigint_over_cpython": 0.21162547659587477,
-            "rust_bigint_over_relar": 0.7624855199135938
+            "rust_bigint_over_imre": 0.7624855199135938
           }
         },
         {
@@ -1344,7 +1344,7 @@
               "p25_ns": 73755528.5,
               "p75_ns": 75774279.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 33170832.5,
               "min_ns": 32317805,
               "max_ns": 36767306,
@@ -1361,16 +1361,16 @@
           },
           "median_ms": {
             "cpython": 74.3402395,
-            "relar": 33.1708325,
+            "imre": 33.1708325,
             "rust_bigint": 21.2740055
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.241132763249159,
+            "cpython_over_imre": 2.241132763249159,
             "cpython_over_rust_bigint": 3.4944166720272776,
-            "relar_over_cpython": 0.44620292755446395,
-            "relar_over_rust_bigint": 1.5592189491536983,
+            "imre_over_cpython": 0.44620292755446395,
+            "imre_over_rust_bigint": 1.5592189491536983,
             "rust_bigint_over_cpython": 0.2861707958312402,
-            "rust_bigint_over_relar": 0.6413467464224782
+            "rust_bigint_over_imre": 0.6413467464224782
           }
         },
         {
@@ -1384,7 +1384,7 @@
               "p25_ns": 104178642.25,
               "p75_ns": 107483119.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 59283136.5,
               "min_ns": 57895340,
               "max_ns": 62148283,
@@ -1401,16 +1401,16 @@
           },
           "median_ms": {
             "cpython": 106.25566,
-            "relar": 59.2831365,
+            "imre": 59.2831365,
             "rust_bigint": 37.8343705
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 1.7923420769074863,
+            "cpython_over_imre": 1.7923420769074863,
             "cpython_over_rust_bigint": 2.808442656657919,
-            "relar_over_cpython": 0.5579292105474664,
-            "relar_over_rust_bigint": 1.566912194296982,
+            "imre_over_cpython": 0.5579292105474664,
+            "imre_over_rust_bigint": 1.566912194296982,
             "rust_bigint_over_cpython": 0.3560692249241123,
-            "rust_bigint_over_relar": 0.6381978541233222
+            "rust_bigint_over_imre": 0.6381978541233222
           }
         },
         {
@@ -1431,7 +1431,7 @@
               "p25_ns": 41786148.0,
               "p75_ns": 42835036.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 42305213.5,
               "min_ns": 41169094,
               "max_ns": 47640520,
@@ -1442,15 +1442,15 @@
           "median_ms": {
             "cpython": 112.476393,
             "baseline": 42.2940125,
-            "relar": 42.3052135
+            "imre": 42.3052135
           },
           "ratios_of_medians": {
             "cpython_over_baseline": 2.659392815945283,
-            "cpython_over_relar": 2.6586886980253626,
+            "cpython_over_imre": 2.6586886980253626,
             "baseline_over_cpython": 0.3760256830071,
-            "baseline_over_relar": 0.9997352335782445,
-            "relar_over_cpython": 0.3761252683485325,
-            "relar_over_baseline": 1.000264836541579
+            "baseline_over_imre": 0.9997352335782445,
+            "imre_over_cpython": 0.3761252683485325,
+            "imre_over_baseline": 1.000264836541579
           },
           "new_vs_baseline_time_change_percent": 0.026483654157893888,
           "baseline_to_new_time_reduction_percent": -0.026483654157893888
@@ -1473,7 +1473,7 @@
               "p25_ns": 63024156.5,
               "p75_ns": 65315653.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 63569766.5,
               "min_ns": 61525302,
               "max_ns": 75614270,
@@ -1484,15 +1484,15 @@
           "median_ms": {
             "cpython": 191.9743235,
             "baseline": 63.85127,
-            "relar": 63.5697665
+            "imre": 63.5697665
           },
           "ratios_of_medians": {
             "cpython_over_baseline": 3.006585828285013,
-            "cpython_over_relar": 3.019899774211063,
+            "cpython_over_imre": 3.019899774211063,
             "baseline_over_cpython": 0.33260317752858237,
-            "baseline_over_relar": 1.004428260720448,
-            "relar_over_cpython": 0.3311368173671413,
-            "relar_over_baseline": 0.9955912623194496
+            "baseline_over_imre": 1.004428260720448,
+            "imre_over_cpython": 0.3311368173671413,
+            "imre_over_baseline": 0.9955912623194496
           },
           "new_vs_baseline_time_change_percent": -0.440873768055039,
           "baseline_to_new_time_reduction_percent": 0.440873768055039
@@ -1515,7 +1515,7 @@
               "p25_ns": 21219025.5,
               "p75_ns": 21820194.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 21471733.5,
               "min_ns": 21068012,
               "max_ns": 22723043,
@@ -1526,15 +1526,15 @@
           "median_ms": {
             "cpython": 102.1660585,
             "baseline": 21.5087625,
-            "relar": 21.4717335
+            "imre": 21.4717335
           },
           "ratios_of_medians": {
             "cpython_over_baseline": 4.749973807186723,
-            "cpython_over_relar": 4.758165357259115,
+            "cpython_over_imre": 4.758165357259115,
             "baseline_over_cpython": 0.21052747669618674,
-            "baseline_over_relar": 1.0017245463669713,
-            "relar_over_cpython": 0.21016503734456976,
-            "relar_over_baseline": 0.9982784225731257
+            "baseline_over_imre": 1.0017245463669713,
+            "imre_over_cpython": 0.21016503734456976,
+            "imre_over_baseline": 0.9982784225731257
           },
           "new_vs_baseline_time_change_percent": -0.17215774268742878,
           "baseline_to_new_time_reduction_percent": 0.17215774268742878
@@ -1557,7 +1557,7 @@
               "p25_ns": 35406960.75,
               "p75_ns": 36527962.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 35637808.0,
               "min_ns": 34644033,
               "max_ns": 37724195,
@@ -1568,15 +1568,15 @@
           "median_ms": {
             "cpython": 186.8281395,
             "baseline": 35.956025,
-            "relar": 35.637808
+            "imre": 35.637808
           },
           "ratios_of_medians": {
             "cpython_over_baseline": 5.196017621525183,
-            "cpython_over_relar": 5.2424138852759965,
+            "cpython_over_imre": 5.2424138852759965,
             "baseline_over_cpython": 0.19245508249575005,
-            "baseline_over_relar": 1.0089291967676575,
-            "relar_over_cpython": 0.19075182194382448,
-            "relar_over_baseline": 0.991149828158146
+            "baseline_over_imre": 1.0089291967676575,
+            "imre_over_cpython": 0.19075182194382448,
+            "imre_over_baseline": 0.991149828158146
           },
           "new_vs_baseline_time_change_percent": -0.8850171841853993,
           "baseline_to_new_time_reduction_percent": 0.8850171841853993
@@ -1599,7 +1599,7 @@
               "p25_ns": 3473605.25,
               "p75_ns": 3547385.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 3483477.0,
               "min_ns": 3412098,
               "max_ns": 3805821,
@@ -1610,15 +1610,15 @@
           "median_ms": {
             "cpython": 20.772873,
             "baseline": 3.5056575,
-            "relar": 3.483477
+            "imre": 3.483477
           },
           "ratios_of_medians": {
             "cpython_over_baseline": 5.925528378057469,
-            "cpython_over_relar": 5.963258261788437,
+            "cpython_over_imre": 5.963258261788437,
             "baseline_over_cpython": 0.1687613215562431,
-            "baseline_over_relar": 1.0063673450406017,
-            "relar_over_cpython": 0.16769355880623735,
-            "relar_over_baseline": 0.9936729415238083
+            "baseline_over_imre": 1.0063673450406017,
+            "imre_over_cpython": 0.16769355880623735,
+            "imre_over_baseline": 0.9936729415238083
           },
           "new_vs_baseline_time_change_percent": -0.6327058476191749,
           "baseline_to_new_time_reduction_percent": 0.6327058476191749

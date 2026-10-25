@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "passed": true,
-  "audit_path": "/tmp/relar-decoder-profile-audit.json",
+  "audit_path": "/tmp/imre-decoder-profile-audit.json",
   "audit_sha256": "479a10da9a9615fd29e69b20e7b3eb67c00ce1622fb14ba6c4162620f0bb164c",
   "audit_script_sha256": "4d1ff5cae754a64a9547efbd5b3c29b835104d6ea288d67af2bf8a1ff9e13a03",
   "before_summary_sha256": "c44837250dd1a4562df59bf6f92eb96be0f8422ce8f16c0cd089d670deae927e",

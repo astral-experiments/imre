@@ -10,7 +10,7 @@ import sys
 import tarfile
 from tempfile import TemporaryDirectory
 
-ARCHIVE_SHA256 = "eab00ac0f27014dcf4f0e7a5c8fbe0a2e7f40f1f65896ba37ef0b88f3ad7693c"
+ARCHIVE_SHA256 = "921da80b0573387a9e860573808c3d12b2f6cb66e5f061d288e7b09058295c7f"
 REVISION = "835b70f3f795f8e061b1f7621178515b0a77a0ad"
 
 

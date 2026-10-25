@@ -89,7 +89,7 @@ def environment(home: Path) -> dict[str, str]:
     return {
         "PATH": "/usr/bin:/bin", "HOME": str(home), "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8", "TZ": "UTC", "PYTHONHASHSEED": "0",
-        "PYTHON_JIT": "0", "CODON_PYTHON": "/nonexistent/relar-native-codon-libpython.so",
+        "PYTHON_JIT": "0", "CODON_PYTHON": "/nonexistent/imre-native-codon-libpython.so",
     }
 
 
@@ -574,7 +574,7 @@ def report_differentials(directory: Path, count: int = 100) -> int:
 
 def source_hashes() -> dict[str, str]:
     files = [Path(__file__), Path(__file__).with_name("conformance_scanner.py"),
-             *APP.rglob("*"), *(ROOT / "stdlib" / "relar").rglob("*.py")]
+             *APP.rglob("*"), *(ROOT / "stdlib" / "imre").rglob("*.py")]
     return {str(path): digest(path.read_bytes()) for path in sorted(set(files))
             if path.is_file() and "__pycache__" not in path.parts}
 
@@ -609,9 +609,9 @@ def validate(args: argparse.Namespace) -> dict:
         "python-port": python_compute_command(args.python),
     }
     if args.binary:
-        engines["relar"] = [str(args.binary.resolve())]
+        engines["imre"] = [str(args.binary.resolve())]
     if args.compute_binary:
-        compute_engines["relar"] = [str(args.compute_binary.resolve())]
+        compute_engines["imre"] = [str(args.compute_binary.resolve())]
     if args.rust_binary:
         engines["rust"] = [str(args.rust_binary.resolve())]
         compute_engines["rust"] = [str(args.rust_binary.resolve()), "--compute"]

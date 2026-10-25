@@ -57,7 +57,7 @@ def verify_build_record(path: Path, guarded: dict[str, dict]) -> dict:
         guard(HERE / "native_tools_build.py", record["driver_sha256"])
         guard(path.parent / "build.py", record["driver_sha256"])
         for name, expected in record["sha256"].items():
-            guard(path.parent / ("relar" if name == "compiler" else name + ".a"), expected)
+            guard(path.parent / ("imre" if name == "compiler" else name + ".a"), expected)
         for step in record["steps"]:
             assert step["returncode"] == 0
             for name in ("log", "messages"):
@@ -165,13 +165,13 @@ def main() -> None:
     parser.add_argument("--old-ty", required=True, type=Path)
     parser.add_argument("--new-ty", required=True, type=Path)
     parser.add_argument("--python", default=sys.executable, type=Path)
-    parser.add_argument("--relar", required=True, type=Path)
-    parser.add_argument("--relar-compute", required=True, type=Path)
+    parser.add_argument("--imre", required=True, type=Path)
+    parser.add_argument("--imre-compute", required=True, type=Path)
     parser.add_argument("--codon", required=True, type=Path)
     parser.add_argument("--codon-compute", required=True, type=Path)
     parser.add_argument("--rust", required=True, type=Path)
     parser.add_argument("--build-record", action="append", required=True, type=Path,
-                        help="supply Relar-program, Rust-reference, Codon, and native-platform build records")
+                        help="supply Imre-program, Rust-reference, Codon, and native-platform build records")
     parser.add_argument("--old-ty-version", default="0.0.60")
     parser.add_argument("--new-ty-version", default="0.0.90")
     parser.add_argument("--output", required=True, type=Path)
@@ -189,7 +189,7 @@ def main() -> None:
     if cpu not in affinity:
         parser.error("selected CPU is outside this process's affinity")
     os.sched_setaffinity(0, {cpu})
-    for field in ("suite", "old_ty", "new_ty", "relar", "relar_compute", "codon", "codon_compute", "rust"):
+    for field in ("suite", "old_ty", "new_ty", "imre", "imre_compute", "codon", "codon_compute", "rust"):
         setattr(args, field, getattr(args, field).resolve(strict=True))
     # Preserve the interpreter's symlink spelling so pyvenv.cfg remains active.
     args.python = args.python.absolute()
@@ -206,11 +206,11 @@ def main() -> None:
     assert not artifact.is_relative_to(Path(checkout)), "benchmark artifacts must not modify the typing checkout"
     artifact.mkdir(parents=True, exist_ok=False)
     commands = {"original": live.original_command(args.python), "port": offline.python_command(args.python),
-                "relar": [str(args.relar)], "codon": [str(args.codon)], "rust": [str(args.rust)]}
+                "imre": [str(args.imre)], "codon": [str(args.codon)], "rust": [str(args.rust)]}
     compute_commands = {"original": offline.original_compute_command(args.python), "port": offline.python_compute_command(args.python),
-                        "relar": [str(args.relar_compute)], "codon": [str(args.codon_compute)], "rust": [str(args.rust), "--compute"]}
-    guarded = {str(path): identity(path) for path in (args.old_ty, args.new_ty, args.python, args.relar,
-                args.relar_compute, args.codon, args.codon_compute, args.rust, *args.build_record)}
+                        "imre": [str(args.imre_compute)], "codon": [str(args.codon_compute)], "rust": [str(args.rust), "--compute"]}
+    guarded = {str(path): identity(path) for path in (args.old_ty, args.new_ty, args.python, args.imre,
+                args.imre_compute, args.codon, args.codon_compute, args.rust, *args.build_record)}
     build_records = {str(path): verify_build_record(path.resolve(strict=True), guarded) for path in args.build_record}
     records_by_kind = {}
     for record in build_records.values():
@@ -220,8 +220,8 @@ def main() -> None:
         if kind == "live-conformance-program-build":
             assert record["source_matches_revision"], "timings require committed program inputs"
             assert record["mode"] in ("normal", "thinlto"), "sanitizer builds are validation-only"
-            assert digest(args.relar) == record["binaries"]["conformance_report"]["sha256"]
-            assert digest(args.relar_compute) == record["binaries"]["conformance_report-compute"]["sha256"]
+            assert digest(args.imre) == record["binaries"]["conformance_report"]["sha256"]
+            assert digest(args.imre_compute) == record["binaries"]["conformance_report-compute"]["sha256"]
         elif kind == "codon":
             assert digest(args.codon) == record["binaries"]["conformance_report"]["sha256"]
             assert digest(args.codon_compute) == record["binaries"]["conformance_report-compute"]["sha256"]
@@ -244,7 +244,7 @@ def main() -> None:
         assert record["command"][record["command"].index("--target") + 1] == program["target"]
     assert codon["native_platform"]["sha256"] == platform["library"]["sha256"], "Codon platform provenance differs"
     libraries = {}
-    for binary in (args.python, args.old_ty, args.new_ty, args.relar, args.relar_compute, args.codon, args.codon_compute, args.rust):
+    for binary in (args.python, args.old_ty, args.new_ty, args.imre, args.imre_compute, args.codon, args.codon_compute, args.rust):
         libraries[str(binary)] = shared.linked_libraries(binary)
         for path in libraries[str(binary)]:
             guarded[path] = identity(Path(path))
@@ -259,7 +259,7 @@ def main() -> None:
             assert dependency in libraries[str(binary)], (binary, "recorded Codon runtime is not linked", dependency)
             assert libraries[str(binary)][dependency]["sha256"] == item["sha256"]
     assert len({tuple(shared.elf_target(path).items()) for path in
-                (args.relar, args.relar_compute, args.codon, args.codon_compute, args.rust)}) == 1
+                (args.imre, args.imre_compute, args.codon, args.codon_compute, args.rust)}) == 1
     runtime_environment = {**live.environment(artifact / "python-home"), "PYTHONPATH": ""}
     python_info = json.loads(subprocess.check_output([
         str(args.python), "-s", "-B", "-c", shared.shared.PYTHON_INFO,
@@ -293,7 +293,7 @@ def main() -> None:
         assert actual == "ty " + version or actual.startswith("ty " + version + " "), (name, actual, "unexpected ty version")
         ty_versions[name] = actual
     assert digest(args.old_ty) != digest(args.new_ty), "changed workload needs distinct ty binaries"
-    source_directories = (ROOT / "examples/conformance_report", ROOT / "stdlib/relar", HERE / "codon_native",
+    source_directories = (ROOT / "examples/conformance_report", ROOT / "stdlib/imre", HERE / "codon_native",
                           HERE / "reference/conformance_report", HERE / "native_platform")
 
     def source_files() -> list[Path]:

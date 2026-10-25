@@ -1,8 +1,10 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Ruff’s fixed regex in the conformance reporter
 
-Relar now uses Ruff’s original verbose regex to find conformance annotations. It validates literal patterns at compile time and initializes each distinct pattern once per process. Rust’s `regex-automata` performs the searches. Relar retains Python’s character offsets and the distinction between empty and absent captures.
+Imre now uses Ruff’s original verbose regex to find conformance annotations. It validates literal patterns at compile time and initializes each distinct pattern once per process. Rust’s `regex-automata` performs the searches. Imre retains Python’s character offsets and the distinction between empty and absent captures.
 
-Scanning the suite with the regex was **2.67× faster than the previous Relar scanner in an ordinary release** and **2.48× faster with ThinLTO**. The new scanner took **1.984× and 1.792× Rust’s time**, respectively. Both builds met the 2× median target for every timed workload. Complete reports took 1.46–1.62× Rust’s time and live checkouts took 1.007–1.025×.
+Scanning the suite with the regex was **2.67× faster than the previous Imre scanner in an ordinary release** and **2.48× faster with ThinLTO**. The new scanner took **1.984× and 1.792× Rust’s time**, respectively. Both builds met the 2× median target for every timed workload. Complete reports took 1.46–1.62× Rust’s time and live checkouts took 1.007–1.025×.
 
 The ordinary scanner finished just 8.85 µs under twice the Rust median. The middle half of its samples ranged from 1.076 to 1.248 ms, versus 0.566 to 0.601 ms for Rust, after subtracting each implementation’s median preload. One-shot reports see a smaller change. Scanner preload rose by about 1.67 ms in both builds, and the unchanged ThinLTO report went from 32.98 to 33.56 ms. The other five one-shot report medians improved.
 
@@ -10,7 +12,7 @@ The ordinary scanner finished just 8.85 µs under twice the Rust median. The mid
 
 Milliseconds per scan of 14,986 lines. Each timing process loads the corpus once and scans it 64 times. The table subtracts the corresponding zero-scan process median and divides by 64.
 
-| Build | Upstream CPython | Typed CPython | Codon | Previous Relar | Relar | Rust | Relar/Rust |
+| Build | Upstream CPython | Typed CPython | Codon | Previous Imre | Imre | Rust | Imre/Rust |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary | 14.471 | 15.596 | 4.794 | 3.021 | 1.130 | 0.570 | 1.984× |
 | ThinLTO | 13.986 | 13.898 | 4.441 | 1.870 | 0.753 | 0.420 | 1.792× |
@@ -19,7 +21,7 @@ Milliseconds per scan of 14,986 lines. Each timing process loads the corpus once
 
 Milliseconds from process launch to exit, including reading the captured diagnostics and writing the report.
 
-| Build and input | Upstream CPython | Typed CPython | Codon | Previous Relar | Relar | Rust | Relar/Rust |
+| Build and input | Upstream CPython | Typed CPython | Codon | Previous Imre | Imre | Rust | Imre/Rust |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary, Unchanged GitHub | 145.24 | 273.06 | 61.01 | 38.39 | 37.71 | 23.58 | 1.599× |
 | Ordinary, Changed GitHub | 149.06 | 275.70 | 62.46 | 40.50 | 39.79 | 24.57 | 1.620× |
@@ -32,7 +34,7 @@ Milliseconds from process launch to exit, including reading the captured diagnos
 
 Milliseconds per report using four passes over preloaded inputs. Each column subtracts its matching zero-pass median before dividing by four.
 
-| Build and input | Upstream CPython | Typed CPython | Codon | Previous Relar | Relar | Rust | Relar/Rust |
+| Build and input | Upstream CPython | Typed CPython | Codon | Previous Imre | Imre | Rust | Imre/Rust |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary, Unchanged GitHub | 50.43 | 169.51 | 32.18 | 20.61 | 18.55 | 10.38 | 1.787× |
 | Ordinary, Changed GitHub | 52.68 | 174.06 | 35.56 | 22.23 | 19.94 | 11.55 | 1.726× |
@@ -45,7 +47,7 @@ Milliseconds per report using four passes over preloaded inputs. Each column sub
 
 Milliseconds from process launch to exit. Each reporter discovers the checkout, runs both ty executables, and writes the complete report.
 
-| Build and input | Upstream CPython | Typed CPython | Codon | Previous Relar | Relar | Rust | Relar/Rust |
+| Build and input | Upstream CPython | Typed CPython | Codon | Previous Imre | Imre | Rust | Imre/Rust |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary, Unchanged GitHub | 982.92 | 1,318.04 | 967.44 | 895.06 | 895.70 | 874.48 | 1.024× |
 | Ordinary, Changed GitHub | 1,010.87 | 1,354.98 | 1,001.42 | 919.25 | 915.97 | 896.94 | 1.021× |
@@ -58,7 +60,7 @@ Milliseconds from process launch to exit. Each reporter discovers the checkout, 
 
 Milliseconds with zero scan or report passes. These processes load the same inputs as their corresponding repeated workload.
 
-| Build and input | Upstream CPython | Typed CPython | Codon | Previous Relar | Relar | Rust | Relar/Rust |
+| Build and input | Upstream CPython | Typed CPython | Codon | Previous Imre | Imre | Rust | Imre/Rust |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary, scanner | 80.10 | 61.43 | 14.70 | 6.70 | 8.37 | 4.98 | 1.682× |
 | Ordinary, Unchanged GitHub | 88.89 | 80.63 | 20.57 | 15.42 | 17.14 | 9.96 | 1.720× |
@@ -75,21 +77,21 @@ These are ordinary-build Callgrind instruction counts and DHAT allocation reques
 
 | Implementation | Executed instructions | Heap blocks requested | Heap bytes requested |
 | --- | ---: | ---: | ---: |
-| Previous Relar | 24,127,523 | 18,485.0 | 847,448 |
-| Relar | 9,001,621 | 3,596.3 | 208,957 |
+| Previous Imre | 24,127,523 | 18,485.0 | 847,448 |
+| Imre | 9,001,621 | 3,596.3 | 208,957 |
 | Rust | 4,093,743 | 0.0 | −0.75 |
 
 Both Rust processes requested 32 blocks. Their startup argument lengths account for a 12-byte difference over 16 passes. Peak live heap for the 16-pass process was 1,569,193 bytes for the previous scanner, 1,592,768 bytes for the regex scanner and 636,033 bytes for Rust.
 
-The runtime reuses matching state, skips lines missing a required literal, and stores short capture spans inline. The compiler resolves known group names to numeric slots and tests capture presence without allocating a substring. The Rust reference borrows captured text from the input. [Runtime](../../crates/relar-runtime/src/objects/regexes.rs) · [Compiler](../../crates/relar-compiler/src/frontend/regex.rs)
+The runtime reuses matching state, skips lines missing a required literal, and stores short capture spans inline. The compiler resolves known group names to numeric slots and tests capture presence without allocating a substring. The Rust reference borrows captured text from the input. [Runtime](../../crates/imre-runtime/src/objects/regexes.rs) · [Compiler](../../crates/imre-compiler/src/frontend/regex.rs)
 
 ## What ran
 
-The new executable was built from `4eb4e4cd6aa81685bb42a7f1e95c1596901d3fc8` and the previous scanner from its stack parent `dad5a967fa7fa34cc34cddbc02e4ab35d147e0da`. Both modes ran on logical CPU 31 of the same AMD EPYC Milan machine. The tools were CPython 3.14.5, Codon 0.20.4, Clang 18.1.3 and Ohm rustc 1.98.1-dev (LLVM 22.1.8). Ordinary linking used GNU ld 2.42. ThinLTO used LLD 22.1.8. [Measured source change](https://github.com/astral-sh/relar/compare/dad5a967fa7fa34cc34cddbc02e4ab35d147e0da...4eb4e4cd6aa81685bb42a7f1e95c1596901d3fc8)
+The new executable was built from `4eb4e4cd6aa81685bb42a7f1e95c1596901d3fc8` and the previous scanner from its stack parent `dad5a967fa7fa34cc34cddbc02e4ab35d147e0da`. Both modes ran on logical CPU 31 of the same AMD EPYC Milan machine. The tools were CPython 3.14.5, Codon 0.20.4, Clang 18.1.3 and Ohm rustc 1.98.1-dev (LLVM 22.1.8). Ordinary linking used GNU ld 2.42. ThinLTO used LLD 22.1.8. [Measured source change](https://github.com/astral-sh/imre/compare/dad5a967fa7fa34cc34cddbc02e4ab35d147e0da...4eb4e4cd6aa81685bb42a7f1e95c1596901d3fc8)
 
 The corpus contains 14,986 lines from 146 files in the Python typing conformance suite. The scanner finds 1,329 annotations before the reporter applies its filters. The reporter uses the exact 567-byte pattern declaration from Ruff, including the comments inside the verbose string. [Ruff source](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L75-L90) · [Typing suite](https://github.com/python/typing/tree/835b70f3f795f8e061b1f7621178515b0a77a0ad/conformance)
 
-The upstream CPython scanner harness imports Ruff’s pattern and returns the same annotation fields as the typed scanner. Its report and checkout adapters run Ruff’s original report logic. Typed CPython, new Relar and native Codon run the typed port. The previous Relar build runs its original string scanner. The independent Rust program uses a handwritten scanner and borrows captured substrings. Codon 0.20.4 needs a benchmark adapter that checks the literal, removes verbose layout and expands Python’s Unicode whitespace for its native RE2 engine. [Reporter](../../examples/conformance_report/parse.py) · [Codon adapter](../codon_native/conformance_re.py) · [Rust reference](../reference/conformance_report)
+The upstream CPython scanner harness imports Ruff’s pattern and returns the same annotation fields as the typed scanner. Its report and checkout adapters run Ruff’s original report logic. Typed CPython, new Imre and native Codon run the typed port. The previous Imre build runs its original string scanner. The independent Rust program uses a handwritten scanner and borrows captured substrings. Codon 0.20.4 needs a benchmark adapter that checks the literal, removes verbose layout and expands Python’s Unicode whitespace for its native RE2 engine. [Reporter](../../examples/conformance_report/parse.py) · [Codon adapter](../codon_native/conformance_re.py) · [Rust reference](../reference/conformance_report)
 
 The unchanged checkout compares ty 0.0.90 to itself. The changed checkout compares ty 0.0.60 to 0.0.90. Each of the six implementations gets one warm-up and 12 timed launches per workload. The six-round ordering repeats twice, giving every implementation the same positions and preceding neighbors. Each build mode has 1,008 timed processes across 14 workloads including the four zero-work controls. Timing begins before process launch and ends at exit. The harness checks exit status, stderr, stdout and the full output bytes for every sample.
 

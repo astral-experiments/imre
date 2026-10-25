@@ -15,12 +15,15 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "private_textwrap_module": ({"main.py": "import __imre_textwrap_wrapper__\n"}, "private textwrap implementation"),
+    "private_textwrap_helper": ({"main.py": "from textwrap import _chunk_text\n"}, "unsupported sealed standard-library export textwrap._chunk_text"),
     "external": ({"main.py": "import math\n"}, "standard-library"),
     "missing": ({"main.py": "import missing_dependency\n"}, "cannot resolve first-party"),
     "wildcard": ({"main.py": "from helper import *\n", "helper.py": HELPER}, "wildcard"),
     "dynamic": ({"main.py": '__import__("helper")\n', "helper.py": HELPER}, "unsupported"),
     "nested": ({"main.py": "def f() -> None:\n    import math\nf()\n"}, "unsupported"),
     "conditional": ({"main.py": "if False:\n    import math\n"}, "unsupported"),
+    "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
     "unused_unsupported": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return eval("1")\n'}, "unsupported"),
     "inactive_guard": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    eval("1")\n'}, "unsupported"),
@@ -33,6 +36,8 @@ REJECTED = {
     "local_function_shadow": ({"main.py": "from helper import f\ndef g() -> None:\n    f = 1\n", "helper.py": HELPER}, "rebinding"),
     "module_rebinding": ({"main.py": "from helper import f\ndef f(value: int) -> int:\n    return value\n", "helper.py": HELPER}, "cannot be rebound"),
     "imports_after_execution": ({"main.py": "print(1)\nimport helper\n", "helper.py": HELPER}, "imports must precede"),
+    "guard_reads_later_import": ({"main.py": "import helper\n", "helper.py": 'if __name__ == "helper":\n    raise ValueError(message)\nfrom child import message\n', "child.py": 'message = "late"\n'}, "imports must precede"),
+    "library_computed_before_import": ({"main.py": "import package\n", "package/__init__.py": "metadata = str(7)\nfrom .child import f\n", "package/child.py": HELPER}, "imports must precede"),
     "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
     "namespace_package": ({"main.py": "import package.child\n", "package/child.py": HELPER}, "namespace-package"),
     "child_overwrites_definition": ({"main.py": "import package.child\n", "package/__init__.py": "def child() -> int:\n    return 1\n", "package/child.py": HELPER}, "overwrite"),
@@ -40,6 +45,9 @@ REJECTED = {
     "reserved_alias": ({"main.py": "from helper import f as int\n", "helper.py": HELPER}, "reserved"),
     "normalized_reserved_alias": ({"main.py": "from helper import f as ℕone\n", "helper.py": HELPER}, "reserved"),
     "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
+    "opcode_shadow": ({"main.py": "import _opcode\n", "_opcode.py": HELPER}, "shadowing"),
+    "opcode_bytecode_operation": ({"main.py": "from _opcode import stack_effect\n"}, "stack_effect"),
+    "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
     "unstubbed_builtin_shadow": ({"main.py": "import _types\n", "_types.py": HELPER}, "standard-library"),
     "frozen_shadow": ({"main.py": "import __hello__\n", "__hello__.py": HELPER}, "standard-library"),
     "imported_surrogate": ({"main.py": IMPORT, "helper.py": '"\\ud800"\n' + HELPER}, "surrogate"),
@@ -48,11 +56,33 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "cast_mutable": {"main.py": 'from typing import cast as view\ndef fresh() -> list[int]:\n    print("create")\n    return [1]\nvalues = view("list[int]", fresh())\nview("list[int]", values).append(7)\nprint(values[1])\n'},
+    "type_aliases": {
+        "types_used.py": (
+            "from typing import NewType, TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n    import pathlib as p\n    from typing import Literal\n"
+            '    Mode = Literal["read", "write"]\n'
+            'Name = NewType("Name", str)\nPair = tuple[Name, int]\n'
+            'def named(value: Name) -> Pair:\n    return value, 7\n'
+            'def mode(value: "Mode") -> str:\n    return value\n'
+            'def leaf(value: "p.Path") -> str:\n    return value.name\n'
+        ),
+        "main.py": (
+            "from pathlib import Path\nfrom types_used import Name, named, mode, leaf\n"
+            'data = named(Name("alias"))\nprint(data[0])\nprint(data[1])\nprint(mode("read"))\nprint(leaf(Path("one/two")))\n'
+        ),
+    },
     "inferred_signature": {"main.py": IMPORT, "helper.py": "def f(value):\n    return value\n"},
     "library_effect": {"main.py": IMPORT, "helper.py": "print(7)\n" + HELPER},
     "library_state": {"main.py": "from helper import f, values\nprint(f(values[0]))\n", "helper.py": "values = [1]\n" + HELPER},
     "package_effect": {"main.py": "import package\n", "package/__init__.py": "print(1)\n"},
     "active_library_else": {"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    print(1)\nelse:\n    print(2)\n'},
+    "guard_before_import": {
+        "main.py": "import pkg.guard\n",
+        "pkg/__init__.py": "",
+        "pkg/guard.py": 'if __name__ != "pkg.guard":\n    raise ValueError("wrong module")\nfrom . import child\n',
+        "pkg/child.py": 'print("child initialized")\n',
+    },
 }
 
 
@@ -90,7 +120,7 @@ def main() -> None:
         build_flags += ["--target", args.target]
     compiler, runtime = str(args.compiler.resolve()), str(args.runtime.resolve())
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-imports-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-imports-") as directory:
         temporary = Path(directory)
         root = temporary / "project"
         shutil.copytree(FIXTURES, root)
@@ -132,6 +162,36 @@ def main() -> None:
                 require_success(result)
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
                 checks += 1
+
+        # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
+        source = root / "opcode_flags.py"
+        for level in args.opt_levels:
+            executable = temporary / f"opcode-flags-{level}"
+            command = [compiler, "build", str(source), "-o", str(executable), "--runtime", runtime,
+                       "--clang", args.clang, "--opt-level", str(level), *build_flags]
+            if args.sanitize:
+                command.append("--sanitize")
+            require_success(run(command, temporary))
+            result = run([str(executable)], temporary)
+            require_success(result)
+            assert result.stdout == "0\n0\nno bytecode specialization\n", result
+            checks += 1
+
+        # A failing guard must run before the next import initializes its child.
+        guarded = temporary / "wrong_name"
+        write_files(guarded, {"main.py": "import helper\n", "child.py": 'print("child initialized")\n',
+                              "helper.py": 'if "helper" == __name__:\n    raise ValueError("wrong module")\nimport child\n'})
+        baseline = run([args.python, "-E", "-m", "main"], guarded)
+        assert baseline.returncode and not baseline.stdout
+        for level in args.opt_levels:
+            executable = temporary / f"wrong-name-{level}"
+            require_success(run([compiler, "build", str(guarded / "main.py"), "-o", str(executable),
+                                 "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                                 *(["--sanitize"] if args.sanitize else []), *build_flags], temporary))
+            result = run([str(executable)], temporary)
+            assert result.returncode and result.stdout == baseline.stdout, result
+            assert result.stderr.splitlines()[-1] == baseline.stderr.splitlines()[-1], result
+            checks += 1
 
         chain = temporary / "deep_imports"
         files = {f"m{i}.py": f"import m{i + 1}\n" for i in range(97)}

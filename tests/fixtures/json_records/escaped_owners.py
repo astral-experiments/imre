@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from urllib.parse import unquote
 
-from relar.json import decode, encode
+from imre.json import decode, encode
 
 
 @dataclass

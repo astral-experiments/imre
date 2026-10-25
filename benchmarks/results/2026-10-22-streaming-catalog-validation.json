@@ -43,7 +43,7 @@
         "-shared",
         "-fPIC",
         "shim.c",
-        "librelar_runtime.a",
+        "libimre_runtime.a",
         "-lpthread",
         "-lm",
         "-ldl"
@@ -70,8 +70,8 @@
     },
     "format": "passed",
     "local_artifacts_sha256": {
-      "librelar_runtime.a": "4b00b8db92bed187e100bacfd02d468a997b2e55e522e5957008efe72db21dfe",
-      "relar": "f065ca32fed0ec9361b85c3fda5a05d93884ed824074c7a556c3ff36ce9cf17d"
+      "libimre_runtime.a": "4b00b8db92bed187e100bacfd02d468a997b2e55e522e5957008efe72db21dfe",
+      "imre": "f065ca32fed0ec9361b85c3fda5a05d93884ed824074c7a556c3ff36ce9cf17d"
     },
     "local_validation_sha256": "8f87bcbb04a3a43b09cae5e3fef563bf0e73a36d5da0bbf53b14226e395904ef",
     "ordinary_differentials": {
@@ -108,7 +108,7 @@
       "input_bytes": 46,
       "reads": 24,
       "record_sha256": "a28ad0c4519bbba8e7163cf0c5d2200b01b7de900ec15e7b93b83f1cca395a8e",
-      "relar_stdout": "70\n",
+      "imre_stdout": "70\n",
       "requested_bytes": 33554432,
       "source_sha256": "e35f9c37428f8d0c10cb596b749b7a05fc31039047a590c92895787e88cf7964"
     },
@@ -169,7 +169,7 @@
       "executions_by_engine": {
         "original": 61,
         "port": 66,
-        "relar": 66
+        "imre": 66
       },
       "expected_case_outcomes": {
         "BadGzipFile": 4,
@@ -222,7 +222,7 @@
           "codon": 61,
           "original": 60,
           "port": 65,
-          "relar": 65,
+          "imre": 65,
           "rust": 65
         },
         "expected_case_outcomes": {
@@ -297,7 +297,7 @@
       "executions_by_engine": {
         "original": 61,
         "port": 66,
-        "relar": 66
+        "imre": 66
       },
       "expected_case_outcomes": {
         "BadGzipFile": 4,
@@ -329,7 +329,7 @@
       "executions_by_engine": {
         "original": 13,
         "port": 14,
-        "relar": 14
+        "imre": 14
       },
       "expected_case_outcomes": {
         "FileExistsError": 1,

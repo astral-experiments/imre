@@ -7,7 +7,7 @@ publish the final measurements, raw samples, build provenance, and validation.
 
 | Group | Captured workloads | Engines |
 | --- | --- | --- |
-| Incremental planner | Five sparse/all/boundary cases | CPython, baseline Relar, current Relar, Rust BigInt |
+| Incremental planner | Five sparse/all/boundary cases | CPython, baseline Imre, current Imre, Rust BigInt |
 | Batch planner | Six valid/mixed cases | The same four engines |
 | Manifest planner | Six valid/mixed filesystem cases | The same four engines |
 
@@ -18,7 +18,7 @@ stay unchanged. Historical Rust source snapshots are retained with their build
 records; adding later application entrypoints does not require rebuilding the
 older controls.
 
-Each invocation compiles the three current Relar programs once at O3, then runs
+Each invocation compiles the three current Imre programs once at O3, then runs
 the full incremental, batch, and manifest validators against all four engines.
 Manifest validation includes the separate Linux `/dev/full` application check.
 Use `--validate-only` to stop after these checks without collecting benchmark
@@ -77,9 +77,9 @@ after freezing current tools and waiting until builds/profilers are idle:
 
 ```sh
 python3 benchmarks/layout_benchmark.py \
-  --compiler benchmarks/local/layout-tools-v2/relar \
-  --runtime benchmarks/local/layout-tools-v2/librelar_runtime.a \
-  --relar-build-record benchmarks/local/layout-tools-v2/build-record.json \
+  --compiler benchmarks/local/layout-tools-v2/imre \
+  --runtime benchmarks/local/layout-tools-v2/libimre_runtime.a \
+  --imre-build-record benchmarks/local/layout-tools-v2/build-record.json \
   --baseline-record benchmarks/local/layout-baseline/baseline.json \
   --python python3.14 --clang clang-18 --target x86_64-unknown-linux-gnu \
   --cpu 0 --samples 32 --warmups 2 \
@@ -87,9 +87,9 @@ python3 benchmarks/layout_benchmark.py \
   --output benchmarks/local/layout-normal-final.json
 
 python3 benchmarks/layout_benchmark.py \
-  --compiler benchmarks/local/layout-tools-v2/relar \
-  --runtime benchmarks/local/layout-tools-v2/librelar_runtime_lto.a \
-  --relar-build-record benchmarks/local/layout-tools-v2/build-record.json \
+  --compiler benchmarks/local/layout-tools-v2/imre \
+  --runtime benchmarks/local/layout-tools-v2/libimre_runtime_lto.a \
+  --imre-build-record benchmarks/local/layout-tools-v2/build-record.json \
   --baseline-record benchmarks/local/layout-baseline/baseline.json \
   --python python3.14 --clang clang-18 --target x86_64-unknown-linux-gnu \
   --lto-linker /path/to/ld.lld \
@@ -112,8 +112,8 @@ captured labels for diagnostic runs. Final comparisons use all workloads.
 
 `layout_profile.py` verifies the comparison, build record, baseline bundle and
 exact executable/IR hashes before profiling. By default it profiles the captured
-16K layered/all and wide/all incremental workloads under baseline Relar, current
-Relar and the preserved Rust BigInt control. It delegates collection and parsing
+16K layered/all and wide/all incremental workloads under baseline Imre, current
+Imre and the preserved Rust BigInt control. It delegates collection and parsing
 to `dependency_profile.py`, retaining raw traces, logs, full stdout, hashes,
 commands, function/edge counts and allocation stacks.
 

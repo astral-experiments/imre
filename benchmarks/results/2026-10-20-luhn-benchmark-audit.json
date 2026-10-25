@@ -11,7 +11,7 @@
     "paths": [
       "benchmarks/luhn_benchmark.py"
     ],
-    "patch": "diff --git a/benchmarks/luhn_benchmark.py b/benchmarks/luhn_benchmark.py\nindex a71427a..eea1111 100644\n--- a/benchmarks/luhn_benchmark.py\n+++ b/benchmarks/luhn_benchmark.py\n@@ -342,9 +342,12 @@ def main() -> None:\n         \"build_ns\": build_ns,\n         \"requested_target\": args.target,\n         \"llvm_target\": next(\n-            line\n-            for line in llvm.read_text().splitlines()\n-            if line.startswith(\"target triple\")\n+            (\n+                line\n+                for line in llvm.read_text().splitlines()\n+                if line.startswith(\"target triple\")\n+            ),\n+            None,\n         ),\n         \"relar_build_record\": relar_record,\n         \"rust_build_record\": rust_record,",
+    "patch": "diff --git a/benchmarks/luhn_benchmark.py b/benchmarks/luhn_benchmark.py\nindex a71427a..eea1111 100644\n--- a/benchmarks/luhn_benchmark.py\n+++ b/benchmarks/luhn_benchmark.py\n@@ -342,9 +342,12 @@ def main() -> None:\n         \"build_ns\": build_ns,\n         \"requested_target\": args.target,\n         \"llvm_target\": next(\n-            line\n-            for line in llvm.read_text().splitlines()\n-            if line.startswith(\"target triple\")\n+            (\n+                line\n+                for line in llvm.read_text().splitlines()\n+                if line.startswith(\"target triple\")\n+            ),\n+            None,\n         ),\n         \"imre_build_record\": imre_record,\n         \"rust_build_record\": rust_record,",
     "patch_sha256": "86f0be9e39cfcf5aec060ffe34cdddca2752271b181d3685073674f808cf74e0",
     "reason": "The harness records an absent emitted LLVM target as null; compiler, runtime, example, and benchmark workload sources are unchanged."
   },
@@ -124,7 +124,7 @@
       "digits": 16,
       "repetitions": 1048576,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.8724125219999999,
           "min_seconds": 1.831118739,
           "max_seconds": 1.895235384,
@@ -146,10 +146,10 @@
           "p75_seconds": 2.08443046
         }
       },
-      "cpython_over_relar": 1.1059772110411044,
-      "relar_over_rust": 67.86599874946751,
+      "cpython_over_imre": 1.1059772110411044,
+      "imre_over_rust": 67.86599874946751,
       "startup_control_fraction": {
-        "relar": 0.0011926800177637351,
+        "imre": 0.0011926800177637351,
         "rust": 0.07735726116929897,
         "cpython": 0.012746084385850771
       }
@@ -160,7 +160,7 @@
       "digits": 16,
       "repetitions": 1048576,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.861160254,
           "min_seconds": 1.843641841,
           "max_seconds": 1.913438804,
@@ -182,10 +182,10 @@
           "p75_seconds": 2.11247110725
         }
       },
-      "cpython_over_relar": 1.1290695438416556,
-      "relar_over_rust": 63.43469407554783,
+      "cpython_over_imre": 1.1290695438416556,
+      "imre_over_rust": 63.43469407554783,
       "startup_control_fraction": {
-        "relar": 0.0011998907644843785,
+        "imre": 0.0011998907644843785,
         "rust": 0.07274337683018768,
         "cpython": 0.012560879303849677
       }
@@ -196,7 +196,7 @@
       "digits": 16,
       "repetitions": 1048576,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 2.078159457,
           "min_seconds": 2.030629457,
           "max_seconds": 2.159042936,
@@ -218,10 +218,10 @@
           "p75_seconds": 2.2556777785
         }
       },
-      "cpython_over_relar": 1.0714053820558198,
-      "relar_over_rust": 70.25508353129655,
+      "cpython_over_imre": 1.0714053820558198,
+      "imre_over_rust": 70.25508353129655,
       "startup_control_fraction": {
-        "relar": 0.0010745994454264825,
+        "imre": 0.0010745994454264825,
         "rust": 0.0721521478530884,
         "cpython": 0.011854733984972898
       }
@@ -232,7 +232,7 @@
       "digits": 16,
       "repetitions": 1048576,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 2.1194712755,
           "min_seconds": 2.097909359,
           "max_seconds": 2.163129077,
@@ -254,10 +254,10 @@
           "p75_seconds": 2.376284769
         }
       },
-      "cpython_over_relar": 1.1092809488278437,
-      "relar_over_rust": 36.57626024958101,
+      "cpython_over_imre": 1.1092809488278437,
+      "imre_over_rust": 36.57626024958101,
       "startup_control_fraction": {
-        "relar": 0.0010536538172583505,
+        "imre": 0.0010536538172583505,
         "rust": 0.03683173192604775,
         "cpython": 0.011226785244250893
       }
@@ -268,7 +268,7 @@
       "digits": 256,
       "repetitions": 65536,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.3854802065,
           "min_seconds": 1.374298861,
           "max_seconds": 1.409115431,
@@ -290,10 +290,10 @@
           "p75_seconds": 1.5904104092500002
         }
       },
-      "cpython_over_relar": 1.1351508766574356,
-      "relar_over_rust": 55.63020807621226,
+      "cpython_over_imre": 1.1351508766574356,
+      "imre_over_rust": 55.63020807621226,
       "startup_control_fraction": {
-        "relar": 0.0016118519698245866,
+        "imre": 0.0016118519698245866,
         "rust": 0.0856960364968288,
         "cpython": 0.016783038469058733
       }
@@ -304,7 +304,7 @@
       "digits": 256,
       "repetitions": 65536,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.3849444155000001,
           "min_seconds": 1.374155047,
           "max_seconds": 1.395026917,
@@ -326,10 +326,10 @@
           "p75_seconds": 1.57432207525
         }
       },
-      "cpython_over_relar": 1.1286506353655172,
-      "relar_over_rust": 55.19435891410923,
+      "cpython_over_imre": 1.1286506353655172,
+      "imre_over_rust": 55.19435891410923,
       "startup_control_fraction": {
-        "relar": 0.0016124755441493744,
+        "imre": 0.0016124755441493744,
         "rust": 0.08505752220307101,
         "cpython": 0.01688622729594524
       }
@@ -340,7 +340,7 @@
       "digits": 256,
       "repetitions": 65536,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.408635792,
           "min_seconds": 1.389592663,
           "max_seconds": 1.467044171,
@@ -362,10 +362,10 @@
           "p75_seconds": 1.6206093385
         }
       },
-      "cpython_over_relar": 1.1328561066408,
-      "relar_over_rust": 56.37876618929708,
+      "cpython_over_imre": 1.1328561066408,
+      "imre_over_rust": 56.37876618929708,
       "startup_control_fraction": {
-        "relar": 0.001585355854709107,
+        "imre": 0.001585355854709107,
         "rust": 0.08542150631982663,
         "cpython": 0.01654059147198157
       }
@@ -376,7 +376,7 @@
       "digits": 256,
       "repetitions": 65536,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.411757272,
           "min_seconds": 1.399445782,
           "max_seconds": 1.441168115,
@@ -398,10 +398,10 @@
           "p75_seconds": 1.5817728952499999
         }
       },
-      "cpython_over_relar": 1.11545776475377,
-      "relar_over_rust": 49.59852704990658,
+      "cpython_over_imre": 1.11545776475377,
+      "imre_over_rust": 49.59852704990658,
       "startup_control_fraction": {
-        "relar": 0.001581850537830982,
+        "imre": 0.001581850537830982,
         "rust": 0.07498236305839928,
         "cpython": 0.01676144051535626
       }
@@ -412,7 +412,7 @@
       "digits": 4096,
       "repetitions": 4096,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.3241740245,
           "min_seconds": 1.317531615,
           "max_seconds": 1.377993275,
@@ -434,10 +434,10 @@
           "p75_seconds": 1.4794992067500001
         }
       },
-      "cpython_over_relar": 1.109298791414255,
-      "relar_over_rust": 54.2940353375737,
+      "cpython_over_imre": 1.109298791414255,
+      "imre_over_rust": 54.2940353375737,
       "startup_control_fraction": {
-        "relar": 0.0016864769725740832,
+        "imre": 0.0016864769725740832,
         "rust": 0.0875099496940027,
         "cpython": 0.01796928928630354
       }
@@ -448,7 +448,7 @@
       "digits": 4096,
       "repetitions": 4096,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.322945112,
           "min_seconds": 1.313729271,
           "max_seconds": 1.363208315,
@@ -470,10 +470,10 @@
           "p75_seconds": 1.4644563845
         }
       },
-      "cpython_over_relar": 1.1030551118586394,
-      "relar_over_rust": 54.29733803336035,
+      "cpython_over_imre": 1.1030551118586394,
+      "imre_over_rust": 54.29733803336035,
       "startup_control_fraction": {
-        "relar": 0.0016880435777293231,
+        "imre": 0.0016880435777293231,
         "rust": 0.08759656774872315,
         "cpython": 0.018087788324969625
       }
@@ -484,7 +484,7 @@
       "digits": 4096,
       "repetitions": 4096,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.335019569,
           "min_seconds": 1.320760571,
           "max_seconds": 1.372617491,
@@ -506,10 +506,10 @@
           "p75_seconds": 1.46011307275
         }
       },
-      "cpython_over_relar": 1.091912330612436,
-      "relar_over_rust": 54.725372083521165,
+      "cpython_over_imre": 1.091912330612436,
+      "imre_over_rust": 54.725372083521165,
       "startup_control_fraction": {
-        "relar": 0.0016727762287954897,
+        "imre": 0.0016727762287954897,
         "rust": 0.08748860032894179,
         "cpython": 0.018107108439431144
       }
@@ -520,7 +520,7 @@
       "digits": 4096,
       "repetitions": 4096,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.3387403414999999,
           "min_seconds": 1.330880936,
           "max_seconds": 1.362839063,
@@ -542,10 +542,10 @@
           "p75_seconds": 1.46391482775
         }
       },
-      "cpython_over_relar": 1.0887293736639818,
-      "relar_over_rust": 47.125200901769,
+      "cpython_over_imre": 1.0887293736639818,
+      "imre_over_rust": 47.125200901769,
       "startup_control_fraction": {
-        "relar": 0.0016681270674922739,
+        "imre": 0.0016681270674922739,
         "rust": 0.07512893653591526,
         "cpython": 0.018109573142631154
       }
@@ -556,7 +556,7 @@
       "digits": 16,
       "repetitions": 1048576,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.2536163980000001,
           "min_seconds": 1.237744626,
           "max_seconds": 1.329069578,
@@ -578,10 +578,10 @@
           "p75_seconds": 2.10778668375
         }
       },
-      "cpython_over_relar": 1.673236402975003,
-      "relar_over_rust": 48.57432098406661,
+      "cpython_over_imre": 1.673236402975003,
+      "imre_over_rust": 48.57432098406661,
       "startup_control_fraction": {
-        "relar": 0.0018194608842377314,
+        "imre": 0.0018194608842377314,
         "rust": 0.08205725212468706,
         "cpython": 0.012652831147274092
       }
@@ -592,7 +592,7 @@
       "digits": 16,
       "repetitions": 1048576,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.2521633835000001,
           "min_seconds": 1.237075655,
           "max_seconds": 1.336957912,
@@ -614,10 +614,10 @@
           "p75_seconds": 2.11817045725
         }
       },
-      "cpython_over_relar": 1.687757536954042,
-      "relar_over_rust": 46.04745687374373,
+      "cpython_over_imre": 1.687757536954042,
+      "imre_over_rust": 46.04745687374373,
       "startup_control_fraction": {
-        "relar": 0.0018215721926195423,
+        "imre": 0.0018215721926195423,
         "rust": 0.07787885281332191,
         "cpython": 0.012558524738470593
       }
@@ -628,7 +628,7 @@
       "digits": 16,
       "repetitions": 1048576,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.384682084,
           "min_seconds": 1.354855277,
           "max_seconds": 1.428703346,
@@ -650,10 +650,10 @@
           "p75_seconds": 2.232171399
         }
       },
-      "cpython_over_relar": 1.6013306076689295,
-      "relar_over_rust": 51.367647801310476,
+      "cpython_over_imre": 1.6013306076689295,
+      "imre_over_rust": 51.367647801310476,
       "startup_control_fraction": {
-        "relar": 0.0016472416494413167,
+        "imre": 0.0016472416494413167,
         "rust": 0.07856235648303012,
         "cpython": 0.011969571502536644
       }
@@ -664,7 +664,7 @@
       "digits": 16,
       "repetitions": 1048576,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 1.45595403,
           "min_seconds": 1.443525483,
           "max_seconds": 1.525325357,
@@ -686,10 +686,10 @@
           "p75_seconds": 2.3670995054999997
         }
       },
-      "cpython_over_relar": 1.6109157368107287,
-      "relar_over_rust": 28.85611368177345,
+      "cpython_over_imre": 1.6109157368107287,
+      "imre_over_rust": 28.85611368177345,
       "startup_control_fraction": {
-        "relar": 0.0015666057808157584,
+        "imre": 0.0015666057808157584,
         "rust": 0.04197252272153772,
         "cpython": 0.011315902433288581
       }
@@ -700,7 +700,7 @@
       "digits": 256,
       "repetitions": 65536,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 0.947276032,
           "min_seconds": 0.94172927,
           "max_seconds": 0.965735931,
@@ -722,10 +722,10 @@
           "p75_seconds": 1.5794046255
         }
       },
-      "cpython_over_relar": 1.662936932621557,
-      "relar_over_rust": 40.29626145835618,
+      "cpython_over_imre": 1.662936932621557,
+      "imre_over_rust": 40.29626145835618,
       "startup_control_fraction": {
-        "relar": 0.0024078578185751038,
+        "imre": 0.0024078578185751038,
         "rust": 0.09008720279718346,
         "cpython": 0.016848349137503403
       }
@@ -736,7 +736,7 @@
       "digits": 256,
       "repetitions": 65536,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 0.94863979,
           "min_seconds": 0.943595216,
           "max_seconds": 0.982982214,
@@ -758,10 +758,10 @@
           "p75_seconds": 1.58669474525
         }
       },
-      "cpython_over_relar": 1.647578310519739,
-      "relar_over_rust": 38.154527317773216,
+      "cpython_over_imre": 1.647578310519739,
+      "imre_over_rust": 38.154527317773216,
       "startup_control_fraction": {
-        "relar": 0.002404396298831193,
+        "imre": 0.002404396298831193,
         "rust": 0.08517646975543959,
         "cpython": 0.01698096153832712
       }
@@ -772,7 +772,7 @@
       "digits": 256,
       "repetitions": 65536,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 0.95956538,
           "min_seconds": 0.951488638,
           "max_seconds": 0.981195167,
@@ -794,10 +794,10 @@
           "p75_seconds": 1.5731897844999998
         }
       },
-      "cpython_over_relar": 1.6343178200113888,
-      "relar_over_rust": 40.41423303676559,
+      "cpython_over_imre": 1.6343178200113888,
+      "imre_over_rust": 40.41423303676559,
       "startup_control_fraction": {
-        "relar": 0.0023770198962367733,
+        "imre": 0.0023770198962367733,
         "rust": 0.08919379983033919,
         "cpython": 0.01692382766917301
       }
@@ -808,7 +808,7 @@
       "digits": 256,
       "repetitions": 65536,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 0.9745274315000001,
           "min_seconds": 0.966616193,
           "max_seconds": 1.027637423,
@@ -830,10 +830,10 @@
           "p75_seconds": 1.5933428657500002
         }
       },
-      "cpython_over_relar": 1.6286113086186633,
-      "relar_over_rust": 36.54919839306569,
+      "cpython_over_imre": 1.6286113086186633,
+      "imre_over_rust": 36.54919839306569,
       "startup_control_fraction": {
-        "relar": 0.0023405251881819396,
+        "imre": 0.0023405251881819396,
         "rust": 0.07942526700041204,
         "cpython": 0.016722383028378033
       }
@@ -844,7 +844,7 @@
       "digits": 4096,
       "repetitions": 4096,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 0.898480894,
           "min_seconds": 0.892489211,
           "max_seconds": 0.927859361,
@@ -866,10 +866,10 @@
           "p75_seconds": 1.4617052997500002
         }
       },
-      "cpython_over_relar": 1.6202458791516607,
-      "relar_over_rust": 39.48837162490303,
+      "cpython_over_imre": 1.6202458791516607,
+      "imre_over_rust": 39.48837162490303,
       "startup_control_fraction": {
-        "relar": 0.0025386249337428874,
+        "imre": 0.0025386249337428874,
         "rust": 0.09307547779308709,
         "cpython": 0.01823139536727719
       }
@@ -880,7 +880,7 @@
       "digits": 4096,
       "repetitions": 4096,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 0.899059753,
           "min_seconds": 0.892003257,
           "max_seconds": 0.934799404,
@@ -902,10 +902,10 @@
           "p75_seconds": 1.4660961465
         }
       },
-      "cpython_over_relar": 1.6229439713335716,
-      "relar_over_rust": 37.17673469991137,
+      "cpython_over_imre": 1.6229439713335716,
+      "imre_over_rust": 37.17673469991137,
       "startup_control_fraction": {
-        "relar": 0.0025369904418355163,
+        "imre": 0.0025369904418355163,
         "rust": 0.08757044993367867,
         "cpython": 0.018189367501741317
       }
@@ -916,7 +916,7 @@
       "digits": 4096,
       "repetitions": 4096,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 0.899959604,
           "min_seconds": 0.895328983,
           "max_seconds": 0.944570394,
@@ -938,10 +938,10 @@
           "p75_seconds": 1.45610448975
         }
       },
-      "cpython_over_relar": 1.6147226470400553,
-      "relar_over_rust": 38.93347445765074,
+      "cpython_over_imre": 1.6147226470400553,
+      "imre_over_rust": 38.93347445765074,
       "startup_control_fraction": {
-        "relar": 0.002534453757548878,
+        "imre": 0.002534453757548878,
         "rust": 0.091616783797514,
         "cpython": 0.018263698488073053
       }
@@ -952,7 +952,7 @@
       "digits": 4096,
       "repetitions": 4096,
       "summary": {
-        "relar": {
+        "imre": {
           "median_seconds": 0.916011682,
           "min_seconds": 0.90249838,
           "max_seconds": 0.984264376,
@@ -974,10 +974,10 @@
           "p75_seconds": 1.4902512127499998
         }
       },
-      "cpython_over_relar": 1.6196814834944429,
-      "relar_over_rust": 34.10566406874304,
+      "cpython_over_imre": 1.6196814834944429,
+      "imre_over_rust": 34.10566406874304,
       "startup_control_fraction": {
-        "relar": 0.002490040296232816,
+        "imre": 0.002490040296232816,
         "rust": 0.0788497631706455,
         "cpython": 0.017888711154207315
       }

@@ -23,18 +23,18 @@
       "compiler_unit_tests": 28,
       "runtime_unit_tests": 46,
       "commands": [
-        "sh /tmp/relar-cargo.sh fmt --all --check",
-        "sh /tmp/relar-cargo.sh test --workspace --locked",
-        "sh /tmp/relar-cargo.sh clippy --workspace --all-targets --locked -- -D warnings"
+        "sh /tmp/imre-cargo.sh fmt --all --check",
+        "sh /tmp/imre-cargo.sh test --workspace --locked",
+        "sh /tmp/imre-cargo.sh clippy --workspace --all-targets --locked -- -D warnings"
       ],
       "returncode": 0
     },
     "python_lint": "Ruff check and format passed for changed Python harnesses, examples, and new fixtures",
     "artifact_sha256": {
-      "benchmarks/local/sequence-access-tools-final/relar": "7c5d8673a49365324f42e0de706786576726d9e9ee6e9c923bbafbef9491fb6a",
-      "benchmarks/local/sequence-access-tools-final/librelar_runtime.a": "c7e6aff0d855570d482dc890c687e7e7cefbbf68b871ddedeb8866fadca8db70",
-      "benchmarks/local/sequence-access-tools-final/librelar_runtime_lto.a": "c348c15dfc570728657c5b9b2b2d95884fb171f6b1518845c7fc4a0927779955",
-      "benchmarks/local/sequence-access-tools-final/librelar_runtime_asan.a": "f1259a3686b0469c5309d6b6e46315ce470894dfcedaa96a9df1a8ae2121b1e5"
+      "benchmarks/local/sequence-access-tools-final/imre": "7c5d8673a49365324f42e0de706786576726d9e9ee6e9c923bbafbef9491fb6a",
+      "benchmarks/local/sequence-access-tools-final/libimre_runtime.a": "c7e6aff0d855570d482dc890c687e7e7cefbbf68b871ddedeb8866fadca8db70",
+      "benchmarks/local/sequence-access-tools-final/libimre_runtime_lto.a": "c348c15dfc570728657c5b9b2b2d95884fb171f6b1518845c7fc4a0927779955",
+      "benchmarks/local/sequence-access-tools-final/libimre_runtime_asan.a": "f1259a3686b0469c5309d6b6e46315ce470894dfcedaa96a9df1a8ae2121b1e5"
     },
     "log_sha256": {
       "asan-calls.log": "f41757e514f1faa732690da07496f88156c5fd5a1a6930111930fe4c22bba2a9",
@@ -256,55 +256,55 @@
   "count_parser_compared_outcomes": 32505,
   "superseded_sanitizer_environment_failures": [
     {
-      "log": "/tmp/relar-sequence-tests/asan-calls.sandbox.log",
+      "log": "/tmp/imre-sequence-tests/asan-calls.sandbox.log",
       "reason": "LeakSanitizer cannot run under ptrace",
-      "receipt": "/tmp/relar-sequence-tests/asan-calls.sandbox.json"
+      "receipt": "/tmp/imre-sequence-tests/asan-calls.sandbox.json"
     },
     {
-      "log": "/tmp/relar-sequence-tests/asan-classes.sandbox.log",
+      "log": "/tmp/imre-sequence-tests/asan-classes.sandbox.log",
       "reason": "LeakSanitizer cannot run under ptrace",
-      "receipt": "/tmp/relar-sequence-tests/asan-classes.sandbox.json"
+      "receipt": "/tmp/imre-sequence-tests/asan-classes.sandbox.json"
     },
     {
-      "log": "/tmp/relar-sequence-tests/asan-differential.sandbox.log",
+      "log": "/tmp/imre-sequence-tests/asan-differential.sandbox.log",
       "reason": "LeakSanitizer cannot run under ptrace",
-      "receipt": "/tmp/relar-sequence-tests/asan-differential.sandbox.json"
+      "receipt": "/tmp/imre-sequence-tests/asan-differential.sandbox.json"
     },
     {
-      "log": "/tmp/relar-sequence-tests/asan-exceptions.sandbox.log",
+      "log": "/tmp/imre-sequence-tests/asan-exceptions.sandbox.log",
       "reason": "LeakSanitizer cannot run under ptrace",
-      "receipt": "/tmp/relar-sequence-tests/asan-exceptions.sandbox.json"
+      "receipt": "/tmp/imre-sequence-tests/asan-exceptions.sandbox.json"
     },
     {
-      "log": "/tmp/relar-sequence-tests/asan-files.sandbox.log",
+      "log": "/tmp/imre-sequence-tests/asan-files.sandbox.log",
       "reason": "LeakSanitizer cannot run under ptrace",
-      "receipt": "/tmp/relar-sequence-tests/asan-files.sandbox.json"
+      "receipt": "/tmp/imre-sequence-tests/asan-files.sandbox.json"
     },
     {
-      "log": "/tmp/relar-sequence-tests/asan-fstrings.sandbox.log",
+      "log": "/tmp/imre-sequence-tests/asan-fstrings.sandbox.log",
       "reason": "LeakSanitizer cannot run under ptrace",
-      "receipt": "/tmp/relar-sequence-tests/asan-fstrings.sandbox.json"
+      "receipt": "/tmp/imre-sequence-tests/asan-fstrings.sandbox.json"
     },
     {
-      "log": "/tmp/relar-sequence-tests/asan-imports.sandbox.log",
+      "log": "/tmp/imre-sequence-tests/asan-imports.sandbox.log",
       "reason": "LeakSanitizer cannot run under ptrace",
-      "receipt": "/tmp/relar-sequence-tests/asan-imports.sandbox.json"
+      "receipt": "/tmp/imre-sequence-tests/asan-imports.sandbox.json"
     },
     {
-      "log": "/tmp/relar-sequence-tests/asan-io.sandbox.log",
+      "log": "/tmp/imre-sequence-tests/asan-io.sandbox.log",
       "reason": "LeakSanitizer cannot run under ptrace",
-      "receipt": "/tmp/relar-sequence-tests/asan-io.sandbox.json"
+      "receipt": "/tmp/imre-sequence-tests/asan-io.sandbox.json"
     },
     {
-      "log": "/tmp/relar-sequence-tests/comprehensions-asan-sandbox.log",
+      "log": "/tmp/imre-sequence-tests/comprehensions-asan-sandbox.log",
       "reason": "LeakSanitizer cannot run under ptrace"
     },
     {
-      "log": "/tmp/relar-sequence-tests/containers-asan-sandbox.log",
+      "log": "/tmp/imre-sequence-tests/containers-asan-sandbox.log",
       "reason": "LeakSanitizer cannot run under ptrace"
     },
     {
-      "log": "/tmp/relar-sequence-tests/expressions-asan-sandbox.log",
+      "log": "/tmp/imre-sequence-tests/expressions-asan-sandbox.log",
       "reason": "LeakSanitizer cannot run under ptrace"
     }
   ],
@@ -415,355 +415,355 @@
     "tests/programs/short_strings.py": "c35fc3f77c55f5d5cc70fa3b46312c290180207c5224d0aaee2bf7476688eed0"
   },
   "retained_evidence_files": {
-    "/tmp/relar-sequence-tests/validation-receipt.json": {
+    "/tmp/imre-sequence-tests/validation-receipt.json": {
       "sha256": "b294d6eb4c039be681c94095a1e04d313775a9e4b0e6dbb7bf6366d4d3b54636",
       "bytes": 4717
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-tools-final/build-record.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-tools-final/build-record.json": {
       "sha256": "c757ec816038bdc1686fcdca7d3cca178d92af9dcbf1820dc47344b583f3e7d8",
       "bytes": 727888
     },
-    "/tmp/relar-sequence-tests/regression-inputs.json": {
+    "/tmp/imre-sequence-tests/regression-inputs.json": {
       "sha256": "a1251d8dc0f5e6ae2ceccb56a88b8956873ff39e355e70074233f8b7e0c7ca8f",
       "bytes": 784
     },
-    "/tmp/relar-sequence-tests/regression-final-hashes.json": {
+    "/tmp/imre-sequence-tests/regression-final-hashes.json": {
       "sha256": "1826773b9bc348728aacd58fc29b6b962eef258a5f2ae42cfa8b0adc735d830e",
       "bytes": 556
     },
-    "/tmp/relar-sequence-tests/artifacts.json": {
+    "/tmp/imre-sequence-tests/artifacts.json": {
       "sha256": "76e958b3084dc4ab9c1ddc5c2b4507800b3c4789b7960e143eac151554466618",
       "bytes": 977
     },
-    "/tmp/relar-sequence-tests/summary.json": {
+    "/tmp/imre-sequence-tests/summary.json": {
       "sha256": "47acbac907f36310c16da359e3a093cd68f7205d6a24dc57f7c5f59ac738bfd3",
       "bytes": 591
     },
-    "/tmp/relar-sequence-tests/regression-results.json": {
+    "/tmp/imre-sequence-tests/regression-results.json": {
       "sha256": "b5a0d5457bad355a7be82a344fa59e81e49318faffbafdbf620a93964bc2c6f3",
       "bytes": 20924
     },
-    "/tmp/relar-sequence-tests/asan-calls.json": {
+    "/tmp/imre-sequence-tests/asan-calls.json": {
       "sha256": "2b9ac85ea013a7d0205d1a8bf3ff8bc9d3960745ebdb6d6600ec4692285d2199",
       "bytes": 818
     },
-    "/tmp/relar-sequence-tests/asan-classes.json": {
+    "/tmp/imre-sequence-tests/asan-classes.json": {
       "sha256": "e06e351e7d1ea41975fa06e925c4d94c4b7ab06e2b1c84d385750bed8bc6cd2c",
       "bytes": 825
     },
-    "/tmp/relar-sequence-tests/asan-differential.json": {
+    "/tmp/imre-sequence-tests/asan-differential.json": {
       "sha256": "4c4f7538ed4fed19e01f8d6838b4975dd4475b50dc194d24247b37b4128bfd91",
       "bytes": 839
     },
-    "/tmp/relar-sequence-tests/asan-exceptions.json": {
+    "/tmp/imre-sequence-tests/asan-exceptions.json": {
       "sha256": "62e45f17e63b98124de453c41278471c908c715ff8f54a636b4c9a4e23176582",
       "bytes": 833
     },
-    "/tmp/relar-sequence-tests/asan-files.json": {
+    "/tmp/imre-sequence-tests/asan-files.json": {
       "sha256": "7001a285a0af842128141fcc8a70ce85ededebf4bbab3987b7f7d5c95fd72879",
       "bytes": 819
     },
-    "/tmp/relar-sequence-tests/asan-fstrings.json": {
+    "/tmp/imre-sequence-tests/asan-fstrings.json": {
       "sha256": "65edcd2d4e32730ca7b5e38fc11de6ce8039181b2b6920c416c0f6d8f08c9147",
       "bytes": 827
     },
-    "/tmp/relar-sequence-tests/asan-imports.json": {
+    "/tmp/imre-sequence-tests/asan-imports.json": {
       "sha256": "1bebe74353fc3d2ee9181636cf4a940a60a88efaf80c8b9e016def26b0d0ab7b",
       "bytes": 824
     },
-    "/tmp/relar-sequence-tests/asan-io.json": {
+    "/tmp/imre-sequence-tests/asan-io.json": {
       "sha256": "b5d4a7a30b971510c948c519251cc0c2ed818dd7ec2118df9f5e7b3467cb2ac3",
       "bytes": 810
     },
-    "/tmp/relar-sequence-tests/normal-calls.json": {
+    "/tmp/imre-sequence-tests/normal-calls.json": {
       "sha256": "5c03607a974d2bc94977eccef6dff95e939e75d3e2bf47934c3caa7ffa4c4a0f",
       "bytes": 715
     },
-    "/tmp/relar-sequence-tests/normal-classes.json": {
+    "/tmp/imre-sequence-tests/normal-classes.json": {
       "sha256": "489795b135aebe541cb03d684ad2966fc04709349146244e01ad28453928e10e",
       "bytes": 721
     },
-    "/tmp/relar-sequence-tests/normal-differential.json": {
+    "/tmp/imre-sequence-tests/normal-differential.json": {
       "sha256": "041f2c79814c77ceffe1a42f1544cd1b1814f84b5438e4aaaa66c99da38c2346",
       "bytes": 737
     },
-    "/tmp/relar-sequence-tests/normal-exceptions.json": {
+    "/tmp/imre-sequence-tests/normal-exceptions.json": {
       "sha256": "6613692dda7b15d226d5dfac61ef6175bba18888dadebd8508257a2b752282d9",
       "bytes": 731
     },
-    "/tmp/relar-sequence-tests/normal-files.json": {
+    "/tmp/imre-sequence-tests/normal-files.json": {
       "sha256": "ff960dd4cbd3a05dab32b9f3eaff3805aeb3b31274f0bfc08f51c1bde98c8a20",
       "bytes": 716
     },
-    "/tmp/relar-sequence-tests/normal-fstrings.json": {
+    "/tmp/imre-sequence-tests/normal-fstrings.json": {
       "sha256": "df83771651739110c23fc6161238daecc2c1c61ec408251f3b2ed86d6f517dee",
       "bytes": 724
     },
-    "/tmp/relar-sequence-tests/normal-imports.json": {
+    "/tmp/imre-sequence-tests/normal-imports.json": {
       "sha256": "ed6fe4c259a1cd815a4ade573a7181bb855a0946864ffb40e2fbc8a7fcaf26c9",
       "bytes": 721
     },
-    "/tmp/relar-sequence-tests/normal-io.json": {
+    "/tmp/imre-sequence-tests/normal-io.json": {
       "sha256": "4bcd9f115fd8b8c923f55169000319eb69888552bc7bcb832aad03c3c7046d95",
       "bytes": 705
     },
-    "/tmp/relar-sequence-tests/thinlto-calls.json": {
+    "/tmp/imre-sequence-tests/thinlto-calls.json": {
       "sha256": "cd6ae8e245c3f0b89a4113d50008ae1f2b8929e671f16882499228fe0a5a1a79",
       "bytes": 899
     },
-    "/tmp/relar-sequence-tests/thinlto-classes.json": {
+    "/tmp/imre-sequence-tests/thinlto-classes.json": {
       "sha256": "50bc2185b4771d2545611f3328c2323d7157ebae1e62de7928ecbae256bd331a",
       "bytes": 904
     },
-    "/tmp/relar-sequence-tests/thinlto-differential.json": {
+    "/tmp/imre-sequence-tests/thinlto-differential.json": {
       "sha256": "108f04d7b4b00304a23e720fe3d24cdf6ad6d48d7f8d8b4cc1921b1f846fa419",
       "bytes": 919
     },
-    "/tmp/relar-sequence-tests/thinlto-exceptions.json": {
+    "/tmp/imre-sequence-tests/thinlto-exceptions.json": {
       "sha256": "069ea25e6fa2181ae2ed64a765c0fcfd7e15c12170f8009c6dc79e9b0e5cd5ad",
       "bytes": 914
     },
-    "/tmp/relar-sequence-tests/thinlto-files.json": {
+    "/tmp/imre-sequence-tests/thinlto-files.json": {
       "sha256": "25e43f447404ac9ac937fe1ae5cb872c69f0c1b3ede2219a462e265589bc586e",
       "bytes": 899
     },
-    "/tmp/relar-sequence-tests/thinlto-fstrings.json": {
+    "/tmp/imre-sequence-tests/thinlto-fstrings.json": {
       "sha256": "c72ed2dce2a648f1eec33a3213e406234e90d35341b1a30aa747797f885dcbad",
       "bytes": 908
     },
-    "/tmp/relar-sequence-tests/thinlto-imports.json": {
+    "/tmp/imre-sequence-tests/thinlto-imports.json": {
       "sha256": "b1d18716e4bfaed76793bbdb9c9169c82b4fee3eac23c01b88ffd362e4a1b33c",
       "bytes": 904
     },
-    "/tmp/relar-sequence-tests/thinlto-io.json": {
+    "/tmp/imre-sequence-tests/thinlto-io.json": {
       "sha256": "68adbb6ae75d054793223763b2d6c5ff001dce6c9b2533557718d7590bdc7a0e",
       "bytes": 889
     },
-    "/tmp/relar-sequence-tests/asan-calls.log": {
+    "/tmp/imre-sequence-tests/asan-calls.log": {
       "sha256": "f41757e514f1faa732690da07496f88156c5fd5a1a6930111930fe4c22bba2a9",
       "bytes": 76
     },
-    "/tmp/relar-sequence-tests/asan-classes.log": {
+    "/tmp/imre-sequence-tests/asan-classes.log": {
       "sha256": "a26de98482d5a15d93e729d42fb28bbcc488e3229801530c07894ac08617f363",
       "bytes": 77
     },
-    "/tmp/relar-sequence-tests/asan-differential.log": {
+    "/tmp/imre-sequence-tests/asan-differential.log": {
       "sha256": "6f0eb6f0c26454a86531ba69d7249778e547066993ecc9dbf879c6f205206211",
       "bytes": 97
     },
-    "/tmp/relar-sequence-tests/asan-exceptions.log": {
+    "/tmp/imre-sequence-tests/asan-exceptions.log": {
       "sha256": "91a9949084dff395322b8fe7245ac8d9a85d7cca29884fa43cea75b8e619732a",
       "bytes": 88
     },
-    "/tmp/relar-sequence-tests/asan-files.log": {
+    "/tmp/imre-sequence-tests/asan-files.log": {
       "sha256": "94b426e693acaa5edddab107d6d3f4918cbebc5b8292a35f63cbc4526513b668",
       "bytes": 70
     },
-    "/tmp/relar-sequence-tests/asan-fstrings.log": {
+    "/tmp/imre-sequence-tests/asan-fstrings.log": {
       "sha256": "8f029680aecd8622f741c6b1e6d0059b0e94d749f01d8450a62efe7984da4db1",
       "bytes": 80
     },
-    "/tmp/relar-sequence-tests/asan-imports.log": {
+    "/tmp/imre-sequence-tests/asan-imports.log": {
       "sha256": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0",
       "bytes": 24
     },
-    "/tmp/relar-sequence-tests/asan-io.log": {
+    "/tmp/imre-sequence-tests/asan-io.log": {
       "sha256": "d9f2f6ec07767e258532afcea56a032598491ddbb3d44867d018ac241e36d6a7",
       "bytes": 60
     },
-    "/tmp/relar-sequence-tests/comprehensions-asan.log": {
+    "/tmp/imre-sequence-tests/comprehensions-asan.log": {
       "sha256": "3dda42bc50903d81d397d31980c4c816267b0dc775d2f9bf72b6ae3b09775c3c",
       "bytes": 85
     },
-    "/tmp/relar-sequence-tests/comprehensions-lto.log": {
+    "/tmp/imre-sequence-tests/comprehensions-lto.log": {
       "sha256": "6ec2c9414b0c8d28da95a5b3431f7075ce585fd94c0d47f93d106b88234142ad",
       "bytes": 86
     },
-    "/tmp/relar-sequence-tests/comprehensions-normal.log": {
+    "/tmp/imre-sequence-tests/comprehensions-normal.log": {
       "sha256": "032c0899953819f366ee418fb6fe57c25b4855e7b31a4b8ea7e012f59833fc4b",
       "bytes": 91
     },
-    "/tmp/relar-sequence-tests/containers-asan.log": {
+    "/tmp/imre-sequence-tests/containers-asan.log": {
       "sha256": "e9edf0c86be8f4f8339590310ba3f75d3284a4c8ad795c640f2b932295f99655",
       "bytes": 90
     },
-    "/tmp/relar-sequence-tests/containers-lto.log": {
+    "/tmp/imre-sequence-tests/containers-lto.log": {
       "sha256": "2175ba539c9f745706a70a6ca3392c9efd98cfab260d693d9f6dc1c3b7c812e7",
       "bytes": 91
     },
-    "/tmp/relar-sequence-tests/containers-normal.log": {
+    "/tmp/imre-sequence-tests/containers-normal.log": {
       "sha256": "7ee1b1d12e54c6c8aba8bb9e5bc4dce60a029e77f4aaddd6f021f7f453e2391b",
       "bytes": 96
     },
-    "/tmp/relar-sequence-tests/expressions-asan.log": {
+    "/tmp/imre-sequence-tests/expressions-asan.log": {
       "sha256": "8676628f1701548850a30fc695ca32f6097db6f743ce5bf8d8aa1c0261c4ab73",
       "bytes": 100
     },
-    "/tmp/relar-sequence-tests/expressions-lto.log": {
+    "/tmp/imre-sequence-tests/expressions-lto.log": {
       "sha256": "768f93104fdb5d548aeebc664dd9dad74f93a30e01d74f8ae4f6b8ab06a54387",
       "bytes": 96
     },
-    "/tmp/relar-sequence-tests/expressions-normal.log": {
+    "/tmp/imre-sequence-tests/expressions-normal.log": {
       "sha256": "52b683e9752f7efa44baa4b61c1ddf04670f0457141bf8ef469a331f847cc66b",
       "bytes": 101
     },
-    "/tmp/relar-sequence-tests/normal-calls.log": {
+    "/tmp/imre-sequence-tests/normal-calls.log": {
       "sha256": "8b5da06c502e162cae33864d6c1138395b494a40bfd167ee142360a0eac38331",
       "bytes": 82
     },
-    "/tmp/relar-sequence-tests/normal-classes.log": {
+    "/tmp/imre-sequence-tests/normal-classes.log": {
       "sha256": "17b5e0bb55bf9b355d570c75aeb14d06b943d145fd3c750ef0318eb2452fd116",
       "bytes": 83
     },
-    "/tmp/relar-sequence-tests/normal-differential.log": {
+    "/tmp/imre-sequence-tests/normal-differential.log": {
       "sha256": "bd6213d537870f3ce12fc4012cb254b21ddf4ecd47aea1515c035139a7d6c75e",
       "bytes": 104
     },
-    "/tmp/relar-sequence-tests/normal-exceptions.log": {
+    "/tmp/imre-sequence-tests/normal-exceptions.log": {
       "sha256": "2acc8d882974554d58247a8f2b8a536de2882591a83438ca391f35802fa7cf15",
       "bytes": 94
     },
-    "/tmp/relar-sequence-tests/normal-files.log": {
+    "/tmp/imre-sequence-tests/normal-files.log": {
       "sha256": "150a6cd78bf0167d4285eb9f1d0e22bcff040c2064ac466c5ade34975c304a35",
       "bytes": 76
     },
-    "/tmp/relar-sequence-tests/normal-fstrings.log": {
+    "/tmp/imre-sequence-tests/normal-fstrings.log": {
       "sha256": "4f06dbdb68207a5293f0c8af4558a08f00dc1ca63d978e25b938a9bead6fd60d",
       "bytes": 86
     },
-    "/tmp/relar-sequence-tests/normal-imports.log": {
+    "/tmp/imre-sequence-tests/normal-imports.log": {
       "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835",
       "bytes": 24
     },
-    "/tmp/relar-sequence-tests/normal-io.log": {
+    "/tmp/imre-sequence-tests/normal-io.log": {
       "sha256": "ff6b20527ed1fc9c431c42fafb7f1f6b7f32182e53ec07ab1cf5d5241f1c23e3",
       "bytes": 66
     },
-    "/tmp/relar-sequence-tests/thinlto-calls.log": {
+    "/tmp/imre-sequence-tests/thinlto-calls.log": {
       "sha256": "99f3c9b2051c87627eb8bb2367583405706b99c1918cbe3225899cc442e1388b",
       "bytes": 77
     },
-    "/tmp/relar-sequence-tests/thinlto-classes.log": {
+    "/tmp/imre-sequence-tests/thinlto-classes.log": {
       "sha256": "724d8cc23455331074e5b350ef4a08ea8a4ace147e236f59b60bd8b511eae8f3",
       "bytes": 78
     },
-    "/tmp/relar-sequence-tests/thinlto-differential.log": {
+    "/tmp/imre-sequence-tests/thinlto-differential.log": {
       "sha256": "b190ebd6e7203c28c17ec7faa0c0f5d8c6decd1e773be99ae0c98e060f7b79ad",
       "bytes": 98
     },
-    "/tmp/relar-sequence-tests/thinlto-exceptions.log": {
+    "/tmp/imre-sequence-tests/thinlto-exceptions.log": {
       "sha256": "4be6f9ad9a05c34549de276fa89593d1ea332cc66be7ccb7b0216027cb0ea3f3",
       "bytes": 89
     },
-    "/tmp/relar-sequence-tests/thinlto-files.log": {
+    "/tmp/imre-sequence-tests/thinlto-files.log": {
       "sha256": "3dd64d3fc327432c225d6548a6ec9041a05e068128093bc969f1978319f64cc1",
       "bytes": 71
     },
-    "/tmp/relar-sequence-tests/thinlto-fstrings.log": {
+    "/tmp/imre-sequence-tests/thinlto-fstrings.log": {
       "sha256": "184c59375e0e29053e2857f5a4564a6b70174a286c91fc28388dce2e2a070ef1",
       "bytes": 81
     },
-    "/tmp/relar-sequence-tests/thinlto-imports.log": {
+    "/tmp/imre-sequence-tests/thinlto-imports.log": {
       "sha256": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0",
       "bytes": 24
     },
-    "/tmp/relar-sequence-tests/thinlto-io.log": {
+    "/tmp/imre-sequence-tests/thinlto-io.log": {
       "sha256": "8db850d1783de29fdc0dc48daec150b64f1b10efdcfa1ee0ed8e7bd2dc5e0fc7",
       "bytes": 61
     },
-    "/tmp/relar-sequence-tests/asan-calls.sandbox.log": {
+    "/tmp/imre-sequence-tests/asan-calls.sandbox.log": {
       "sha256": "29ef935baa6d5205ff4633db5ad0ebf7a180c5101e62f85622cc5d4f8d0e8643",
       "bytes": 857
     },
-    "/tmp/relar-sequence-tests/asan-calls.sandbox.json": {
+    "/tmp/imre-sequence-tests/asan-calls.sandbox.json": {
       "sha256": "558581a4cee9b26b9d55372564a0e0fa11fc104426267d031337e600d810add0",
       "bytes": 801
     },
-    "/tmp/relar-sequence-tests/asan-classes.sandbox.log": {
+    "/tmp/imre-sequence-tests/asan-classes.sandbox.log": {
       "sha256": "319cf22c1a8c97a0574000c83e7822af3438b1cf2572f551a65dc89a3e450790",
       "bytes": 1265
     },
-    "/tmp/relar-sequence-tests/asan-classes.sandbox.json": {
+    "/tmp/imre-sequence-tests/asan-classes.sandbox.json": {
       "sha256": "d3cc87efacd14b47dd5f2c1b83f67be13ee79fa6eb974f1ed811cb0f0c5de46b",
       "bytes": 807
     },
-    "/tmp/relar-sequence-tests/asan-differential.sandbox.log": {
+    "/tmp/imre-sequence-tests/asan-differential.sandbox.log": {
       "sha256": "ef9e0472ad311305fe5275932cbc9ea5e03824c53f14986ae0b4bf90c4515ec5",
       "bytes": 653
     },
-    "/tmp/relar-sequence-tests/asan-differential.sandbox.json": {
+    "/tmp/imre-sequence-tests/asan-differential.sandbox.json": {
       "sha256": "4c8eac11e7097ddcff95c77c60c05021128aa8e6f8f4ba5eb227e6b0ac3f8bed",
       "bytes": 822
     },
-    "/tmp/relar-sequence-tests/asan-exceptions.sandbox.log": {
+    "/tmp/imre-sequence-tests/asan-exceptions.sandbox.log": {
       "sha256": "b157d9985d3887ad09c7e8a0c49831d353fef8f3e76c821c944d4db7f538491d",
       "bytes": 882
     },
-    "/tmp/relar-sequence-tests/asan-exceptions.sandbox.json": {
+    "/tmp/imre-sequence-tests/asan-exceptions.sandbox.json": {
       "sha256": "3e5a0b63191019fda132c5a70acddc7caa274971614491d571ac6a8f9343731b",
       "bytes": 816
     },
-    "/tmp/relar-sequence-tests/asan-files.sandbox.log": {
+    "/tmp/imre-sequence-tests/asan-files.sandbox.log": {
       "sha256": "34e746e2e08cdd762f6a878063447bc0ea8d1baebafa929525ef4a11b401cfba",
       "bytes": 806
     },
-    "/tmp/relar-sequence-tests/asan-files.sandbox.json": {
+    "/tmp/imre-sequence-tests/asan-files.sandbox.json": {
       "sha256": "361125101d18336767901e3ca08d8dd835562fdf567ceb7fc1a0b7eb267f0ae2",
       "bytes": 801
     },
-    "/tmp/relar-sequence-tests/asan-fstrings.sandbox.log": {
+    "/tmp/imre-sequence-tests/asan-fstrings.sandbox.log": {
       "sha256": "bf38800dd8579a68b80c85d196b64398f52300536246dc13ad4673d5a28001f7",
       "bytes": 974
     },
-    "/tmp/relar-sequence-tests/asan-fstrings.sandbox.json": {
+    "/tmp/imre-sequence-tests/asan-fstrings.sandbox.json": {
       "sha256": "476051444cd026f05bc2e001468193dc3c6f41aaf2694a4472f8154e9f821361",
       "bytes": 810
     },
-    "/tmp/relar-sequence-tests/asan-imports.sandbox.log": {
+    "/tmp/imre-sequence-tests/asan-imports.sandbox.log": {
       "sha256": "eb38ce6e068ac1338593e1a6d9eb6176736b2cbcca6d7f4b2fcee17bd030f548",
       "bytes": 882
     },
-    "/tmp/relar-sequence-tests/asan-imports.sandbox.json": {
+    "/tmp/imre-sequence-tests/asan-imports.sandbox.json": {
       "sha256": "4610d5fbbbd9f42154e1ec0438edc06c2590b97023586632379c604df1c046c9",
       "bytes": 807
     },
-    "/tmp/relar-sequence-tests/asan-io.sandbox.log": {
+    "/tmp/imre-sequence-tests/asan-io.sandbox.log": {
       "sha256": "2e359b71720e4f2250ec2faac10da1c7775b9bff6fa4fdc2e87540e982cf8da6",
       "bytes": 757
     },
-    "/tmp/relar-sequence-tests/asan-io.sandbox.json": {
+    "/tmp/imre-sequence-tests/asan-io.sandbox.json": {
       "sha256": "77ca59bb42d3e1fc2a452d609bb32a2e54bf3dfcf42aeb3add013fd8ebe73622",
       "bytes": 792
     },
-    "/tmp/relar-sequence-tests/comprehensions-asan-sandbox.log": {
+    "/tmp/imre-sequence-tests/comprehensions-asan-sandbox.log": {
       "sha256": "125f47ae078a0bf71526dd05e938828bbb8e886c8bbce5e3ca3245d2db7703ad",
       "bytes": 1018
     },
-    "/tmp/relar-sequence-tests/containers-asan-sandbox.log": {
+    "/tmp/imre-sequence-tests/containers-asan-sandbox.log": {
       "sha256": "62c951e92fe038acaff7ae4c279e44cc0d5e9c806df5f1dcfb1e076e48a21c17",
       "bytes": 790
     },
-    "/tmp/relar-sequence-tests/expressions-asan-sandbox.log": {
+    "/tmp/imre-sequence-tests/expressions-asan-sandbox.log": {
       "sha256": "05c8ac3aea696e4a372b7ee401867331e75899fd0687cd9480fdd7494b05bc3b",
       "bytes": 1181
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-inventory-asan.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-inventory-asan.json": {
       "sha256": "1421cda57a422a34d4eadf4c49ae2dab94e427f31b397d8edb8a102193703579",
       "bytes": 815446
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-migration-oracle.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-migration-oracle.json": {
       "sha256": "1b90b850e47fd062b3e2764c5e44cfdffcef00f7f8a22640e87ef7d9140e4bd8",
       "bytes": 1506576
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-count-parser-validation.json": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-count-parser-validation.json": {
       "sha256": "348b7350cc01f8ade4b8c03c45d3d5e590585e6032f03ca58194e285b69c6c3d",
       "bytes": 105411
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-count-parser-validation.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-count-parser-validation.py": {
       "sha256": "0a02fa8fc1c88f93bdf9935ea30a861ac8308a903a95f75ddd29aee43dfc4d3e",
       "bytes": 3427
     },
-    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-validate-migration.py": {
+    "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-validate-migration.py": {
       "sha256": "a910771f87ee5bfea09442035a6ec7ea2a12ff8d30727b6f90ede2541bd92612",
       "bytes": 2487
     }

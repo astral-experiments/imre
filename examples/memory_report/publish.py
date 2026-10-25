@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def write_report(path: Path, rendered: str) -> None:
-    with tempfile.TemporaryDirectory(dir=path.parent, prefix=".relar-report-") as name:
+    with tempfile.TemporaryDirectory(dir=path.parent, prefix=".imre-report-") as name:
         staged = Path(name) / "report.md"
         staged.write_text(rendered, encoding="utf-8")
         staged.replace(path)

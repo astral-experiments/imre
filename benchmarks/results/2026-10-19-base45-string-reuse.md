@@ -1,16 +1,16 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Removing repeated string copies from unchanged Base45
 
-With the upstream Python codec unchanged, sustained ThinLTO encoding now takes **1.535× Rust's time for 16 KiB inputs**, **1.676× for 1 KiB**, and **2.406× for 64 bytes**. The large-input encoder is **43.96× faster than the previous Relar executable** in a separate same-session comparison. This substantially narrows the native gap; it does not establish Rust parity. ThinLTO decoding still takes **26.95–31.51× Rust's time**.
+With the upstream Python codec unchanged, sustained ThinLTO encoding now takes **1.535× Rust's time for 16 KiB inputs**, **1.676× for 1 KiB**, and **2.406× for 64 bytes**. The large-input encoder is **43.96× faster than the previous Imre executable** in a separate same-session comparison. This substantially narrows the native gap; it does not establish Rust parity. ThinLTO decoding still takes **26.95–31.51× Rust's time**.
 
-The [compiler/runtime change](https://github.com/viarius-experiments/relar/pull/49) continues GitHub Stack 4 after the unchanged-library milestone. Measured application, Rust reference, and harness sources are clean commit `3349b85efc78e5ac09a92d8d367d914264679067`; compiler/runtime sources are `31bffb7e1aa929497c89b6de38f8e9efa83302e8`. This report and its evidence are committed afterward. The [initial report](2026-10-19-base45.md) remains intact.
+The [compiler/runtime change](https://github.com/viarius-experiments/imre/pull/49) continues GitHub Stack 4 after the unchanged-library milestone. Measured application, Rust reference, and harness sources are clean commit `3349b85efc78e5ac09a92d8d367d914264679067`; compiler/runtime sources are `31bffb7e1aa929497c89b6de38f8e9efa83302e8`. This report and its evidence are committed afterward. The [initial report](2026-10-19-base45.md) remains intact.
 
 ## Sustained comparison with Rust
 
-Each process encodes **64 MiB of raw data** through repeated calls on the indicated payload. Values are median milliseconds with inclusive quartiles in brackets. **Relar / Rust is a time ratio: lower is better.** Both native executables use ThinLTO, including matched LLVM import and inline budgets of 1,000. Twenty balanced AB/BA measured rounds follow two balanced warmup rounds.
+Each process encodes **64 MiB of raw data** through repeated calls on the indicated payload. Values are median milliseconds with inclusive quartiles in brackets. **Imre / Rust is a time ratio: lower is better.** Both native executables use ThinLTO, including matched LLVM import and inline budgets of 1,000. Twenty balanced AB/BA measured rounds follow two balanced warmup rounds.
 
-| Raw bytes per call | Relar ms [Q1–Q3] | Rust ms [Q1–Q3] | Relar / Rust |
+| Raw bytes per call | Imre ms [Q1–Q3] | Rust ms [Q1–Q3] | Imre / Rust |
 |---|---:|---:|---:|
 | 64 | 462.438 [460.650–464.695] | 192.214 [191.288–193.173] | 2.406× |
 | 1,024 | 294.293 [293.460–296.674] | 175.558 [174.758–176.571] | 1.676× |
@@ -20,11 +20,11 @@ These larger batches reduce the proportion of process startup in the samples. Th
 
 The [independent Rust reference](../reference/base45_codec/README.md) uses a fixed alphabet, preallocated byte buffers, direct arithmetic, and the same file protocol, repetition count, checksum, and complete final output. `black_box` guards each input and result against elimination of repeated work. The reference's exact source, compiler, flags, and executable hashes are retained in every benchmark record. This compares the unchanged Python implementation with an idiomatic native implementation, including their different storage strategies.
 
-## Same-session comparison with previous Relar
+## Same-session comparison with previous Imre
 
 The previous and current retained ThinLTO executables were interleaved on CPU 0 using identical inputs and the same 2 MiB batch protocol. Twenty balanced AB/BA rounds follow two warmup rounds. The original codec and driver hashes match across both executables; every output and checksum is checked.
 
-| Raw bytes per call | Previous Relar ms [Q1–Q3] | Current Relar ms [Q1–Q3] | Previous / current |
+| Raw bytes per call | Previous Imre ms [Q1–Q3] | Current Imre ms [Q1–Q3] | Previous / current |
 |---|---:|---:|---:|
 | 64 | 221.874 [220.441–223.305] | 18.229 [17.173–18.699] | 12.171× |
 | 1,024 | 262.729 [261.842–263.999] | 13.058 [11.850–13.334] | 20.120× |
@@ -32,11 +32,11 @@ The previous and current retained ThinLTO executables were interleaved on CPU 0 
 
 Current samples in this control are short and noisier: the largest IQR/median is 11.36%. Their spread is shown above. The control directly establishes the before/after encoder improvement; the separately measured Rust comparisons establish the remaining native gap.
 
-## Ordinary linking: Relar, Rust, and CPython
+## Ordinary linking: Imre, Rust, and CPython
 
-Each row represents **2 MiB of raw data** per process, with six balanced warmup rounds and 24 measured rounds covering all six engine orders four times. **CPython / Relar is a speedup ratio: higher is better.**
+Each row represents **2 MiB of raw data** per process, with six balanced warmup rounds and 24 measured rounds covering all six engine orders four times. **CPython / Imre is a speedup ratio: higher is better.**
 
-| Operation / raw bytes per call | Relar ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Relar / Rust | CPython / Relar |
+| Operation / raw bytes per call | Imre ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Imre / Rust | CPython / Imre |
 |---|---:|---:|---:|---:|---:|
 | encode-64 | 23.274 [23.116–23.783] | 9.444 [9.315–9.550] | 328.516 [326.976–334.146] | 2.465× | 14.115× |
 | decode-bytes-64 | 279.419 [278.156–283.967] | 6.987 [6.858–7.049] | 327.920 [326.188–329.812] | 39.989× | 1.174× |
@@ -48,9 +48,9 @@ Each row represents **2 MiB of raw data** per process, with six balanced warmup 
 | decode-bytes-16384 | 289.578 [288.742–292.338] | 6.299 [6.158–6.480] | 341.114 [339.720–346.188] | 45.973× | 1.178× |
 | decode-text-16384 | 266.315 [264.943–267.576] | 5.948 [5.843–6.097] | 338.421 [335.883–341.188] | 44.777× | 1.271× |
 
-## ThinLTO: Relar, Rust, and CPython
+## ThinLTO: Imre, Rust, and CPython
 
-| Operation / raw bytes per call | Relar ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Relar / Rust | CPython / Relar |
+| Operation / raw bytes per call | Imre ms [Q1–Q3] | Rust ms [Q1–Q3] | CPython ms [Q1–Q3] | Imre / Rust | CPython / Imre |
 |---|---:|---:|---:|---:|---:|
 | encode-64 | 18.187 [17.861–18.246] | 9.447 [9.309–9.649] | 329.143 [326.614–330.514] | 1.925× | 18.097× |
 | decode-bytes-64 | 179.764 [179.148–181.140] | 6.671 [6.496–6.743] | 328.746 [327.184–332.038] | 26.948× | 1.829× |
@@ -74,23 +74,23 @@ A guarded range pass specializes eligible zero-start, positive-constant-step lea
 
 ## Allocation and instruction profiles
 
-Separate DHAT and Callgrind runs use the exact timed ThinLTO Relar and Rust binaries. Each profiled process handles **64 KiB of raw data**: 1,024 calls for encode-64 or four calls for the large cases. Inputs, repetitions, checksums, and full outputs match the historical profiles.
+Separate DHAT and Callgrind runs use the exact timed ThinLTO Imre and Rust binaries. Each profiled process handles **64 KiB of raw data**: 1,024 calls for encode-64 or four calls for the large cases. Inputs, repetitions, checksums, and full outputs match the historical profiles.
 
 | Case / engine | Cumulative allocated bytes | Allocation blocks | Peak live bytes | Callgrind instructions |
 |---|---:|---:|---:|---:|
-| encode-64 / previous Relar | 7,046,310 | 160,854 | 14,379 | 66,583,941 |
-| encode-64 / current Relar | 503,922 | 7,252 | 14,414 | 6,136,042 |
+| encode-64 / previous Imre | 7,046,310 | 160,854 | 14,379 | 66,583,941 |
+| encode-64 / current Imre | 503,922 | 7,252 | 14,414 | 6,136,042 |
 | encode-64 / Rust | 102,474 | 1,042 | 2,170 | 2,280,287 |
-| encode-16384 / previous Relar | 408,084,816 | 163,914 | 95,174 | 439,795,671 |
-| encode-16384 / current Relar | 557,892 | 168 | 105,386 | 3,337,720 |
+| encode-16384 / previous Imre | 408,084,816 | 163,914 | 95,174 | 439,795,671 |
+| encode-16384 / current Imre | 557,892 | 168 | 105,386 | 3,337,720 |
 | encode-16384 / Rust | 118,797 | 22 | 67,453 | 2,060,679 |
-| decode-bytes-16384 / previous Relar | 7,291,988 | 98,535 | 455,557 | 70,934,097 |
-| decode-bytes-16384 / current Relar | 7,291,628 | 98,525 | 455,592 | 70,473,196 |
+| decode-bytes-16384 / previous Imre | 7,291,988 | 98,535 | 455,557 | 70,934,097 |
+| decode-bytes-16384 / current Imre | 7,291,628 | 98,525 | 455,592 | 70,473,196 |
 | decode-bytes-16384 / Rust | 94,239 | 22 | 59,279 | 1,618,712 |
 
 For large encoding, cumulative allocation falls from **408,084,816 to 557,892 bytes**, a **731× reduction**; allocation blocks fall **976×**, and instrumented instructions fall **132×**. Peak live allocation rises from **95,174 to 105,386 bytes**, or **10.7%**, because geometric capacity growth retains some spare space. Cumulative allocation is not peak memory or RSS.
 
-The remaining large-encode allocation includes **418,252 bytes in 72 growth allocations** under the append slow path and **98,304 bytes in four final string-to-bytes conversions**. Growth is linear overall, but Rust reserves the final output capacity directly. Current Relar still requests **4.70×** Rust's cumulative allocation and executes **1.62×** its instrumented instructions in this profile. These counts include imports, startup, file I/O, and checksum work. Callgrind counts are instrumented instructions, not hardware CPU-time percentages. Profiling ran separately from timing.
+The remaining large-encode allocation includes **418,252 bytes in 72 growth allocations** under the append slow path and **98,304 bytes in four final string-to-bytes conversions**. Growth is linear overall, but Rust reserves the final output capacity directly. Current Imre still requests **4.70×** Rust's cumulative allocation and executes **1.62×** its instrumented instructions in this profile. These counts include imports, startup, file I/O, and checksum work. Callgrind counts are instrumented instructions, not hardware CPU-time percentages. Profiling ran separately from timing.
 
 The decoder's allocation and instruction counts remain close to the historical profile. Its **98,525 allocation blocks** and **70.47 million instructions**, versus Rust's **22 blocks** and **1.62 million instructions**, make it a distinct remaining optimization target. This encoder change does not resolve that gap.
 
@@ -100,7 +100,7 @@ The codec, `py.typed`, upstream tests, and BSD-2-Clause license match all four h
 
 At each of five optimization configurations, all five unchanged upstream test methods pass through the native adapter, covering **323 validly typed codec calls**, **289 additional CPython differential cases**, and **two compile-time rejections** for upstream calls passing integer `42` to typed APIs. Those last two checks are not native runtime `TypeError` tests. Validation checks complete values, exact error messages, causes, suppression, unchanged output on failure, alias mutations, and recovery, including odd, empty, malformed, Unicode, and all-byte inputs.
 
-The Rust reference passes **295 checks** against both CPython 3.14.5 and the CI-compatible Python 3.12 interpreter. Of these, 291 require exact messages; four explicitly recorded combining-mark `repr` boundaries allow different character quoting while checking error category, cause, suppression, and unchanged output. Relar matches CPython's exact messages in all cases. Timed decoder workloads use valid ASCII and do not exercise those four Rust diagnostic boundaries.
+The Rust reference passes **295 checks** against both CPython 3.14.5 and the CI-compatible Python 3.12 interpreter. Of these, 291 require exact messages; four explicitly recorded combining-mark `repr` boundaries allow different character quoting while checking error category, cause, suppression, and unchanged output. Imre matches CPython's exact messages in all cases. Timed decoder workloads use valid ASCII and do not exercise those four Rust diagnostic boundaries.
 
 The integrated changes pass **116 Rust unit tests**, strict workspace Clippy, formatting, focused Ruff checks, and **23 language suites** across ordinary O0/O3, ThinLTO O3, and ASan/LeakSanitizer O0/O1. Excluding separately reported Base45 checks, this is **3,892 language checks**: 1,414 ordinary, 1,064 ThinLTO, and 1,414 combined sanitizer checks. Counts include compile-time rejections. One ThinLTO float compilation timed out during a 24-worker validation run; its isolated retry passed. Both attempts are retained. Sanitizers cover generated code and the custom runtime with leak detection enabled; the prebuilt Rust standard library is uninstrumented.
 
@@ -108,7 +108,7 @@ All six existing first-party application oracle suites pass **935 cases**, plus 
 
 ## Measurement and retained evidence
 
-All timing ran on October 19, 2026, on an AMD EPYC-Milan host pinned to CPU 0, outside tracing. CPython 3.14.5 has PGO and LTO enabled, the GIL enabled, and JIT disabled. Relar uses Clang 18 at O3; Rust uses Ohm 1.98.1 with LLVM 22.1.8. ThinLTO uses LLVM 22 LLD and linker-plugin runtime bitcode. The [build manifest](2026-10-19-base45-string-reuse-build.json) records exact tool versions, commands, source hashes, and frozen artifact identities. Compiler/runtime artifacts were built before their commit from the same verified source bytes; measurement sources were committed and clean.
+All timing ran on October 19, 2026, on an AMD EPYC-Milan host pinned to CPU 0, outside tracing. CPython 3.14.5 has PGO and LTO enabled, the GIL enabled, and JIT disabled. Imre uses Clang 18 at O3; Rust uses Ohm 1.98.1 with LLVM 22.1.8. ThinLTO uses LLVM 22 LLD and linker-plugin runtime bitcode. The [build manifest](2026-10-19-base45-string-reuse-build.json) records exact tool versions, commands, source hashes, and frozen artifact identities. Compiler/runtime artifacts were built before their commit from the same verified source bytes; measurement sources were committed and clean.
 
 Timing includes process startup, imports where applicable, one input read, all repeated codec calls, checksum work, one complete final output write, and exit. Preparation, compilation, hashing, and verification are outside the clock. OS caches are warm and output is not fsynced. Task-owned builds, tests, and profiles were stopped during timing; host frequency and unrelated shared-host activity remain uncontrolled. Timed inputs have valid even lengths; separate correctness checks cover the other cases.
 
