@@ -45,6 +45,8 @@ jobs:
             --suites differential io files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
 
+      - name: Compare string core on Apple Silicon
+        run: python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
       - name: Check pinned PyPA RECORD fixtures with reference CPython
         run: python3 tests/wheel_record.py --reference-only
       - name: Compare uv's upstream wheel checker with CPython
@@ -164,6 +166,8 @@ jobs:
           for suite in build_cache module_objects link_cache build_output; do
             env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/imre
           done
+      - name: Run original string core methods in native Imre
+        run: python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Run complete itertools methods in native Imre
         run: |
           for opt in 0 3; do
