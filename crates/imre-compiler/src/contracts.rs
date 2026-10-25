@@ -118,6 +118,7 @@ impl Builtin {
                     | PathOperation::JoinObject
                     | PathOperation::Parent
                     | PathOperation::IsRelativeTo
+                    | PathOperation::AsPosix
                     | PathOperation::ReadText
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
@@ -152,7 +153,6 @@ impl Builtin {
                     | PathOperation::Root
                     | PathOperation::Anchor
                     | PathOperation::CountPart
-                    | PathOperation::AsPosix
                     | PathOperation::Text
                     | PathOperation::Name
                     | PathOperation::Stem
@@ -371,6 +371,7 @@ impl Builtin {
             | Self::CacheNew
             | Self::CacheTable
             | Self::CacheStat(_)
+            | Self::CacheParameter(_)
             | Self::CacheClear
             | Self::CallableContext
             | Self::ModuleCache(_)
@@ -451,6 +452,9 @@ impl Builtin {
             | Self::SysPlatform
             | Self::OsName
             | Self::SysOrigArgv
+            | Self::DocCaptureStart
+            | Self::DocCaptureTake
+            | Self::DocAscii
             | Self::SysArgv
             | Self::FileFileno
             | Self::TextClose
@@ -555,6 +559,10 @@ impl Builtin {
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+            }
+            Self::CacheParameter(_) => {
+                matches!(args, [wrapper] if types.cached_function(wrapper.ty).is_some())
+                    && result == Type::Document(crate::ir::DocumentShape::Any)
             }
             Self::CacheNew | Self::ModuleCache(_) => {
                 args.is_empty() && result.cache_table().is_some()
@@ -817,6 +825,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_input"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
+                | "imre_path_as_posix"
                 | "imre_path_join"
                 | "imre_path_join_object"
                 | "imre_path_parent"

@@ -84,6 +84,60 @@ pub(super) unsafe fn descriptor<'a>(payload: *const usize) -> &'a RecordDescript
     unsafe { (*payload.cast::<Header>().sub(1)).descriptor() }
 }
 
+/// Copy the inner cached callable's public policy, as update_wrapper does.
+/// Capacity used for lookup and eviction belongs to the new wrapper's table.
+///
+/// # Safety
+/// The destination is a newly allocated four-word cache callable; source is
+/// null or a rooted native callable (two ordinary words or four cache words).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_callable_copy_cache_policy(
+    destination: *mut usize,
+    source: *const usize,
+    capacity: i64,
+    typed: u32,
+) {
+    // SAFETY: all four fields exist on a cache callable. Its two public
+    // policy fields are plain words and do not own references.
+    unsafe {
+        debug_assert_eq!(descriptor(destination).length, 4);
+        if !source.is_null() && descriptor(source).length == 4 {
+            destination.add(2).write(*source.add(2));
+            destination.add(3).write(*source.add(3));
+        } else {
+            destination.add(2).write(capacity as usize);
+            destination.add(3).write(typed as usize);
+        }
+    }
+}
+
+/// Read a cached callable's public maxsize or typed flag as a dictionary value.
+///
+/// # Safety
+/// The owner roots a four-word cache callable. Its last two words contain
+/// an immutable signed capacity and a boolean, in that order.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_callable_cache_parameter(
+    wrapper: *const usize,
+    typed: u32,
+) -> *const Object {
+    use super::json::readonly::document::Value;
+    // SAFETY: generated code verified the wrapper layout.
+    let value = unsafe {
+        if typed != 0 {
+            Value::Bool(*wrapper.add(3) != 0)
+        } else {
+            let size = *wrapper.add(2) as i64;
+            if size < 0 {
+                Value::Null
+            } else {
+                Value::Integer(crate::Int::from_usize(size as usize))
+            }
+        }
+    };
+    Rc::into_raw(value.object())
+}
+
 /// Checks the declared identity of a record, including across codegen units.
 ///
 /// # Safety
