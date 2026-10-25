@@ -4298,6 +4298,13 @@ impl<'a> Checker<'a> {
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(Binding::Intrinsic(Intrinsic::Declaration(symbol))) = self.resolve(expression) {
+            return Err(error(
+                self.source,
+                expression,
+                &format!("no native implementation for {symbol}"),
+            ));
+        }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level) | Intrinsic::SignalNumber(level),
         )) = self.resolve(expression)
@@ -5464,6 +5471,13 @@ impl<'a> Checker<'a> {
                 | Intrinsic::Semaphore),
             )) => {
                 return self.async_builtin(kind, call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::Declaration(symbol))) => {
+                return Err(error(
+                    self.source,
+                    call,
+                    &format!("no native implementation for {symbol}"),
+                ));
             }
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {

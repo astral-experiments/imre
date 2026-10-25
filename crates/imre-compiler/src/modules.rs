@@ -12,6 +12,7 @@ use crate::analysis::{CheckedOverload, Session};
 use crate::ir::PosixPathOperation;
 use crate::watch::FileSystem;
 
+mod declarations;
 mod empty_keywords;
 mod entry_profile;
 mod reachability;
@@ -52,6 +53,7 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    Declaration(&'static str),
     Argparse,
     Future,
     Sys,
@@ -101,6 +103,7 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    Declaration(&'static str),
     ArgumentParser,
     ArgparseNamespace,
     RawDescriptionHelpFormatter,
@@ -289,7 +292,7 @@ impl IntrinsicModule {
             "imre.json" => Some(Self::ImreJson),
             "imre.toml" => Some(Self::ImreToml),
             "tomllib" => Some(Self::Tomllib),
-            _ => None,
+            _ => declarations::module(name).map(Self::Declaration),
         }
     }
 
@@ -480,7 +483,7 @@ impl IntrinsicModule {
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
-            _ => return None,
+            _ => return declarations::symbol(self, name),
         };
         Some(Binding::Intrinsic(symbol))
     }
@@ -710,6 +713,7 @@ impl SourceGraph {
     pub(crate) fn single_with_mode(source: &str, reachable_only: bool) -> Result<Self, String> {
         let mut loader = Loader::new(PathBuf::from("/"), &[], FileSystem::default())?;
         loader.allow_imports = false;
+        loader.reachable_only = reachable_only;
         let filename = PathBuf::from("/input.py");
         let entry = loader.add(
             filename.clone(),
@@ -797,6 +801,7 @@ impl SourceGraph {
             .read_to_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
         let mut loader = Loader::new(root, extension_paths, fs)?;
+        loader.reachable_only = reachable_only;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
         }
@@ -868,6 +873,7 @@ struct Loader<'a> {
     loading: HashSet<ModuleId>,
     import_depth: usize,
     allow_imports: bool,
+    reachable_only: bool,
     initialization: Vec<(ModuleId, Range<usize>)>,
 }
 
@@ -904,6 +910,7 @@ impl<'a> Loader<'a> {
             loading: HashSet::new(),
             import_depth: 0,
             allow_imports: true,
+            reachable_only: false,
             initialization: Vec::new(),
         })
     }
@@ -1196,12 +1203,24 @@ impl<'a> Loader<'a> {
                     && let Some(module) = self.intrinsic_module(&name)?
                 {
                     for alias in &import.names {
-                        let binding = module.symbol(alias.name.as_str()).ok_or_else(|| {
-                            format!(
-                                "unsupported sealed standard-library export {name}.{}",
-                                alias.name
-                            )
-                        })?;
+                        let binding = module
+                            .symbol(alias.name.as_str())
+                            .filter(|binding| {
+                                self.reachable_only
+                                    || !matches!(
+                                        binding,
+                                        Binding::Intrinsic(Intrinsic::Declaration(_))
+                                            | Binding::IntrinsicModule(
+                                                IntrinsicModule::Declaration(_)
+                                            )
+                                    )
+                            })
+                            .ok_or_else(|| {
+                                format!(
+                                    "unsupported sealed standard-library export {name}.{}",
+                                    alias.name
+                                )
+                            })?;
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
@@ -1258,7 +1277,9 @@ impl<'a> Loader<'a> {
     /// Intrinsic imports use fixed identities, but never silently accept a
     /// first-party file that attempts to shadow the standard-library namespace.
     fn intrinsic_module(&mut self, name: &str) -> Result<Option<IntrinsicModule>, String> {
-        let module = IntrinsicModule::named(name);
+        let module = IntrinsicModule::named(name).filter(|module| {
+            self.reachable_only || !matches!(module, IntrinsicModule::Declaration(_))
+        });
         if module.is_some() {
             self.reject_stdlib_shadow(name)?;
         }

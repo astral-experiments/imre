@@ -257,6 +257,47 @@ impl Session {
         )
     }
 
+    /// Bound methods on these sealed native receiver layouts cannot dispatch to a
+    /// first-party class. Source subclasses of those layouts are rejected by the
+    /// fixed-class collector. Unknowns, unions, protocols and first-party
+    /// receivers keep the ordinary conservative name-based roots.
+    pub(crate) fn sealed_native_method(
+        &self,
+        module: usize,
+        attr: &ruff_python_ast::ExprAttribute,
+    ) -> bool {
+        use ty_python_semantic::types::{ProgramEnvironment, Type as Ty};
+        self.used_hints.set(true);
+        let program = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, program);
+        if !matches!(attr.inferred_type(&model), Some(Ty::BoundMethod(_))) {
+            return false;
+        }
+        let Some(receiver @ Ty::NominalInstance(_)) = attr.value.inferred_type(&model) else {
+            return false;
+        };
+        let Some(class) = receiver.definition(&self.db, &ProgramEnvironment::from_file(program))
+        else {
+            return false;
+        };
+        let Some(range) = class.focus_range(&self.db) else {
+            return false;
+        };
+        let Some(path) = range.file().path(&self.db).as_vendored_path() else {
+            return false;
+        };
+        // Use the bundled stdlib source identity, never a user-controlled module name.
+        let module = match path.file_name() {
+            Some("__init__.pyi") => path.parent().and_then(|parent| parent.file_name()),
+            _ if path.extension() == Some("pyi") => path.file_stem(),
+            _ => None,
+        };
+        matches!(
+            module,
+            Some("zipfile" | "io" | "_io" | "pathlib" | "re" | "gzip" | "hashlib" | "_hashlib")
+        )
+    }
+
     /// A nominal instance here, instead of its declared optional union, records
     /// a source-level narrowing. The backend must still guard mutable rereads.
     pub(crate) fn narrowed_instance(&self, module: usize, expression: &Expr) -> bool {
