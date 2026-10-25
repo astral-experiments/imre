@@ -424,12 +424,7 @@ pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const
 }
 
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
-pub(super) fn open(
-    path: &Rc<Str>,
-    mode: u32,
-    binary: bool,
-    gzip: bool,
-) -> Result<*const Object> {
+pub(super) fn open(path: &Rc<Str>, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
     let state = open_state(path, mode, binary, gzip)?;
     Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
         Storage::File(Box::new(state)),
@@ -465,10 +460,7 @@ fn open_state(path: &Rc<Str>, mode: u32, binary: bool, gzip: bool) -> Result<Fil
 }
 
 /// Open a raw descriptor with the same pathname and directory errors as Python open().
-pub(super) fn open_file(
-    path: &Rc<Str>,
-    mode: u32,
-) -> Result<(std::fs::File, std::fs::Metadata)> {
+pub(super) fn open_file(path: &Rc<Str>, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
     super::super::initialize_io();
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
@@ -480,8 +472,14 @@ pub(super) fn open_file(
             .create(true)
             .truncate(true)
             .open(path.as_str()),
-        2 => OpenOptions::new().append(true).create(true).open(path.as_str()),
-        3 => OpenOptions::new().write(true).create_new(true).open(path.as_str()),
+        2 => OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path.as_str()),
+        3 => OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path.as_str()),
         _ => fail("SystemError", "invalid file mode"),
     }
     .map_err(|error| errno_with_filename(error, Some(path)))?;
@@ -875,7 +873,12 @@ mod tests {
                 [first.as_bytes(), second.as_bytes()].concat()
             };
             std::fs::write(&path, bytes).unwrap();
-            let mut state = open_state(path.to_str().unwrap(), 0, false, gzip)
+            let mut state = open_state(
+                &Rc::new(Str::from(path.to_str().unwrap())),
+                0,
+                false,
+                gzip,
+            )
                 .ok()
                 .unwrap();
             let input = state.input().ok().unwrap();
@@ -894,7 +897,12 @@ mod tests {
         bytes.resize(8191, b'a');
         bytes.extend(b"\xf0\x9f\xff");
         std::fs::write(&path, bytes).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, false, false)
+        let mut state = open_state(
+                &Rc::new(Str::from(path.to_str().unwrap())),
+                0,
+                false,
+                false,
+            )
             .ok()
             .unwrap();
         let input = state.input().ok().unwrap();
@@ -919,7 +927,12 @@ mod tests {
         .concat();
         gzip.splice(10..10, metadata);
         std::fs::write(&path, &gzip).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
+        let mut state = open_state(
+                &Rc::new(Str::from(path.to_str().unwrap())),
+                0,
+                true,
+                true,
+            )
             .ok()
             .unwrap();
         let input = state.input().ok().unwrap();
@@ -934,7 +947,12 @@ mod tests {
         let end = gzip.len();
         gzip[end - 8] ^= 1;
         std::fs::write(&path, &gzip).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
+        let mut state = open_state(
+                &Rc::new(Str::from(path.to_str().unwrap())),
+                0,
+                true,
+                true,
+            )
             .ok()
             .unwrap();
         let input = state.input().ok().unwrap();
@@ -958,7 +976,12 @@ mod tests {
             ),
         ] {
             std::fs::write(&path, bytes).unwrap();
-            let mut state = open_state(path.to_str().unwrap(), 0, true, true)
+            let mut state = open_state(
+                &Rc::new(Str::from(path.to_str().unwrap())),
+                0,
+                true,
+                true,
+            )
                 .ok()
                 .unwrap();
             let input = state.input().ok().unwrap();
@@ -976,7 +999,12 @@ mod tests {
         invalid.resize(invalid.len() + 9000, b'a');
         invalid.push(7);
         std::fs::write(&path, invalid).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
+        let mut state = open_state(
+                &Rc::new(Str::from(path.to_str().unwrap())),
+                0,
+                true,
+                true,
+            )
             .ok()
             .unwrap();
         state
