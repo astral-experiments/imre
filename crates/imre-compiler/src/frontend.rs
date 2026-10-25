@@ -6533,7 +6533,7 @@ impl<'a> Checker<'a> {
             } else {
                 receiver
             };
-            if receiver.ty.is_path() {
+            if receiver.ty.is_path() || receiver.ty == Type::PathInfo {
                 return self.path_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::Popen(..)) {
@@ -7026,9 +7026,18 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(builtin, args),
             });
         }
-        if args.len() == 1 && args[0].ty.is_path() && matches!(name.id.as_str(), "str" | "print") {
-            let text = paths::operation(ir::PathOperation::Text, Type::Str, args);
-            return Ok(if name.id == "str" {
+        if args.len() == 1
+            && ((args[0].ty.is_path() && matches!(name.id.as_str(), "str" | "print"))
+                || (args[0].ty == Type::PathInfo
+                    && matches!(name.id.as_str(), "str" | "repr" | "print")))
+        {
+            let op = if args[0].ty == Type::PathInfo {
+                ir::PathOperation::InfoRepr
+            } else {
+                ir::PathOperation::Text
+            };
+            let text = paths::operation(op, Type::Str, args);
+            return Ok(if name.id != "print" {
                 text
             } else {
                 Expr {

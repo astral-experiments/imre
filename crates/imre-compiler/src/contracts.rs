@@ -158,9 +158,9 @@ impl Builtin {
                     | PathOperation::Stem
                     | PathOperation::Suffix
                     | PathOperation::IsAbsolute
-                    | PathOperation::Exists
-                    | PathOperation::IsFile
-                    | PathOperation::IsDir => false,
+                    | PathOperation::Info
+                    | PathOperation::InfoRepr
+                    | PathOperation::Query(_) => false,
                 },
                 PreservesLists,
             ),
