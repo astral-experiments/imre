@@ -350,9 +350,12 @@ impl Emitter<'_, '_> {
             ProcessOperation::PopenArgs => self.call("imre_popen_args", returns, &[&args[0].value]),
             ProcessOperation::PopenPid => self.call("imre_popen_pid", returns, &[&args[0].value]),
             ProcessOperation::PopenStatus { poll } => {
+                let control = self.instruction(format!(
+                    "call ptr @imre_popen_control(ptr {})",
+                    args[0].value.operand
+                ));
                 let word = self.checked_instruction(format!(
-                    "call i64 @imre_popen_status(ptr {}, i1 {})",
-                    args[0].value.operand,
+                    "call i64 @imre_child_status(ptr {control}, i1 {})",
                     u8::from(poll)
                 ));
                 self.unpack_word(word, returns)
@@ -372,10 +375,14 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::PopenWait => {
+                let control = self.instruction(format!(
+                    "call ptr @imre_popen_control(ptr {})",
+                    args[0].value.operand
+                ));
                 let kind = if args[1].value.ty == Type::Int { 2 } else { 7 };
                 let word = self.checked_instruction(format!(
-                    "call i64 @imre_popen_wait(ptr {}, i32 {kind}, i64 {})",
-                    args[0].value.operand, args[1].value.operand
+                    "call i64 @imre_child_wait(ptr {control}, i32 {kind}, i64 {}, ptr {})",
+                    args[1].value.operand, args[0].value.operand
                 ));
                 self.unpack_word(word, returns)
             }
@@ -387,9 +394,13 @@ impl Emitter<'_, '_> {
                 none()
             }
             ProcessOperation::PopenSignal => {
+                let control = self.instruction(format!(
+                    "call ptr @imre_popen_control(ptr {})",
+                    args[0].value.operand
+                ));
                 self.checked_line(format!(
-                    "call void @imre_popen_signal(ptr {}, i64 {})",
-                    args[0].value.operand, args[1].value.operand
+                    "call void @imre_child_signal(ptr {control}, i64 {})",
+                    args[1].value.operand
                 ));
                 none()
             }
