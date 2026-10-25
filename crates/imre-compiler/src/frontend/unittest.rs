@@ -10,6 +10,56 @@ struct Expected {
 }
 
 impl Checker<'_> {
+    /// Read the concrete case's class metadata even when a fixture receives a base-typed case.
+    pub(super) fn testcase_class_text(
+        &mut self,
+        attribute: &ast::ExprAttribute,
+    ) -> Result<Option<Expr>, String> {
+        let name = attribute.attr.as_str();
+        let Some(owner) = attribute.value.as_attribute_expr() else {
+            return Ok(None);
+        };
+        if owner.attr.as_str() != "__class__" || !matches!(name, "__module__" | "__qualname__") {
+            return Ok(None);
+        }
+        let receiver = self.expr(&owner.value)?;
+        let Type::Class(base) = receiver.ty else {
+            return Ok(None);
+        };
+        if !self.unittest_case(base) {
+            return Ok(None);
+        }
+        self.dispatch_record(base, receiver, attribute, |checker, class, _| {
+            let record = &checker.classes.declarations.definitions[class];
+            if record
+                .methods
+                .iter()
+                .any(|m| m.name.as_str() == "__class__")
+                || record.fields.iter().any(|f| f.name == "__class__")
+                || record.static_bindings.contains_key("__class__")
+                || record.static_bindings.contains_key(name)
+            {
+                return Err(error(
+                    checker.source,
+                    attribute,
+                    "custom TestCase class metadata requires its original descriptor",
+                ));
+            }
+            let module = &checker.graph.modules[record.definition.module];
+            let text = if name == "__qualname__" {
+                record.name.as_str()
+            } else if record.definition.module == checker.graph.entry {
+                "__main__"
+            } else if module.bundled && module.name == "unittest" && record.name == "TestCase" {
+                "unittest.case"
+            } else {
+                module.name.as_str()
+            };
+            Ok(unpacking::string(text))
+        })
+        .map(Some)
+    }
+
     pub(super) fn unittest_case(&self, class: usize) -> bool {
         let classes = &self.classes.declarations.definitions;
         std::iter::once(&class)

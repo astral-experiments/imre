@@ -6109,6 +6109,9 @@ impl<'a> Checker<'a> {
                 if let Some(flag) = self.command_flag(attribute)? {
                     return Ok(flag);
                 }
+                if let Some(text) = self.testcase_class_text(attribute)? {
+                    return Ok(text);
+                }
                 if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
                     return self.namedtuple_class_attribute(attribute, &declaration);
                 }
