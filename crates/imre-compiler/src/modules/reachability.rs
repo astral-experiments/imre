@@ -380,6 +380,8 @@ impl Reachable {
                                             | "_assert_called_once_with"
                                     ),
                                     "_Call" => matches!(name, "_represent" | "_represent_list"),
+                                    "_PatchFactory" => name == "_dictionary",
+                                    "_DictionaryPatch" => matches!(name, "_enter" | "_exit"),
                                     _ => false,
                                 };
                             if (property
@@ -841,18 +843,43 @@ class Token:
         return " padded ".strip() + b"!".decode() + "x\ty".expandtabs(self)
 print(Token().clean())
 "#;
+        let assert_rooted = |source: &str, expected: Option<&str>| {
+            let graph = super::SourceGraph::single_with_mode(source, true).unwrap();
+            let super::ast::Stmt::ClassDef(token) =
+                &graph.modules[graph.entry].parsed.syntax().body[0]
+            else {
+                panic!("expected the Token class");
+            };
+            for statement in &token.body {
+                if let super::ast::Stmt::FunctionDef(method) = statement {
+                    let name = method.name.as_str();
+                    if matches!(name, "strip" | "decode" | "expandtabs") {
+                        assert_eq!(
+                            graph.includes_method(graph.entry, method),
+                            Some(name) == expected,
+                            "{name}"
+                        );
+                    }
+                }
+            }
+        };
         reachable(source).unwrap();
-        for (before, after) in [
-            (r#"" padded ".strip()"#, "self.strip()"),
-            (r#"b"!".decode()"#, "self.decode()"),
-            (r#""x\ty".expandtabs(self)"#, "self.expandtabs()"),
-            (r#"" padded ".strip()"#, r#"" padded ".strip(self.strip())"#),
+        assert_rooted(source, None);
+        for (before, after, method) in [
+            (r#"" padded ".strip()"#, "self.strip()", "strip"),
+            (r#"b"!".decode()"#, "self.decode()", "decode"),
+            (
+                r#""x\ty".expandtabs(self)"#,
+                "self.expandtabs()",
+                "expandtabs",
+            ),
+            (
+                r#"" padded ".strip()"#,
+                r#"" padded ".strip(self.strip())"#,
+                "strip",
+            ),
         ] {
-            assert!(
-                reachable(&source.replace(before, after))
-                    .unwrap_err()
-                    .contains("variadic parameters")
-            );
+            assert_rooted(&source.replace(before, after), Some(method));
         }
     }
 

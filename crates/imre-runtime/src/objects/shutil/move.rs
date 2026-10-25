@@ -65,7 +65,7 @@ fn move_path(
     layout: &RecordDescriptor,
     callback: Option<Callback>,
     handles: (*const (), *const ()),
-    original_src: Option<Rc<Object>>,
+    original_src: Option<crate::ObjectOwner>,
 ) -> TreeResult<Destination> {
     let mut joined = None;
     if let Ok(directory) = fs::metadata(dst.path())
@@ -221,7 +221,7 @@ pub unsafe extern "C" fn imre_shutil_move(
             &*layout,
             Callback::new(function, context, repr).map(|c| c.tagged(tagged)),
             (src, dst),
-            (src_tag == 2).then(|| acquire_rc::<Object>(src as usize)),
+            (src_tag == 2).then(|| crate::ObjectOwner::acquire_word(src as usize)),
         )
         .and_then(|out| {
             Ok(match out {

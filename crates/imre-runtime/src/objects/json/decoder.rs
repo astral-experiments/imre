@@ -1,5 +1,4 @@
 //! Public decoder instances own their visible memo; each scan owns its key namespace.
-use std::rc::Rc;
 
 use super::readonly;
 use crate::finish;
@@ -10,10 +9,10 @@ use crate::objects::{Object, Storage, StorageCell, Str, object};
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_json_decoder_new() -> *const Object {
     // SAFETY: a fresh string/string dictionary transfers its sole owner to this instance.
-    let memo = unsafe { Rc::from_raw(imre_dict_new(3, 3)) };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::JsonDecoder(
-        memo,
-    )))))
+    let memo = unsafe { crate::ObjectOwner::from_raw(imre_dict_new(3, 3)) };
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::JsonDecoder(memo),
+    ))))
 }
 
 /// # Safety
@@ -26,7 +25,7 @@ pub unsafe extern "C" fn imre_json_decoder_memo(decoder: *const Object) -> *cons
             let Storage::JsonDecoder(memo) = storage else {
                 unreachable!("expected JSONDecoder")
             };
-            Rc::into_raw(memo.clone())
+            crate::ObjectOwner::into_raw(memo.clone())
         })
     }
 }

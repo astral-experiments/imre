@@ -1,0 +1,21 @@
+{
+  "independent_receipt_edit": "Only release.artifacts.*.path shortened to its filename.",
+  "original_receipt_sha256": {
+    "collections-default-prospective-82d6826.json": "19e8fec0ea32ffddcfeeb46caa16b89dabbc13881211164e7539f7cbee86c8b8",
+    "prospective-docs-collections-1217-on-82d6826.json": "e0102c4abd1fd7ce29298b519d1d10c11a4baf33f2cee3a866534d75a9c40ecf"
+  },
+  "regenerated_docs_sha256": "4c113eaa707694ee1f23da1212bc30c6b8324575f75c2d1d273324642ee6c700",
+  "release_commit": "041050c0397e38e68a49546d303c46fad56b93a9",
+  "source_comparison": "Only benchmarks, docs, README and .github/workflows/ci.yml differ between the release and stack.",
+  "stack_source": {
+    "compiler_revision": "3da09720e93c58b92dff79da31affbc402fedd6f",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "imre_sha256": "7b6679435d6c849c438b4b58cae735c0e88ebef71f89f87b4fa1f171b9b7d761",
+    "parents": [
+      "2b1805eb14c415d4d3e6016a0441aafd208a635b",
+      "6b793d366e49ae786e337c429334fa24f29958f5"
+    ],
+    "runtime_sha256": "2d56a8e42a84029266033a498704500516eda69c6c2e9b93be5dbd1215da719e",
+    "tree": "25c4c819f52e025d8c98fd8a2b14e3b54a2c9937"
+  }
+}

@@ -1,5 +1,36 @@
 //! Recognize exception constructors that store their inputs and forward them unchanged.
 use super::*;
+use ruff_python_ast::visitor::transformer::{self, Transformer};
+
+fn private_field(class: &str, name: &str) -> Option<String> {
+    let owner = class.trim_start_matches('_');
+    (name.starts_with("__") && !name.ends_with("__") && !owner.is_empty())
+        .then(|| format!("_{owner}{name}"))
+}
+
+/// Resolve private attributes in the declaring method before subclasses inherit it.
+pub(super) fn mangle_fields(class: &str, method: &mut ast::StmtFunctionDef) {
+    struct PrivateFields<'a>(&'a str);
+
+    impl Transformer for PrivateFields<'_> {
+        fn visit_expr(&self, expr: &mut ast::Expr) {
+            if let ast::Expr::Attribute(attr) = expr
+                && let Some(name) = private_field(self.0, attr.attr.as_str())
+            {
+                attr.attr.id = name.into();
+            }
+            transformer::walk_expr(self, expr);
+        }
+
+        fn visit_stmt(&self, stmt: &mut ast::Stmt) {
+            if !matches!(stmt, ast::Stmt::ClassDef(_)) {
+                transformer::walk_stmt(self, stmt);
+            }
+        }
+    }
+
+    PrivateFields(class).visit_body(&mut method.body);
+}
 
 #[derive(Clone)]
 pub(crate) struct ForwardingInitializer {
@@ -114,21 +145,9 @@ impl ForwardingInitializer {
                     if field.value.as_name_expr()?.id != receiver || !is_parameter(input) {
                         return None;
                     }
-                    // These assignments invoke inherited data descriptors, even inside __init__.
-                    if matches!(
-                        field.attr.as_str(),
-                        "args"
-                            | "__cause__"
-                            | "__context__"
-                            | "__traceback__"
-                            | "__suppress_context__"
-                            | "__dict__"
-                            | "__class__"
-                            | "__weakref__"
-                    ) {
-                        return None;
-                    }
-                    stores.push((field.attr.to_string(), input.to_owned()));
+                    let name = private_field(node.name.as_str(), field.attr.as_str())
+                        .unwrap_or_else(|| field.attr.to_string());
+                    stores.push((name, input.to_owned()));
                 }
                 ast::Stmt::Expr(e) => {
                     let call = e.value.as_call_expr()?;

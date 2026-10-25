@@ -9,7 +9,6 @@ use std::io;
 use std::net::Ipv4Addr;
 use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::ptr;
-use std::rc::Rc;
 
 pub(super) struct Socket {
     fd: RawFd,
@@ -93,6 +92,9 @@ socket_constants! {
     imre_socket_so_rcvbuf = libc::SO_RCVBUF,
     imre_socket_so_linger = libc::SO_LINGER,
     imre_socket_msg_peek = libc::MSG_PEEK,
+    imre_socket_shut_rd = libc::SHUT_RD,
+    imre_socket_shut_wr = libc::SHUT_WR,
+    imre_socket_shut_rdwr = libc::SHUT_RDWR,
 
     imre_socket_default_backlog = if libc::SOMAXCONN < 128 { libc::SOMAXCONN } else { 128 },
 }
@@ -111,7 +113,7 @@ fn setopt(fd: RawFd, level: i32, name: i32, value: i32) -> io::Result<()> {
     Ok(())
 }
 
-fn handle(raw: RawFd, blocking: bool) -> io::Result<Rc<Object>> {
+fn handle(raw: RawFd, blocking: bool) -> io::Result<crate::ObjectOwner> {
     // SAFETY: the kernel transferred a new fd; every path now has an owner.
     let fd = unsafe { OwnedFd::from_raw_fd(raw) };
     #[cfg(not(target_os = "linux"))]
@@ -121,10 +123,12 @@ fn handle(raw: RawFd, blocking: bool) -> io::Result<Rc<Object>> {
     }
     #[cfg(target_vendor = "apple")]
     setopt(raw, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1)?;
-    Ok(Rc::new(Object(StorageCell::new(Storage::Socket(Socket {
-        fd: fd.into_raw_fd(),
-        blocking,
-    })))))
+    Ok(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::Socket(Socket {
+            fd: fd.into_raw_fd(),
+            blocking,
+        }),
+    ))))
 }
 
 #[unsafe(no_mangle)]
@@ -154,7 +158,9 @@ pub extern "C" fn imre_socket_new(family: usize, ty: usize, proto: usize) -> *co
             let ty = ty | libc::SOCK_CLOEXEC;
             // SAFETY: socket consumes only integer arguments; handle acquires a successful fd.
             let raw = checked(unsafe { libc::socket(family, ty, proto) }).map_err(errno_error)?;
-            handle(raw, true).map(Rc::into_raw).map_err(errno_error)
+            handle(raw, true)
+                .map(crate::ObjectOwner::into_raw)
+                .map_err(errno_error)
         })(),
         ptr::null(),
     )
@@ -264,6 +270,17 @@ pub extern "C" fn imre_socket_listen(s: &Object, backlog: usize) {
     );
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_socket_shutdown(s: &Object, how: usize) {
+    finish(
+        c_int(how).and_then(|how| {
+            // SAFETY: shutdown takes scalar values and never relinquishes the descriptor.
+            checked(unsafe { libc::shutdown(fd(s), how) }).map_err(errno_error)
+        }),
+        0,
+    );
+}
+
 fn connect(fd: RawFd, addr: &libc::sockaddr_in, blocking: bool) -> io::Result<()> {
     // SAFETY: the kernel reads the supplied stack IPv4 address.
     let result = checked(unsafe {
@@ -286,23 +303,26 @@ fn connect(fd: RawFd, addr: &libc::sockaddr_in, blocking: bool) -> io::Result<()
     };
     // SAFETY: poll writes one live pollfd in place.
     retry(|| checked(unsafe { libc::poll(&raw mut pfd, 1, -1) }))?;
-    let mut error: i32 = 0;
-    let mut len = size_of_val(&error) as libc::socklen_t;
-    // SAFETY: SO_ERROR fills one int and its initialized capacity.
-    checked(unsafe {
-        libc::getsockopt(
-            fd,
-            libc::SOL_SOCKET,
-            libc::SO_ERROR,
-            (&raw mut error).cast(),
-            &raw mut len,
-        )
-    })?;
-    if error == 0 || error == libc::EISCONN {
-        Ok(())
-    } else {
-        Err(io::Error::from_raw_os_error(error))
-    }
+    // Retry the completion check itself on EINTR, without reconnecting.
+    retry(|| {
+        let mut error: i32 = 0;
+        let mut len = size_of_val(&error) as libc::socklen_t;
+        // SAFETY: SO_ERROR fills one int and its initialized capacity.
+        checked(unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_ERROR,
+                (&raw mut error).cast(),
+                &raw mut len,
+            )
+        })?;
+        if error == 0 || error == libc::EISCONN {
+            Ok(())
+        } else {
+            Err(io::Error::from_raw_os_error(error))
+        }
+    })
 }
 
 /// # Safety
@@ -386,7 +406,8 @@ pub unsafe extern "C" fn imre_socket_accept(
         // SAFETY: both descriptors match these transferred owners. No fallible syscall remains.
         unsafe {
             let pair = imre_record_new(layout);
-            pair.cast::<*const Object>().write(Rc::into_raw(child));
+            pair.cast::<*const Object>()
+                .write(crate::ObjectOwner::into_raw(child));
             pair.add(1)
                 .cast::<*mut usize>()
                 .write(addr_tuple(addr_layout, a));
@@ -435,7 +456,9 @@ pub unsafe extern "C" fn imre_socket_recv(s: &Object, size: usize, flags: usize)
                 bytes.shrink_to_fit();
             }
         }
-        Ok(Rc::into_raw(Rc::new(bytes)))
+        crate::BytesOwner::try_new(bytes)
+            .map(crate::BytesOwner::into_raw)
+            .map_err(|_| Error::memory_error())
     })();
     finish(result, ptr::null())
 }
@@ -531,7 +554,7 @@ pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
         let child = handle(copy, blocking)?;
         // socket.dup reapplies its source's blocking mode to the shared open file.
         set_blocking(copy, blocking)?;
-        Ok(Rc::into_raw(child))
+        Ok(crate::ObjectOwner::into_raw(child))
     })();
     finish(result.map_err(errno_error), ptr::null())
 }

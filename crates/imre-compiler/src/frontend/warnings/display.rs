@@ -98,6 +98,8 @@ impl Checker<'_> {
                 }
             }
         };
+        // A line-number conversion failure precedes the message's __str__.
+        let number = scope.hold(self, string(number));
         let (root, environment) = self.linecache_search();
         let text = Expr {
             ty: Type::Str,
@@ -110,7 +112,7 @@ impl Checker<'_> {
                     string(field(0)),
                     annotations::type_name(field(1)),
                     field(2),
-                    string(number),
+                    number,
                     index,
                     field(fields.len() - 1),
                     root,

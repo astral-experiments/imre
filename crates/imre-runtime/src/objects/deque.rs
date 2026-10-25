@@ -22,6 +22,18 @@ impl Deque {
         std::mem::take(&mut self.items)
     }
 
+    /// Convert an exact integer before normalizing negative positions against this ring.
+    fn position(&self, at: &Int) -> Result<usize, Error> {
+        let raw = crate::decode_index(at).map_err(|_| {
+            Error::new(
+                Kind::IndexError,
+                "cannot fit 'int' into an index-sized integer",
+            )
+        })?;
+        crate::index(raw, self.items.len())
+            .map_err(|_| Error::new(Kind::IndexError, "deque index out of range"))
+    }
+
     /// Compare one pair of elements and resume after the child comparison.
     /// The traversal retains its deque roots; neither storage borrow escapes.
     pub(super) fn compare_entry(&self, other: &Self, position: usize) -> values::Comparison {
@@ -96,9 +108,9 @@ pub unsafe extern "C" fn imre_deque_new(kind: u32, limit: usize) -> *const Objec
         maxlen,
         state: 0,
     };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Deque(Box::new(
-        deque,
-    ))))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::Deque(Box::new(deque)),
+    ))))
 }
 
 /// # Safety
@@ -170,9 +182,9 @@ pub unsafe extern "C" fn imre_deque_copy(value: *const Object) -> *const Object 
     };
     finish(
         copy.map(|deque| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Deque(Box::new(
-                deque,
-            ))))))
+            crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                Storage::Deque(Box::new(deque)),
+            ))))
         }),
         std::ptr::null(),
     )
@@ -191,7 +203,7 @@ pub unsafe extern "C" fn imre_deque_extend_source(
         if target == source {
             imre_deque_copy(source)
         } else {
-            Rc::into_raw(acquire_rc::<Object>(source as usize))
+            crate::ObjectOwner::into_raw(crate::ObjectOwner::acquire_word(source as usize))
         }
     }
 }
@@ -219,6 +231,74 @@ pub unsafe extern "C" fn imre_deque_pop(value: *const Object, left: u32) -> usiz
         || Error::new(Kind::IndexError, "pop from an empty deque").returning(0),
         OwnedWord::into_word,
     )
+}
+
+/// # Safety
+/// The caller roots the deque and tagged index while the selected element is retained.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_deque_get(value: *const Object, at: usize) -> usize {
+    // SAFETY: the caller roots the deque and the tagged index while an element owner is cloned.
+    let result = unsafe {
+        let at = Int::borrow(at);
+        object(value).0.with(|storage| {
+            let deque = storage.deque();
+            Ok(deque.items[deque.position(&at)?].clone().into_word())
+        })
+    };
+    finish(result, 0)
+}
+
+/// # Safety
+/// The caller roots the deque, integer index and element of the deque's exact kind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_deque_set(value: *const Object, at: usize, word: usize) {
+    // SAFETY: acquire the new owner before releasing the displaced one outside the borrow.
+    let result: Result<OwnedWord, Error> = unsafe {
+        let at = Int::borrow(at);
+        object(value).0.with_mut(|storage| {
+            let deque = storage.deque_mut();
+            let i = deque.position(&at)?;
+            let new = deque.kind.acquire(word);
+            Ok(std::mem::replace(&mut deque.items[i], new))
+        })
+    };
+    if let Err(error) = result {
+        error.returning(());
+    }
+}
+
+/// # Safety
+/// The caller roots the deque and the tagged integer index throughout removal.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_deque_delete(value: *const Object, at: usize) {
+    // SAFETY: only the detached owner escapes the storage borrow.
+    let result = unsafe {
+        let at = Int::borrow(at);
+        object(value).0.with_mut(|storage| {
+            let deque = storage.deque_mut();
+            let i = deque.position(&at)?;
+            deque.state = deque.state.wrapping_add(1);
+            Ok(deque.items.remove(i))
+        })
+    };
+    drop(finish(result, None));
+}
+
+/// # Safety
+/// The caller roots a deque and a matching scalar needle throughout the comparison.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_deque_contains(value: *const Object, word: usize) -> u32 {
+    // SAFETY: the checker admits only scalar integer, string, or boolean equality,
+    // which cannot reenter while the caller's deque and needle are rooted.
+    u32::from(unsafe {
+        object(value).0.with(|storage| {
+            let deque = storage.deque();
+            deque
+                .items
+                .iter()
+                .any(|item| values::equal(item.word, word, deque.kind))
+        })
+    })
 }
 
 /// # Safety
@@ -252,6 +332,20 @@ pub unsafe extern "C" fn imre_deque_reset(value: *const Object, limit: usize) {
     drop(removed);
 }
 
+/// Reverse the owned words in place. Existing iterators keep their positions.
+///
+/// # Safety
+/// The caller roots this deque until the exclusive storage borrow ends.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_deque_reverse(value: *const Object) {
+    // SAFETY: no element is copied or released while rearranging the ring.
+    unsafe {
+        object(value).0.with_mut(|storage| {
+            storage.deque_mut().items.make_contiguous().reverse();
+        });
+    }
+}
+
 /// # Safety
 /// The caller roots this deque while its length is read.
 #[unsafe(no_mangle)]
@@ -271,7 +365,7 @@ pub unsafe extern "C" fn imre_deque_maxlen(value: *const Object) -> usize {
 }
 
 pub(super) struct DequeIterator {
-    owner: Rc<Object>,
+    owner: crate::ObjectOwner,
     state: usize,
     remaining: usize,
     reverse: bool,
@@ -314,7 +408,7 @@ impl DequeIterator {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_deque_iter(value: *const Object, reverse: u32) -> *const Object {
     // SAFETY: the caller roots the exact deque throughout acquisition.
-    let owner = unsafe { acquire_rc::<Object>(value as usize) };
+    let owner = unsafe { crate::ObjectOwner::acquire_word(value as usize) };
     // SAFETY: neither scalar snapshot can refer back into storage.
     let (state, remaining) = unsafe { owner.0.with(|s| (s.deque().state, s.deque().items.len())) };
     let iterator = DequeIterator {
@@ -323,7 +417,7 @@ pub unsafe extern "C" fn imre_deque_iter(value: *const Object, reverse: u32) -> 
         remaining,
         reverse: reverse != 0,
     };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::DequeIterator(
-        iterator,
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::DequeIterator(iterator),
+    ))))
 }

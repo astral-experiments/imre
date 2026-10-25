@@ -9,6 +9,12 @@ pub(super) enum JoinStyle {
     WindowsCommand,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum ReverseSequence {
+    List,
+    Deque,
+}
+
 /// All leaves must be plain local reads so no later operand can change the
 /// keys captured by an earlier union. Bound the number of membership probes.
 fn local_key_union(expr: &Expr, dictionaries: &mut Vec<Expr>) -> bool {
@@ -97,6 +103,110 @@ impl Checker<'_> {
                 clear,
             },
         })
+    }
+
+    /// Bind reverse on an instance or as a descriptor. The receiver and
+    /// every argument are evaluated before a rejected call raises TypeError.
+    pub(super) fn sequence_reverse(
+        &mut self,
+        sequence: ReverseSequence,
+        receiver: Option<Expr>,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        let skip = usize::from(receiver.is_none());
+        let mut receiver = if let Some(receiver) = receiver {
+            Some(receiver)
+        } else {
+            args.args
+                .first()
+                .map(|arg| self.evaluated_argument(arg))
+                .transpose()?
+        };
+        let (owner, descriptor, builtin) = match sequence {
+            ReverseSequence::List => {
+                if let Some(value) = receiver.take() {
+                    receiver = Some(self.json_mutation_receiver(value, call)?);
+                }
+                ("list", "list", Builtin::ListReverse)
+            }
+            ReverseSequence::Deque => ("deque", "collections.deque", Builtin::DequeReverse),
+        };
+        let accepts = |ty| match sequence {
+            ReverseSequence::List => self.types.element(ty).is_some(),
+            ReverseSequence::Deque => self.types.deque_element(ty).is_some(),
+        };
+        let extra = args.args.len().saturating_sub(skip);
+        let message = match receiver.as_ref() {
+            None => {
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+                format!("unbound method {owner}.reverse() needs an argument")
+            }
+            Some(value) if !accepts(value.ty) => {
+                let name = match value.ty {
+                    Type::None => "NoneType".to_owned(),
+                    Type::PlainObject => "object".to_owned(),
+                    Type::Deque(_) => "collections.deque".to_owned(),
+                    Type::ListInt | Type::List(_) => "list".to_owned(),
+                    Type::StrLiteral(_) => "str".to_owned(),
+                    Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes => {
+                        self.type_name(value.ty)
+                    }
+                    Type::Set(_) => "set".to_owned(),
+                    Type::Tuple(_) if self.types.namedtuple_definition(value.ty).is_none() => {
+                        "tuple".to_owned()
+                    }
+                    Type::Dict(_)
+                        if !self.types.is_counter(value.ty)
+                            && !self.types.is_default_list_dict(value.ty) =>
+                    {
+                        "dict".to_owned()
+                    }
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            &format!(
+                                "{owner}.reverse requires an exact native {owner} or known descriptor receiver"
+                            ),
+                        ));
+                    }
+                };
+                format!(
+                    "descriptor 'reverse' for '{descriptor}' objects doesn't apply to a '{name}' object"
+                )
+            }
+            Some(_) if !args.keywords.is_empty() => {
+                format!("{owner}.reverse() takes no keyword arguments")
+            }
+            Some(_) if extra != 0 => {
+                format!("{owner}.reverse() takes no arguments ({extra} given)")
+            }
+            Some(_) => {
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(builtin, vec![receiver.unwrap()]),
+                });
+            }
+        };
+        self.graph.checked_overload(self.module, call.range());
+        self.graph
+            .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+        for arg in args.args.iter().skip(skip) {
+            self.graph.checked_excess_argument(self.module, arg.range());
+        }
+        let mut values: Vec<_> = receiver.into_iter().collect();
+        for arg in args
+            .args
+            .iter()
+            .skip(skip)
+            .chain(args.keywords.iter().map(|kw| &kw.value))
+        {
+            values.push(self.evaluated_argument(arg)?);
+        }
+        Ok(calls::type_error(Type::None, values, message))
     }
 
     /// Keeps the receiver identity and argument order. A key can observe or mutate
@@ -342,6 +452,12 @@ impl Checker<'_> {
                 "str.join requires one string iterable",
             ));
         };
+        if self.joined_lines.finishes_buffer(call.range()) {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::JoinBufferFinish, vec![self.expr(source)?]),
+            });
+        }
         self.join_parts(receiver, source, call, JoinStyle::Plain)
     }
 

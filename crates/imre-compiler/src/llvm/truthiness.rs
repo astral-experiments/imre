@@ -82,6 +82,13 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
+                Type::Context => {
+                    let count = self.instruction(format!(
+                        "call i64 @imre_contextvars_len(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i64 {count}, 1"))
+                }
                 Type::Calendar(crate::ir::CalendarType::Delta) => self.instruction(format!(
                     "call i1 @imre_calendar_truth(ptr {})",
                     value.operand
@@ -113,6 +120,11 @@ impl Emitter<'_, '_> {
                         value.operand
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
+                }
+                Type::Patch(_) => {
+                    let length = self
+                        .instruction(format!("call i64 @imre_patch_len(ptr {})", value.operand));
+                    self.instruction(format!("icmp ne i64 {length}, 1"))
                 }
                 Type::List(_) => {
                     let length = self

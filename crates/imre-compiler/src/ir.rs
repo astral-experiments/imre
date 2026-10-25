@@ -4,6 +4,8 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
     Document(DocumentShape),
+    /// Read-only nodes from the sealed unified-diff parser.
+    Patch(PatchKind),
     Int,
     Float,
     Bool,
@@ -87,6 +89,10 @@ pub(crate) enum Type {
     Task(usize),
     TaskGroup,
     GeneratorContext,
+    Context,
+    ContextMissing,
+    ContextVar(usize),
+    ContextToken(usize),
     /// A native temporary-directory or null context with a known enter result.
     DirectoryContext(usize),
     Semaphore,
@@ -217,6 +223,7 @@ pub(crate) enum SocketOp {
     Listen,
     Accept,
     Connect,
+    Shutdown,
     SockName,
     Recv,
     Send,
@@ -317,8 +324,15 @@ impl std::fmt::Display for Type {
             Self::Task(_) => "asyncio.Task",
             Self::TaskGroup => "asyncio.TaskGroup",
             Self::GeneratorContext => "@contextmanager",
+            Self::Context => "contextvars.Context",
+            Self::ContextMissing => "Token.MISSING",
+            Self::ContextVar(_) => "contextvars.ContextVar",
+            Self::ContextToken(_) => "contextvars.Token",
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
+            Self::Patch(PatchKind::Set) => "unidiff.PatchSet",
+            Self::Patch(PatchKind::File) => "unidiff.PatchedFile",
+            Self::Patch(PatchKind::Hunk) => "unidiff.Hunk",
             Self::RegexPattern => "re.Pattern[str]",
             Self::NativeModule => "builtin module",
             Self::ModuleNamespace => "module namespace",
@@ -348,6 +362,7 @@ impl std::fmt::Display for Type {
             Self::JsonValue => "JSON value",
             Self::JsonObject => "dict[str, Any]",
             Self::Document(DocumentShape::Any) => "TOML or JSON value",
+            Self::Document(DocumentShape::Scalar) => "None, bool, int or str",
             Self::Document(DocumentShape::Map) => "mutable dict[str, Any]",
             Self::Document(DocumentShape::List) => "mutable list[Any]",
             Self::StrLiteral(_)
@@ -381,6 +396,8 @@ pub(crate) struct Module {
     pub class_fields: Vec<Vec<Type>>,
     /// Static names and generated value behavior; instance layouts stay unchanged.
     pub class_metadata: Vec<ClassMetadata>,
+    /// Single-generator list builds, keyed by the outlined helper they describe.
+    pub list_builds: std::collections::HashMap<usize, ListBuild>,
     /// Concrete JSON field schemas; decoding additionally checks constructors.
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
@@ -400,7 +417,17 @@ pub(crate) struct ClassMetadata {
     pub dataclass_eq: bool,
     pub dataclass_repr: bool,
     pub toml_hash: bool,
+    /// Field index for each parameter of a generated, field-only initializer.
+    pub initializer_fields: Option<Vec<usize>>,
     pub fields: Vec<ClassFieldMetadata>,
+}
+
+/// A helper appends one element to its private result for each item of the
+/// iterable parameter. The element stays in the checked append expression.
+pub(crate) struct ListBuild {
+    pub iterable: usize,
+    pub item: usize,
+    pub result: usize,
 }
 
 pub(crate) struct ClassFieldMetadata {
@@ -777,6 +804,8 @@ pub(crate) enum Builtin {
     AnnotationRef,
     AnnotationIs,
     StaticFunction(usize),
+    FunctionWrappedSet,
+    FunctionWrappedGet,
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
@@ -790,6 +819,7 @@ pub(crate) enum Builtin {
     /// Match an exception against the category list retained by an assertion context.
     ExceptionMatchesAny,
     LiteralStringView,
+    IntListContains,
     StringListContains,
     StructListContains,
     StringContains,
@@ -921,6 +951,9 @@ pub(crate) enum Builtin {
     SortDetach,
     SortRestore,
     StringJoin,
+    JoinBufferNew,
+    JoinBufferAppend,
+    JoinBufferFinish,
     StringFormat,
     StringReplace,
     Text(TextOperation),
@@ -940,6 +973,8 @@ pub(crate) enum Builtin {
     /// bounds, with no intervening mutation or user code. Returns an owned
     /// element of a generic typed list; the index is canonical and nonnegative.
     SequenceGetInBounds,
+    /// Transfers the next slot of a fresh append-only list to its sole consumer.
+    SequenceTakeInBounds,
     /// Reduces an exact integer list after evaluating its source and start.
     /// Integer addition cannot invoke callbacks or raise a recoverable error.
     ListSum,
@@ -1011,6 +1046,7 @@ pub(crate) enum Builtin {
     Sha256Copy,
     BytesIo,
     StringIo(StringIoOperation),
+    ContextVar(ContextOperation),
     BinarySeek,
     BinaryTell,
     ZipOpenFile,
@@ -1033,6 +1069,7 @@ pub(crate) enum Builtin {
     Append,
     Pop,
     ListClear,
+    ListReverse,
     IsNone,
     /// Promotes an exact str/bytes owner without allocating or changing identity.
     UnionInject,
@@ -1044,6 +1081,8 @@ pub(crate) enum Builtin {
     IsBuiltinSubclass,
     Split,
     SplitLines,
+    /// Only the first line and a joined remainder can be observed.
+    JoinedSplitLines,
     DecodeSplitLines,
     Ndiff,
     /// Copy an exact list of immutable strings into a distinct mutable list.
@@ -1135,6 +1174,7 @@ pub(crate) enum Builtin {
     PosixPath(PosixPathOperation),
     Errno(ErrnoOperation),
     Fnmatch(FnmatchOperation),
+    Patch(PatchOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -1174,6 +1214,7 @@ pub(crate) enum Builtin {
     ModuleParentPrefix,
     ModuleCacheFromOrigin,
     CachePath(CachePathOperation),
+    OrderedDict,
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,
@@ -1199,6 +1240,11 @@ pub(crate) enum Builtin {
         left: bool,
     },
     DequeClear,
+    DequeReverse,
+    DequeGet,
+    DequeSet,
+    DequeDelete,
+    DequeContains,
     DequeMaxlen,
     DequeIter {
         reverse: bool,
@@ -1212,6 +1258,7 @@ pub(crate) enum Builtin {
     ChainMapContains,
     /// The stored type may be promoted to an optional result on a hit.
     ChainMapGet(Type),
+    CounterElements,
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,
@@ -1283,8 +1330,32 @@ impl Builtin {
 
 pub(crate) const TUPLE_PROBE_ARITY: std::ops::RangeInclusive<usize> = 1..=16;
 
-/// Operations specific to Unicode text held in native memory.
+/// Reads from the active context or an explicit shallow snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ContextOperation {
+    New,
+    CopyCurrent,
+    Copy,
+    Var,
+    Set,
+    Reset,
+    ExitToken,
+    Read,
+    Contains,
+    ContextRead,
+    ContextContains,
+    Name,
+    TokenVar,
+    Old,
+    Missing,
+    WasMissing,
+    Enter,
+    Leave,
+    Len,
+}
+
+/// Operations specific to Unicode text held in native memory.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum StringIoOperation {
     New,
     Newlines,
@@ -1299,6 +1370,8 @@ pub(crate) enum StringIoOperation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum DocumentShape {
     Any,
+    /// A tagged Python scalar whose container equality does not depend on object identity.
+    Scalar,
     Map,
     List,
 }
@@ -1377,6 +1450,26 @@ impl StrDescriptor {
             Self::IsAlnum => "isalnum",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PatchKind {
+    Set,
+    File,
+    Hunk,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum PatchOperation {
+    Parse,
+    Len,
+    Files,
+    ModifiedFiles,
+    ModifiedCount,
+    Hunks,
+    Path,
+    SourceStart,
+    HunkText,
 }
 
 /// Closed string operations preserve exact argument and storage types.
@@ -1603,6 +1696,9 @@ pub(crate) enum LogOperation {
     LevelName,
     LevelForName,
     CheckLevel,
+    InvalidLevel,
+    Disable,
+    EnabledCache,
     Names,
     Numbers,
     NamesCopy,
@@ -1690,6 +1786,9 @@ pub(crate) enum ProcessOperation {
     SetSelector,
     Executable,
     RunToStderr,
+    ShellOutput {
+        status: bool,
+    },
     CheckOutput {
         streams: u32,
         validation: u32,
@@ -1718,6 +1817,7 @@ pub(crate) enum ProcessOperation {
     PopenStatus {
         poll: bool,
     },
+    PopenSetStatus,
     PopenWait,
     PopenCommunicate {
         text: bool,
@@ -1830,6 +1930,8 @@ impl IoBase {
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceType {
     Exact(Type),
+    ContextVar,
+    ContextToken,
     IoBase(IoBase),
     ForwardRef,
     SimpleNamespace,
@@ -1847,6 +1949,8 @@ impl InstanceType {
         match self {
             Self::IoBase(base) => base.matches(ty) != Some(false),
             Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
+            Self::ContextVar => matches!(ty, Type::ContextVar(_)),
+            Self::ContextToken => matches!(ty, Type::ContextToken(_)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
@@ -1935,8 +2039,8 @@ pub(crate) enum Statement {
 
 /// Visits expression trees, including statements embedded in eager expressions.
 /// Analyses must include every checked branch, even when it never executes.
-pub(crate) fn walk_expressions(body: &[Statement], visit: &mut impl FnMut(&Expr)) {
-    fn expression(value: &Expr, visit: &mut impl FnMut(&Expr)) {
+pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
+    fn expression<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
         visit(value);
         match &value.kind {
             ExprKind::List(values)

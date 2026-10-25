@@ -243,7 +243,7 @@ impl Checker<'_> {
                     .mapping(receiver.ty)
                     .or_else(|| {
                         self.types
-                            .element(receiver.ty)
+                            .indexed_element(receiver.ty)
                             .map(|element| (Type::Int, element))
                     })
                     .ok_or_else(|| {
@@ -253,7 +253,11 @@ impl Checker<'_> {
                             "indexed assignment requires a mutable typed list or dictionary",
                         )
                     })?;
-                let index = self.expr_expected(&subscript.slice, key)?;
+                let index = if matches!(receiver.ty, Type::Deque(_)) {
+                    self.integer_index(&subscript.slice)?
+                } else {
+                    self.expr_expected(&subscript.slice, key)?
+                };
                 let value = self.coerce(value, element, target)?;
                 Ok(Statement::SetItem(receiver, index, value))
             }
@@ -310,6 +314,15 @@ impl Checker<'_> {
                     return self.store_class_data(class, attribute, value);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "returncode"
+                {
+                    let value = self.coerce(value, self.types.optional(Type::Int), target)?;
+                    return Ok(Statement::Expr(builtin(
+                        Type::None,
+                        Builtin::Process(ir::ProcessOperation::PopenSetStatus),
+                        vec![value, receiver],
+                    )));
+                }
                 if let Some(class) =
                     self.mutable_instance_data(receiver.ty, attribute.attr.as_str())
                 {

@@ -130,3 +130,16 @@ The native callable fixture also checks mutation, key order, nested caches,
 and calls through a `Callable` parameter or return. For example, decorating a
 cache configured with `maxsize=2, typed=True` with `lru_cache(3)` preserves
 the inner public parameters, but the new wrapper's `cache_info()[2]` is 3.
+
+### Local cache decorators
+
+At `5144a54` each executed local `@cache` or `@lru_cache` definition
+allocates a wrapper and table. Redefining the name leaves earlier aliases
+and their entries intact. [The native fixture](../../../../tests/fixtures/callables/local_caches.py)
+checks hits, clearing, callback use, annotations, and a class-held module
+alias against CPython at O0 with ASan and O3 (365 output bytes at each level).
+
+Both unchanged `test_lru_cache_parameters` methods get past declaration
+collection and reach the first assertion on upstream line 2120. Its native
+`unittest.TestCase.assertEqual` fixture expects integers and rejects the
+dictionary, so neither complete body is a native pass on that compiler.

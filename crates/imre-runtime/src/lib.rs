@@ -34,7 +34,11 @@
 
 mod extensions;
 mod floats;
+mod shared;
 mod string_owner;
+use shared::Shared;
+type ObjectOwner = Shared<objects::Object>;
+type WeakObject = shared::Weak<objects::Object>;
 use string_owner::{StrOwner, WeakStr};
 mod integer_power;
 mod integer_text;
@@ -347,25 +351,46 @@ impl Drop for List {
 /// representation directly.
 pub type Str = compact_str::CompactString;
 
-/// Immutable byte storage; ABI handles own an Rc and never expose a mutable view.
+/// Immutable byte storage; native handles share ownership and expose no mutable view.
 pub type Bytes = Vec<u8>;
+/// All byte handles crossing the native ABI point into this strong owner.
+pub(crate) type BytesOwner = triomphe::Arc<Bytes>;
 
-/// LLVM's C main bypasses Rust's SIGPIPE setup. Ignore it once before publishing
-/// buffered writers, so a disconnected pipe reports an ordinary I/O error. The
-/// closed runtime has no signal API or callbacks that could change this policy.
+/// The caller roots a byte handle for the duration of this ownership increment.
+unsafe fn acquire_bytes(word: usize) -> BytesOwner {
+    if word == 0 {
+        fail("TypeError", "unexpected null runtime handle");
+    }
+    // SAFETY: the caller supplies the data pointer of a live BytesOwner.
+    unsafe { triomphe::ArcBorrow::from_ptr(word as *const Bytes) }.clone_arc()
+}
+
+unsafe fn retain_bytes(value: *const Bytes) {
+    // SAFETY: the caller roots this exact bytes handle.
+    let _ = BytesOwner::into_raw(unsafe { acquire_bytes(value as usize) });
+}
+
+unsafe fn release_bytes(value: *const Bytes) {
+    // SAFETY: the caller transfers one strong reference.
+    drop(unsafe { BytesOwner::from_raw(value) });
+}
+
+/// Generated main installs Python's I/O signal dispositions before user code.
+/// Native callers that enter through a writer use the same initialization.
 fn initialize_io() {
     static INITIALIZED: Once = Once::new();
     INITIALIZED.call_once(|| {
-        // SAFETY: SIG_IGN is a valid process-wide disposition, not a Rust callback.
-        if unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) } == libc::SIG_ERR {
-            // This fixed startup operation cannot be induced by source code.
-            // Avoid fail(), which would recursively initialize OUTPUT here.
-            let error = io::Error::last_os_error();
-            let _ = writeln!(
-                io::stderr().lock(),
-                "OSError: could not initialize I/O signals: {error}"
-            );
-            std::process::exit(1);
+        for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
+            // SAFETY: SIG_IGN is a valid disposition for both fixed signals.
+            if unsafe { libc::signal(signal, libc::SIG_IGN) } == libc::SIG_ERR {
+                // Avoid fail(), which would recursively initialize OUTPUT here.
+                let error = io::Error::last_os_error();
+                let _ = writeln!(
+                    io::stderr().lock(),
+                    "OSError: could not initialize I/O signals: {error}"
+                );
+                std::process::exit(1);
+            }
         }
     });
 }
@@ -385,6 +410,38 @@ struct BinaryOutput<W> {
     buffer: Vec<u8>,
     written: usize,
 }
+
+/// A buffered write can accept bytes into the kernel and its own buffer before it stalls.
+#[derive(Debug)]
+struct BlockedWrite {
+    errno: i32,
+    accepted: usize,
+}
+
+impl BlockedWrite {
+    const DESCRIPTION: &'static str = "write could not complete without blocking";
+
+    fn error(error: io::Error, accepted: usize) -> io::Error {
+        if error.kind() != io::ErrorKind::WouldBlock {
+            return error;
+        }
+        io::Error::new(
+            io::ErrorKind::WouldBlock,
+            Self {
+                errno: error.raw_os_error().unwrap_or(libc::EAGAIN),
+                accepted,
+            },
+        )
+    }
+}
+
+impl std::fmt::Display for BlockedWrite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(Self::DESCRIPTION)
+    }
+}
+
+impl std::error::Error for BlockedWrite {}
 
 /// Writes directly to fd 1 so the native binary buffer observes descriptor errors.
 struct RawStdout;
@@ -482,15 +539,16 @@ impl<W: Write> BinaryOutput<W> {
 
     #[cold]
     fn write_all_slow(&mut self, mut bytes: &[u8]) -> io::Result<()> {
+        let supplied = bytes.len();
         if let Err(error) = self.flush_buffer() {
-            return self.buffer_after_error(bytes, error);
+            return self.buffer_after_error(bytes, 0, error);
         }
         while !bytes.is_empty() && bytes.len() >= self.buffer.capacity() {
             match self.inner.write(bytes) {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
                 Ok(count) => bytes = &bytes[count..],
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return self.buffer_after_error(bytes, error),
+                Err(error) => return self.buffer_after_error(bytes, supplied - bytes.len(), error),
             }
         }
         self.buffer.extend_from_slice(bytes);
@@ -499,7 +557,12 @@ impl<W: Write> BinaryOutput<W> {
 
     /// After a nonblocking write stalls, keep as much of the new input as fits
     /// behind the unwritten portion of the previous buffer.
-    fn buffer_after_error(&mut self, bytes: &[u8], error: io::Error) -> io::Result<()> {
+    fn buffer_after_error(
+        &mut self,
+        bytes: &[u8],
+        sent: usize,
+        error: io::Error,
+    ) -> io::Result<()> {
         if error.kind() != io::ErrorKind::WouldBlock {
             return Err(error);
         }
@@ -508,7 +571,7 @@ impl<W: Write> BinaryOutput<W> {
         let count = bytes.len().min(self.buffer.capacity() - self.buffer.len());
         self.buffer.extend_from_slice(&bytes[..count]);
         if count < bytes.len() {
-            return Err(error);
+            return Err(BlockedWrite::error(error, sent + count));
         }
         Ok(())
     }
@@ -530,13 +593,7 @@ impl<W: Write> BinaryOutput<W> {
 
 impl<W: Write> Write for BinaryOutput<W> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if bytes.len() > self.buffer.capacity() - self.buffer.len() {
-            self.flush_buffer()?;
-        }
-        if bytes.len() >= self.buffer.capacity() {
-            return self.inner.write(bytes);
-        }
-        self.buffer.extend_from_slice(bytes);
+        self.write_all(bytes)?;
         Ok(bytes.len())
     }
 
@@ -552,8 +609,9 @@ impl<W: Write> Write for BinaryOutput<W> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.flush_buffer()?;
-        self.inner.flush()
+        self.flush_buffer()
+            .and_then(|()| self.inner.flush())
+            .map_err(|error| BlockedWrite::error(error, 0))
     }
 }
 
@@ -1076,6 +1134,26 @@ pub extern "C" fn imre_list_new() -> *const List {
     new_list(Vec::new())
 }
 
+/// Test an optional integer against a homogeneous integer list. Small integers
+/// are canonical words; only two distinct heap integers need a value comparison.
+///
+/// # Safety
+/// The caller roots the list and its optional integer (zero represents None).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_list_contains(needle: usize, list: *const List) -> u32 {
+    if needle == 0 {
+        return 0;
+    }
+    // SAFETY: neither the list scan nor integer equality can reenter or mutate it.
+    unsafe {
+        u32::from((&*list).0.with(|values| {
+            values.iter().any(|v| {
+                v.0 == needle || ((v.0 | needle) & 1 == 0 && imre_int_compare(v.0, needle) == 0)
+            })
+        }))
+    }
+}
+
 /// # Safety
 /// The argument must be a live list handle or null during slot cleanup.
 #[unsafe(no_mangle)]
@@ -1172,6 +1250,16 @@ pub unsafe extern "C" fn imre_list_clear(list: *const List) {
             drop(value);
         }
     }
+}
+
+/// Reverse the tagged integer words in place without changing any owner.
+///
+/// # Safety
+/// The caller keeps this list rooted for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_reverse(list: *const List) {
+    // SAFETY: only swaps within the buffer occur under the exclusive borrow.
+    unsafe { (&*list).0.with_mut(|values| values.reverse()) };
 }
 
 /// Returns an owned nonzero integer word, or raw zero with a pending error.

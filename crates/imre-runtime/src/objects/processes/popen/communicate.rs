@@ -151,7 +151,11 @@ pub unsafe extern "C" fn imre_run_config(
                     0
                 };
                 let stderr = stream(stderr, stderr_kind)?;
-                let code = p.control.status().expect("communicate reaped the child");
+                let code = p
+                    .control
+                    .status()
+                    .expect("communicate reaped the child")
+                    .kernel();
                 if check && code != 0 {
                     raise_process(ProcessError {
                         positional_streams: false,
@@ -176,8 +180,8 @@ pub unsafe extern "C" fn imre_run_config(
                     cmd: p.args.clone(),
                     timeout: timeout.expect("timed communication"),
                     wait_budget,
-                    stdout: stdout.map(Rc::new),
-                    stderr: stderr.map(Rc::new),
+                    stdout: stdout.map(crate::BytesOwner::new),
+                    stderr: stderr.map(crate::BytesOwner::new),
                 });
                 Ok(std::ptr::null())
             }
@@ -383,8 +387,8 @@ pub unsafe extern "C" fn imre_popen_communicate(
                         cmd: p.args.clone(),
                         timeout: timeout.expect("timed communication"),
                         wait_budget,
-                        stdout: stdout.map(Rc::new),
-                        stderr: stderr.map(Rc::new),
+                        stdout: stdout.map(crate::BytesOwner::new),
+                        stderr: stderr.map(crate::BytesOwner::new),
                     });
                     Ok(std::ptr::null_mut())
                 }
