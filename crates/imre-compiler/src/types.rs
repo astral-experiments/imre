@@ -161,6 +161,7 @@ impl Types {
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::StringIO
+            | Type::HandlerLock
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
@@ -564,6 +565,7 @@ impl Types {
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::StringIO
+            | Type::HandlerLock
             | Type::Path
             | Type::PurePath(_)
             | Type::CompletedProcess(..)
@@ -1040,6 +1042,7 @@ impl Types {
                 Type::Cursor(_)
                 | Type::TextIO
                 | Type::StringIO
+                | Type::HandlerLock
                 | Type::BinaryIO
                 | Type::CsvReader
                 | Type::ZipFile
