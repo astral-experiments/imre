@@ -1,5 +1,5 @@
-from os import PathLike
-from typing import BinaryIO, Callable, Protocol, TextIO, TypeVar, overload
+from os import PathLike, terminal_size
+from typing import BinaryIO, Callable, NamedTuple, Protocol, TextIO, TypeVar, overload
 
 _S = TypeVar("_S", str, bytes)
 _D = TypeVar("_D", bound=str | bytes | PathLike[str] | PathLike[bytes])
@@ -75,3 +75,11 @@ def register_unpack_format(name: str, extensions: list[str], function: Callable,
 def unregister_archive_format(name: str) -> None: ...
 def unregister_unpack_format(name: str) -> None: ...
 def chown(path: str | bytes | PathLike[str] | PathLike[bytes] | int, user: str | int | None = None, group: str | int | None = None, *, dir_fd: int | None = None, follow_symlinks: bool = True) -> None: ...
+
+class _ntuple_diskusage(NamedTuple):
+    total: int
+    used: int
+    free: int
+
+def disk_usage(path: str | bytes | PathLike[str] | PathLike[bytes] | int) -> _ntuple_diskusage: ...
+def get_terminal_size(fallback: tuple[int, int] = (80, 24)) -> terminal_size: ...

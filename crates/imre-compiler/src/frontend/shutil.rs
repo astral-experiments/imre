@@ -5,6 +5,97 @@ use super::*;
 mod registry;
 
 impl Checker<'_> {
+    pub(super) fn shutil_size(
+        &mut self,
+        call: &ast::ExprCall,
+        terminal: bool,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let pair = self.types.tuple(vec![Type::Int; 2]);
+        let (name, operation, returns, default) = if terminal {
+            let default = Expr {
+                ty: pair,
+                kind: ExprKind::Tuple(
+                    [80, 24]
+                        .map(|n| Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Int(n.to_string()),
+                        })
+                        .into(),
+                ),
+            };
+            (
+                "fallback",
+                ir::ProcessOperation::GetTerminalSize,
+                self.types.struct_sequence(
+                    "os.terminal_size",
+                    &["columns", "lines"],
+                    vec![Type::Int; 2],
+                ),
+                Some(default),
+            )
+        } else {
+            (
+                "path",
+                ir::ProcessOperation::DiskUsage,
+                self.types.intrinsic_namedtuple(
+                    "usage",
+                    &["total", "used", "free"],
+                    vec![Type::Int; 3],
+                ),
+                None,
+            )
+        };
+        let param = Parameter {
+            name: name.into(),
+            ty: Type::None,
+            default,
+            sign_only: false,
+            kind: ParameterKind::PositionalOrKeyword,
+        };
+        let args = self.arguments_with(call, &[param], None, |checker, _, expr| {
+            let value = checker.expr(expr)?;
+            if terminal {
+                if matches!(value.ty, Type::None | Type::Int | Type::ListInt)
+                    || checker
+                        .types
+                        .fields(value.ty)
+                        .is_some_and(|fields| fields.iter().all(|t| *t == Type::Int))
+                {
+                    return Ok(value);
+                }
+                return Err(error(
+                    checker.source,
+                    expr,
+                    "terminal fallback requires an integer sequence",
+                ));
+            }
+            if matches!(value.ty, Type::Path | Type::PurePath(_)) {
+                return checker.fspath_value(value, expr);
+            }
+            if matches!(
+                value.ty,
+                Type::None
+                    | Type::Bool
+                    | Type::Int
+                    | Type::Str
+                    | Type::StrLiteral(_)
+                    | Type::Bytes
+                    | Type::Float
+                    | Type::Optional(_)
+                    | Type::Union(_)
+            ) {
+                return Ok(value);
+            }
+            Err(error(
+                checker.source,
+                expr,
+                "unsupported disk_usage path type",
+            ))
+        })?;
+        Ok(self.ordered_builtin(Builtin::Process(operation), returns, args))
+    }
+
     pub(super) fn shutil_chown(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let none = Expr {

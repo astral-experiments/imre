@@ -708,6 +708,36 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            ProcessOperation::DiskUsage | ProcessOperation::GetTerminalSize => {
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(returns)));
+                let arg = &args[0].value;
+                let word = self.word(arg);
+                let call = if matches!(operation, ProcessOperation::DiskUsage) {
+                    let kind = representation_kind(arg.ty, &self.module.types);
+                    format!(
+                        "call ptr @imre_shutil_disk_usage(i64 {word}, i32 {kind}, ptr @{layout})"
+                    )
+                } else {
+                    let (kind, len) = if let Some(fields) = self.module.types.fields(arg.ty) {
+                        (0, fields.len())
+                    } else if arg.ty == Type::ListInt {
+                        (1, 0)
+                    } else {
+                        (2, 0)
+                    };
+                    format!(
+                        "call ptr @imre_shutil_terminal_size(i64 {word}, i32 {kind}, i64 {len}, ptr @{layout})"
+                    )
+                };
+                let operand = self.checked_instruction(call);
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             ProcessOperation::Chown => {
                 let mut operands = Vec::new();
                 for arg in &args[..4] {

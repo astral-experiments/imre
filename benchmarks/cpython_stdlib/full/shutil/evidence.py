@@ -13,6 +13,7 @@ sys.path[:0] = [str(HERE), str(STDLIB)]
 import copyfile
 import archive_ops
 import fastcopy_ops
+import misc_ops
 import native_copy
 import native_rmtree
 import stream_ops
@@ -91,6 +92,9 @@ def run_level(args, module, reference, level, directory):
     stream_work = directory / "streams"
     stream_work.mkdir()
     executions.update(stream_ops.executors(module, tools, stream_work, with_roles=True))
+    misc_work = directory / "misc"
+    misc_work.mkdir()
+    executions.update(misc_ops.executors(tools, module, misc_work, with_roles=True))
     archive_work = directory / "archives"
     archive_work.mkdir()
     archive_blockers = {}
@@ -171,6 +175,7 @@ def main():
     for arg in ("imre", "runtime", "clang"):
         parser.add_argument("--" + arg, required=True, type=lambda v: Path(v).resolve())
     parser.add_argument("--result", type=Path, default=HERE / "evidence-linux.json")
+    parser.add_argument("--reference", type=Path, default=HERE / "reference-linux.json")
     parser.add_argument("--method-attempts", type=lambda p: Path(p).resolve(),
                         default=HERE / "method-attempts-linux.json")
     parser.add_argument("--cpython-source", type=Path)
@@ -180,7 +185,7 @@ def main():
     if args.cpython_source:
         sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
-    reference = json.loads((HERE / "reference-linux.json").read_text())
+    reference = json.loads(args.reference.read_text())
     if reference["cpython_commit"] != manifest["commit"]:
         raise ValueError("reference commit changed")
     verify_files(STDLIB / "upstream", manifest["files"])

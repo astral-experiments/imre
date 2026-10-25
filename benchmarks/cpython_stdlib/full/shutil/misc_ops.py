@@ -14,7 +14,8 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path.insert(0, str(STDLIB))
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, run_in_fixtures
+from suite_native import Toolchain, native_method, run_in_fixtures, testcase_fixture
+from suite_evidence import roles
 
 
 def spelling(value, slot):
@@ -111,9 +112,39 @@ try:
         raise_native_error(result.stdout)
 
 
-def run_level(tools, main, folder):
+SIZE_DRIVER = """import shutil
+import sys
+with open(sys.argv[1], 'w', encoding='utf-8') as output:
+    if sys.argv[2] == 'disk':
+        usage = shutil.disk_usage(sys.argv[3])
+        output.write(str(usage.total) + ' ' + str(usage.used) + ' ' + str(usage.free))
+    else:
+        size = shutil.get_terminal_size((int(sys.argv[3]), int(sys.argv[4])))
+        output.write(str(size.columns) + ' ' + str(size.lines))
+"""
+
+
+def size_driver(tools, folder):
+    work = folder / "size"
+    work.mkdir()
+    binary = tools.build(SIZE_DRIVER.encode(), work)
+    def invoke(*argv, stream=None, closed=False):
+        with tempfile.NamedTemporaryFile(dir=work) as output:
+            # A swapped __stdout__ is fixture state. Give the child the actual
+            # descriptor; a missing __stdout__ maps to a closed fd 1.
+            result = subprocess.run([binary, output.name, *argv], stdin=subprocess.DEVNULL,
+                                    stdout=stream, stderr=subprocess.PIPE,
+                                    preexec_fn=(lambda: os.close(1)) if closed else None,
+                                    timeout=30, check=True)
+            assert not result.stderr, result.stderr
+            return tuple(map(int, output.read().split()))
+    return invoke
+
+
+def executors(tools, main, folder, *, with_roles=False):
     suite = load_suite('test.test_shutil')
     ownership = Ownership(tools, folder)
+    size = size_driver(tools, folder)
     def execute(case, original):
         name = case._testMethodName
         if name == 'test_chown':
@@ -122,9 +153,57 @@ def run_level(tools, main, folder):
             assert ownership.calls
             return {"status": "host_driven_native", "operations": {"chown": ownership.calls},
                     "fixture": "original OS account lookup, descriptors, stat assertions and cleanups in CPython"}
-        return {"status": "blocked", "reason": "native named tuple result and original fixtures pending"}
-    selected = {case.id(): execute for case in cases(suite)
-                if isinstance(case, (main.TestMisc, main.TestGetTerminalSize))}
+        if name == 'test_does_not_crash':
+            work = folder / name
+            work.mkdir()
+            fixture = "import shutil\n" + testcase_fixture()
+            run = native_method(tools, work, Path(main.__file__), 'TestGetTerminalSize',
+                                case.id(), fixture, operation=('imre', 'shutil.get_terminal_size'))
+            return {"status": "native_body_host_fixture", **run(case, original)}
+        calls = 0
+        if name == 'test_disk_usage':
+            def disk(path):
+                nonlocal calls
+                calls += 1
+                return main.shutil._ntuple_diskusage(*size('disk', path))
+            with patch.object(main.shutil, 'disk_usage', disk):
+                original()
+            assert calls == 2
+            return {"status": "host_driven_native", "operations": {"disk_usage": calls},
+                    "fixture": "both native statvfs results; original dynamic field/type assertions in CPython"}
+        def terminal(fallback=(80, 24)):
+            nonlocal calls
+            calls += 1
+            stream = sys.__stdout__
+            dimensions = size('terminal', *map(str, fallback), stream=stream, closed=stream is None)
+            return os.terminal_size(dimensions)
+        with patch.object(main.shutil, 'get_terminal_size', terminal):
+            original()
+        assert calls > 0
+        return {"status": "mixed" if name == 'test_fallback' else "host_driven_native",
+                "operations": {"get_terminal_size": calls},
+                "fixture": ("original sys.__stdout__ swaps translated to a closed stdout and the test's /dev/null descriptor"
+                            if name == 'test_fallback' else "original process environment forwarded; assertions in CPython")}
+    def observe(case, original):
+        result = execute(case, original)
+        if not with_roles:
+            return result
+        if "observation" in result:
+            return result["observation"]
+        (operation, calls), = result["operations"].items()
+        return {"roles": roles(body="cpython", assertions="cpython",
+                               operation="mixed" if result["status"] == "mixed" else "imre",
+                               fixture="cpython"),
+                "evidence": {"operation": "shutil." + operation, "native_calls": calls,
+                             "fixture": result["fixture"], "opt_level": tools.level}}
+
+    return {case.id(): observe for case in cases(suite)
+            if isinstance(case, (main.TestMisc, main.TestGetTerminalSize))}
+
+
+def run_level(tools, main, folder):
+    suite = load_suite("test.test_shutil")
+    selected = executors(tools, main, folder)
     good, failures, skips = run_in_fixtures(suite, selected)
     rows = {n: v[0] for n, v in good.items() if v}
     rows.update({n: {"status": "failed", "reason": reason} for n, reason in failures})
@@ -137,10 +216,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('imre', 'runtime', 'clang', 'result'):
         parser.add_argument('--' + name, type=lambda p: Path(p).resolve(), required=True)
+    parser.add_argument("--controls", action="store_true", help="compare extra real fd, terminal and exception cases with CPython")
+    parser.add_argument("--cpython-source", type=Path)
     args = parser.parse_args()
     if sys.implementation.name != 'cpython' or sys.version_info[:3] != (3, 14, 5) or sys.platform != 'linux':
         parser.error("requires the test-enabled CPython 3.14.5 Linux interpreter")
     manifest = json.loads((HERE / 'UPSTREAM.json').read_text())
+    if args.cpython_source:
+        sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     verify_files(STDLIB / 'upstream', manifest['files'])
     verify_interpreter_tests(manifest)
     import test
@@ -153,8 +236,15 @@ def main():
         for level in (0, 3):
             folder = Path(tmp) / str(level)
             folder.mkdir()
-            levels[level] = run_level(Toolchain(args.imre, args.runtime, args.clang, level),
-                                      test_shutil, folder)
+            tools = Toolchain(args.imre, args.runtime, args.clang, level)
+            levels[level] = run_level(tools, test_shutil, folder)
+            if args.controls:
+                from ownership_controls import compare as check_ownership
+                from capacity_controls import compare as check_capacity
+                ownership = folder / "ownership-controls"
+                ownership.mkdir()
+                print(f"-O{level}: {check_ownership(tools, ownership)} ownership and "
+                      f"{check_capacity(tools, folder)} capacity controls matched CPython", flush=True)
     args.result.write_text(json.dumps({"cpython_commit": manifest["commit"],
                                       "optimization_levels": levels}, indent=2) + "\n")
     return int(any(v['status'] == 'failed' for rows in levels.values() for v in rows.values()))

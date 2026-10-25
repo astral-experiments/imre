@@ -6767,6 +6767,10 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Random(op))) => return self.random_call(op, call),
             Some(Binding::Intrinsic(Intrinsic::RandomChoice)) => return self.random_choice(call),
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
+            Some(Binding::Intrinsic(Intrinsic::DiskUsage)) => return self.shutil_size(call, false),
+            Some(Binding::Intrinsic(Intrinsic::GetTerminalSize)) => {
+                return self.shutil_size(call, true);
+            }
             Some(Binding::Intrinsic(Intrinsic::Chown)) => return self.shutil_chown(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::CopyFileObj)) => {

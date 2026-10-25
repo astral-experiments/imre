@@ -1,6 +1,7 @@
 //! POSIX executable lookup shares the caller's credentials and current working directory.
 mod accounts;
 mod archives;
+mod capacity;
 mod copy;
 mod fastcopy;
 mod ownership;

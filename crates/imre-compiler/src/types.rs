@@ -52,6 +52,7 @@ pub(crate) struct CachePolicy {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum TupleOrigin {
     Declaration(DefinitionId),
+    BuiltinNamedTuple(&'static str, &'static [&'static str]),
     StructSequence(&'static str, &'static [&'static str]),
 }
 
@@ -679,6 +680,20 @@ impl Types {
         )))
     }
 
+    /// A named tuple constructed by a builtin has no source-level factory declaration.
+    pub(crate) fn intrinsic_namedtuple(
+        &self,
+        name: &'static str,
+        names: &'static [&'static str],
+        fields: Vec<Type>,
+    ) -> Type {
+        assert_eq!(names.len(), fields.len());
+        Type::Tuple(self.intern(Shape::NamedTuple(
+            TupleOrigin::BuiltinNamedTuple(name, names),
+            fields,
+        )))
+    }
+
     pub(crate) fn tuple_metadata(&self, ty: Type) -> Option<Rc<NamedTuple>> {
         let Type::Tuple(id) = ty else { return None };
         let storage = self.0.borrow();
@@ -686,12 +701,14 @@ impl Types {
             Shape::NamedTuple(TupleOrigin::Declaration(id), _) => {
                 storage.named_tuples.get(id).cloned()
             }
-            Shape::NamedTuple(TupleOrigin::StructSequence(name, fields), _) => {
-                Some(Rc::new(NamedTuple {
-                    name: name.to_string(),
-                    fields: fields.iter().map(|v| v.to_string()).collect(),
-                }))
-            }
+            Shape::NamedTuple(
+                TupleOrigin::StructSequence(name, fields)
+                | TupleOrigin::BuiltinNamedTuple(name, fields),
+                _,
+            ) => Some(Rc::new(NamedTuple {
+                name: name.to_string(),
+                fields: fields.iter().map(|v| v.to_string()).collect(),
+            })),
             _ => None,
         }
     }

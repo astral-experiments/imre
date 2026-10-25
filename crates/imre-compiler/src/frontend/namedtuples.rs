@@ -111,11 +111,29 @@ impl Checker<'_> {
         receiver: Expr,
         declaration: &NamedTuple,
     ) -> Result<Expr, String> {
-        if attribute.attr.as_str() == "__match_args__"
-            || (attribute.attr.as_str() == "_fields"
-                && self.types.namedtuple_definition(receiver.ty).is_some())
-        {
-            let fields = self.namedtuple_fields(declaration);
+        let attr = attribute.attr.as_str();
+        let struct_sequence = self.types.struct_sequence_fields(receiver.ty).is_some();
+        let metadata = match attr {
+            "__match_args__" => Some(self.namedtuple_fields(declaration)),
+            "_fields" if !struct_sequence => Some(self.namedtuple_fields(declaration)),
+            "n_fields" | "n_sequence_fields" | "n_unnamed_fields"
+                if struct_sequence && declaration.name == "os.terminal_size" =>
+            {
+                Some(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Int(
+                        if attr == "n_unnamed_fields" {
+                            0
+                        } else {
+                            declaration.fields.len()
+                        }
+                        .to_string(),
+                    ),
+                })
+            }
+            _ => None,
+        };
+        if let Some(fields) = metadata {
             return Ok(Expr {
                 ty: fields.ty,
                 kind: ExprKind::Scope {

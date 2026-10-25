@@ -243,6 +243,7 @@ def main(stack):
     for key in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + key, type=lambda p: Path(p).resolve(), required=True)
     parser.add_argument("--only", action="append")
+    parser.add_argument("--reference", type=Path, default=HERE / "reference-linux.json")
     parser.add_argument("--fixture-root", type=Path, default=HERE.parent / "shared/upstream")
     parser.add_argument("--fixture-manifest", type=Path, default=HERE.parent / "shared/UPSTREAM.json")
     parser.add_argument("--compiler-tree", required=True)
@@ -250,7 +251,10 @@ def main(stack):
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5):
         parser.error("requires test-enabled CPython 3.14.5")
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
-    reference = json.loads((HERE / "reference-linux.json").read_text())["reference"]
+    baseline = json.loads(args.reference.read_text())
+    if baseline["cpython_commit"] != manifest["commit"]:
+        raise ValueError("reference has a different CPython revision")
+    reference = baseline["reference"]
     verify_files(STDLIB / "upstream", manifest["files"])
     verify_interpreter_tests(manifest)
     shared = json.loads(args.fixture_manifest.read_text())
@@ -295,7 +299,7 @@ def main(stack):
                 return row
             selected = {}
             for name in ids:
-                if reference[name] != "pass":
+                if isinstance(reference[name], dict) and "skipped" in reference[name]:
                     rows[name] = {"status": "reference-skip", "reason": reference[name]["skipped"]}
                 elif args.only and name not in args.only:
                     rows[name] = {"status": "not-selected"}

@@ -266,6 +266,8 @@ impl Builtin {
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
+                | ProcessOperation::DiskUsage
+                | ProcessOperation::GetTerminalSize
                 | ProcessOperation::Chown
                 | ProcessOperation::RmTree
                 | ProcessOperation::CopyTree(_)

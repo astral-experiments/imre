@@ -1516,6 +1516,8 @@ pub(crate) enum ProcessOperation {
     Strerror,
     DescriptorConstant(&'static str),
     Which,
+    DiskUsage,
+    GetTerminalSize,
     Chown,
     RmTree,
     Copy(CopyOperation),
