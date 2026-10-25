@@ -6,6 +6,7 @@ _string = ["`formatter_parser` and `formatter_field_name_split` iterate format f
 abc = ["Abstract bases and `@abstractmethod` on fixed-layout classes.","tests/fixtures/classes/fixed_lineage.py"]
 annotationlib = ["`get_annotations`, `Format` and `type_repr` for supported declarations.","tests/fixtures/callables/annotations.py"]
 argparse = ["`ArgumentParser`, typed options, subcommands and generated help.","benchmarks/cpython_stdlib/full/argparse/README.md"]
+array = ["`array.array` class identity, metadata, and virtual registration with `Sequence` and `MutableSequence`.","tests/fixtures/containers/array_registration.py"]
 asyncio = ["Run subprocess tasks, wait for a task group and handle cancellation.","tests/fixtures/processes/async_groups.py"]
 base64 = ["`urlsafe_b64encode` on bytes.","benchmarks/cpython_stdlib/native_base64.py"]
 builtins = ["Read, assign and delete `builtins._`; escape supported representations with `ascii` and f-string `!a`.","benchmarks/cpython_stdlib/full/builtins/README.md"]

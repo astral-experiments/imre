@@ -572,6 +572,7 @@ pub(crate) enum CheckedDiagnostic {
     ArgumentType(TextRange),
     RepeatedKeyword(TextRange),
     NonIterableSpread(TextRange),
+    CallableKey(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -594,6 +595,7 @@ impl CheckedDiagnostic {
             Self::DeferredName(range) => (range, 9),
             Self::NonIterableSpread(range) => (range, 10),
             Self::RuntimeOverload(range) => (range, 12),
+            Self::CallableKey(range) => (range, 16),
             Self::ArgumentType(range) => (range, 15),
         };
         (range.start(), range.end(), kind)
@@ -601,7 +603,9 @@ impl CheckedDiagnostic {
 
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
-            Self::AbstractClassCall(call) => diagnostic == "call-non-callable" && call == range,
+            Self::AbstractClassCall(call) | Self::CallableKey(call) => {
+                diagnostic == "call-non-callable" && call == range
+            }
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }

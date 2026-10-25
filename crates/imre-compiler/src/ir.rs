@@ -39,6 +39,8 @@ pub(crate) enum Type {
     StringKeys,
     Tuple(usize),
     VarTuple(usize),
+    /// A functools key retains its comparator and, for a bound key, its object.
+    CmpKey(usize, bool),
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
     /// Private state retained by an independently constructed function cache.
@@ -294,6 +296,7 @@ impl std::fmt::Display for Type {
             Self::BuiltinClass => "type",
             Self::ForwardRef(_) => "annotationlib.ForwardRef",
             Self::AnnotationValue(_) => "annotation value",
+            Self::CmpKey(..) => "functools.KeyWrapper",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -475,14 +478,20 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
-    /// Only programs that can own a display value need to clear the namespace at shutdown.
+    /// Release the rooted namespace bindings at shutdown if this program uses them.
     pub(crate) fn uses_builtins_last(&self) -> bool {
         let mut used = false;
         for function in self.functions.iter().chain([&self.entry]) {
             walk_expressions(&function.body, &mut |value| {
                 used |= matches!(
                     value.kind,
-                    ExprKind::Builtin(Builtin::BuiltinsSetLast | Builtin::SysDisplayHook, _)
+                    ExprKind::Builtin(
+                        Builtin::BuiltinsSetLast
+                            | Builtin::SysDisplayHook
+                            | Builtin::BuiltinsLen
+                            | Builtin::BuiltinsSetLen,
+                        _
+                    )
                 );
             });
         }
@@ -793,6 +802,8 @@ pub(crate) enum Builtin {
     Cycle,
     SysDisplayHook,
     BuiltinsLast,
+    BuiltinsLen,
+    BuiltinsSetLen,
     BuiltinsHasLast,
     BuiltinsSetLast,
     BuiltinsDeleteLast,
@@ -814,6 +825,9 @@ pub(crate) enum Builtin {
     },
     StrEnumName,
     ClassNameView,
+    ClassNamePart {
+        module: bool,
+    },
     NewForwardRef,
     ForwardRefField(usize),
     BoxAnnotation(usize),
@@ -1860,6 +1874,10 @@ pub(crate) enum ProcessOperation {
         poll: bool,
     },
     PopenSetStatus,
+    PopenSetPoll {
+        returns_none: bool,
+    },
+    PopenDeletePoll,
     PopenWait,
     PopenCommunicate {
         text: bool,

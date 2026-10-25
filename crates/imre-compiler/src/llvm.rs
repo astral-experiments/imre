@@ -57,6 +57,7 @@ impl Type {
             Self::Str
             | Self::ForwardRef(_)
             | Self::AnnotationValue(_)
+            | Self::CmpKey(..)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -149,6 +150,7 @@ impl Type {
             Self::Str
             | Self::ForwardRef(_)
             | Self::AnnotationValue(_)
+            | Self::CmpKey(..)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -844,6 +846,7 @@ impl Emitter<'_, '_> {
             | Type::AnnotationValue(_)
             | Type::VarTuple(_)
             | Type::ModuleSpec(_)
+            | Type::CmpKey(..)
             | Type::SysImplementation
             | Type::CompletedProcess(..) => "record",
             Type::List(_)
@@ -3467,6 +3470,7 @@ impl Emitter<'_, '_> {
             self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
         } else {
             match left.ty {
+                Type::CmpKey(..) => unreachable!("comparator keys use their callback"),
                 Type::ForwardRef(_) | Type::AnnotationValue(_) => {
                     let symbol = if matches!(left.ty, Type::ForwardRef(_)) {
                         "imre_forward_ref_equal"
@@ -4080,6 +4084,15 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ClassNamePart { module } => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @imre_class_name_part(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*module)
+                )),
+                small_integer: false,
+            },
             Builtin::StaticFunction(_)
             | Builtin::AnnotationMember(_)
             | Builtin::BoxAnnotation(_)
@@ -4942,6 +4955,20 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
+            Builtin::BuiltinsLen => {
+                let layout = self.output.global_ref("layout_callable".to_owned());
+                let value = Value {
+                    ty: returns,
+                    operand: self
+                        .checked_pointer(format!("call ptr @imre_builtins_len(ptr @{layout})")),
+                    small_integer: false,
+                };
+                self.owned(value)
+            }
+            Builtin::BuiltinsSetLen => {
+                self.void_call("imre_builtins_set_len", &[&args[0].value]);
+                none()
+            }
             Builtin::BuiltinsHasLast => {
                 let bit = self.instruction("call i32 @imre_builtins_has_last()");
                 Value {
@@ -7127,6 +7154,7 @@ impl Emitter<'_, '_> {
                     | Type::ForwardRef(_)
                     | Type::FunctionRef
                     | Type::AnnotationValue(_)
+                    | Type::CmpKey(..)
                     | Type::BuiltinClass
                     | Type::Class(_)
                     | Type::List(_)
@@ -7414,6 +7442,7 @@ impl Emitter<'_, '_> {
             | Type::ForwardRef(_)
             | Type::FunctionRef
             | Type::AnnotationValue(_)
+            | Type::CmpKey(..)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -7520,6 +7549,7 @@ impl Emitter<'_, '_> {
             | Type::ForwardRef(_)
             | Type::FunctionRef
             | Type::AnnotationValue(_)
+            | Type::CmpKey(..)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -8166,6 +8196,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Class(_)
         | Type::VarTuple(_)
         | Type::Tuple(_)
+        | Type::CmpKey(..)
         | Type::Callable(_)
         | Type::ModuleSpec(_)
         | Type::SysImplementation
@@ -8442,6 +8473,10 @@ declare i64 @imre_popen_identity(ptr)
 declare ptr @imre_popen_args(ptr)
 declare ptr @imre_popen_control(ptr)
 declare i64 @imre_child_status(ptr, i1 zeroext)
+declare i64 @imre_popen_status(ptr, i1 zeroext)
+declare void @imre_popen_set_poll(ptr, ptr, i1 zeroext)
+declare void @imre_popen_del_poll(ptr)
+declare zeroext i1 @imre_popen_signal_override(ptr, i64)
 declare void @imre_child_set_status(ptr, i64)
 declare ptr @imre_popen_communicate(ptr, ptr, i1 zeroext, i32, i64, ptr)
 declare i64 @imre_child_wait(ptr, i32, i64, ptr)
@@ -9107,6 +9142,8 @@ declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_builtins_last()
+declare ptr @imre_builtins_len(ptr)
+declare void @imre_builtins_set_len(ptr)
 declare i32 @imre_builtins_has_last()
 declare void @imre_builtins_set_last(i32, i64)
 declare void @imre_builtins_del_last()
@@ -9332,6 +9369,7 @@ declare void @imre_str_enum_table(ptr, i64)
 declare i64 @imre_enum_lookup(ptr, i64, i64)
 declare ptr @imre_enum_string(i64)
 declare i32 @imre_str_equal(ptr, ptr)
+declare ptr @imre_class_name_part(ptr, i32)
 declare i32 @imre_optional_int_equal(i64, i64)
 declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)

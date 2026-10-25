@@ -508,16 +508,38 @@ impl Emitter<'_, '_> {
             ProcessOperation::PopenIdentity => {
                 self.call("imre_popen_identity", returns, &[&args[0].value])
             }
-            ProcessOperation::PopenStatus { poll } => {
+            ProcessOperation::PopenStatus { poll: true } => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_popen_status(ptr {}, i1 true)",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::PopenStatus { poll: false } => {
                 let control = self.instruction(format!(
                     "call ptr @imre_popen_control(ptr {})",
                     args[0].value.operand
                 ));
                 let word = self.checked_instruction(format!(
-                    "call i64 @imre_child_status(ptr {control}, i1 {})",
-                    u8::from(poll)
+                    "call i64 @imre_child_status(ptr {control}, i1 false)"
                 ));
                 self.unpack_word(word, returns)
+            }
+            ProcessOperation::PopenSetPoll { returns_none } => {
+                self.checked_line(format!(
+                    "call void @imre_popen_set_poll(ptr {}, ptr {}, i1 {})",
+                    args[1].value.operand,
+                    args[0].value.operand,
+                    u8::from(returns_none)
+                ));
+                none()
+            }
+            ProcessOperation::PopenDeletePoll => {
+                self.checked_line(format!(
+                    "call void @imre_popen_del_poll(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
             }
             ProcessOperation::PopenSetStatus => {
                 let control = self.instruction(format!(
@@ -564,6 +586,13 @@ impl Emitter<'_, '_> {
                 none()
             }
             ProcessOperation::PopenSignal => {
+                let overridden = self.checked_instruction(format!(
+                    "call i1 @imre_popen_signal_override(ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                let (default, done) = (self.label(), self.label());
+                self.branch(&overridden, &done, &default);
+                self.start(&default);
                 let control = self.instruction(format!(
                     "call ptr @imre_popen_control(ptr {})",
                     args[0].value.operand
@@ -572,6 +601,8 @@ impl Emitter<'_, '_> {
                     "call void @imre_child_signal(ptr {control}, i64 {})",
                     args[1].value.operand
                 ));
+                self.jump(&done);
+                self.start(&done);
                 none()
             }
             ProcessOperation::AsyncSpawn { stdout, stderr } => {

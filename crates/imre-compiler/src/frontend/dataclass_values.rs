@@ -84,6 +84,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         }
         Type::SysImplementation => true,
         Type::Exception
+        | Type::CmpKey(..)
         | Type::NamedException(_)
         | Type::StringKeys
         | Type::ImportException
