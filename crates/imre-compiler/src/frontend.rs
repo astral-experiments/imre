@@ -7116,6 +7116,10 @@ impl<'a> Checker<'a> {
             return self.simple_exception(call, kind);
         }
         if let Some(binding) = self.resolve(&call.func) {
+            if let Binding::Value(_) = binding {
+                let callable = self.expr(&call.func)?;
+                return self.invoke(call, callable);
+            }
             let Binding::Definition(definition) = binding else {
                 return Err(error(self.source, call, "a module is not callable"));
             };
