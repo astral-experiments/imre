@@ -286,7 +286,7 @@ fn emit_program(
             }
         });
     }
-    let (uses_sys_argv, uses_orig_argv) = module.sys_argument_usage();
+    let (uses_sys_argv, uses_orig_argv, uses_linecache) = module.startup_usage();
     let mut emitter = Emitter {
         module,
         output,
@@ -330,6 +330,7 @@ fn emit_program(
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv,
         uses_orig_argv,
+        uses_linecache,
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -515,6 +516,7 @@ struct Emitter<'a, 'module> {
     integer_regions: Vec<Option<integer_regions::Summary>>,
     uses_sys_argv: bool,
     uses_orig_argv: bool,
+    uses_linecache: bool,
     has_extensions: bool,
 }
 
@@ -1722,6 +1724,9 @@ impl Emitter<'_, '_> {
             self.line("call void @imre_record_error_init()");
             self.line("call void @imre_init_literals()");
         }
+        if entry && self.uses_linecache {
+            self.line("call void @imre_linecache_init()");
+        }
         if entry && self.uses_sys_argv {
             self.line("call void @imre_args_init(i32 %argc, ptr %argv)");
         }
@@ -1739,6 +1744,9 @@ impl Emitter<'_, '_> {
                 self.line("call void @imre_extension_clear()");
             }
             self.cleanup_globals();
+            if self.uses_linecache {
+                self.line("call void @imre_linecache_clear()");
+            }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
@@ -1771,6 +1779,9 @@ impl Emitter<'_, '_> {
                 self.line("call void @imre_extension_clear()");
             }
             self.cleanup_globals();
+            if self.uses_linecache {
+                self.line("call void @imre_linecache_clear()");
+            }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
@@ -2417,7 +2428,7 @@ impl Emitter<'_, '_> {
                 }
                 set
             }
-            ExprKind::Tuple(values) => self.tuple(expression.ty, values),
+            ExprKind::Tuple(values) => self.tuple(expression.ty, values, None),
             ExprKind::Present(expression_value) => {
                 let value = self.operand(expression_value);
                 let value = self.own_operand(value);
@@ -4616,7 +4627,83 @@ impl Emitter<'_, '_> {
                 small_integer: false,
             },
             Builtin::NewPlainObject => self.call("imre_plain_object_new", returns, &[]),
+            Builtin::Linecache(op, entry, env) => {
+                use crate::ir::LinecacheOperation as Op;
+                let pointer = |i: usize| {
+                    if args[i].value.ty == Type::None {
+                        "null"
+                    } else {
+                        args[i].value.operand.as_str()
+                    }
+                };
+                match op {
+                    Op::Cache => self.call("imre_linecache_cache", returns, &[]),
+                    Op::Clear => self.call("imre_linecache_clear", returns, &[]),
+                    Op::Check => {
+                        self.line(format!(
+                            "call void @imre_linecache_check(ptr {})",
+                            pointer(0)
+                        ));
+                        Value {
+                            ty: Type::None,
+                            operand: "0".into(),
+                            small_integer: false,
+                        }
+                    }
+                    Op::Lazy => Value {
+                        ty: Type::Bool,
+                        operand: "false".into(),
+                        small_integer: false,
+                    },
+                    Op::Getline | Op::Getlines | Op::Update => {
+                        let globals = if *op == Op::Getline { 2 } else { 1 };
+                        let root = globals + 1;
+                        let layout = self
+                            .output
+                            .global_ref(format!("layout_{}", record_name(*entry)));
+                        let list = self.checked_instruction(format!(
+                            "call ptr @imre_linecache_lines(ptr {}, ptr {}, ptr {}, ptr {}, i32 {}, i32 {}, ptr @{layout})",
+                            pointer(0), pointer(globals), pointer(root), pointer(root+1), u32::from(*env), u32::from(*op == Op::Update)
+                        ));
+                        let operand = if *op == Op::Getline {
+                            let index = &args[1].value;
+                            let ty = index.ty.llvm();
+                            let fname = if index.ty == Type::Float {
+                                "imre_linecache_line_float"
+                            } else {
+                                "imre_linecache_line_int"
+                            };
+                            let item = self.instruction(format!(
+                                "call ptr @{fname}(ptr {list}, {ty} {}, ptr {})",
+                                index.operand,
+                                pointer(root + 2)
+                            ));
+                            self.line(format!("call void @imre_object_release(ptr {list})"));
+                            self.check_error();
+                            item
+                        } else {
+                            list
+                        };
+                        Value {
+                            ty: returns,
+                            operand,
+                            small_integer: false,
+                        }
+                    }
+                }
+            }
             Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
+            Builtin::WrapperAttributes(fields) => {
+                let names = fields
+                    .names()
+                    .iter()
+                    .map(|name| Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str((*name).to_owned()),
+                    })
+                    .collect::<Vec<_>>();
+                self.tuple(returns, &names, Some(fields.root()))
+            }
             Builtin::HashAvailable => self.call("imre_hash_algorithms_available", returns, &[]),
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
             Builtin::Sha256Update => {
@@ -6799,11 +6886,12 @@ declare ptr @imre_popen_pipe(ptr, i32)
 declare i64 @imre_file_fileno(ptr)
 declare i64 @imre_popen_pid(ptr)
 declare ptr @imre_popen_args(ptr)
-declare i64 @imre_popen_status(ptr, i1 zeroext)
+declare ptr @imre_popen_control(ptr)
+declare i64 @imre_child_status(ptr, i1 zeroext)
 declare ptr @imre_popen_communicate(ptr, ptr, i1 zeroext, i32, i64, ptr)
-declare i64 @imre_popen_wait(ptr, i32, i64)
+declare i64 @imre_child_wait(ptr, i32, i64, ptr)
 declare void @imre_popen_exit(ptr)
-declare void @imre_popen_signal(ptr, i64)
+declare void @imre_child_signal(ptr, i64)
 declare ptr @imre_async_process_spawn(ptr, ptr, ptr, i32, i32)
 declare i64 @imre_async_process_status(ptr, i1 zeroext)
 declare ptr @imre_async_process_communicate(ptr, ptr)
@@ -6957,6 +7045,13 @@ declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_next(ptr, i32)
 declare i64 @imre_csv_line_number(ptr)
 declare ptr @imre_plain_object_new()
+declare void @imre_linecache_init()
+declare ptr @imre_linecache_cache()
+declare void @imre_linecache_clear()
+declare void @imre_linecache_check(ptr)
+declare ptr @imre_linecache_lines(ptr, ptr, ptr, ptr, i32, i32, ptr)
+declare ptr @imre_linecache_line_int(ptr, i64, ptr)
+declare ptr @imre_linecache_line_float(ptr, double, ptr)
 declare ptr @imre_inspect_sentinel()
 declare ptr @imre_inspect_str_descriptor(i32)
 declare ptr @imre_sha256_new(ptr)
