@@ -3,19 +3,23 @@
 import argparse
 import ast
 from collections import Counter
-from functools import cache
+from functools import cache, partial
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 import types
 import unittest
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import cases, load_suite, verify_files
+from suite_native import Toolchain, run_in_fixtures
 
 
 class Blocked(Exception):
@@ -73,12 +77,13 @@ class Parser(Group):
                   f"    {decl}\n    return parser.parse_args({arg})\n\n"
                   f"result = parse({'sys.argv[1:]' if explicit else ''})\n"
                   f"print('RETURN')\nprint(repr(result))\n")
-        binary, reason = self.driver.build(source, self.driver.level)
+        binary, reason = self.driver.build(source)
         if reason:
+            self.driver.blocked[self.driver.name].add(reason)
             raise Blocked(reason)
         argv = args if explicit else sys.argv[1:]
         actual = completed([binary, *argv])
-        expected = completed([sys.executable, "-B", binary.with_name("cli.py"), *argv])
+        expected = completed([sys.executable, "-B", binary.with_name("case.py"), *argv])
         if actual != expected:
             raise AssertionError(f"argv={argv!r}: native={actual!r}, CPython={expected!r}")
         self.driver.operations += 1
@@ -96,44 +101,67 @@ class Parser(Group):
 
 
 class Driver:
-    def __init__(self, options, work):
-        self.options = options
+    def __init__(self, toolchain, work):
+        self.toolchain = toolchain
         self.work = work
+        self.blocked = {}
 
     @cache
-    def build(self, source, level):
+    def build(self, source):
         folder = self.work / hashlib.sha256(source.encode()).hexdigest()
         folder.mkdir(exist_ok=True)
-        script = folder / "cli.py"
-        script.write_text(source)
-        binary = folder / f"native-{level}"
-        code, _, error = completed([self.options.imre, "build", script, "--quiet", "-o", binary,
-                                    "--runtime", self.options.runtime, "--clang", self.options.clang,
-                                    "--opt-level", str(level)])
-        if code:
-            message = error.decode(errors="replace").strip().replace(str(script), "cli.py")
-            return None, message
-        return binary, None
+        try:
+            return self.toolchain.build(source.encode(), folder), None
+        except RuntimeError as error:
+            # A setup, linker, or toolchain error is a failure of the run.
+            # Only a source diagnostic explains a blocked parser declaration.
+            diagnostic = str(error).partition(str(folder / "case.py") + ":")[2]
+            if "Imre:" not in diagnostic:
+                raise
+            return None, "case.py:" + diagnostic.strip()
 
+    def execute(self, case, method):
+        self.name = case.id()
+        self.operations = 0
+        self.blocked[self.name] = set()
+        with patch.object(case, "parser_class", partial(Parser, self)):
+            try:
+                method()
+            except Blocked as error:
+                self.blocked[self.name].add(str(error))
+                raise
+        return self.operations
 
-class Result(unittest.TestResult):
-    def __init__(self):
-        super().__init__()
-        self.problems = []
-
-    def record(self, error):
-        kind, value, _ = error
-        self.problems.append(("blocked" if issubclass(kind, Blocked) else "failed", str(value)))
-
-    def addError(self, test, err):
-        self.record(err)
-
-    def addFailure(self, test, err):
-        self.record(err)
-
-    def addSubTest(self, test, subtest, err):
-        if err:
-            self.record(err)
+    def outcomes(self, suite, executions, reference):
+        evidence, failures, skips = run_in_fixtures(suite, executions)
+        results = {}
+        for name, entries in evidence.items():
+            if not entries:  # The callback raised; the runner reports its failure below.
+                continue
+            operations, = entries
+            results[name] = (["host-driven-native", operations] if operations else
+                             ["reference-only", "no parse_args calls in the upstream routine"])
+        for name, reason in skips:
+            if reference.get(name) != {"skipped": reason}:
+                raise ValueError(f"unexpected native skip: {name}: {reason}")
+            results[name] = ["reference-skip", reason]
+        for occurrence, message in failures:
+            # unittest appends a space and the subtest description to its ID.
+            name = occurrence.partition(" ")[0]
+            if name not in executions:
+                raise RuntimeError(f"fixture failed: {occurrence}: {message}")
+            # Only a traceback ending in the exact exception we recorded is a
+            # blocker. Preserve mismatches and original assertion failures.
+            blockers = self.blocked.get(name, ())
+            reason = next((r for r in sorted(blockers) if message.endswith(
+                "".join(traceback.format_exception_only(Blocked, Blocked(r))))), None)
+            if reason is None:
+                results[name] = ["failed", message]
+            elif results.get(name, [None])[0] != "failed":
+                results[name] = ["blocked", reason]
+        if set(results) != set(executions):
+            raise ValueError("shared fixture runner returned incomplete outcomes")
+        return results
 
 
 def main():
@@ -146,6 +174,9 @@ def main():
     options = parser.parse_args()
     options.imre = options.imre.resolve()
     options.runtime = options.runtime.resolve()
+    clang = shutil.which(options.clang)
+    if clang is None:
+        parser.error(f"cannot find clang executable: {options.clang}")
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
     if sys.implementation.name != "cpython" or "v" + ".".join(map(str, sys.version_info[:3])) != manifest["tag"]:
         parser.error(f"use a test-enabled CPython {manifest['tag']}")
@@ -165,33 +196,25 @@ def main():
     # tempfile cleanup applies to each class; linked native executables are large.
     for level in (0, 3):
         results = {}
-        for cls in dict.fromkeys(type(c) for c in inventory):
+        class_cases = {}
+        # run_in_fixtures wraps discovered instances, so load fresh ones per level.
+        for case in cases(load_suite(manifest["module"])):
+            class_cases.setdefault(type(case), []).append(case)
+        for cls, members in class_cases.items():
             with tempfile.TemporaryDirectory(prefix="imre-argparse-") as work:
-                driver = Driver(options, Path(work))
-                driver.level = level
-                for case in (c for c in inventory if type(c) is cls):
+                toolchain = Toolchain(options.imre, options.runtime, Path(clang), level)
+                driver = Driver(toolchain, Path(work))
+                executions = {}
+                for case in members:
                     name = case.id()
                     if not isinstance(cls, upstream.ParserTesterMetaclass) or not case._testMethodName.startswith(("test_failures_", "test_successes_")):
                         results[name] = ["reference-only", "outside generated parse routine adapter"]
-                        continue
-                    if cls.parser_class is not upstream.ErrorRaisingArgumentParser:
+                    elif cls.parser_class is not upstream.ErrorRaisingArgumentParser:
                         results[name] = ["blocked", f"custom parser class {cls.parser_class.__qualname__}"]
-                        continue
-                    driver.operations = 0
-                    case.parser_class = lambda *a, **kw: Parser(driver, *a, **kw)
-                    outcome = Result()
-                    case.run(outcome)
-                    if outcome.problems:
-                        # A differential or assertion failure takes precedence over
-                        # a blocked subtest. Never count a partially executed routine.
-                        result = next((p for p in outcome.problems if p[0] == "failed"), outcome.problems[0])
-                    elif outcome.skipped:
-                        result = ["reference-skip", outcome.skipped[0][1]]
-                    elif driver.operations:
-                        result = ["host-driven-native", driver.operations]
                     else:
-                        result = ["reference-only", "no parse_args calls in the upstream routine"]
-                    results[name] = result
+                        executions[name] = driver.execute
+                if executions:
+                    results.update(driver.outcomes(unittest.TestSuite(members), executions, reference["reference"]))
                 driver.build.cache_clear()
         counts = dict(sorted(Counter(v[0] for v in results.values()).items()))
         report["summary"][f"-O{level}"] = counts
