@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar]
         required: true
 permissions:
   contents: read
@@ -172,6 +172,12 @@ jobs:
               done
               python3 -B tests/files.py "${ordinary[@]}"
               ;;
+            percent-scalar)
+              PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/percent_filename.py "${tools[@]}" --result "$results/quoted-filename.json"
+              PYTHONPATH="$ref/Lib" python3 -B tests/text.py "${ordinary[@]}"
+              PYTHONPATH="$ref/Lib" python3 -B tests/errno.py "${ordinary[@]}" --evidence "$results/errno-evidence.json"
+              PYTHONPATH="$ref/Lib" python3 -B tests/unittest_main.py --compiler "$imre" --runtime "$runtime" --clang /usr/bin/clang-18 --manifest benchmarks/cpython_stdlib/full/errno/UPSTREAM.json --upstream-source benchmarks/cpython_stdlib/full/errno/upstream/Lib/test/test_errno.py
+              ;;
             properties)
               python3 -B tests/classes.py "${ordinary[@]}"
               python3 -B tests/dataclass_records.py "${ordinary[@]}"
@@ -189,7 +195,7 @@ jobs:
           if path.is_file():
               for level in json.loads(path.read_text()):
                   for row in level["records"]:
-                      if row["outcome"] in {"fail", "failed"}:
+                      if row["classification"] == "failed":
                           print(level["opt_level"], row["id"], row.get("reason", row.get("evidence")))
           PYTHON
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
