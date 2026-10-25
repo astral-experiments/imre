@@ -402,6 +402,9 @@ impl Checker<'_> {
         {
             return self.mock_arguments(call, class, callable, "_record");
         }
+        if let Some(result) = self.invoke_bound_unittest(call, &callable)? {
+            return Ok(result);
+        }
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(
                 self.source,
