@@ -395,7 +395,7 @@ impl Checker<'_> {
             || (types.iter().all(|ty| matches!(ty, Type::Tuple(_)))
                 && types
                     .iter()
-                    .any(|ty| self.types.struct_sequence_fields(*ty).is_some()))
+                    .any(|ty| self.types.library_tuple_fields(*ty).is_some()))
             || types == [Type::Logger; 2]
             || types == [Type::StringIO; 2]
             || types == [Type::TimedFileHandler; 2]

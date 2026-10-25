@@ -10,8 +10,10 @@ Module functions with annotated results can use `functools.cache` or
 `functools.lru_cache` with a literal capacity. The native cache accepts fixed
 positional arguments with immutable key types. Bounded caches evict the least
 recently used key; zero disables storage, and `None` keeps all results.
-`cache_clear()` resets entries and counters. `cache_info()` supports unpacking
-and indexing the four snapshot fields. `cache_parameters()` returns a fresh
+`cache_clear()` resets entries and counters. `cache_info()` returns a fresh
+immutable `CacheInfo` tuple with named fields `hits`, `misses`, `maxsize`,
+and `currsize`. An earlier snapshot keeps its values after another lookup or
+clear. `cache_parameters()` returns a fresh
 dictionary containing `maxsize` and `typed`. Applying a second cache to a
 cached callable copies its public parameters; the outer wrapper still uses
 its own capacity for eviction and for `cache_info()`.
