@@ -169,7 +169,7 @@ impl Checker<'_> {
                         ),
                     }
                 } else if class.is_some() {
-                    checker.mapping_primitive(
+                    checker.record_primitive(
                         mapped.clone(),
                         "get",
                         &[key.clone(), pipelines::integer(0)],
@@ -188,7 +188,7 @@ impl Checker<'_> {
                     ),
                 };
                 Ok(vec![if class.is_some() {
-                    Statement::Expr(checker.mapping_primitive(
+                    Statement::Expr(checker.record_primitive(
                         mapped.clone(),
                         "__setitem__",
                         &[key, count],

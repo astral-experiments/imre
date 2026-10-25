@@ -1,0 +1,20 @@
+{
+  "tree": "35cb6131cce23b73a141245406e81060ca9c0056",
+  "source_sha256": "64d10b9a124ee17ff3b043f45bf505ee09a362156cd572084a369543312b7950",
+  "compiler_sha256": "62b5cdde7cd18052d71637e13d69f3218078344cb6d50d0c5abf4a487c11e187",
+  "runtime_sha256": "1c9614ff3f4ab155e6f78441463e25ad3fa13dfcf91d8f550d63aefbcf808751",
+  "cpython": "3.14.5 (main, Oct 24 2026, 17:26:45) [GCC 13.3.0]",
+  "reference_bytes": 129,
+  "levels": {
+    "O0": {
+      "compile_status": 1,
+      "diagnostic": "ty: too-many-positional-arguments for the conditional partial containing Placeholder"
+    },
+    "O3": {
+      "compile_status": 1,
+      "diagnostic": "ty: too-many-positional-arguments for the conditional partial containing Placeholder"
+    }
+  },
+  "compiler_commit": "2e5aaf08adb58a6f39aad53f8a1c3e29da0ff789",
+  "reference_stdout": "True\n2\nTrue\nTrue\nTrue\n123\n425\nTrue\nTrue\n729\nFalse\nTrue\nTrue\nTrue\n723\nTrue\nTrue\nFalse\nTrue\n345\nTrue\nTrue\n2\n2\n9\nTrue\n10\n15\n127\n745\n"
+}

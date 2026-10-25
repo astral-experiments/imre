@@ -1,0 +1,257 @@
+{
+  "compiler_revision": "e328ca39a14d8f0243f0b50b106a17d32b1e0a2f",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre_sha256": "57c372342d7fb458e574e2858cce258c325f3ad82aa07d502101e2f542242d7e",
+  "runtime_sha256": "d5fb632c03642a347d0a21fa1e797ef86b09435578687bbfb520fbd3aea1e52f",
+  "examples": {
+    "collections.Counter": 18,
+    "collections.Counter.__add__": 1,
+    "collections.Counter.__and__": 1,
+    "collections.Counter.__iadd__": 3,
+    "collections.Counter.__iand__": 3,
+    "collections.Counter.__init__": 4,
+    "collections.Counter.__ior__": 3,
+    "collections.Counter.__isub__": 3,
+    "collections.Counter.__or__": 1,
+    "collections.Counter.__sub__": 1,
+    "collections.Counter.elements": 5,
+    "collections.Counter.most_common": 1,
+    "collections.Counter.subtract": 5,
+    "collections.Counter.update": 5,
+    "collections.namedtuple": 11
+  },
+  "entries": {
+    "discover-collections": {
+      "source": "import doctest\nimport collections\nsuite = doctest.DocTestSuite(collections)\nprint(suite.countTestCases())\nfor case in suite:\n    print(case.id())\n",
+      "reference_stdout_sha256": "d35b42f69fcc5df720e13192de9ea1d110ef98544034a3d9040cf621a23c9213",
+      "reference_stdout_bytes": 418,
+      "native": {
+        "O0-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "d35b42f69fcc5df720e13192de9ea1d110ef98544034a3d9040cf621a23c9213",
+          "stderr": ""
+        },
+        "O0-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "d35b42f69fcc5df720e13192de9ea1d110ef98544034a3d9040cf621a23c9213",
+          "stderr": ""
+        },
+        "O3-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "d35b42f69fcc5df720e13192de9ea1d110ef98544034a3d9040cf621a23c9213",
+          "stderr": ""
+        },
+        "O3-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "d35b42f69fcc5df720e13192de9ea1d110ef98544034a3d9040cf621a23c9213",
+          "stderr": ""
+        }
+      }
+    },
+    "discover-itertools": {
+      "source": "import doctest\nimport itertools\nsuite = doctest.DocTestSuite(itertools)\nprint(suite.countTestCases())\nfor case in suite:\n    print(case.id())\n",
+      "reference_stdout_sha256": "d7988a756172fd4c9508344e52769c53897a98bbc86693652de8a75fbcdab4fe",
+      "reference_stdout_bytes": 20,
+      "native": {
+        "O0-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "d7988a756172fd4c9508344e52769c53897a98bbc86693652de8a75fbcdab4fe",
+          "stderr": ""
+        },
+        "O0-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "d7988a756172fd4c9508344e52769c53897a98bbc86693652de8a75fbcdab4fe",
+          "stderr": ""
+        },
+        "O3-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "d7988a756172fd4c9508344e52769c53897a98bbc86693652de8a75fbcdab4fe",
+          "stderr": ""
+        },
+        "O3-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "d7988a756172fd4c9508344e52769c53897a98bbc86693652de8a75fbcdab4fe",
+          "stderr": ""
+        }
+      }
+    },
+    "discover-json": {
+      "source": "import doctest\nimport json\nsuite = doctest.DocTestSuite(json)\nprint(suite.countTestCases())\nfor case in suite:\n    print(case.id())\n",
+      "reference_stdout_sha256": "1bbc6a4231fe89c4784a56819c4415018f7b389366fd32111a47d67b52cc9540",
+      "reference_stdout_bytes": 7,
+      "native": {
+        "O0-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "1bbc6a4231fe89c4784a56819c4415018f7b389366fd32111a47d67b52cc9540",
+          "stderr": ""
+        },
+        "O0-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "1bbc6a4231fe89c4784a56819c4415018f7b389366fd32111a47d67b52cc9540",
+          "stderr": ""
+        },
+        "O3-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "1bbc6a4231fe89c4784a56819c4415018f7b389366fd32111a47d67b52cc9540",
+          "stderr": ""
+        },
+        "O3-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "1bbc6a4231fe89c4784a56819c4415018f7b389366fd32111a47d67b52cc9540",
+          "stderr": ""
+        }
+      }
+    },
+    "discover-json.encoder": {
+      "source": "import doctest\nimport json.encoder\nsuite = doctest.DocTestSuite(json.encoder)\nprint(suite.countTestCases())\nfor case in suite:\n    print(case.id())\n",
+      "reference_stdout_sha256": "31f8913432e84b96dfc7cdf47d7efb2e59bb3d2fa3809a39dace4f70c4d754d2",
+      "reference_stdout_bytes": 34,
+      "native": {
+        "O0-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "31f8913432e84b96dfc7cdf47d7efb2e59bb3d2fa3809a39dace4f70c4d754d2",
+          "stderr": ""
+        },
+        "O0-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "31f8913432e84b96dfc7cdf47d7efb2e59bb3d2fa3809a39dace4f70c4d754d2",
+          "stderr": ""
+        },
+        "O3-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "31f8913432e84b96dfc7cdf47d7efb2e59bb3d2fa3809a39dace4f70c4d754d2",
+          "stderr": ""
+        },
+        "O3-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "31f8913432e84b96dfc7cdf47d7efb2e59bb3d2fa3809a39dace4f70c4d754d2",
+          "stderr": ""
+        }
+      }
+    },
+    "discover-json.decoder": {
+      "source": "import doctest\nimport json.decoder\nsuite = doctest.DocTestSuite(json.decoder)\nprint(suite.countTestCases())\nfor case in suite:\n    print(case.id())\n",
+      "reference_stdout_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "reference_stdout_bytes": 2,
+      "native": {
+        "O0-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "stderr": ""
+        },
+        "O0-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "stderr": ""
+        },
+        "O3-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "stderr": ""
+        },
+        "O3-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "stderr": ""
+        }
+      }
+    },
+    "metadata": {
+      "source": "import doctest\nimport collections\nsuite = doctest.DocTestSuite(collections)\nfor case in suite:\n    print(case.id())\n    found = case._dt_test\n    print(found.docstring)\n    for example in found.examples:\n        print(example.source)\n        print(example.want)\n        message = example.exc_msg\n        if message is None:\n            print(\"<no exception>\")\n        else:\n            print(message)\n        print(example.options)\n        print(example.lineno)\n        print(example.indent)\n",
+      "reference_stdout_sha256": "444828f777b43b0cef426f9964b4562c5a05b4b873971e86c9c6f8233c696a78",
+      "reference_stdout_bytes": 10949,
+      "native": {
+        "O0-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "444828f777b43b0cef426f9964b4562c5a05b4b873971e86c9c6f8233c696a78",
+          "stderr": ""
+        },
+        "O0-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "444828f777b43b0cef426f9964b4562c5a05b4b873971e86c9c6f8233c696a78",
+          "stderr": ""
+        },
+        "O3-whole": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "444828f777b43b0cef426f9964b4562c5a05b4b873971e86c9c6f8233c696a78",
+          "stderr": ""
+        },
+        "O3-reachable": {
+          "status": "matched",
+          "exit": 0,
+          "stdout_sha256": "444828f777b43b0cef426f9964b4562c5a05b4b873971e86c9c6f8233c696a78",
+          "stderr": ""
+        }
+      }
+    },
+    "elements": {
+      "source": "import doctest\nimport collections\nsuite = doctest.DocTestSuite(collections)\nfor case in suite:\n    if case.id() == 'collections.Counter.elements':\n        case.debug()\n        print(case.id())\n",
+      "reference_stdout_sha256": "0a7a0f2e43f66c8f33c6da0cefed3ceb14a4a5cbe372edf03f7acf90ecf4745a",
+      "reference_stdout_bytes": 29,
+      "native": {
+        "O0-whole": {
+          "status": "compile-blocked",
+          "reason": "Compiling <entry>/case.py (-O0)\n<entry>/_imre_compiled_doctest_0.py:41:38: Imre: supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+        },
+        "O0-reachable": {
+          "status": "compile-blocked",
+          "reason": "Compiling <entry>/case.py (-O0)\n<entry>/_imre_compiled_doctest_0.py:41:38: Imre: supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+        },
+        "O3-whole": {
+          "status": "compile-blocked",
+          "reason": "Compiling <entry>/case.py (-O3)\n<entry>/_imre_compiled_doctest_0.py:41:38: Imre: supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+        },
+        "O3-reachable": {
+          "status": "compile-blocked",
+          "reason": "Compiling <entry>/case.py (-O3)\n<entry>/_imre_compiled_doctest_0.py:41:38: Imre: supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+        }
+      }
+    },
+    "execute": {
+      "source": "import doctest\nimport collections\nsuite = doctest.DocTestSuite(collections)\nsuite.debug()\n",
+      "reference_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reference_stdout_bytes": 0,
+      "native": {
+        "O0-whole": {
+          "status": "compile-blocked",
+          "reason": "Compiling <entry>/case.py (-O0)\n<entry>/_imre_compiled_doctest_0.py:41:38: Imre: supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+        },
+        "O0-reachable": {
+          "status": "compile-blocked",
+          "reason": "Compiling <entry>/case.py (-O0)\n<entry>/_imre_compiled_doctest_0.py:41:38: Imre: supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+        },
+        "O3-whole": {
+          "status": "compile-blocked",
+          "reason": "Compiling <entry>/case.py (-O3)\n<entry>/_imre_compiled_doctest_0.py:41:38: Imre: supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+        },
+        "O3-reachable": {
+          "status": "compile-blocked",
+          "reason": "Compiling <entry>/case.py (-O3)\n<entry>/_imre_compiled_doctest_0.py:41:38: Imre: supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+        }
+      }
+    }
+  }
+}

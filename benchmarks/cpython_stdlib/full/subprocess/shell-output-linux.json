@@ -1,0 +1,148 @@
+{
+  "schema": "imre.subprocess.shell-output/v1",
+  "platform": "linux",
+  "imre_revision": "31cca90475de8d6fb53ed6416821b7eea197044e",
+  "tested_tree": "e48bd67c8875adc91aaeefb7932de415d44c6940",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "toolchain": {
+        "imre": "16a205d547773190c617f25a0980ed9fdce4fc5e8e5a19372e367c0e47b5b91b",
+        "runtime": "0c19259fbf4f89ff7a01cd46803172a9c52d28fb6b3561c53442fe332799e298",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "native_actor_sha256": "16b510a7ae941a5f2be1584d535953300d199b1aaa094503b79733e5602ead14",
+      "body_attempt": {
+        "status": "blocked",
+        "reason": "<case>/case.py:12:26: Imre: expected int, got tuple[int, str]; annotations are enforced contracts"
+      },
+      "rows": {
+        "test.test_subprocess.MiscTests.test_getoutput": [
+          {
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "calls": [
+              {
+                "api": "getoutput",
+                "command": "echo xyzzy",
+                "output": "xyzzy",
+                "native_exit": 0,
+                "native_reaps": 1,
+                "child_write_fd": 1,
+                "stderr_duplicated_to_stdout": true,
+                "native_drain_to_eof": true,
+                "native_read_bytes": 6,
+                "child_write_bytes": 6
+              },
+              {
+                "api": "getstatusoutput",
+                "command": "echo xyzzy",
+                "output": "xyzzy",
+                "native_exit": 0,
+                "native_reaps": 1,
+                "child_write_fd": 1,
+                "stderr_duplicated_to_stdout": true,
+                "native_drain_to_eof": true,
+                "native_read_bytes": 6,
+                "child_write_bytes": 6
+              },
+              {
+                "api": "getstatusoutput",
+                "command": "cat <original-tempdir>/foo",
+                "output": "cat: <original-tempdir>/foo: No such file or directory",
+                "native_exit": 1,
+                "native_reaps": 1,
+                "child_write_fd": 2,
+                "stderr_duplicated_to_stdout": true,
+                "native_drain_to_eof": true,
+                "native_read_bytes": 53,
+                "child_write_bytes": 53
+              }
+            ],
+            "original_tempdir_removed": true
+          }
+        ]
+      },
+      "withheld_status": {
+        "native_exit": 1,
+        "original_failure": "AssertionError: 0 == 0",
+        "original_tempdir_removed": true
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "toolchain": {
+        "imre": "16a205d547773190c617f25a0980ed9fdce4fc5e8e5a19372e367c0e47b5b91b",
+        "runtime": "0c19259fbf4f89ff7a01cd46803172a9c52d28fb6b3561c53442fe332799e298",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "native_actor_sha256": "29fdbe79edfbd7e3a76430c7b0eece476937065e3aa6272233bc86b7db02043d",
+      "body_attempt": {
+        "status": "blocked",
+        "reason": "<case>/case.py:12:26: Imre: expected int, got tuple[int, str]; annotations are enforced contracts"
+      },
+      "rows": {
+        "test.test_subprocess.MiscTests.test_getoutput": [
+          {
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "calls": [
+              {
+                "api": "getoutput",
+                "command": "echo xyzzy",
+                "output": "xyzzy",
+                "native_exit": 0,
+                "native_reaps": 1,
+                "child_write_fd": 1,
+                "stderr_duplicated_to_stdout": true,
+                "native_drain_to_eof": true,
+                "native_read_bytes": 6,
+                "child_write_bytes": 6
+              },
+              {
+                "api": "getstatusoutput",
+                "command": "echo xyzzy",
+                "output": "xyzzy",
+                "native_exit": 0,
+                "native_reaps": 1,
+                "child_write_fd": 1,
+                "stderr_duplicated_to_stdout": true,
+                "native_drain_to_eof": true,
+                "native_read_bytes": 6,
+                "child_write_bytes": 6
+              },
+              {
+                "api": "getstatusoutput",
+                "command": "cat <original-tempdir>/foo",
+                "output": "cat: <original-tempdir>/foo: No such file or directory",
+                "native_exit": 1,
+                "native_reaps": 1,
+                "child_write_fd": 2,
+                "stderr_duplicated_to_stdout": true,
+                "native_drain_to_eof": true,
+                "native_read_bytes": 53,
+                "child_write_bytes": 53
+              }
+            ],
+            "original_tempdir_removed": true
+          }
+        ]
+      },
+      "withheld_status": {
+        "native_exit": 1,
+        "original_failure": "AssertionError: 0 == 0",
+        "original_tempdir_removed": true
+      }
+    }
+  ]
+}
