@@ -9,7 +9,8 @@ use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{
-    Bytes, Int, Object, Storage, StorageCell, Str, StringPart, concat_parts, fail, object,
+    Bytes, Int, Object, Storage, StorageCell, Str, StringPart, acquire_rc, concat_parts, fail,
+    object,
 };
 mod buffered;
 mod gzip;
@@ -343,10 +344,10 @@ pub(super) fn errno_error(error: io::Error) -> Error {
     errno_with_filename(error, None)
 }
 
-fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+fn errno_with_filename(error: io::Error, path: Option<&Rc<Str>>) -> Error {
     errno_with_filenames(
         error,
-        path.map(|s| super::exceptions::Filename::Str(Rc::new(Str::from(s)))),
+        path.map(|s| super::exceptions::Filename::Str(Rc::clone(s))),
         None,
     )
 }
@@ -392,11 +393,9 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
 /// Like other fallible entries, pending state must be clear on entry.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_open(path: *const Str, mode: u32) -> *const Object {
-    // SAFETY: the caller roots the immutable path throughout opening the stream.
-    finish(
-        open(unsafe { &*path }, mode, false, false),
-        std::ptr::null(),
-    )
+    // SAFETY: retain the caller's exact immutable path for the stream and any error.
+    let path: Rc<Str> = unsafe { acquire_rc(path as usize) };
+    finish(open(&path, mode, false, false), std::ptr::null())
 }
 
 /// Opens an immutable-byte stream in rb, wb, ab, or xb mode (0 through 3).
@@ -405,8 +404,9 @@ pub unsafe extern "C" fn imre_text_open(path: *const Str, mode: u32) -> *const O
 /// Root the UTF-8 path; the compiler validates the mode and clear pending state.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_binary_open(path: *const Str, mode: u32) -> *const Object {
-    // SAFETY: the caller roots the immutable path throughout opening the stream.
-    finish(open(unsafe { &*path }, mode, true, false), std::ptr::null())
+    // SAFETY: retain the caller's exact immutable path for the stream and any error.
+    let path: Rc<Str> = unsafe { acquire_rc(path as usize) };
+    finish(open(&path, mode, true, false), std::ptr::null())
 }
 
 /// Opens a gzip source without consuming a header until the first read.
@@ -418,22 +418,25 @@ pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const
     if binary > 1 {
         fail("SystemError", "invalid gzip mode");
     }
-    // SAFETY: the caller roots the immutable path throughout the open.
-    finish(
-        open(unsafe { &*path }, 0, binary == 1, true),
-        std::ptr::null(),
-    )
+    // SAFETY: retain the caller's exact immutable path for the stream and any error.
+    let path: Rc<Str> = unsafe { acquire_rc(path as usize) };
+    finish(open(&path, 0, binary == 1, true), std::ptr::null())
 }
 
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
-pub(super) fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
+pub(super) fn open(
+    path: &Rc<Str>,
+    mode: u32,
+    binary: bool,
+    gzip: bool,
+) -> Result<*const Object> {
     let state = open_state(path, mode, binary, gzip)?;
     Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
         Storage::File(Box::new(state)),
     )))))
 }
 
-fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
+fn open_state(path: &Rc<Str>, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
     let (file, metadata) = open_file(path, mode)?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
     let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
@@ -451,7 +454,7 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     Ok(FileState {
         fd: Some(fd),
         stream: Some(stream),
-        name: Some(Rc::new(Str::new(path))),
+        name: Some(Rc::clone(path)),
         kind: match (binary, mode) {
             (false, _) => FileKind::Text,
             (true, 0) if gzip => FileKind::GzipBinaryRead,
@@ -462,7 +465,10 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
 }
 
 /// Open a raw descriptor with the same pathname and directory errors as Python open().
-pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
+pub(super) fn open_file(
+    path: &Rc<Str>,
+    mode: u32,
+) -> Result<(std::fs::File, std::fs::Metadata)> {
     super::super::initialize_io();
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
@@ -497,7 +503,8 @@ fn with_path_file<T>(
     binary: bool,
     operation: impl FnOnce(&mut FileState) -> Result<T>,
 ) -> Result<T> {
-    let mut state = open_state(path, mode, binary, false)?;
+    let path = Rc::new(Str::from(path));
+    let mut state = open_state(&path, mode, binary, false)?;
     let result = operation(&mut state);
     let closed = state.stream.take().unwrap().close().map_err(os_error);
     closed.and(result)
