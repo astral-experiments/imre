@@ -3,6 +3,7 @@
 import argparse
 import fcntl
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -179,6 +180,18 @@ def run(
     )
 
 
+def unobserved_children(result):
+    """Match emitted warning PIDs to each operation; PIDs and source filenames vary."""
+    assert result.returncode == 0, result
+    lines = result.stdout.splitlines()
+    assert lines[-1] == b"invalid action: 'invented'", result
+    pids = dict(zip(lines[:-1:2], lines[1:-1:2], strict=True))
+    assert set(pids) == {b"default", b"live", b"exited", b"waited", b"polled", b"other-category", b"ignored"}
+    emitted = re.findall(rb"ResourceWarning: subprocess (\d+) is still running", result.stderr)
+    assert emitted == [pids[key] for key in (b"live", b"exited", b"other-category")], result
+    assert not re.search(rb"(?:Error|Sanitizer|panicked):", result.stderr), result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -226,7 +239,9 @@ def main() -> None:
                     "empty_name": name == "environment",
                 }
                 reference = run([python, "-E", "-B", str(source), *arguments], reference_dir, **options)
-                if name == "check_output":
+                if name == "unobserved_child":
+                    unobserved_children(reference)
+                elif name == "check_output":
                     assert reference.returncode == 0 and reference.stderr == b"inherited", reference
                 else:
                     files.check_result(reference, None, f"CPython {name}")
@@ -240,11 +255,14 @@ def main() -> None:
                     native_dir = project / f"imre-O{level}" / "work"
                     seed(native_dir, python)
                     actual = run([str(binary), *arguments], native_dir, **options)
-                    if name == "check_output":
+                    if name == "unobserved_child":
+                        unobserved_children(actual)
+                    elif name == "check_output":
                         assert actual.returncode == 0 and actual.stderr == reference.stderr, actual
                     else:
                         files.check_result(actual, None, f"Imre {name} O{level}")
-                    assert actual.stdout == reference.stdout, (name, level, actual.stdout, reference.stdout)
+                    if name != "unobserved_child":
+                        assert actual.stdout == reference.stdout, (name, level, actual.stdout, reference.stdout)
                     assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
                     checks += 1
         for name, source in REJECTED.items():

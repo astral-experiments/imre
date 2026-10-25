@@ -33,10 +33,12 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
 - `test_43581`: the complete method, both stream attributes, equality and assertion execute in the native binary.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.
+- `test_jit_is_available` and `test_jit_is_enabled`: Imre answers the parent capability query and executes both original child assertions under `PYTHON_JIT=0` and `=1`. CPython runs the parent, fixtures and child-status assertions. The fixture builds the original child source directly; its automatic `-X faulthandler` option is outside this check.
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
 
 The existing [stream and exit smoke runner](../../native_sys.py) exercises four
-`test_subprocess` IDs and additional native program fixtures. Those are outside this
+`test_subprocess` IDs and additional native program fixtures, including the
+[standard-stream buffering checks](STREAM_BUFFERING.md). Those are outside this
 suite's denominator. A CPython-only result or an operation probe is not a native
 pass for a complete routine.
 
@@ -51,8 +53,9 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-This baseline was executed with Imre compiler/runtime source `20f02ee43e0f33306ae8a7917d0d222d66972602`. The pinned suite has no companion module. The two shorter `native-O*.json`
-files retain their original records and are not additional test occurrences.
+The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40173735073) executed source `35158607886bce3fec10dd8e965d891e803e1088` (tree `f80a4bcd512cdb24ff2f279f59adb6d2075bef8a`). Its `sys-evidence-linux` artifact contains both optimization reports, the legacy outcomes, and the tested commit and tree. The checked-in reports match those records. The pinned suite has no companion module; `native-O*.json` describes the same occurrences.
+
+At each level the two JIT capability methods add two mixed results. `test_jit_is_active` made one native availability query in the parent; its first original child stopped at line 2 on `import _testcapi` before any `is_active` call or child assertion. The second child was not reached. Its individual private-API proposal remains unapproved.
 
 The versioned gate loads the original suite and runs its selected methods
 under their CPython fixtures. For every remaining non-skipped method it either
@@ -68,6 +71,12 @@ jq -s . /tmp/sys-evidence-O0.json /tmp/sys-evidence-O3.json > /tmp/sys-evidence.
 python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json /tmp/sys-evidence.json
 ```
 
+
+A manual run of the CI workflow can verify a prospective merge commit on Linux.
+Publish the commit to this repository, then supply its full SHA as the
+`sys_source` input. The job builds that commit and runs the same sys commands
+as pull request CI. Its `sys-evidence-linux` artifact records the tested Git
+commit and tree alongside both reports. Pull request checks run separately.
 
 ## Two process-boundary cases
 

@@ -73,3 +73,21 @@ for large in [1099511627776, 1267650600228229401496703205376]:
         subprocess.run(identity, umask=large)
     except OverflowError as exc:
         print(str(exc))
+
+# The parent resolves stream handles before fork converts the child attributes.
+try:
+    subprocess.Popen(identity, stdout=report, process_group=2**65)
+except ValueError as exc:
+    print(str(exc))
+try:
+    subprocess.Popen(identity, stdout=subprocess.STDOUT, umask=2**65)
+except ValueError as exc:
+    print(str(exc))
+try:
+    subprocess.Popen(identity, env={"invalid=name": "val"}, umask=2**65)
+except ValueError as exc:
+    print(str(exc))
+try:
+    subprocess.Popen(["bad\x00program"], process_group=2**65)
+except OverflowError as exc:
+    print(str(exc))

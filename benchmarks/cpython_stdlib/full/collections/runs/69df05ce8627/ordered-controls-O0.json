@@ -1,0 +1,10 @@
+{
+  "tests": 4,
+  "outcomes": [
+    "True",
+    "False",
+    "False",
+    "False"
+  ],
+  "sha256": "2103536f01f6285b5e1f6baa17e18240f84ff385f32fad8afc6374e3bb5cdceb"
+}

@@ -65,3 +65,12 @@ try:
     subprocess.Popen(["/bin/true"], pass_fds=(1 << 34,))
 except ValueError as error:
     print(str(error))
+
+try:
+    subprocess.Popen(["/bin/true"], pass_fds=(-1,), umask=2**65)
+except OverflowError as error:
+    print(str(error))
+try:
+    subprocess.Popen(["bad\x00program"], pass_fds=(-1,))
+except ValueError as error:
+    print(str(error))

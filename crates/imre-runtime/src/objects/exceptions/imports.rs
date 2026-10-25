@@ -1,4 +1,6 @@
 //! ImportError retains its positional arguments separately from its named attributes.
+mod suggestions;
+
 use super::*;
 use crate::objects::{records, values};
 use crate::{Bytes, Int};
@@ -17,6 +19,21 @@ impl Import {
         } else {
             self.args.message()
         }
+    }
+
+    /// A live native module supplies candidates just before uncaught display.
+    pub(super) fn suggestion(&self) -> Option<&'static str> {
+        let text = |field: &OwnedWord| {
+            (field.kind == WordKind::new(3)).then(|| {
+                // SAFETY: the concrete field owns this exact string through the lookup.
+                unsafe { &*(field.word as *const Str) }.as_str()
+            })
+        };
+        if text(&self.fields[0])? != "errno" {
+            return None;
+        }
+        let wrong = text(&self.fields[2])?;
+        suggestions::closest(wrong, crate::objects::errno::exported_names())
     }
 }
 
@@ -140,8 +157,10 @@ pub unsafe extern "C" fn imre_import_error_new(
         let payload = Import {
             args: Positional(WordKind::new(6).acquire(args as usize)),
             msg: msg_kind.acquire(msg),
-            fields: [(name_kind, name), (path_kind, path), (from_kind, from)]
-                .map(|(k, w)| WordKind::new(k).acquire(w)),
+            fields: [(name_kind, name), (path_kind, path), (from_kind, from)].map(|(k, w)| {
+                let (kind, word) = concrete(WordKind::new(k), w);
+                kind.acquire(word)
+            }),
         };
         let err = new_exception(
             Kind::from_raw(named.map_or(kind, |d| d.base)),

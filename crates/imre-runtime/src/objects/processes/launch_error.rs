@@ -100,10 +100,15 @@ pub(super) unsafe fn spawn(
     config: &popen::LaunchConfig,
     streams: u32,
     fds: [RawFd; 3],
-    attributes: ChildAttributes,
+    child_attributes: impl FnOnce() -> Result<ChildAttributes>,
 ) -> Result<Child> {
     // SAFETY: validation and copying complete before the command may fork.
-    let (launch, cwd) = unsafe { prepare_command(cmd, config)? };
+    let (launch, cwd, attributes) = unsafe { prepare_command(cmd, config, child_attributes)? };
+    let streams = if attributes.keep.is_empty() {
+        streams
+    } else {
+        streams & !(1 << 17) // pass_fds closes all other inherited descriptors
+    };
     let has_directory = launch.search.is_none();
     let requires_fork = attributes.requires_fork();
     launch
