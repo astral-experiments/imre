@@ -983,6 +983,7 @@ pub(crate) enum Builtin {
     Abs,
     /// Stable permutation of a fully typed list by precomputed scalar keys.
     SortByKeys,
+    SortByComparator,
     ListExtendUnhinted,
     SortDetach,
     SortRestore,
