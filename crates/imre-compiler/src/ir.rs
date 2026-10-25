@@ -878,6 +878,7 @@ pub(crate) enum Builtin {
     /// Arguments are key then dictionary, matching membership evaluation order.
     DictContains,
     DictDelete,
+    DictClear,
     /// False visits keys; true visits key/value pairs without an intermediate tuple.
     DictIter(bool),
     /// Arguments are the element then set, matching membership evaluation order.
@@ -974,6 +975,7 @@ pub(crate) enum TextOperation {
     Unquote,
     Dedent,
     ShlexSplit,
+    ShlexQuote,
 }
 
 /// Native path operations keep their exact result types in the checked IR.
@@ -1149,6 +1151,7 @@ pub(crate) enum LogOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     Open,
+    Seek,
     Pipe,
     Dup2,
     Close,
@@ -1261,7 +1264,7 @@ pub(crate) enum ProcessOperation {
     Fd(FdOperation),
     OsErrorField(u32),
     Strerror,
-    OpenFlag(&'static str),
+    DescriptorConstant(&'static str),
     Which,
     RmTree,
     Copy(CopyOperation),

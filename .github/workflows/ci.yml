@@ -46,7 +46,7 @@ jobs:
           target/release/imre build tests/programs/control_flow.py -o "$RUNNER_TEMP/control_flow"
           lipo "$RUNNER_TEMP/control_flow" -verify_arch arm64
           python3 tests/run_suites.py --workers 3 --log-dir "$RUNNER_TEMP/imre-suites" \
-            --suites differential io files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
+            --suites unittest_main differential io files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
 
       - name: Get the real pip wheel shipped by the pinned CPython
@@ -125,6 +125,7 @@ jobs:
       - name: Run pinned unittest methods against native Imre
         run: |
           python3 benchmarks/cpython_stdlib/test_suite_evidence.py
+          python3 tests/unittest_main.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
           python3 benchmarks/cpython_stdlib/full/unittest/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-unittest.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/unittest/reference-linux.json "$RUNNER_TEMP/cpython-unittest.json"
       - name: Verify the complete OS, POSIX and genericpath evidence
@@ -203,6 +204,8 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/shutil/native_rmtree.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-rmtree.json"
           python3 benchmarks/cpython_stdlib/native_json.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
           python3 benchmarks/cpython_stdlib/native_json_values.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json-values.json"
+          python3 benchmarks/cpython_stdlib/full/shlex/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shlex.json"
+          diff -u benchmarks/cpython_stdlib/full/shlex/native-linux.json "$RUNNER_TEMP/cpython-shlex.json"
           python3 benchmarks/cpython_stdlib/native_os.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/native_os_path.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-os-path.json"
           python3 benchmarks/cpython_stdlib/full/logging/native_timed.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
@@ -218,6 +221,7 @@ jobs:
             python3 benchmarks/cpython_stdlib/full/logging/native_hierarchy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-children-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_formatters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-formatters-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_filters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-filters-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/logging/descriptor_seek.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-descriptor-seek-O$opt.json"
           done
       - name: Build and install a Imre extension wheel
         run: |
