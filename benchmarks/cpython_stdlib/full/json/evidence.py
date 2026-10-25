@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bindings import Boundary, PRIVATE, Probe
 from bodies import compiled
 from deep_decode import DRIVER as DEEP_DRIVER, METHOD as DEEP_METHOD, fixture as deep_fixture
-from key_identity import METHOD as KEY_METHOD, owner_fixture
+from key_identity import METHOD as KEY_METHOD, OPERATIONS as KEY_OPERATIONS, SOURCE as KEY_SOURCE
+from key_identity import native_identity_control, owner_fixture, typed_body_fixture
 from formatting import METHODS as FORMATTING, Native as NativeFormatter, formatting_method
 from native import counts
 from reference import BENCH, COMMIT, HERE, routine, verify
@@ -24,7 +25,7 @@ sys.path.insert(0, str(BENCH))
 from native_json_values import Native
 from suite_evidence import ROLES, build_report, occurrence_keys, roles, write_reports
 from suite_inventory import cases, load_suite
-from suite_native import Toolchain, run_in_fixtures
+from suite_native import Toolchain, method_bytes, native_method, run_in_fixtures
 
 UNOBSERVED = dict.fromkeys(ROLES, "unobserved")
 
@@ -175,6 +176,29 @@ def run(tools, directory, reference):
         return obs
 
     executions.update(dict.fromkeys(ids[KEY_METHOD], native_keys))
+    # Only choose the body observation if its actual native assertions also
+    # reject different key owners and a nonempty memo. The focused report
+    # separately retains the general TestCase and repr transport attempts.
+    control = native_identity_control(tools, key_dir / "assertion-control")
+    if control["outcome"] == "pass":
+        body_dir = key_dir / "original-body"
+        body_dir.mkdir()
+        helper = method_bytes(KEY_SOURCE, "TestDecode", "check_keys_reuse")
+        body = native_method(tools, body_dir, KEY_SOURCE, "TestDecode", ids[KEY_METHOD][0],
+                             typed_body_fixture(string_identity=True, memo_truth=True),
+                             operation=("imre", KEY_OPERATIONS))
+
+        def native_key_body(case, original):
+            try:
+                result = body(case, original)["observation"]
+            except AssertionError as exc:
+                return {"outcome": "failure", "roles": roles(body="imre", assertions="imre", operation="imre", fixture="mixed"),
+                        "reason": str(exc), "evidence": {"source": KEY_METHOD, "opt_level": tools.level,
+                            "fixture": "CPython module/class/instance hooks; native instance in child", "operation": KEY_OPERATIONS}}
+            return {"outcome": "pass", "roles": result["roles"], "evidence": {**result["evidence"], "source": KEY_METHOD,
+                    "helper_sha256": hashlib.sha256(helper).hexdigest(), "negative_control": control["operation"]}}
+
+        executions.update(dict.fromkeys(ids[KEY_METHOD], native_key_body))
 
     formatter = NativeFormatter(tools, directory)
     for short in FORMATTING:

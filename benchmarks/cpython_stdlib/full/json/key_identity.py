@@ -23,9 +23,10 @@ from suite_native import NativeCompileError, Toolchain, method_bytes, native_met
 
 METHOD = "test.test_json.test_decode.TestDecode.test_keys_reuse"
 SOURCE = BENCH / "upstream/Lib/test/test_json/test_decode.py"
+OPERATIONS = "json.loads, native JSONDecoder construction and decode, sorted decoded keys, identity and memo truth"
 
 
-def typed_body_fixture(*, string_identity=False):
+def typed_body_fixture(*, string_identity=False, memo_truth=False):
     """Bind both public entry points without copying any decoded value."""
     prefix = """import json
 import unittest
@@ -56,19 +57,30 @@ class NativeCase(unittest.TestCase):
             raise AssertionError("expected identical native key owners")
 
 """
+    if memo_truth:
+        prefix += """    def assertFalse(self, expr: dict[str, str], msg: str | None = None) -> None:
+        if expr:
+            raise AssertionError("expected an empty decoder memo")
+
+"""
     return prefix + method_bytes(SOURCE, "TestDecode", "check_keys_reuse").decode()
 
 
 def native_identity_control(tools, directory):
     """The same native assertion must reject equal keys from separate scans."""
     directory.mkdir()
-    fixture = typed_body_fixture(string_identity=True)
+    fixture = typed_body_fixture(string_identity=True, memo_truth=True)
     program = fixture + "\n" + method_bytes(SOURCE, "TestDecode", "test_keys_reuse").decode() + '''
 case = NativeCase()
 case.test_keys_reuse()
 left = case.loads('[{"same_owner_spelling": 1}]')
 right = case.loads(' [{"same_owner_spelling": 2}]')
-first, second = sorted(left[0])[0], sorted(right[0])[0]
+left_keys, right_keys = sorted(left[0]), sorted(right[0])
+short: list[str] = []
+different = ["different spelling"]
+if left_keys != right_keys or left_keys == short or left_keys == different:
+    raise ValueError("expected string lists to compare by length and element value")
+first, second = left_keys[0], right_keys[0]
 if first != second or first is second:
     raise ValueError("expected equal keys from independent native scans")
 try:
@@ -77,15 +89,21 @@ except AssertionError:
     print("rejected distinct owners")
 else:
     raise ValueError("the identity assertion accepted distinct native owners")
+try:
+    case.assertFalse({"nonempty": "memo"})
+except AssertionError:
+    print("rejected nonempty memo")
+else:
+    raise ValueError("the truth assertion accepted a nonempty mapping")
 '''
     try:
         binary = tools.build(program.encode(), directory)
     except NativeCompileError as exc:
         return {"outcome": "blocked", "diagnostic": diagnostic(exc, directory)}
     child = subprocess.run([binary], capture_output=True, text=True, timeout=60)
-    if child.returncode or child.stderr or child.stdout != "rejected distinct owners\n":
+    if child.returncode or child.stderr or child.stdout != "rejected distinct owners\nrejected nonempty memo\n":
         return {"outcome": "failed", "exit": child.returncode, "stdout": child.stdout, "stderr": child.stderr}
-    return {"outcome": "pass", "operation": "assertIs on equal native strings from independent scans"}
+    return {"outcome": "pass", "operation": "distinct native string owners and nonempty memo rejected; string lists compared by value"}
 
 
 def component_checks(compiler):
@@ -295,12 +313,12 @@ def run(tools, work):
     attempts = results["native-body-attempts"] = {}
     for name, fixture in (("general", general), ("unshadowed-module", unshadowed),
                           ("typed-module-bindings", typed_body_fixture()),
-                          ("typed-string-identity", typed_body_fixture(string_identity=True))):
+                          ("typed-string-identity", typed_body_fixture(string_identity=True)),
+                          ("typed-key-assertions", typed_body_fixture(string_identity=True, memo_truth=True))):
         directory = work / name
         directory.mkdir()
         try:
-            body = native_method(tools, directory, SOURCE, owner, ids[0], fixture, operation=(
-                "imre", "json.loads, JSONDecoder.decode, sorted decoded keys, identity and memo truth"))
+            body = native_method(tools, directory, SOURCE, owner, ids[0], fixture, operation=("imre", OPERATIONS))
         except NativeCompileError as exc:
             attempts[name] = {"outcome": "blocked", "diagnostic": diagnostic(exc, directory)}
         else:
