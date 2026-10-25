@@ -276,8 +276,11 @@ impl Types {
             | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -737,8 +740,11 @@ impl Types {
             | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
