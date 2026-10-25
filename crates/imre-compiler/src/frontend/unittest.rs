@@ -167,6 +167,7 @@ impl Checker<'_> {
                 ("shutil", "Error"),
                 ("shutil", "SameFileError"),
                 ("shutil", "SpecialFileError"),
+                ("shutil", "_GiveupOnFastCopy"),
                 ("shutil", "ReadError"),
                 ("shutil", "RegistryError"),
                 ("tarfile", "TarError"),

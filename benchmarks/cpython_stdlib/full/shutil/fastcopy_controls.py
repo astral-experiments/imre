@@ -9,6 +9,7 @@ SRC = '''import csv
 import io
 import shutil
 import sys
+import unittest
 from pathlib import Path
 src = sys.argv[1]
 dst = sys.argv[2]
@@ -37,6 +38,16 @@ elif method == 'memory':
         except shutil._GiveupOnFastCopy as err:
             print(str(err))
             print(repr(err))
+elif method == 'assert-raises':
+    with io.BytesIO(b'input') as memory, open(dst, 'wb') as dest:
+        with unittest.TestCase().assertRaises(shutil._GiveupOnFastCopy) as raised:
+            shutil._fastcopy_sendfile(memory, dest)
+        print(repr(raised.exception))
+    try:
+        with unittest.TestCase().assertRaises((shutil._GiveupOnFastCopy, csv.Error)):
+            pass
+    except AssertionError as error:
+        print(str(error))
 elif method == 'handlers':
     reader = csv.reader(['"unterminated'], strict=True)
     try:
@@ -98,7 +109,7 @@ with tempfile.TemporaryDirectory() as tmp:
     script.write_text(SRC)
     def run(cmd):
         results={}
-        for method, size, pos in [('flags',31,0),('memory',31,0),('same',31,0),('range',0,0),('sendfile',0,0),('range',113,13),('sendfile',113,13),('handlers',31,0)]:
+        for method, size, pos in [('flags',31,0),('memory',31,0),('same',31,0),('range',0,0),('sendfile',0,0),('range',113,13),('sendfile',113,13),('handlers',31,0),('assert-raises',31,0)]:
             original=bytes(range(size))
             (root/'source').write_bytes(original)
             (root/'dest').write_bytes(b'target')
@@ -109,6 +120,8 @@ with tempfile.TemporaryDirectory() as tmp:
         return results
     oracle=run([sys.executable,'-B',script])
     assert oracle['handlers',31,0][0] == b"csv\nsame file\ncodec\n_GiveupOnFastCopy(UnsupportedOperation('fileno'))\n"
+    assert oracle['assert-raises',31,0][0] == (b"_GiveupOnFastCopy(UnsupportedOperation('fileno'))\n"
+        b"(<class 'shutil._GiveupOnFastCopy'>, <class '_csv.Error'>) not raised\n")
     for level in ('0','3'):
         program=root/'fast'
         subprocess.run([args.imre,'build',script,'--no-cache','--opt-level',level,'--runtime',args.runtime,'--clang',args.clang,'-o',program],check=True)
