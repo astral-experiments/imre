@@ -1,80 +1,14 @@
 //! Stream tar headers and data without changing cwd or following directory symlinks.
 use std::collections::HashMap;
-use std::ffi::{CStr, CString};
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
+use super::super::accounts::account;
 use super::{Error, Format, Kind, Result, errno_error, path_error};
 use tar::{Builder, EntryType, Header};
-
-/// Each reentrant NSS lookup fills caller-owned storage. Unknown names leave the
-/// original owner/group unchanged, as shutil's _get_uid/_get_gid do.
-fn account(user: bool, id: u32, name: Option<&str>) -> Option<(u32, String)> {
-    let name = name.map(CString::new).transpose().ok()?;
-    let mut buf = vec![0u8; 4096];
-    macro_rules! lookup {
-        ($entry:ty, $by_name:path, $by_id:path, $id:ident, $name:ident) => {{
-            let mut entry = std::mem::MaybeUninit::<$entry>::uninit();
-            let mut found = std::ptr::null_mut();
-            // SAFETY: caller storage and the C name are valid for each complete libc lookup.
-            let status = unsafe {
-                match &name {
-                    Some(s) => $by_name(
-                        s.as_ptr(),
-                        entry.as_mut_ptr(),
-                        buf.as_mut_ptr().cast(),
-                        buf.len(),
-                        &mut found,
-                    ),
-                    None => $by_id(
-                        id,
-                        entry.as_mut_ptr(),
-                        buf.as_mut_ptr().cast(),
-                        buf.len(),
-                        &mut found,
-                    ),
-                }
-            };
-            if status == libc::ERANGE {
-                buf.resize(buf.len().checked_mul(2)?, 0);
-                continue;
-            }
-            if status != 0 || found.is_null() {
-                return None;
-            }
-            // SAFETY: a successful non-null result initialized both the record and its name.
-            unsafe {
-                let entry = entry.assume_init();
-                return Some((
-                    entry.$id,
-                    CStr::from_ptr(entry.$name).to_string_lossy().into_owned(),
-                ));
-            }
-        }};
-    }
-    loop {
-        if user {
-            lookup!(
-                libc::passwd,
-                libc::getpwnam_r,
-                libc::getpwuid_r,
-                pw_uid,
-                pw_name
-            );
-        } else {
-            lookup!(
-                libc::group,
-                libc::getgrnam_r,
-                libc::getgrgid_r,
-                gr_gid,
-                gr_name
-            );
-        }
-    }
-}
 
 struct Contents<'a> {
     source: &'a Path,

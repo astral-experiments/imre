@@ -5,6 +5,69 @@ use super::*;
 mod registry;
 
 impl Checker<'_> {
+    pub(super) fn shutil_chown(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let none = Expr {
+            ty: Type::None,
+            kind: ExprKind::None,
+        };
+        let params = ["path", "user", "group", "dir_fd", "follow_symlinks"].map(|name| Parameter {
+            name: name.into(),
+            ty: if name == "follow_symlinks" {
+                Type::Bool
+            } else {
+                Type::None
+            },
+            kind: if matches!(name, "dir_fd" | "follow_symlinks") {
+                ParameterKind::KeywordOnly
+            } else {
+                ParameterKind::PositionalOrKeyword
+            },
+            default: match name {
+                "path" => None,
+                "follow_symlinks" => Some(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(true),
+                }),
+                _ => Some(none.clone()),
+            },
+            sign_only: false,
+        });
+        let args = self.arguments_with(call, &params, None, |checker, idx, expr| {
+            if idx == 4 {
+                return checker.condition(expr);
+            }
+            let val = checker.expr(expr)?;
+            if idx == 0 && matches!(val.ty, Type::Path | Type::PurePath(_)) {
+                return checker.fspath_value(val, expr);
+            }
+            if matches!(
+                val.ty,
+                Type::None
+                    | Type::Int
+                    | Type::Str
+                    | Type::StrLiteral(_)
+                    | Type::Bytes
+                    | Type::Bool
+                    | Type::Float
+                    | Type::Optional(_)
+                    | Type::Union(_)
+            ) {
+                return Ok(val);
+            }
+            Err(error(
+                checker.source,
+                expr,
+                "unsupported shutil.chown argument type",
+            ))
+        })?;
+        Ok(self.ordered_builtin(
+            Builtin::Process(ir::ProcessOperation::Chown),
+            Type::None,
+            args,
+        ))
+    }
+
     pub(super) fn shutil_copyfileobj(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let params = [

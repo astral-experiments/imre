@@ -14,6 +14,9 @@ pub(in crate::objects) enum Filename {
     Str(Rc<Str>),
     Bytes(Rc<Bytes>),
     Path(Rc<Object>),
+    /// POSIX path converters retain the original descriptor on syscall failure.
+    Descriptor(crate::Int),
+    Bool(bool),
     /// A POSIX name decoded with surrogateescape, outside Imre's scalar str domain.
     SurrogateEscaped(Rc<Bytes>),
 }
@@ -31,6 +34,8 @@ impl Filename {
             Self::Str(s) => push_string_repr(s, output),
             Self::Bytes(b) => crate::objects::bytes::write_repr(output, b),
             Self::SurrogateEscaped(raw) => push_fs_repr(raw, output),
+            Self::Descriptor(n) => write!(output, "{}", n.big()).unwrap(),
+            Self::Bool(b) => output.push_str(if *b { "True" } else { "False" }),
             Self::Path(p) => {
                 // SAFETY: the exception roots this immutable path while rendering it.
                 unsafe {
@@ -49,6 +54,8 @@ impl Filename {
             Self::Str(s) => Rc::into_raw(Rc::clone(s)) as usize,
             Self::Bytes(b) => Rc::into_raw(Rc::clone(b)) as usize | 1,
             Self::Path(p) => Rc::into_raw(Rc::clone(p)) as usize | 6,
+            Self::Descriptor(n) => crate::objects::unions::integer(n.clone()),
+            Self::Bool(b) => 1 + usize::from(*b),
             Self::SurrogateEscaped(_) => {
                 return Err(Error::new(
                     Kind::UnicodeDecodeError,
@@ -131,7 +138,7 @@ impl Error {
     }
 }
 
-/// Return an optional integer, string, or str/bytes union in its owned word.
+/// Return the original errno, description, or filename as an owned optional word.
 ///
 /// # Safety
 /// The exception is rooted and field is an index into the four public fields.

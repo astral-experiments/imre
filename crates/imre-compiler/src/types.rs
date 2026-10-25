@@ -502,6 +502,17 @@ impl Types {
         Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Int])))
     }
 
+    /// A POSIX filename can also be the original descriptor passed to a syscall.
+    pub(crate) fn os_error_filename(&self) -> Type {
+        Type::Union(self.intern(Shape::Union(vec![
+            Type::Str,
+            Type::Bytes,
+            Type::Path,
+            Type::Bool,
+            Type::Int,
+        ])))
+    }
+
     pub(crate) fn is_bool_or_int(&self, ty: Type) -> bool {
         let Type::Union(id) = ty else { return false };
         matches!(&self.0.borrow().shapes[id], Shape::Union(members) if members == &[Type::Bool, Type::Int])

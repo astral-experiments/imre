@@ -708,6 +708,20 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            ProcessOperation::Chown => {
+                let mut operands = Vec::new();
+                for arg in &args[..4] {
+                    let word = self.word(&arg.value);
+                    let kind = representation_kind(arg.value.ty, &self.module.types);
+                    operands.push(format!("i64 {word}, i32 {kind}"));
+                }
+                let follow = self.instruction(format!("zext i1 {} to i32", args[4].value.operand));
+                self.checked_line(format!(
+                    "call void @imre_shutil_chown({}, i32 {follow})",
+                    operands.join(", ")
+                ));
+                none()
+            }
             ProcessOperation::RmTree => {
                 let [path, ignore, _, _, fd] = args else {
                     unreachable!()

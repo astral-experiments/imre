@@ -266,6 +266,7 @@ impl Builtin {
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
+                | ProcessOperation::Chown
                 | ProcessOperation::RmTree
                 | ProcessOperation::CopyTree(_)
                 | ProcessOperation::Move(_)
