@@ -4124,6 +4124,12 @@ impl Emitter<'_, '_> {
                 Type::Int,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::DecodeAscii => {
+                self.call("imre_bytes_decode_ascii", Type::Str, &[&args[0].value])
+            }
+            Builtin::UrlsafeB64encode => {
+                self.call("imre_urlsafe_b64encode", Type::Bytes, &[&args[0].value])
+            }
             Builtin::Bytes => match args[0].value.ty {
                 Type::Bytes => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("imre_bytes_count", Type::Bytes, &[&args[0].value]),
@@ -4135,12 +4141,6 @@ impl Emitter<'_, '_> {
             },
             Builtin::Encode => self.call("imre_str_encode", Type::Bytes, &[&args[0].value]),
             Builtin::Decode => self.call("imre_bytes_decode", Type::Str, &[&args[0].value]),
-            Builtin::DecodeAscii => {
-                self.call("imre_bytes_decode_ascii", Type::Str, &[&args[0].value])
-            }
-            Builtin::UrlsafeB64encode => {
-                self.call("imre_urlsafe_b64encode", Type::Bytes, &[&args[0].value])
-            }
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::HashNew => self.call(
                 "imre_hash_new",
