@@ -465,6 +465,7 @@ impl Builtin {
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::OrderedDict
             | Self::CounterNew
             | Self::CounterTotal
             | Self::DictAsBase
