@@ -56,7 +56,7 @@ pub(crate) enum Type {
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
     /// A synchronous child with statically known captured stream types.
-    Popen(ProcessCapture, bool),
+    Popen(ProcessCapture, bool, usize),
     /// Async process handle, with bits for the captured stdout and stderr slots.
     AsyncProcess(u8),
     Coroutine(usize),
@@ -70,6 +70,7 @@ pub(crate) enum Type {
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
     LogRecord,
+    LogFormatter,
     Logger,
     TimedFileHandler,
     ClockTime,
@@ -77,6 +78,7 @@ pub(crate) enum Type {
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
     ZipInfo,
+    CsvReader,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
@@ -181,6 +183,7 @@ impl std::fmt::Display for Type {
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::LogFormatter => "logging.Formatter",
             Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
@@ -188,6 +191,7 @@ impl std::fmt::Display for Type {
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
+            Self::CsvReader => "CSV reader",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
@@ -448,6 +452,18 @@ pub(crate) enum Compare {
     GreaterEqual,
 }
 
+/// Native multiset arithmetic over integer counts. Values match the runtime ABI.
+#[repr(u32)]
+#[derive(Clone, Copy)]
+pub(crate) enum CounterOp {
+    Add,
+    Subtract,
+    Union,
+    Intersection,
+    Positive,
+    Negative,
+}
+
 /// Public ZIP entry metadata read from the central directory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ZipField {
@@ -517,9 +533,12 @@ pub(crate) enum Builtin {
     /// Evaluates and roots all arguments, then raises the last (an exception).
     RaiseException,
     WallTime,
+    TimeSleep,
+    PercentInteger,
     Logging(LogOperation),
     Timed(TimedOperation),
     LogRecord(LogRecordOperation),
+    Formatter(FormatterOperation),
     Input,
     Chr,
     Int,
@@ -695,6 +714,16 @@ pub(crate) enum Builtin {
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
     ExactRecord(usize),
+    CsvReader {
+        delimiter: char,
+        quote: Option<char>,
+        escape: Option<char>,
+        flags: u32,
+    },
+    CsvNext {
+        required: bool,
+    },
+    CsvLineNumber,
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
     JsonLoads,
@@ -766,6 +795,10 @@ pub(crate) enum Builtin {
     CounterNew,
     CounterTotal,
     CounterUpdate,
+    CounterMath {
+        op: CounterOp,
+        inplace: bool,
+    },
     DictSumValues,
     /// Widens a defaultdict owner to its ordinary dictionary interface.
     DictAsBase,
@@ -993,6 +1026,25 @@ pub(crate) enum TimedOperation {
     FilesToDelete,
     ShouldRollover,
     DoRollover,
+}
+
+/// Public formatting operations on a retained style, defaults mapping, and clock converter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FormatterOperation {
+    New,
+    Text,
+    Date,
+    UsesTime,
+    Format,
+    Message,
+    Time,
+    SetUtc,
+    SetDate,
+    DefaultTime,
+    DefaultMsec,
+    SetDefaultTime,
+    SetDefaultMsec,
+    Stack,
 }
 
 /// Operations on a record with individually owned, named Python fields.
