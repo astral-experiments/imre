@@ -305,6 +305,9 @@ impl Checker<'_> {
                         clear: vec![rhs, object],
                     });
                 }
+                if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
+                    return self.store_setup_field(receiver, value, attribute, field);
+                }
                 let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
                 let value = self.coerce(value, ty, target)?;
                 Ok(Statement::SetField(receiver, field, value))
