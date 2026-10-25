@@ -1,0 +1,253 @@
+{
+  "module": "test.test_posix",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 179,
+  "reference": {
+    "test.test_posix.NamespacesTests.test_unshare_setns": "pass",
+    "test.test_posix.PosixGroupsTester.test_initgroups": {
+      "skipped": "not enough privileges"
+    },
+    "test.test_posix.PosixGroupsTester.test_setgroups": {
+      "skipped": "not enough privileges"
+    },
+    "test.test_posix.PosixTester.testNoArgFunctions": "pass",
+    "test.test_posix.PosixTester.test_access": "pass",
+    "test.test_posix.PosixTester.test_bug_140634": "pass",
+    "test.test_posix.PosixTester.test_chdir": "pass",
+    "test.test_posix.PosixTester.test_chflags": {
+      "skipped": "test needs os.chflags()"
+    },
+    "test.test_posix.PosixTester.test_chmod_dir": "pass",
+    "test.test_posix.PosixTester.test_chmod_dir_symlink": "pass",
+    "test.test_posix.PosixTester.test_chmod_file": "pass",
+    "test.test_posix.PosixTester.test_chmod_file_symlink": "pass",
+    "test.test_posix.PosixTester.test_chown": "pass",
+    "test.test_posix.PosixTester.test_cld_xxxx_constants": "pass",
+    "test.test_posix.PosixTester.test_confstr": "pass",
+    "test.test_posix.PosixTester.test_dup": "pass",
+    "test.test_posix.PosixTester.test_dup2": "pass",
+    "test.test_posix.PosixTester.test_environ": "pass",
+    "test.test_posix.PosixTester.test_fchmod_file": "pass",
+    "test.test_posix.PosixTester.test_fchown": "pass",
+    "test.test_posix.PosixTester.test_fexecve": "pass",
+    "test.test_posix.PosixTester.test_fs_holes": "pass",
+    "test.test_posix.PosixTester.test_fstat": "pass",
+    "test.test_posix.PosixTester.test_fstatvfs": "pass",
+    "test.test_posix.PosixTester.test_ftruncate": "pass",
+    "test.test_posix.PosixTester.test_get_and_set_scheduler_and_param": "pass",
+    "test.test_posix.PosixTester.test_getcwd_long_pathnames": "pass",
+    "test.test_posix.PosixTester.test_getgrouplist": "pass",
+    "test.test_posix.PosixTester.test_getgroups": "pass",
+    "test.test_posix.PosixTester.test_getresgid": "pass",
+    "test.test_posix.PosixTester.test_getresuid": "pass",
+    "test.test_posix.PosixTester.test_initgroups": "pass",
+    "test.test_posix.PosixTester.test_lchflags_regular_file": {
+      "skipped": "test needs os.lchflags()"
+    },
+    "test.test_posix.PosixTester.test_lchflags_symlink": {
+      "skipped": "test needs os.lchflags()"
+    },
+    "test.test_posix.PosixTester.test_lchmod_dir": {
+      "skipped": "test needs os.lchmod()"
+    },
+    "test.test_posix.PosixTester.test_lchmod_dir_symlink": {
+      "skipped": "test needs os.lchmod()"
+    },
+    "test.test_posix.PosixTester.test_lchmod_file": {
+      "skipped": "test needs os.lchmod()"
+    },
+    "test.test_posix.PosixTester.test_lchmod_file_symlink": {
+      "skipped": "test needs os.lchmod()"
+    },
+    "test.test_posix.PosixTester.test_lchown": "pass",
+    "test.test_posix.PosixTester.test_link_follow_symlinks": "pass",
+    "test.test_posix.PosixTester.test_listdir": "pass",
+    "test.test_posix.PosixTester.test_listdir_bytes": "pass",
+    "test.test_posix.PosixTester.test_listdir_bytes_like": "pass",
+    "test.test_posix.PosixTester.test_listdir_default": "pass",
+    "test.test_posix.PosixTester.test_listdir_fd": "pass",
+    "test.test_posix.PosixTester.test_lockf": "pass",
+    "test.test_posix.PosixTester.test_makedev": "pass",
+    "test.test_posix.PosixTester.test_mkfifo": "pass",
+    "test.test_posix.PosixTester.test_mknod": "pass",
+    "test.test_posix.PosixTester.test_oscloexec": "pass",
+    "test.test_posix.PosixTester.test_osexlock": {
+      "skipped": "test needs posix.O_EXLOCK"
+    },
+    "test.test_posix.PosixTester.test_osshlock": {
+      "skipped": "test needs posix.O_SHLOCK"
+    },
+    "test.test_posix.PosixTester.test_path_error2": "pass",
+    "test.test_posix.PosixTester.test_path_with_null_byte": "pass",
+    "test.test_posix.PosixTester.test_path_with_null_character": "pass",
+    "test.test_posix.PosixTester.test_pidfd_open": "pass",
+    "test.test_posix.PosixTester.test_pipe": "pass",
+    "test.test_posix.PosixTester.test_pipe2": "pass",
+    "test.test_posix.PosixTester.test_pipe2_c_limits": "pass",
+    "test.test_posix.PosixTester.test_posix_fadvise": "pass",
+    "test.test_posix.PosixTester.test_posix_fadvise_errno": "pass",
+    "test.test_posix.PosixTester.test_posix_fallocate": "pass",
+    "test.test_posix.PosixTester.test_posix_fallocate_errno": "pass",
+    "test.test_posix.PosixTester.test_pread": "pass",
+    "test.test_posix.PosixTester.test_preadv": "pass",
+    "test.test_posix.PosixTester.test_preadv_flags": "pass",
+    "test.test_posix.PosixTester.test_preadv_overflow_32bits": {
+      "skipped": "test is only meaningful on 32-bit builds"
+    },
+    "test.test_posix.PosixTester.test_putenv": "pass",
+    "test.test_posix.PosixTester.test_pwrite": "pass",
+    "test.test_posix.PosixTester.test_pwritev": "pass",
+    "test.test_posix.PosixTester.test_pwritev_flags": {
+      "skipped": "test needs os.RWF_SYNC"
+    },
+    "test.test_posix.PosixTester.test_pwritev_overflow_32bits": {
+      "skipped": "test is only meaningful on 32-bit builds"
+    },
+    "test.test_posix.PosixTester.test_readv": "pass",
+    "test.test_posix.PosixTester.test_readv_overflow_32bits": {
+      "skipped": "test is only meaningful on 32-bit builds"
+    },
+    "test.test_posix.PosixTester.test_register_at_fork": "pass",
+    "test.test_posix.PosixTester.test_rtld_constants": "pass",
+    "test.test_posix.PosixTester.test_sched_getaffinity": "pass",
+    "test.test_posix.PosixTester.test_sched_param": "pass",
+    "test.test_posix.PosixTester.test_sched_priority": "pass",
+    "test.test_posix.PosixTester.test_sched_rr_get_interval": "pass",
+    "test.test_posix.PosixTester.test_sched_setaffinity": "pass",
+    "test.test_posix.PosixTester.test_sched_yield": "pass",
+    "test.test_posix.PosixTester.test_setresgid": "pass",
+    "test.test_posix.PosixTester.test_setresgid_exception": "pass",
+    "test.test_posix.PosixTester.test_setresuid": "pass",
+    "test.test_posix.PosixTester.test_setresuid_exception": "pass",
+    "test.test_posix.PosixTester.test_stat": "pass",
+    "test.test_posix.PosixTester.test_stat_fd_zero_follow_symlinks": "pass",
+    "test.test_posix.PosixTester.test_statvfs": "pass",
+    "test.test_posix.PosixTester.test_strerror": "pass",
+    "test.test_posix.PosixTester.test_sysconf": "pass",
+    "test.test_posix.PosixTester.test_truncate": "pass",
+    "test.test_posix.PosixTester.test_umask": "pass",
+    "test.test_posix.PosixTester.test_utime": "pass",
+    "test.test_posix.PosixTester.test_utime_nofollow_symlinks": "pass",
+    "test.test_posix.PosixTester.test_utime_with_fd": "pass",
+    "test.test_posix.PosixTester.test_waitid": "pass",
+    "test.test_posix.PosixTester.test_writev": "pass",
+    "test.test_posix.PosixTester.test_writev_overflow_32bits": {
+      "skipped": "test is only meaningful on 32-bit builds"
+    },
+    "test.test_posix.TestPosixDirFd.test_access_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_chmod_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_chown_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_link_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_mkdir_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_mkfifo_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_mknod_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_open_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_readlink_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_rename_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_stat_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_symlink_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_unlink_dir_fd": "pass",
+    "test.test_posix.TestPosixDirFd.test_utime_dir_fd": "pass",
+    "test.test_posix.TestPosixSpawn.test_bad_file_actions": "pass",
+    "test.test_posix.TestPosixSpawn.test_close_file": "pass",
+    "test.test_posix.TestPosixSpawn.test_dup2": "pass",
+    "test.test_posix.TestPosixSpawn.test_empty_file_actions": "pass",
+    "test.test_posix.TestPosixSpawn.test_multiple_file_actions": "pass",
+    "test.test_posix.TestPosixSpawn.test_no_such_executable": "pass",
+    "test.test_posix.TestPosixSpawn.test_none_file_actions": "pass",
+    "test.test_posix.TestPosixSpawn.test_open_file": "pass",
+    "test.test_posix.TestPosixSpawn.test_resetids": "pass",
+    "test.test_posix.TestPosixSpawn.test_resetids_explicit_default": "pass",
+    "test.test_posix.TestPosixSpawn.test_returns_pid": "pass",
+    "test.test_posix.TestPosixSpawn.test_scheduler_allow_none": "pass",
+    "test.test_posix.TestPosixSpawn.test_scheduler_wrong_type": "pass",
+    "test.test_posix.TestPosixSpawn.test_setpgroup": "pass",
+    "test.test_posix.TestPosixSpawn.test_setpgroup_allow_none": "pass",
+    "test.test_posix.TestPosixSpawn.test_setpgroup_wrong_type": "pass",
+    "test.test_posix.TestPosixSpawn.test_setscheduler_only_param": "pass",
+    "test.test_posix.TestPosixSpawn.test_setscheduler_with_policy": "pass",
+    "test.test_posix.TestPosixSpawn.test_setsid": "pass",
+    "test.test_posix.TestPosixSpawn.test_setsigdef": "pass",
+    "test.test_posix.TestPosixSpawn.test_setsigdef_wrong_type": "pass",
+    "test.test_posix.TestPosixSpawn.test_setsigmask": "pass",
+    "test.test_posix.TestPosixSpawn.test_setsigmask_wrong_type": "pass",
+    "test.test_posix.TestPosixSpawn.test_specify_environment": "pass",
+    "test.test_posix.TestPosixSpawnP.test_bad_file_actions": "pass",
+    "test.test_posix.TestPosixSpawnP.test_close_file": "pass",
+    "test.test_posix.TestPosixSpawnP.test_dup2": "pass",
+    "test.test_posix.TestPosixSpawnP.test_empty_file_actions": "pass",
+    "test.test_posix.TestPosixSpawnP.test_multiple_file_actions": "pass",
+    "test.test_posix.TestPosixSpawnP.test_no_such_executable": "pass",
+    "test.test_posix.TestPosixSpawnP.test_none_file_actions": "pass",
+    "test.test_posix.TestPosixSpawnP.test_open_file": "pass",
+    "test.test_posix.TestPosixSpawnP.test_posix_spawnp": "pass",
+    "test.test_posix.TestPosixSpawnP.test_resetids": "pass",
+    "test.test_posix.TestPosixSpawnP.test_resetids_explicit_default": "pass",
+    "test.test_posix.TestPosixSpawnP.test_returns_pid": "pass",
+    "test.test_posix.TestPosixSpawnP.test_scheduler_allow_none": "pass",
+    "test.test_posix.TestPosixSpawnP.test_scheduler_wrong_type": "pass",
+    "test.test_posix.TestPosixSpawnP.test_setpgroup": "pass",
+    "test.test_posix.TestPosixSpawnP.test_setpgroup_allow_none": "pass",
+    "test.test_posix.TestPosixSpawnP.test_setpgroup_wrong_type": "pass",
+    "test.test_posix.TestPosixSpawnP.test_setscheduler_only_param": "pass",
+    "test.test_posix.TestPosixSpawnP.test_setscheduler_with_policy": "pass",
+    "test.test_posix.TestPosixSpawnP.test_setsid": "pass",
+    "test.test_posix.TestPosixSpawnP.test_setsigdef": "pass",
+    "test.test_posix.TestPosixSpawnP.test_setsigdef_wrong_type": "pass",
+    "test.test_posix.TestPosixSpawnP.test_setsigmask": "pass",
+    "test.test_posix.TestPosixSpawnP.test_setsigmask_wrong_type": "pass",
+    "test.test_posix.TestPosixSpawnP.test_specify_environment": "pass",
+    "test.test_posix.TestPosixWeaklinking.test_access": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_chmod": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_chown": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_link": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_listdir_scandir": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_mkdir": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_mkfifo": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_mknod": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_open": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_ptsname_r": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_pwritev": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_readlink": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_rename_replace": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_stat": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_symlink": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_unlink_rmdir": {
+      "skipped": "test weak linking on macOS"
+    },
+    "test.test_posix.TestPosixWeaklinking.test_utime": {
+      "skipped": "test weak linking on macOS"
+    }
+  }
+}

@@ -27,7 +27,7 @@
   },
   "workloads": {
     "encode-64": {
-      "old_relar": {
+      "old_imre": {
         "total_allocated_bytes": 7046310,
         "total_allocated_blocks": 160854,
         "peak_live_bytes": 14379,
@@ -41,7 +41,7 @@
         "output_sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
         "stdout": "OK\n250880\n"
       },
-      "relar": {
+      "imre": {
         "total_allocated_bytes": 503922,
         "total_allocated_blocks": 7252,
         "peak_live_bytes": 14414,
@@ -57,29 +57,29 @@
       },
       "ratios": {
         "total_allocated_bytes": {
-          "old_relar_over_new_relar": 13.982937835617417,
-          "relar_reduction_percent": 92.84842704905121,
-          "new_relar_over_rust": 4.9175595760875925
+          "old_imre_over_new_imre": 13.982937835617417,
+          "imre_reduction_percent": 92.84842704905121,
+          "new_imre_over_rust": 4.9175595760875925
         },
         "total_allocated_blocks": {
-          "old_relar_over_new_relar": 22.180639823496968,
-          "relar_reduction_percent": 95.49156377833314,
-          "new_relar_over_rust": 6.959692898272553
+          "old_imre_over_new_imre": 22.180639823496968,
+          "imre_reduction_percent": 95.49156377833314,
+          "new_imre_over_rust": 6.959692898272553
         },
         "peak_live_bytes": {
-          "old_relar_over_new_relar": 0.9975718051893991,
-          "relar_reduction_percent": -0.24341052924403694,
-          "new_relar_over_rust": 6.642396313364055
+          "old_imre_over_new_imre": 0.9975718051893991,
+          "imre_reduction_percent": -0.24341052924403694,
+          "new_imre_over_rust": 6.642396313364055
         },
         "instructions": {
-          "old_relar_over_new_relar": 10.85128507920904,
-          "relar_reduction_percent": 90.78450162630055,
-          "new_relar_over_rust": 2.6909077673117463
+          "old_imre_over_new_imre": 10.85128507920904,
+          "imre_reduction_percent": 90.78450162630055,
+          "new_imre_over_rust": 2.6909077673117463
         }
       }
     },
     "encode-16384": {
-      "old_relar": {
+      "old_imre": {
         "total_allocated_bytes": 408084816,
         "total_allocated_blocks": 163914,
         "peak_live_bytes": 95174,
@@ -93,7 +93,7 @@
         "output_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
         "stdout": "OK\n98784\n"
       },
-      "relar": {
+      "imre": {
         "total_allocated_bytes": 557892,
         "total_allocated_blocks": 168,
         "peak_live_bytes": 105386,
@@ -109,29 +109,29 @@
       },
       "ratios": {
         "total_allocated_bytes": {
-          "old_relar_over_new_relar": 731.4763717708804,
-          "relar_reduction_percent": 99.86329018426406,
-          "new_relar_over_rust": 4.696179196444355
+          "old_imre_over_new_imre": 731.4763717708804,
+          "imre_reduction_percent": 99.86329018426406,
+          "new_imre_over_rust": 4.696179196444355
         },
         "total_allocated_blocks": {
-          "old_relar_over_new_relar": 975.6785714285714,
-          "relar_reduction_percent": 99.89750722940079,
-          "new_relar_over_rust": 7.636363636363637
+          "old_imre_over_new_imre": 975.6785714285714,
+          "imre_reduction_percent": 99.89750722940079,
+          "new_imre_over_rust": 7.636363636363637
         },
         "peak_live_bytes": {
-          "old_relar_over_new_relar": 0.9030990833697076,
-          "relar_reduction_percent": -10.729821169647181,
-          "new_relar_over_rust": 1.562361940907002
+          "old_imre_over_new_imre": 0.9030990833697076,
+          "imre_reduction_percent": -10.729821169647181,
+          "new_imre_over_rust": 1.562361940907002
         },
         "instructions": {
-          "old_relar_over_new_relar": 131.76529816761143,
-          "relar_reduction_percent": 99.24107483995675,
-          "new_relar_over_rust": 1.6197185490801818
+          "old_imre_over_new_imre": 131.76529816761143,
+          "imre_reduction_percent": 99.24107483995675,
+          "new_imre_over_rust": 1.6197185490801818
         }
       }
     },
     "decode-bytes-16384": {
-      "old_relar": {
+      "old_imre": {
         "total_allocated_bytes": 7291988,
         "total_allocated_blocks": 98535,
         "peak_live_bytes": 455557,
@@ -145,7 +145,7 @@
         "output_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
         "stdout": "OK\n67512\n"
       },
-      "relar": {
+      "imre": {
         "total_allocated_bytes": 7291628,
         "total_allocated_blocks": 98525,
         "peak_live_bytes": 455592,
@@ -161,24 +161,24 @@
       },
       "ratios": {
         "total_allocated_bytes": {
-          "old_relar_over_new_relar": 1.0000493716903824,
-          "relar_reduction_percent": 0.004936925293896888,
-          "new_relar_over_rust": 77.3737836776706
+          "old_imre_over_new_imre": 1.0000493716903824,
+          "imre_reduction_percent": 0.004936925293896888,
+          "new_imre_over_rust": 77.3737836776706
         },
         "total_allocated_blocks": {
-          "old_relar_over_new_relar": 1.0001014970819588,
-          "relar_reduction_percent": 0.010148678134669353,
-          "new_relar_over_rust": 4478.409090909091
+          "old_imre_over_new_imre": 1.0001014970819588,
+          "imre_reduction_percent": 0.010148678134669353,
+          "new_imre_over_rust": 4478.409090909091
         },
         "peak_live_bytes": {
-          "old_relar_over_new_relar": 0.9999231768775572,
-          "relar_reduction_percent": -0.007682902468841846,
-          "new_relar_over_rust": 7.685554749574048
+          "old_imre_over_new_imre": 0.9999231768775572,
+          "imre_reduction_percent": -0.007682902468841846,
+          "new_imre_over_rust": 7.685554749574048
         },
         "instructions": {
-          "old_relar_over_new_relar": 1.006540089369581,
-          "relar_reduction_percent": 0.6497594520728178,
-          "new_relar_over_rust": 43.53658711370522
+          "old_imre_over_new_imre": 1.006540089369581,
+          "imre_reduction_percent": 0.6497594520728178,
+          "new_imre_over_rust": 43.53658711370522
         }
       }
     }
@@ -187,7 +187,7 @@
     "Instruction totals are instrumented Callgrind guest Ir counts, not CPU cycles, CPU time, or wall-time speedups.",
     "Each process handles 64 KiB of raw data; whole-process totals include startup, checksum, and file I/O. These profiles do not reproduce sustained benchmark batch sizes.",
     "DHAT measures requested heap allocation bytes and blocks, not copied bytes or RSS. Global peak uses allocation-point contributions at the global peak, not summed pointwise maxima.",
-    "Historical and new Relar profiles cover the complete compiler/runtime change, not an isolated ablation of owned append. Program paths and startup details differ, so tiny changes are not meaningful.",
+    "Historical and new Imre profiles cover the complete compiler/runtime change, not an isolated ablation of owned append. Program paths and startup details differ, so tiny changes are not meaningful.",
     "Both versions use the same upstream codec and profile input/output/checksum. Rust is an independent implementation with direct byte processing and output preallocation; it is not an identical-source comparison.",
     "Large encode cumulative allocation falls sharply, while peak live heap rises by about 10.7 percent. Lower total allocation does not imply lower peak memory.",
     "Decode allocation and instruction totals remain effectively unchanged; the separate decode gap to the Rust reference remains substantial."

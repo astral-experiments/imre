@@ -9,10 +9,10 @@ import statistics
 import subprocess
 import tarfile
 
-ROOT = Path('/home/dev-user/code/oss/relar')
+ROOT = Path('/home/dev-user/code/oss/imre')
 PREFIX = ROOT / 'benchmarks/results/2026-10-21-callable'
 REVISION = '848477f3d06fb1afe6d4bdd93dae4b107c90229a'
-ENGINES = ('relar', 'cpython', 'rust')
+ENGINES = ('imre', 'cpython', 'rust')
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 def load(suffix):
@@ -99,20 +99,20 @@ for mode in ('normal', 'thinlto'):
             q = statistics.quantiles(values, n=4, method='inclusive')
             summary[engine] = dict(median_seconds=statistics.median(values), min_seconds=min(values), max_seconds=max(values), p25_seconds=q[0], p75_seconds=q[2])
             check(summary[engine] == workload['summary'][engine], 'raw sample summary')
-        for left, right in [('cpython', 'relar'), ('relar', 'rust'), ('cpython', 'rust')]:
+        for left, right in [('cpython', 'imre'), ('imre', 'rust'), ('cpython', 'rust')]:
             check(workload[left + '_over_' + right] == summary[left]['median_seconds'] / summary[right]['median_seconds'], 'raw sample ratio')
         if workload['records']:
-            row = f"| `{workload['label']}` | {summary['relar']['median_seconds']*1000:.3f} | {summary['rust']['median_seconds']*1000:.3f} | {summary['cpython']['median_seconds']*1000:.3f} | {workload['cpython_over_relar']:.3f}× | {workload['relar_over_rust']:.3f}× |"
+            row = f"| `{workload['label']}` | {summary['imre']['median_seconds']*1000:.3f} | {summary['rust']['median_seconds']*1000:.3f} | {summary['cpython']['median_seconds']*1000:.3f} | {workload['cpython_over_imre']:.3f}× | {workload['imre_over_rust']:.3f}× |"
             check(row in report, 'numeric report table row')
             table_rows += 1
             if workload['records'] == 4096:
-                large[mode + '/' + workload['label']] = workload['relar_over_rust']
+                large[mode + '/' + workload['label']] = workload['imre_over_rust']
     control = record['startup_control']['summary']
-    fraction = max(control['relar']['median_seconds'] / item['summary']['relar']['median_seconds'] for item in record['workloads'])
+    fraction = max(control['imre']['median_seconds'] / item['summary']['imre']['median_seconds'] for item in record['workloads'])
     for item in record['workloads']:
         for engine in ENGINES:
             check(item['startup_control_fraction'][engine] == control[engine]['median_seconds'] / item['summary'][engine]['median_seconds'], 'raw control fraction')
-    row = f"| {mode} | {control['relar']['median_seconds']*1000:.3f} | {control['rust']['median_seconds']*1000:.3f} | {control['cpython']['median_seconds']*1000:.3f} | {fraction:.2%} |"
+    row = f"| {mode} | {control['imre']['median_seconds']*1000:.3f} | {control['rust']['median_seconds']*1000:.3f} | {control['cpython']['median_seconds']*1000:.3f} | {fraction:.2%} |"
     check(row in report, 'control report table row')
     table_rows += 1
 full = [large['thinlto/' + mode + '-full-4096'] for mode in ('gross', 'net')]
@@ -122,6 +122,6 @@ check(f"**{min(selective):.2f}–{max(selective):.2f}×**" in report, 'selective
 check(all(value > 2 for value in full), 'headline target conclusion')
 check(counts == {'gates': 54, 'warmups': 108, 'measured': 648}, 'independent execution counts')
 check(audit['execution_counts'] == {'preparation': 732, **counts}, 'audit execution counts')
-result = {'status': 'passed', 'scope': 'Independent archive/member/mode/Git-source/sidecar verification and raw-sample statistics/report-table recomputation; application oracle validity is provided by the separately reviewed packaged audit.', 'revision': REVISION, 'archive_sha256': sha(archive_bytes), 'manifest_sha256': sha(load('-evidence-manifest.json')), 'members': len(members), 'source_files': len(source_entries), 'exclusions': len(exclusions), 'numeric_report_rows': table_rows, 'execution_counts': {'preparation': 732, **counts}, 'large_relar_over_rust': large, 'auditor_sha256': sha(Path(__file__).read_bytes())}
-Path('/tmp/relar-callable-artifact-audit.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
+result = {'status': 'passed', 'scope': 'Independent archive/member/mode/Git-source/sidecar verification and raw-sample statistics/report-table recomputation; application oracle validity is provided by the separately reviewed packaged audit.', 'revision': REVISION, 'archive_sha256': sha(archive_bytes), 'manifest_sha256': sha(load('-evidence-manifest.json')), 'members': len(members), 'source_files': len(source_entries), 'exclusions': len(exclusions), 'numeric_report_rows': table_rows, 'execution_counts': {'preparation': 732, **counts}, 'large_imre_over_rust': large, 'auditor_sha256': sha(Path(__file__).read_bytes())}
+Path('/tmp/imre-callable-artifact-audit.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
 print(json.dumps(result, indent=2, sort_keys=True))

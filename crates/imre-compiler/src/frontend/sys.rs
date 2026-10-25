@@ -1,0 +1,148 @@
+//! Sealed bindings for the process's standard streams and exit exception.
+use super::*;
+
+impl Checker<'_> {
+    fn sys_no_args(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &str,
+        result: Expr,
+    ) -> Result<Expr, String> {
+        if call.arguments.is_empty() {
+            return Ok(result);
+        }
+        let count = call.arguments.args.len();
+        let message = if call.arguments.keywords.is_empty() {
+            format!("sys.{name}() takes no arguments ({count} given)")
+        } else {
+            format!("sys.{name}() takes no keyword arguments")
+        };
+        self.sys_type_error(call, result.ty, message)
+    }
+
+    fn sys_type_error(
+        &mut self,
+        call: &ast::ExprCall,
+        ty: Type,
+        message: String,
+    ) -> Result<Expr, String> {
+        let mut args = Vec::new();
+        for argument in &call.arguments.args {
+            args.push(self.expr(argument)?);
+        }
+        for keyword in &call.arguments.keywords {
+            if keyword.arg.is_none() {
+                return Err(error(
+                    self.source,
+                    keyword,
+                    "expanded keyword arguments are unsupported",
+                ));
+            }
+            args.push(self.expr(&keyword.value)?);
+        }
+        args.push(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(message))),
+            },
+        });
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::RaiseException, args),
+        })
+    }
+
+    pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::SysExit)) => {
+                return self.system_exit(call, true).map(Some);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysEncoding(name))) => {
+                return self
+                    .sys_no_args(call, name, unpacking::string("utf-8"))
+                    .map(Some);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysException)) => {
+                let result = Expr {
+                    ty: self.types.optional(Type::Exception),
+                    kind: ExprKind::Builtin(Builtin::ActiveException, Vec::new()),
+                };
+                return self.sys_no_args(call, "exception", result).map(Some);
+            }
+            _ => {}
+        }
+        let ast::Expr::Attribute(attribute) = &*call.func else {
+            return Ok(None);
+        };
+        let stderr = match self.resolve(&attribute.value) {
+            Some(Binding::Intrinsic(Intrinsic::Stdout)) => false,
+            Some(Binding::Intrinsic(Intrinsic::Stderr)) => true,
+            _ => return Ok(None),
+        };
+        self.reject_builtin_keywords(call)?;
+        let (ty, op, args) = match (attribute.attr.as_str(), call.arguments.args.as_slice()) {
+            ("write", [text]) => (
+                Type::Int,
+                Builtin::SysStreamWrite { stderr },
+                vec![self.expr_expected(text, Type::Str)?],
+            ),
+            ("flush", []) => (Type::None, Builtin::SysStreamFlush { stderr }, Vec::new()),
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "standard streams support write(str) and flush()",
+                ));
+            }
+        };
+        Ok(Some(Expr {
+            ty,
+            kind: ExprKind::Builtin(op, args),
+        }))
+    }
+
+    pub(super) fn system_exit(
+        &mut self,
+        call: &ast::ExprCall,
+        raise: bool,
+    ) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let args = match call.arguments.args.as_slice() {
+            [] => Vec::new(),
+            [value] => {
+                let value = self.expr(value)?;
+                if !matches!(
+                    value.ty,
+                    Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_)
+                ) {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "exit status requires None, bool, int, or str",
+                    ));
+                }
+                vec![value]
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "exit accepts zero or one positional argument",
+                ));
+            }
+        };
+        let exception = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Builtin(Builtin::SystemExitNew { omit_none: raise }, args),
+        };
+        Ok(if raise {
+            Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::RaiseException, vec![exception]),
+            }
+        } else {
+            exception
+        })
+    }
+}

@@ -1,0 +1,19 @@
+[package]
+name = "imre-runtime-jemalloc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+imre-runtime = { path = "../imre-runtime" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemallocator = { version = "=0.6.1", default-features = false, features = ["background_threads_runtime_support"] }
+
+[lints]
+workspace = true

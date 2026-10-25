@@ -552,7 +552,7 @@ def main() -> None:
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
     commands = {"cpython": python_command(args.python)}
-    for engine, binary in (("relar", args.binary), ("rust_bigint", args.rust_bigint)):
+    for engine, binary in (("imre", args.binary), ("rust_bigint", args.rust_bigint)):
         if binary is not None:
             commands[engine] = [str(binary.resolve(strict=True))]
     result = validate_commands(commands, args.timeout)

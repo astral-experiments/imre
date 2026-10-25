@@ -1,5 +1,5 @@
-import relar.json as wire
-from relar import json
+import imre.json as wire
+from imre import json
 from models import Record as Entry
 from decoder import decode as restored
 

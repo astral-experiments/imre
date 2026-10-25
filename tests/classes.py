@@ -35,6 +35,11 @@ REJECTED = {
     "literal_mutable_alias": 'from typing import Literal\na: list[Literal["a"]] = ["a"]\nb: list[str] = a\nb.append("b")\n',
     "literal_non_string": 'from typing import Literal\nx: Literal["a", 7] = "a"\n',
     "literal_invalidated_guard": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    if s == "a":\n        s = input()\n        return s\n    return "a"\n',
+    "root_super_wrong_arity": CELL.replace("self.value = value", "super().__init__(value)\n        self.value = value"),
+    "init_alias_partial_self": CELL.replace("self.value = value", "alias = self\n        self.value = value"),
+    "init_rebind_self": CELL.replace("self.value = value", "self = self\n        self.value = value"),
+    "init_assert_unset_field": CELL.replace("self.value = value", "assert self.value\n        self.value = value"),
+    "init_eager_message_escape": CELL.replace("self.value = value", "assert value, self\n        self.value = value"),
     "wrong_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"\n',
     "wrong_alias_type": CELL + "value = Cell(1)\nalias = value\nalias.value = True\n",
     "ignored_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"  # type: ignore\n',
@@ -71,7 +76,6 @@ REJECTED = {
         + "def escape(value: Cell) -> int:\n    return 0\n",
     "constructor_control_flow": CELL.replace("self.value = value", "if value > 0:\n            self.value = value\n        else:\n            self.value = 0"),
     "constructor_side_effect": CELL.replace("self.value = value", "print(value)\n        self.value = value"),
-    "constructor_local": CELL.replace("self.value = value", "temporary = value\n        self.value = temporary"),
     "constructor_return": CELL.replace("self.value = value", "self.value = value\n        return"),
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
     "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),
@@ -204,12 +208,12 @@ def main() -> None:
     python = str(Path(args.python).resolve()) if "/" in args.python else args.python
     clang = str(Path(args.clang).resolve()) if "/" in args.clang else args.clang
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-classes-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-classes-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py"]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py"]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)

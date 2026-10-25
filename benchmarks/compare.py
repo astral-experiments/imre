@@ -1,4 +1,4 @@
-"""Compare prebuilt baseline and optimized Relar executables with unchanged CPython.
+"""Compare prebuilt baseline and optimized Imre executables with unchanged CPython.
 
 This measures fresh-process execution, including startup and pipes. It never
 builds either native executable. Twelve measured triplets cover every execution
@@ -153,7 +153,7 @@ def compare(args: argparse.Namespace) -> dict:
             )
     return {
         "schema_version": 1,
-        "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+        "comparison": "prebuilt baseline vs optimized Imre vs unchanged CPython",
         "started_at_utc": started_at,
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
         "git": {"revision": revision, "dirty": dirty},

@@ -1,10 +1,10 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Inventory string construction: CPU, allocations, and Rust comparison
 
-Fusing string construction reduces large inventory times by **29.0–33.6% with ThinLTO** and **32.7–36.0% with ordinary linking**, without changing the program. With ThinLTO, Relar runs **2.52–3.37× faster than CPython** and takes **1.048–1.098× the Rust BigInt reference's time**. Allocation counts fall **68.7–70.9%**; a measurable Rust timing advantage remains.
+Fusing string construction reduces large inventory times by **29.0–33.6% with ThinLTO** and **32.7–36.0% with ordinary linking**, without changing the program. With ThinLTO, Imre runs **2.52–3.37× faster than CPython** and takes **1.048–1.098× the Rust BigInt reference's time**. Allocation counts fall **68.7–70.9%**; a measurable Rust timing advantage remains.
 
-The application and Rust reference are unchanged. The implementation is [PR 28](https://github.com/viarius-experiments/relar/pull/28), continuing native GitHub Stack 4. Measurements use clean source commit `7ec35cbd0a94ca82419061c725382b2e2a1d4a1e`; its compiler and runtime artifacts are byte-identical to the final development candidate validated before publication.
+The application and Rust reference are unchanged. The implementation is [PR 28](https://github.com/viarius-experiments/imre/pull/28), continuing native GitHub Stack 4. Measurements use clean source commit `7ec35cbd0a94ca82419061c725382b2e2a1d4a1e`; its compiler and runtime artifacts are byte-identical to the final development candidate validated before publication.
 
 ## What the profiles changed
 
@@ -20,7 +20,7 @@ Expanded sanitizer checks also exposed a pre-existing `-O0` issue: Clang 18 Addr
 
 ## CPU and allocation evidence
 
-| Mode | Input | Original instructions | Optimized instructions | Rust instructions | Relar reduction |
+| Mode | Input | Original instructions | Optimized instructions | Rust instructions | Imre reduction |
 |---|---|---:|---:|---:|---:|
 | Ordinary | dense-16384 | 346,819,285 | 199,669,704 | 145,098,582 | 42.4% |
 | Ordinary | sparse-16384 | 592,952,946 | 360,707,107 | 265,252,293 | 39.2% |
@@ -31,14 +31,14 @@ Allocation counts are identical across linking modes. Requested and peak bytes d
 
 | Input | Engine | Allocated blocks | Requested bytes | Peak live requested bytes |
 |---|---|---:|---:|---:|
-| dense-16384 | Original Relar | 737,634 | 31,104,655 | 2,960,589 |
-| dense-16384 | Optimized Relar | 214,685 | 10,470,795 | 2,960,601 |
+| dense-16384 | Original Imre | 737,634 | 31,104,655 | 2,960,589 |
+| dense-16384 | Optimized Imre | 214,685 | 10,470,795 | 2,960,601 |
 | dense-16384 | Rust BigInt | 209,498 | 11,313,674 | 4,518,642 |
-| sparse-16384 | Original Relar | 1,211,056 | 55,580,015 | 6,718,517 |
-| sparse-16384 | Optimized Relar | 378,738 | 22,965,627 | 6,718,449 |
+| sparse-16384 | Original Imre | 1,211,056 | 55,580,015 | 6,718,517 |
+| sparse-16384 | Optimized Imre | 378,738 | 22,965,627 | 6,718,449 |
 | sparse-16384 | Rust BigInt | 378,629 | 25,877,008 | 9,881,188 |
 
-Requested allocation bytes fall 66.3% on dense input and 58.7% on sparse input. Optimized allocation counts are 2.48% above Rust on dense input and 0.029% above Rust on sparse input; requested bytes are 7.45% and 11.25% below Rust. Peak live requested heap is essentially unchanged by this optimization. The preserved Rust profiles use the exact unchanged reference binaries and captured inputs used in the final timing run; only optimized Relar needed new profile runs.
+Requested allocation bytes fall 66.3% on dense input and 58.7% on sparse input. Optimized allocation counts are 2.48% above Rust on dense input and 0.029% above Rust on sparse input; requested bytes are 7.45% and 11.25% below Rust. Peak live requested heap is essentially unchanged by this optimization. The preserved Rust profiles use the exact unchanged reference binaries and captured inputs used in the final timing run; only optimized Imre needed new profile runs.
 
 Callgrind reports executed instructions, not CPU cycles or elapsed-time shares. DHAT reports requested allocation traffic and peak live heap bytes, not process RSS. Hardware performance counters are unavailable on this devbox. Profiled elapsed times are diagnostic only and are excluded from the native timing comparison. Inclusive call costs overlap and are never added together.
 
@@ -58,7 +58,7 @@ The unchanged renderer still materializes a string before its `line` helper adds
 
 ## Timing method
 
-Each mode compares the preserved original inventory executable, optimized Relar, CPython, and the unchanged Rust BigInt reference on six inputs. It also compares CPython, preserved Relar, and optimized Relar on the five existing incremental-planner controls. Every inventory workload has 48 measured rounds containing all 24 engine permutations twice; controls use all six permutations eight times. There are two warmups per engine. The measured rounds balance engine positions and directed within-round predecessors; warmups, cross-round predecessors, and workload order are not balanced.
+Each mode compares the preserved original inventory executable, optimized Imre, CPython, and the unchanged Rust BigInt reference on six inputs. It also compares CPython, preserved Imre, and optimized Imre on the five existing incremental-planner controls. Every inventory workload has 48 measured rounds containing all 24 engine permutations twice; controls use all six permutations eight times. There are two warmups per engine. The measured rounds balance engine positions and directed within-round predecessors; warmups, cross-round predecessors, and workload order are not balanced.
 
 All 3,744 measured executions and 156 warmups are retained. Each uses a fresh process pinned to CPU 0, outside ptrace. Timing includes startup, input open/read/decode/parse, eager collection construction, reconciliation, complete report rendering/writes, flush/close, and exit. Fixture preparation, oracle execution, hashing/comparison, builds, and deletion are outside the timer. Inputs are created before timing and executables are exercised by validation/warmups; OS page caches are not deliberately flushed, and output is not fsynced. CPython uses its normal bytecode cache, whose application/control cache bytes are recorded before and after both sessions.
 
@@ -66,11 +66,11 @@ Ordinary and ThinLTO runs are sequential, after all task-owned builds, tests, an
 
 ## Inventory results
 
-Times are median milliseconds with observed Q1–Q3 in brackets. These ranges describe sample spread, not confidence intervals. Ratios divide medians; `Relar/Rust` above one means Rust is faster. The preserved and optimized executables run in the same session.
+Times are median milliseconds with observed Q1–Q3 in brackets. These ranges describe sample spread, not confidence intervals. Ratios divide medians; `Imre/Rust` above one means Rust is faster. The preserved and optimized executables run in the same session.
 
 **Ordinary**
 
-| Workload | CPython ms | Preserved Relar ms | Optimized Relar ms | Rust BigInt ms | Before/Relar | CPython/Relar | Relar/Rust |
+| Workload | CPython ms | Preserved Imre ms | Optimized Imre ms | Rust BigInt ms | Before/Imre | CPython/Imre | Imre/Rust |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | empty | 26.911 [26.754–27.102] | 2.250 [2.175–2.385] | 2.221 [2.114–2.280] | 2.266 [2.207–2.408] | 1.013× | 12.115× | 0.980× |
 | boundary-128 | 28.182 [27.775–29.174] | 3.087 [2.989–3.229] | 2.863 [2.754–2.966] | 2.754 [2.634–2.840] | 1.078× | 9.845× | 1.039× |
@@ -81,7 +81,7 @@ Times are median milliseconds with observed Q1–Q3 in brackets. These ranges de
 
 **ThinLTO**
 
-| Workload | CPython ms | Preserved Relar ms | Optimized Relar ms | Rust BigInt ms | Before/Relar | CPython/Relar | Relar/Rust |
+| Workload | CPython ms | Preserved Imre ms | Optimized Imre ms | Rust BigInt ms | Before/Imre | CPython/Imre | Imre/Rust |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | empty | 26.924 [26.601–27.554] | 2.261 [2.123–2.451] | 2.211 [2.083–2.383] | 2.336 [2.227–2.518] | 1.023× | 12.180× | 0.946× |
 | boundary-128 | 27.868 [27.550–28.212] | 2.928 [2.844–3.091] | 2.804 [2.681–2.915] | 2.722 [2.624–2.868] | 1.044× | 9.937× | 1.030× |
@@ -94,7 +94,7 @@ The two largest inputs each contain 16,384 positive requests and 18,906 total re
 
 ## Existing planner controls
 
-| Mode | Workload | CPython ms | Preserved Relar ms | Optimized Relar ms | Time change |
+| Mode | Workload | CPython ms | Preserved Imre ms | Optimized Imre ms | Time change |
 |---|---|---:|---:|---:|---:|
 | Ordinary | layered-16384-sparse | 111.992 [110.922–113.314] | 49.433 [48.676–49.846] | 49.674 [48.640–49.976] | +0.49% |
 | Ordinary | layered-16384-all | 194.570 [192.794–198.812] | 75.670 [74.703–77.453] | 75.866 [74.501–77.268] | +0.26% |

@@ -31,10 +31,10 @@ creates a new file subject to umask, leaving prior symlink/hardlink targets
 unchanged. Neither application fsyncs its output. The independent workspace
 helper uses POSIX `mkdtemp`, checked file close, and explicit cleanup, including
 permission recovery and rejection of a workspace root replaced by a symlink.
-The reference uses `std::process::Command`; it does not invoke Python or Relar.
+The reference uses `std::process::Command`; it does not invoke Python or Imre.
 
 The [native-path results](../../results/2026-10-21-native-paths.md) compare both
-directory layouts in ordinary and ThinLTO builds. Relar takes 0.91–1.28× Rust's
+directory layouts in ordinary and ThinLTO builds. Imre takes 0.91–1.28× Rust's
 time for the complete application and 1.38–1.63× for repeated
 parse/compare/render work. The report retains raw samples and a portable replay
 of the output, statistics, and source checks.
@@ -53,12 +53,12 @@ Prepare separately from timing:
 python3 benchmarks/reference/memory_report/build.py \
   --artifact-dir /tmp/memory-rust
 python3 benchmarks/memory_benchmark.py \
-  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre --runtime target/release/libimre_runtime.a \
   --rust /tmp/memory-rust/memory-report-reference --clang clang-18 \
   --prepare-only --artifact-dir /tmp/memory-prepared \
   --output /tmp/memory-prepared.json
 python3 benchmarks/memory_benchmark.py \
-  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre --runtime target/release/libimre_runtime.a \
   --rust /tmp/memory-rust/memory-report-reference --clang clang-18 \
   --prepared-record /tmp/memory-prepared.json --cpu 0 \
   --artifact-dir /tmp/memory-timing --output /tmp/memory-timing.json
@@ -69,10 +69,10 @@ Preparation compiles at optimization level 3 and validates the exact executables
 The harness requires committed sources; `--allow-dirty` labels exploration.
 Compiler, runtime, interpreter, linker, program sources, captures, helpers,
 reference build record, LLVM, and executable hashes are checked before and after
-measurement. `--relar-build-record` optionally binds a separately recorded build.
+measurement. `--imre-build-record` optionally binds a separately recorded build.
 
 Four engines are measured separately: an upstream CPython atomic-output adapter, the typed
-CPython port including its schema-checking shim, Relar, and Rust. The two genuine
+CPython port including its schema-checking shim, Imre, and Rust. The two genuine
 capture pairs remain unmodified. Default `--copies 32 256` also produces 8,128
 and 65,024 items per file by duplicating the Ruff capture with distinct names and
 multiplying totals. Each size includes a full old-to-new comparison and an
@@ -116,7 +116,7 @@ Unicode character counts and its complete last report; the harness validates
 both outside timing. This keeps I/O from dominating the comparison while still
 checking complete application work.
 
-Compute timings compare Relar, the upstream CPython compute adapter, and Rust, with all six
+Compute timings compare Imre, the upstream CPython compute adapter, and Rust, with all six
 engine permutations balancing positions and directed within-round neighbors.
 The typed CPython port is additionally checked in compute validation and remains
 in every application timing. Twelve measured rounds balance both order designs.
@@ -126,7 +126,7 @@ output, so it is explicitly an amortized compute estimate. A zero-repetition
 preload control is reported for each layout without subtraction. Inspect that
 control fraction alongside the Rust ratio; no timing is silently subtracted.
 
-For matched ThinLTO, build Rust with `--thinlto`, use a Relar runtime with embedded
+For matched ThinLTO, build Rust with `--thinlto`, use a Imre runtime with embedded
 LLVM bitcode, and pass `--lto-linker /path/to/matching/ld.lld` to preparation and
 measurement. Both use optimization level 3 and the existing 1,000-instruction
 import/inline budget; Rust uses 16 codegen units. Keep each mode's artifacts in a
@@ -137,13 +137,13 @@ Prepared-project benchmarks use a separate harness:
 
 ```sh
 python3 benchmarks/memory_process_benchmark.py \
-  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre --runtime target/release/libimre_runtime.a \
   --rust /tmp/memory-rust/memory-report-reference --clang clang-18 \
   --old-ty /absolute/path/to/ty-0.0.89 --new-ty /absolute/path/to/ty-0.0.90 \
   --ruff-source /path/to/pinned/ruff --prepare-only \
   --artifact-dir /tmp/process-prepared --output /tmp/process-prepared.json
 python3 benchmarks/memory_process_benchmark.py \
-  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre --runtime target/release/libimre_runtime.a \
   --rust /tmp/memory-rust/memory-report-reference --clang clang-18 \
   --old-ty /absolute/path/to/ty-0.0.89 --new-ty /absolute/path/to/ty-0.0.90 \
   --ruff-source /path/to/pinned/ruff --prepared-record /tmp/process-prepared.json \
@@ -176,7 +176,7 @@ compute controls preload text and measure repeated decode/compare/render work.
 Default preparation therefore produces 13 timed rows. These separate costs are
 reported directly without subtracting control timings.
 
-Three engines are timed in all six permutations: Relar, Rust, and a CPython
+Three engines are timed in all six permutations: Imre, Rust, and a CPython
 prepared-project adapter using the unchanged upstream models and renderer. This
 adapter replaces upstream's checkout/setup CLI and adds matching capture and
 atomic-output behavior; it is labeled explicitly. The

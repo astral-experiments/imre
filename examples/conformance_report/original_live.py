@@ -43,7 +43,7 @@ def main() -> None:
         return subprocess.run(command, **kwargs)
 
     upstream.subprocess = SimpleNamespace(run=run)
-    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".relar-conformance-") as temporary:
+    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".imre-conformance-") as temporary:
         # Schema validation is an adapter boundary: upstream consumes table keys.
         groups = upstream.tomllib.loads((suite / "src" / "test_groups.toml").read_text(encoding="utf-8"))
         for group in groups.values():

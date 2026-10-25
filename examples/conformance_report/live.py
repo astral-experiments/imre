@@ -6,8 +6,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from relar.json import decode
-from relar.toml import decode as decode_toml
+from imre.json import decode
+from imre.toml import decode as decode_toml
 
 from conformance_report.app import render_diagnostics
 from conformance_report.model import Source, WireDiagnostic
@@ -128,7 +128,7 @@ def live_main(arguments: list[str]) -> None:
     old_ty = Path(options.old_ty).resolve(strict=True)
     new_ty = Path(options.new_ty).resolve(strict=True)
     output = Path(options.output)
-    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".relar-conformance-") as name:
+    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".imre-conformance-") as name:
         workspace = Path(name)
         test_files = discover_test_files(suite)
         expected = collect_expected_diagnostics(test_files)

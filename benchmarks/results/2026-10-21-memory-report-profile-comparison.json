@@ -4,19 +4,19 @@
   "status": "passed",
   "analysis_script_sha256": "b4930fde1982173494cc2f736ac01611d52ec9a2d971e46df5fea0e9ba2246a1",
   "baseline": {
-    "directory": "/tmp/relar-memory-profile-baseline-v2",
+    "directory": "/tmp/imre-memory-profile-baseline-v2",
     "manifest_sha256": "52900a785a32cc2c56b838908f735f05e786d520f5c2190ee87d7d678f0a56fb",
     "summary_sha256": "7bedfbbb5e96e22c69e178e6c2347bdca1cc97ed39ae411847e6754b4d82356a",
     "provenance_sha256": "d40afeb22345a1b9817e657c3d12555f1525ede1e3a1c9f89490f2fa808ab227"
   },
   "optimized": {
-    "directory": "/tmp/relar-memory-profile-optimized-v1",
+    "directory": "/tmp/imre-memory-profile-optimized-v1",
     "manifest_sha256": "7e7b264f277158bb3cc69fb82010a1d461a8dc5257974528dc0857aa811072b2",
     "summary_sha256": "f3b35af495a310083378155c41e49dd45b8fb886167c7352e2a01db150c24ef5",
     "provenance_sha256": "41bd733ae9d800d74fb26d74157040dfecb35bd31cb8a5dfa981af7d8476455b"
   },
   "baseline_source_mapping": {
-    "path": "/tmp/relar-memory-baseline-source-mapping.json",
+    "path": "/tmp/imre-memory-baseline-source-mapping.json",
     "sha256": "3062fe8294d22d5d2e3a4bca5d3002188e9a9448b8fe1685369a5f2aec6f454d"
   },
   "captured_revisions": {
@@ -39,8 +39,8 @@
     "prepared:helper:manifest_validate.py",
     "prepared:helper:batch_validate.py",
     "prepared:helper:incremental_validate.py",
-    "prepared:stdlib:relar/__init__.py",
-    "prepared:stdlib:relar/json.py",
+    "prepared:stdlib:imre/__init__.py",
+    "prepared:stdlib:imre/json.py",
     "prepared:fixture:ruff-scripts.json",
     "prepared:fixture:inventory-old.stderr",
     "prepared:fixture:inventory.json",
@@ -74,7 +74,7 @@
   "rows": [
     {
       "workload": "scaled-full-32",
-      "engine": "relar",
+      "engine": "imre",
       "baseline_instructions": 150096383,
       "optimized_instructions": 126014790,
       "instruction_reduction_fraction": 0.1604408615229589,
@@ -140,7 +140,7 @@
     },
     {
       "workload": "scaled-unchanged-32",
-      "engine": "relar",
+      "engine": "imre",
       "baseline_instructions": 106665569,
       "optimized_instructions": 87021924,
       "instruction_reduction_fraction": 0.18416106700748017,

@@ -312,35 +312,35 @@
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/final/lto/layered-all-16384.relar.callgrind.log": {
+    "profiles/final/lto/layered-all-16384.imre.callgrind.log": {
       "sha256": "b924e7f22318f608efb2a14c82be8191f89cd4372959eab0bdf44d57088a87fa",
       "bytes": 756
     },
-    "profiles/final/lto/layered-all-16384.relar.callgrind.stderr": {
+    "profiles/final/lto/layered-all-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/final/lto/layered-all-16384.relar.callgrind.stdout": {
+    "profiles/final/lto/layered-all-16384.imre.callgrind.stdout": {
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/final/lto/layered-all-16384.relar.callgrind.trace": {
+    "profiles/final/lto/layered-all-16384.imre.callgrind.trace": {
       "sha256": "aa046c0fdf176e8d21cb90ab020e517e9825ac7beb447cb1992da35d7585dc12",
       "bytes": 372706
     },
-    "profiles/final/lto/layered-all-16384.relar.dhat.log": {
+    "profiles/final/lto/layered-all-16384.imre.dhat.log": {
       "sha256": "2cff6ac7b79d3b9d74757aeb3dcf88e2e6dbacc8b7b54d3674e4fdeba24b90d9",
       "bytes": 1006
     },
-    "profiles/final/lto/layered-all-16384.relar.dhat.stderr": {
+    "profiles/final/lto/layered-all-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/final/lto/layered-all-16384.relar.dhat.stdout": {
+    "profiles/final/lto/layered-all-16384.imre.dhat.stdout": {
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/final/lto/layered-all-16384.relar.dhat.trace": {
+    "profiles/final/lto/layered-all-16384.imre.dhat.trace": {
       "sha256": "d07bdc0caec08190b007ef976db4187d081bcdf39b5e510a37a16c9a8de5b1d3",
       "bytes": 48217
     },
@@ -364,35 +364,35 @@
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/final/lto/wide-all-16384.relar.callgrind.log": {
+    "profiles/final/lto/wide-all-16384.imre.callgrind.log": {
       "sha256": "875bf5b299117fd0737eddca199d7a8bb2a540f92328cd02622e22f97b1babc4",
       "bytes": 562
     },
-    "profiles/final/lto/wide-all-16384.relar.callgrind.stderr": {
+    "profiles/final/lto/wide-all-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/final/lto/wide-all-16384.relar.callgrind.stdout": {
+    "profiles/final/lto/wide-all-16384.imre.callgrind.stdout": {
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/final/lto/wide-all-16384.relar.callgrind.trace": {
+    "profiles/final/lto/wide-all-16384.imre.callgrind.trace": {
       "sha256": "0f0ec982aa2c96e8b6d6328058451cb83c2016b5df4716ad2acf751e8d8bade8",
       "bytes": 343795
     },
-    "profiles/final/lto/wide-all-16384.relar.dhat.log": {
+    "profiles/final/lto/wide-all-16384.imre.dhat.log": {
       "sha256": "6cbb09d6c6e3c9ffdfd23b4f1bad4c6a6343eee1d14618307040c6cfbe479dbd",
       "bytes": 1001
     },
-    "profiles/final/lto/wide-all-16384.relar.dhat.stderr": {
+    "profiles/final/lto/wide-all-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/final/lto/wide-all-16384.relar.dhat.stdout": {
+    "profiles/final/lto/wide-all-16384.imre.dhat.stdout": {
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/final/lto/wide-all-16384.relar.dhat.trace": {
+    "profiles/final/lto/wide-all-16384.imre.dhat.trace": {
       "sha256": "c0d63eb604d8e35d34445713bf6ed84eb5a23f81c31b686033605fd94e930b07",
       "bytes": 43795
     },
@@ -420,35 +420,35 @@
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/final/normal/layered-all-16384.relar.callgrind.log": {
+    "profiles/final/normal/layered-all-16384.imre.callgrind.log": {
       "sha256": "ed16cc571b2b87392bb0675c8c6d45b81de730a4a5f3013bc83b953697ef5a67",
       "bytes": 759
     },
-    "profiles/final/normal/layered-all-16384.relar.callgrind.stderr": {
+    "profiles/final/normal/layered-all-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/final/normal/layered-all-16384.relar.callgrind.stdout": {
+    "profiles/final/normal/layered-all-16384.imre.callgrind.stdout": {
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/final/normal/layered-all-16384.relar.callgrind.trace": {
+    "profiles/final/normal/layered-all-16384.imre.callgrind.trace": {
       "sha256": "a2c1a7eb8da46f3e0b4eb28f4758056fc9f42974ab2635607ef25dcdff791c62",
       "bytes": 356763
     },
-    "profiles/final/normal/layered-all-16384.relar.dhat.log": {
+    "profiles/final/normal/layered-all-16384.imre.dhat.log": {
       "sha256": "d1823359be602a90b7800cec0681018b60dfde7c4a4b2116dcfede932fe6018f",
       "bytes": 1012
     },
-    "profiles/final/normal/layered-all-16384.relar.dhat.stderr": {
+    "profiles/final/normal/layered-all-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/final/normal/layered-all-16384.relar.dhat.stdout": {
+    "profiles/final/normal/layered-all-16384.imre.dhat.stdout": {
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/final/normal/layered-all-16384.relar.dhat.trace": {
+    "profiles/final/normal/layered-all-16384.imre.dhat.trace": {
       "sha256": "f141780d3cb86a0ad673ddf1eb3585c3753acd5ab6c9d52bcf40f2c8a88ecddf",
       "bytes": 50300
     },
@@ -472,35 +472,35 @@
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/final/normal/wide-all-16384.relar.callgrind.log": {
+    "profiles/final/normal/wide-all-16384.imre.callgrind.log": {
       "sha256": "47529411d614e9994a5af2bd49297787dc47a3048774339fcee9dfafab0d204f",
       "bytes": 565
     },
-    "profiles/final/normal/wide-all-16384.relar.callgrind.stderr": {
+    "profiles/final/normal/wide-all-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/final/normal/wide-all-16384.relar.callgrind.stdout": {
+    "profiles/final/normal/wide-all-16384.imre.callgrind.stdout": {
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/final/normal/wide-all-16384.relar.callgrind.trace": {
+    "profiles/final/normal/wide-all-16384.imre.callgrind.trace": {
       "sha256": "7e90dfead5677ce6120497ddad4b8885570293aac4fb0b8479dda30d7919a0a6",
       "bytes": 336046
     },
-    "profiles/final/normal/wide-all-16384.relar.dhat.log": {
+    "profiles/final/normal/wide-all-16384.imre.dhat.log": {
       "sha256": "0a8877c4a332f4674b9aa9a97c7366b3092c4e855cd5a938421a1157819f00ce",
       "bytes": 1007
     },
-    "profiles/final/normal/wide-all-16384.relar.dhat.stderr": {
+    "profiles/final/normal/wide-all-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/final/normal/wide-all-16384.relar.dhat.stdout": {
+    "profiles/final/normal/wide-all-16384.imre.dhat.stdout": {
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/final/normal/wide-all-16384.relar.dhat.trace": {
+    "profiles/final/normal/wide-all-16384.imre.dhat.trace": {
       "sha256": "56eff88bbfc625ac5bbca34ca8bb72857ffe108946618f85459f3ea313ff962d",
       "bytes": 46301
     },
@@ -564,35 +564,35 @@
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/integration/lto/applications/layered-all-16384.relar.callgrind.log": {
+    "profiles/integration/lto/applications/layered-all-16384.imre.callgrind.log": {
       "sha256": "96279eaca70f632e92576d889f0e6b8dbf571ff9f01d6a16a9ac8a5f623b6867",
       "bytes": 765
     },
-    "profiles/integration/lto/applications/layered-all-16384.relar.callgrind.stderr": {
+    "profiles/integration/lto/applications/layered-all-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/lto/applications/layered-all-16384.relar.callgrind.stdout": {
+    "profiles/integration/lto/applications/layered-all-16384.imre.callgrind.stdout": {
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/integration/lto/applications/layered-all-16384.relar.callgrind.trace": {
+    "profiles/integration/lto/applications/layered-all-16384.imre.callgrind.trace": {
       "sha256": "1f765ef7b8e58adecb1b5634c68d17d4af6f484b091799c9d9facc0b36270098",
       "bytes": 372479
     },
-    "profiles/integration/lto/applications/layered-all-16384.relar.dhat.log": {
+    "profiles/integration/lto/applications/layered-all-16384.imre.dhat.log": {
       "sha256": "e140f94bd9ff21164a0804f69eb4cbc04dbd7a08ff506405a875a878d5425aeb",
       "bytes": 1019
     },
-    "profiles/integration/lto/applications/layered-all-16384.relar.dhat.stderr": {
+    "profiles/integration/lto/applications/layered-all-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/lto/applications/layered-all-16384.relar.dhat.stdout": {
+    "profiles/integration/lto/applications/layered-all-16384.imre.dhat.stdout": {
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/integration/lto/applications/layered-all-16384.relar.dhat.trace": {
+    "profiles/integration/lto/applications/layered-all-16384.imre.dhat.trace": {
       "sha256": "2550e42daf62894fb28bf56f1f90e8739fa78dc8b0e9816dc12dc672b86e7e0b",
       "bytes": 48920
     },
@@ -680,35 +680,35 @@
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/integration/lto/applications/wide-all-16384.relar.callgrind.log": {
+    "profiles/integration/lto/applications/wide-all-16384.imre.callgrind.log": {
       "sha256": "01893bb7415bb49a2b17649bb6767e8619537ec08f41f83432110e91683770dc",
       "bytes": 571
     },
-    "profiles/integration/lto/applications/wide-all-16384.relar.callgrind.stderr": {
+    "profiles/integration/lto/applications/wide-all-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/lto/applications/wide-all-16384.relar.callgrind.stdout": {
+    "profiles/integration/lto/applications/wide-all-16384.imre.callgrind.stdout": {
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/integration/lto/applications/wide-all-16384.relar.callgrind.trace": {
+    "profiles/integration/lto/applications/wide-all-16384.imre.callgrind.trace": {
       "sha256": "17c8e2914507dbdb0ce3283ef260242b8c22fe0aa0c89b208903ae2dc42af119",
       "bytes": 343952
     },
-    "profiles/integration/lto/applications/wide-all-16384.relar.dhat.log": {
+    "profiles/integration/lto/applications/wide-all-16384.imre.dhat.log": {
       "sha256": "71a1d4d3bbd3e51ce88780e6d0bd7b6e2e21ad16ec9615447baeff0d05824849",
       "bytes": 1014
     },
-    "profiles/integration/lto/applications/wide-all-16384.relar.dhat.stderr": {
+    "profiles/integration/lto/applications/wide-all-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/lto/applications/wide-all-16384.relar.dhat.stdout": {
+    "profiles/integration/lto/applications/wide-all-16384.imre.dhat.stdout": {
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/integration/lto/applications/wide-all-16384.relar.dhat.trace": {
+    "profiles/integration/lto/applications/wide-all-16384.imre.dhat.trace": {
       "sha256": "aa03d62610d5d81a80b3b8d39bca46cf928f7d73b15c5df0207361d07b2ec60a",
       "bytes": 44461
     },
@@ -756,7 +756,7 @@
       "sha256": "8937bc76baaaf0aff65f07f80cc4819854c8af64c4748f792f9dd2d46136ad57",
       "bytes": 48728
     },
-    "profiles/integration/lto/probe-tools/relar.ll": {
+    "profiles/integration/lto/probe-tools/imre.ll": {
       "sha256": "0cbe53206efa250aa7ca16d3c5d240c3fa929e368da0963ca2b3f46e4aa77437",
       "bytes": 50410
     },
@@ -800,19 +800,19 @@
       "sha256": "f47e29e88cd0d38456a402d8aa68def4b67303f348b95e49aab64ed3741ffa80",
       "bytes": 7
     },
-    "profiles/integration/lto/storage/optionals-1000.relar.dhat.log": {
+    "profiles/integration/lto/storage/optionals-1000.imre.dhat.log": {
       "sha256": "84b498017685a874682a7d9189f3fd99109009965d71ad80e95ace5c2f078a7c",
       "bytes": 985
     },
-    "profiles/integration/lto/storage/optionals-1000.relar.dhat.stderr": {
+    "profiles/integration/lto/storage/optionals-1000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/lto/storage/optionals-1000.relar.dhat.stdout": {
+    "profiles/integration/lto/storage/optionals-1000.imre.dhat.stdout": {
       "sha256": "f47e29e88cd0d38456a402d8aa68def4b67303f348b95e49aab64ed3741ffa80",
       "bytes": 7
     },
-    "profiles/integration/lto/storage/optionals-1000.relar.dhat.trace": {
+    "profiles/integration/lto/storage/optionals-1000.imre.dhat.trace": {
       "sha256": "aa7a6e4dd616d2916ea4110bebb28004b87535244204de6f0942e56e8832d281",
       "bytes": 9371
     },
@@ -840,19 +840,19 @@
       "sha256": "bc87bc3ad074aa683e60545fa88caa4ef29ba1b2a2329d9df6d2a02969b41613",
       "bytes": 9
     },
-    "profiles/integration/lto/storage/optionals-10000.relar.dhat.log": {
+    "profiles/integration/lto/storage/optionals-10000.imre.dhat.log": {
       "sha256": "d307519f18b80272d64cd4f713a64d1b27e5fbe47fcccc946a3bb2bbf3fec984",
       "bytes": 994
     },
-    "profiles/integration/lto/storage/optionals-10000.relar.dhat.stderr": {
+    "profiles/integration/lto/storage/optionals-10000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/lto/storage/optionals-10000.relar.dhat.stdout": {
+    "profiles/integration/lto/storage/optionals-10000.imre.dhat.stdout": {
       "sha256": "bc87bc3ad074aa683e60545fa88caa4ef29ba1b2a2329d9df6d2a02969b41613",
       "bytes": 9
     },
-    "profiles/integration/lto/storage/optionals-10000.relar.dhat.trace": {
+    "profiles/integration/lto/storage/optionals-10000.imre.dhat.trace": {
       "sha256": "64e1197b890d5f7c33c77d36392955feee24084039222429bcb2f41b36f6adcc",
       "bytes": 9423
     },
@@ -884,19 +884,19 @@
       "sha256": "2e6e8f4bbb9b872ed1c2807f8184de9e3ce76ff73bd049fbe7441198f1a75e51",
       "bytes": 8
     },
-    "profiles/integration/lto/storage/records-1000.relar.dhat.log": {
+    "profiles/integration/lto/storage/records-1000.imre.dhat.log": {
       "sha256": "454a6c68c8dccb0a5a8c122e81520ed850ae52bedb2c7997f201b9b5b1dccf15",
       "bytes": 984
     },
-    "profiles/integration/lto/storage/records-1000.relar.dhat.stderr": {
+    "profiles/integration/lto/storage/records-1000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/lto/storage/records-1000.relar.dhat.stdout": {
+    "profiles/integration/lto/storage/records-1000.imre.dhat.stdout": {
       "sha256": "2e6e8f4bbb9b872ed1c2807f8184de9e3ce76ff73bd049fbe7441198f1a75e51",
       "bytes": 8
     },
-    "profiles/integration/lto/storage/records-1000.relar.dhat.trace": {
+    "profiles/integration/lto/storage/records-1000.imre.dhat.trace": {
       "sha256": "4a3f1c5877e6cbe68ad56e5f91793fe4e00aaaf745fee8daf3cf769d48b981ae",
       "bytes": 9437
     },
@@ -924,19 +924,19 @@
       "sha256": "9e2a10f9b02f8ca6b5a3e0bca186e8aedd6fbdf9c1cd5a1bfad4a9d60d66f223",
       "bytes": 10
     },
-    "profiles/integration/lto/storage/records-10000.relar.dhat.log": {
+    "profiles/integration/lto/storage/records-10000.imre.dhat.log": {
       "sha256": "67f8d99b48806c9b310e09e985b4d4e709ce732accfc8cdf3c6f0a94dd0e188b",
       "bytes": 992
     },
-    "profiles/integration/lto/storage/records-10000.relar.dhat.stderr": {
+    "profiles/integration/lto/storage/records-10000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/lto/storage/records-10000.relar.dhat.stdout": {
+    "profiles/integration/lto/storage/records-10000.imre.dhat.stdout": {
       "sha256": "9e2a10f9b02f8ca6b5a3e0bca186e8aedd6fbdf9c1cd5a1bfad4a9d60d66f223",
       "bytes": 10
     },
-    "profiles/integration/lto/storage/records-10000.relar.dhat.trace": {
+    "profiles/integration/lto/storage/records-10000.imre.dhat.trace": {
       "sha256": "b12669ce4e9c599c90b7f02124583a7afb208326a67724a2821a290778ee9300",
       "bytes": 9495
     },
@@ -964,19 +964,19 @@
       "sha256": "c31197d981912dc077c2e73657c32d8760964e5316f57bdb2838f47d10cc2ae3",
       "bytes": 7
     },
-    "profiles/integration/lto/storage/sequences-1000.relar.dhat.log": {
+    "profiles/integration/lto/storage/sequences-1000.imre.dhat.log": {
       "sha256": "31e0786e2675055f945dae9a9ce643542072a6a0ef0a9411b28ed0630d4800d9",
       "bytes": 985
     },
-    "profiles/integration/lto/storage/sequences-1000.relar.dhat.stderr": {
+    "profiles/integration/lto/storage/sequences-1000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/lto/storage/sequences-1000.relar.dhat.stdout": {
+    "profiles/integration/lto/storage/sequences-1000.imre.dhat.stdout": {
       "sha256": "c31197d981912dc077c2e73657c32d8760964e5316f57bdb2838f47d10cc2ae3",
       "bytes": 7
     },
-    "profiles/integration/lto/storage/sequences-1000.relar.dhat.trace": {
+    "profiles/integration/lto/storage/sequences-1000.imre.dhat.trace": {
       "sha256": "5dffc95e16e103f26feb2a7e622d961cb446f719d88bf19a8d52d6794714d382",
       "bytes": 10518
     },
@@ -1004,19 +1004,19 @@
       "sha256": "966e7445591ffbcff275595cd256642d4074197d5c652585631a8c1102e371ae",
       "bytes": 9
     },
-    "profiles/integration/lto/storage/sequences-10000.relar.dhat.log": {
+    "profiles/integration/lto/storage/sequences-10000.imre.dhat.log": {
       "sha256": "36c093a46a0eb92ce449c0219c4f3bf132b11853ee9a0de65e2b4769ddeadc37",
       "bytes": 996
     },
-    "profiles/integration/lto/storage/sequences-10000.relar.dhat.stderr": {
+    "profiles/integration/lto/storage/sequences-10000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/lto/storage/sequences-10000.relar.dhat.stdout": {
+    "profiles/integration/lto/storage/sequences-10000.imre.dhat.stdout": {
       "sha256": "966e7445591ffbcff275595cd256642d4074197d5c652585631a8c1102e371ae",
       "bytes": 9
     },
-    "profiles/integration/lto/storage/sequences-10000.relar.dhat.trace": {
+    "profiles/integration/lto/storage/sequences-10000.imre.dhat.trace": {
       "sha256": "a90931d8e5e4b1d83c292b15ad14d88997a5505cd67529c58bef572ac8b8775a",
       "bytes": 10601
     },
@@ -1080,35 +1080,35 @@
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/integration/normal/applications/layered-all-16384.relar.callgrind.log": {
+    "profiles/integration/normal/applications/layered-all-16384.imre.callgrind.log": {
       "sha256": "245dd05e0eea0d989a75925f2247aec00b4775f1ea8dc0628493a93a0927dd0b",
       "bytes": 768
     },
-    "profiles/integration/normal/applications/layered-all-16384.relar.callgrind.stderr": {
+    "profiles/integration/normal/applications/layered-all-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/normal/applications/layered-all-16384.relar.callgrind.stdout": {
+    "profiles/integration/normal/applications/layered-all-16384.imre.callgrind.stdout": {
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/integration/normal/applications/layered-all-16384.relar.callgrind.trace": {
+    "profiles/integration/normal/applications/layered-all-16384.imre.callgrind.trace": {
       "sha256": "ba7951dc77c2d90e3c86ff2181286b99718ab4b13e267e701ead6d9107dc71ef",
       "bytes": 356448
     },
-    "profiles/integration/normal/applications/layered-all-16384.relar.dhat.log": {
+    "profiles/integration/normal/applications/layered-all-16384.imre.dhat.log": {
       "sha256": "bfc47960dba2efe3b65de10052828046cbcbc47ed4f6a084742b0ae3fc297b2e",
       "bytes": 1025
     },
-    "profiles/integration/normal/applications/layered-all-16384.relar.dhat.stderr": {
+    "profiles/integration/normal/applications/layered-all-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/normal/applications/layered-all-16384.relar.dhat.stdout": {
+    "profiles/integration/normal/applications/layered-all-16384.imre.dhat.stdout": {
       "sha256": "a00bc0c5d4ed4257e29bec22c50cad0efa415421914ffec58be0987689db166a",
       "bytes": 533127
     },
-    "profiles/integration/normal/applications/layered-all-16384.relar.dhat.trace": {
+    "profiles/integration/normal/applications/layered-all-16384.imre.dhat.trace": {
       "sha256": "fc1c2c6dc59e38de528300465899c81c0772d8a1ad10b58fad4a63c215e74595",
       "bytes": 50966
     },
@@ -1196,35 +1196,35 @@
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/integration/normal/applications/wide-all-16384.relar.callgrind.log": {
+    "profiles/integration/normal/applications/wide-all-16384.imre.callgrind.log": {
       "sha256": "1d04f1c03bf4d9eec577f7e1a2ee96e965c062d4e00211f0be13584292b3db05",
       "bytes": 574
     },
-    "profiles/integration/normal/applications/wide-all-16384.relar.callgrind.stderr": {
+    "profiles/integration/normal/applications/wide-all-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/normal/applications/wide-all-16384.relar.callgrind.stdout": {
+    "profiles/integration/normal/applications/wide-all-16384.imre.callgrind.stdout": {
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/integration/normal/applications/wide-all-16384.relar.callgrind.trace": {
+    "profiles/integration/normal/applications/wide-all-16384.imre.callgrind.trace": {
       "sha256": "884edb56695a519d9a4476d0a96ade7deb78fdcf11403c54196a50c5a434abbd",
       "bytes": 336289
     },
-    "profiles/integration/normal/applications/wide-all-16384.relar.dhat.log": {
+    "profiles/integration/normal/applications/wide-all-16384.imre.dhat.log": {
       "sha256": "99bc4d44ac08f40100485a7501e86c9cd9027f7848f9c7cf478aaff83aed4781",
       "bytes": 1020
     },
-    "profiles/integration/normal/applications/wide-all-16384.relar.dhat.stderr": {
+    "profiles/integration/normal/applications/wide-all-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/normal/applications/wide-all-16384.relar.dhat.stdout": {
+    "profiles/integration/normal/applications/wide-all-16384.imre.dhat.stdout": {
       "sha256": "f9a04368c486f31cab6fe52b9b0606213827972981eb221d8e12d91bdd92bdab",
       "bytes": 428772
     },
-    "profiles/integration/normal/applications/wide-all-16384.relar.dhat.trace": {
+    "profiles/integration/normal/applications/wide-all-16384.imre.dhat.trace": {
       "sha256": "b6602b7d1ea0738b13b86e16f831de893440591cbf886c528d3a27485f4c6c7d",
       "bytes": 46931
     },
@@ -1272,7 +1272,7 @@
       "sha256": "8937bc76baaaf0aff65f07f80cc4819854c8af64c4748f792f9dd2d46136ad57",
       "bytes": 48728
     },
-    "profiles/integration/normal/probe-tools/relar.ll": {
+    "profiles/integration/normal/probe-tools/imre.ll": {
       "sha256": "0cbe53206efa250aa7ca16d3c5d240c3fa929e368da0963ca2b3f46e4aa77437",
       "bytes": 50410
     },
@@ -1316,19 +1316,19 @@
       "sha256": "f47e29e88cd0d38456a402d8aa68def4b67303f348b95e49aab64ed3741ffa80",
       "bytes": 7
     },
-    "profiles/integration/normal/storage/optionals-1000.relar.dhat.log": {
+    "profiles/integration/normal/storage/optionals-1000.imre.dhat.log": {
       "sha256": "8e60bc0a9e42cc88af09ebbce9678672b68faed896a49a6fe9adf44524e298e2",
       "bytes": 991
     },
-    "profiles/integration/normal/storage/optionals-1000.relar.dhat.stderr": {
+    "profiles/integration/normal/storage/optionals-1000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/normal/storage/optionals-1000.relar.dhat.stdout": {
+    "profiles/integration/normal/storage/optionals-1000.imre.dhat.stdout": {
       "sha256": "f47e29e88cd0d38456a402d8aa68def4b67303f348b95e49aab64ed3741ffa80",
       "bytes": 7
     },
-    "profiles/integration/normal/storage/optionals-1000.relar.dhat.trace": {
+    "profiles/integration/normal/storage/optionals-1000.imre.dhat.trace": {
       "sha256": "13fb9d25c6554afe02784410032028556f5c64bc98c1a2590c668d55155b1979",
       "bytes": 11055
     },
@@ -1356,19 +1356,19 @@
       "sha256": "bc87bc3ad074aa683e60545fa88caa4ef29ba1b2a2329d9df6d2a02969b41613",
       "bytes": 9
     },
-    "profiles/integration/normal/storage/optionals-10000.relar.dhat.log": {
+    "profiles/integration/normal/storage/optionals-10000.imre.dhat.log": {
       "sha256": "4e113839e14a30e3e2b753ff2a91c00e0f88537fdc28531171368a629b374428",
       "bytes": 1000
     },
-    "profiles/integration/normal/storage/optionals-10000.relar.dhat.stderr": {
+    "profiles/integration/normal/storage/optionals-10000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/normal/storage/optionals-10000.relar.dhat.stdout": {
+    "profiles/integration/normal/storage/optionals-10000.imre.dhat.stdout": {
       "sha256": "bc87bc3ad074aa683e60545fa88caa4ef29ba1b2a2329d9df6d2a02969b41613",
       "bytes": 9
     },
-    "profiles/integration/normal/storage/optionals-10000.relar.dhat.trace": {
+    "profiles/integration/normal/storage/optionals-10000.imre.dhat.trace": {
       "sha256": "5e56e6c12ca52856afe6d3b8284c7b68fb8a2a8adde0e64b6267b94d288b859a",
       "bytes": 11107
     },
@@ -1400,19 +1400,19 @@
       "sha256": "2e6e8f4bbb9b872ed1c2807f8184de9e3ce76ff73bd049fbe7441198f1a75e51",
       "bytes": 8
     },
-    "profiles/integration/normal/storage/records-1000.relar.dhat.log": {
+    "profiles/integration/normal/storage/records-1000.imre.dhat.log": {
       "sha256": "87a7e7dee76a3ee24ec45ad4113a3ac1483e858c46e4e5a16c1753d488ac2796",
       "bytes": 990
     },
-    "profiles/integration/normal/storage/records-1000.relar.dhat.stderr": {
+    "profiles/integration/normal/storage/records-1000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/normal/storage/records-1000.relar.dhat.stdout": {
+    "profiles/integration/normal/storage/records-1000.imre.dhat.stdout": {
       "sha256": "2e6e8f4bbb9b872ed1c2807f8184de9e3ce76ff73bd049fbe7441198f1a75e51",
       "bytes": 8
     },
-    "profiles/integration/normal/storage/records-1000.relar.dhat.trace": {
+    "profiles/integration/normal/storage/records-1000.imre.dhat.trace": {
       "sha256": "b2441f451d43afc63a7abe07ae4a6b937377b6a6a96c34111fa387eccddcd481",
       "bytes": 11610
     },
@@ -1440,19 +1440,19 @@
       "sha256": "9e2a10f9b02f8ca6b5a3e0bca186e8aedd6fbdf9c1cd5a1bfad4a9d60d66f223",
       "bytes": 10
     },
-    "profiles/integration/normal/storage/records-10000.relar.dhat.log": {
+    "profiles/integration/normal/storage/records-10000.imre.dhat.log": {
       "sha256": "70ebddafc6c35d99fd9c7796f8a3f2545671642bac74dd1044b4397ade4f48ac",
       "bytes": 998
     },
-    "profiles/integration/normal/storage/records-10000.relar.dhat.stderr": {
+    "profiles/integration/normal/storage/records-10000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/normal/storage/records-10000.relar.dhat.stdout": {
+    "profiles/integration/normal/storage/records-10000.imre.dhat.stdout": {
       "sha256": "9e2a10f9b02f8ca6b5a3e0bca186e8aedd6fbdf9c1cd5a1bfad4a9d60d66f223",
       "bytes": 10
     },
-    "profiles/integration/normal/storage/records-10000.relar.dhat.trace": {
+    "profiles/integration/normal/storage/records-10000.imre.dhat.trace": {
       "sha256": "91c48c2532cfd24e1d1a28f60800fff6bbc26335e2460a321d8e93d770e9eb85",
       "bytes": 11669
     },
@@ -1480,19 +1480,19 @@
       "sha256": "c31197d981912dc077c2e73657c32d8760964e5316f57bdb2838f47d10cc2ae3",
       "bytes": 7
     },
-    "profiles/integration/normal/storage/sequences-1000.relar.dhat.log": {
+    "profiles/integration/normal/storage/sequences-1000.imre.dhat.log": {
       "sha256": "ab0e5fef96a18c4978e24d4b536bf54c8c0817de088827d15a181ab5b14b710e",
       "bytes": 991
     },
-    "profiles/integration/normal/storage/sequences-1000.relar.dhat.stderr": {
+    "profiles/integration/normal/storage/sequences-1000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/normal/storage/sequences-1000.relar.dhat.stdout": {
+    "profiles/integration/normal/storage/sequences-1000.imre.dhat.stdout": {
       "sha256": "c31197d981912dc077c2e73657c32d8760964e5316f57bdb2838f47d10cc2ae3",
       "bytes": 7
     },
-    "profiles/integration/normal/storage/sequences-1000.relar.dhat.trace": {
+    "profiles/integration/normal/storage/sequences-1000.imre.dhat.trace": {
       "sha256": "acf530e3dc8c450dc750fd4a90d3919f3e9b459c2f8e139b41ddb16e981aff00",
       "bytes": 12842
     },
@@ -1520,19 +1520,19 @@
       "sha256": "966e7445591ffbcff275595cd256642d4074197d5c652585631a8c1102e371ae",
       "bytes": 9
     },
-    "profiles/integration/normal/storage/sequences-10000.relar.dhat.log": {
+    "profiles/integration/normal/storage/sequences-10000.imre.dhat.log": {
       "sha256": "b7b50b4fc5b8c7fbbe27a2a1de4771f76bc388ea1d340884872de05126304287",
       "bytes": 1002
     },
-    "profiles/integration/normal/storage/sequences-10000.relar.dhat.stderr": {
+    "profiles/integration/normal/storage/sequences-10000.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0
     },
-    "profiles/integration/normal/storage/sequences-10000.relar.dhat.stdout": {
+    "profiles/integration/normal/storage/sequences-10000.imre.dhat.stdout": {
       "sha256": "966e7445591ffbcff275595cd256642d4074197d5c652585631a8c1102e371ae",
       "bytes": 9
     },
-    "profiles/integration/normal/storage/sequences-10000.relar.dhat.trace": {
+    "profiles/integration/normal/storage/sequences-10000.imre.dhat.trace": {
       "sha256": "6c8e99d64c516309b325ebd8cb7de0d607ad41a6bc32b9a368f98b6661554926",
       "bytes": 12926
     },
@@ -1580,7 +1580,7 @@
       "bytes": 3262952
     },
     {
-      "path": "profiles/integration/normal/probe-tools/relar",
+      "path": "profiles/integration/normal/probe-tools/imre",
       "sha256": "4097c36e0366605e1140217f81d8ef0a97044281f948cae7f3b512d62363f26a",
       "bytes": 3499928
     },
@@ -1590,27 +1590,27 @@
       "bytes": 2501584
     },
     {
-      "path": "profiles/integration/lto/probe-tools/relar",
+      "path": "profiles/integration/lto/probe-tools/imre",
       "sha256": "eb0711b7233225343844026f85c392812b0c1a96f77420be0fddc63f8763a5ac",
       "bytes": 2469856
     },
     {
-      "path": "tools/librelar_runtime.a",
+      "path": "tools/libimre_runtime.a",
       "sha256": "ca204d2df89a52927cdd792f96ab2a45f833658858b3d926f0e27a6bd4839daf",
       "bytes": 37285184
     },
     {
-      "path": "tools/librelar_runtime_asan.a",
+      "path": "tools/libimre_runtime_asan.a",
       "sha256": "1ae81c87bf9e9cccb16813da21dfe534158ab72a7fbc6960ee88d22e9f6d3e32",
       "bytes": 38154982
     },
     {
-      "path": "tools/librelar_runtime_lto.a",
+      "path": "tools/libimre_runtime_lto.a",
       "sha256": "cf4f3b157fd4e836e8a1b641bf845fb963aa104ec115f3a6396ca927887a5ebc",
       "bytes": 24688476
     },
     {
-      "path": "tools/relar",
+      "path": "tools/imre",
       "sha256": "5fc88efd11118c5bb49430be7c87c79c14edb6651f3490797e82c3722ff2e6d1",
       "bytes": 137858992
     },
@@ -1675,17 +1675,17 @@
       "bytes": 1542480
     },
     {
-      "path": "baseline/tools/librelar_runtime.a",
+      "path": "baseline/tools/libimre_runtime.a",
       "sha256": "aad4116c1ef75a4773ebf95d40a497f2f13a410b5da29e62bee8285be8f87787",
       "bytes": 36810406
     },
     {
-      "path": "baseline/tools/librelar_runtime_lto.a",
+      "path": "baseline/tools/libimre_runtime_lto.a",
       "sha256": "414b5fb52457ba0894f1c197aeaa33f22d5160ed586e4307d084e8217d71f1d9",
       "bytes": 24427604
     },
     {
-      "path": "baseline/tools/relar",
+      "path": "baseline/tools/imre",
       "sha256": "4dd89ab84a0732485f3bc306e8a7eb3c0d7e76fe262efad75b5bf4d89ca3bb6c",
       "bytes": 137800288
     }

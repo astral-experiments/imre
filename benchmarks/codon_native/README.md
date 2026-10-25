@@ -44,8 +44,8 @@ Run validation with `CODON_PYTHON` pointing to a nonexistent library. Resulting
 executables depend on the pinned native Codon runtime libraries.
 
 Comparisons use the shared valid-input domain. Codon integers are signed 64-bit;
-Relar's arbitrary-precision fixtures remain separately tested. Codon's stock
-JSON parser retains the last duplicate key, whereas Relar's typed decoder
+Imre's arbitrary-precision fixtures remain separately tested. Codon's stock
+JSON parser retains the last duplicate key, whereas Imre's typed decoder
 rejects duplicate known fields. Record these unsupported validation cases
 explicitly; do not count them as passing. All engines must still reproduce the
 complete real program output and filesystem effects on shared-domain inputs.
@@ -68,9 +68,19 @@ contains ordinary, adjacent gzip members and every engine must read them all.
 ```sh
 python3 benchmarks/codon_native/build.py \
   --codon /path/to/codon-deploy-linux-x86_64/bin/codon \
-  --platform-library /path/to/native-platform/librelar_benchmark_platform.so \
+  --platform-library /path/to/native-platform/libimre_benchmark_platform.so \
   --output /path/to/fresh-build-directory
 ```
+
+## Memory report comparisons
+
+`--applications memory_report` builds the file and directory `compare` command.
+The Codon entry point reads each file with its native JSON module, constructs
+fixed-field records, and calls the existing typed port's comparison and Markdown
+renderer. It supports the stdout path used in the timed runs. The native
+integer range covers all four retained ty captures. The benchmark checks each
+complete report against Ruff on CPython, including any rows tied at the top-15
+cutoff. [Memory benchmark](../memory_program_benchmark.py)
 
 ## Live conformance workflow
 
@@ -80,7 +90,7 @@ its shared library with `--platform-library`; select `--applications conformance
 to build the live and compute reporter binaries. The platform library uses Rust
 for configuration decoding, deadline-bound process capture, and temporary
 directories. It contains no annotation parsing, diagnostic classification, or
-report rendering, and links neither Python nor Relar.
+report rendering, and links neither Python nor Imre.
 
 The subprocess adapter serializes arguments and the environment across its native
 FFI boundary and returns decoded captures. All serialization and native calls

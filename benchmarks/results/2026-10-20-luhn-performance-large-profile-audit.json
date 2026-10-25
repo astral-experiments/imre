@@ -29,7 +29,7 @@
     "source_policy": "All recorded example and Rust sources must match except Markdown documentation. The current benchmark harness differs intentionally; its validators, shared measurement helpers, Python, Clang, Rust toolchain, and optional ThinLTO linker must match."
   },
   "binary_sha256": {
-    "relar": "de4607551b8c53b616c3acb6249bbcd38abfc8ebdb86c934455e41970c5316f5",
+    "imre": "de4607551b8c53b616c3acb6249bbcd38abfc8ebdb86c934455e41970c5316f5",
     "rust": "6ecadfe19c5db5427f79b93d4d74299ed5f481a972465bc1834353dbba47c5bc"
   },
   "workload": {
@@ -43,7 +43,7 @@
     "stdout": "OK\n128\n"
   },
   "profiles": {
-    "relar-callgrind": {
+    "imre-callgrind": {
       "instructions": 6514902,
       "self_cost_sum": 6514902,
       "cost_rows": 21933,
@@ -53,7 +53,7 @@
       "all_function_self_and_call_edge_metrics_agree": true,
       "top_self_functions": [
         {
-          "name": "relar_str_int_list",
+          "name": "imre_str_int_list",
           "instructions": 2490377
         },
         {
@@ -61,11 +61,11 @@
           "instructions": 1973248
         },
         {
-          "name": "relar_list_slice_sum",
+          "name": "imre_list_slice_sum",
           "instructions": 1155264
         },
         {
-          "name": "relar_list_release",
+          "name": "imre_list_release",
           "instructions": 467776
         },
         {
@@ -94,7 +94,7 @@
         }
       ]
     },
-    "relar-dhat": {
+    "imre-dhat": {
       "allocated_bytes": 59532,
       "allocated_blocks": 34,
       "peak_live_bytes": 47051,

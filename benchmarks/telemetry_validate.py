@@ -602,7 +602,7 @@ def main() -> None:
             for path in sorted(PACKAGE.rglob("*.py"))
         }
     )
-    for name, binary in (("relar", args.binary), ("rust", args.rust)):
+    for name, binary in (("imre", args.binary), ("rust", args.rust)):
         if binary is not None:
             paths[name] = binary.resolve(strict=True)
             commands[name] = [str(paths[name])]

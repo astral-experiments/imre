@@ -86,7 +86,7 @@ def invoke(args, case, arm, out, prefix=(), audit=False):
             # Every arm must issue both invocations afresh; old files must not satisfy the audit.
             for side in ("old", "new"):
                 (cwd / f"{side}.argv").unlink(missing_ok=True)
-            env["RELAR_BENCH_AUDIT"] = "1"
+            env["IMRE_BENCH_AUDIT"] = "1"
     started = time.perf_counter_ns()
     run = subprocess.run([*prefix, *cmd], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                          capture_output=True, timeout=900)

@@ -22,8 +22,8 @@ ROOT = HERE.parent
 driver = SimpleNamespace(**runpy.run_path(str(HERE / "dependency_profile.py")))
 shared = SimpleNamespace(**runpy.run_path(str(HERE / "benchmark.py")))
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "inventory_validate.py")))
-ENGINES = ("relar", "rust_bigint", "baseline")
-DEFAULT_ENGINES = ("relar", "rust_bigint")
+ENGINES = ("imre", "rust_bigint", "baseline")
+DEFAULT_ENGINES = ("imre", "rust_bigint")
 WORKLOADS = ("dense-16384", "sparse-16384")
 HELPERS = (
     "inventory_profile.py",
@@ -91,7 +91,7 @@ def profiler(args):
     executable = Path(
         args.valgrind
         or shutil.which("valgrind")
-        or Path.home() / ".cache/relar/profiling-tools/root/usr/bin/valgrind"
+        or Path.home() / ".cache/imre/profiling-tools/root/usr/bin/valgrind"
     )
     executable = Path(shutil.which(str(executable)) or executable).resolve(strict=True)
     library = args.valgrind_lib or os.environ.get("VALGRIND_LIB")
@@ -193,7 +193,7 @@ def profile(args) -> None:
     elif args.baseline_record is not None:
         raise ValueError("--baseline-record requires --engine baseline")
     binary_keys = {
-        "relar": "inventory_binary",
+        "imre": "inventory_binary",
         "rust_bigint": "rust_bigint",
         "baseline": "inventory_baseline",
     }
@@ -208,7 +208,7 @@ def profile(args) -> None:
     for engine in engines:
         selected_record = engine_records[engine]
         compile_command = selected_record["method"]["compile_commands"]["inventory"]
-        native = engine in ("relar", "baseline")
+        native = engine in ("imre", "baseline")
         default = (
             Path(compile_command[0]).parent / "build-record.json"
             if native
@@ -217,7 +217,7 @@ def profile(args) -> None:
         path = retain(
             "build:" + engine,
             builds.get(engine, default),
-            selected_record["sha256"]["relar_build_record" if native else "rust_record"],
+            selected_record["sha256"]["imre_build_record" if native else "rust_record"],
         )
         value = json.loads(path.read_text())
         if native:
@@ -234,7 +234,7 @@ def profile(args) -> None:
             )
             retain(
                 prefix + "llvm_ir",
-                (args.llvm_ir if engine == "relar" else None)
+                (args.llvm_ir if engine == "imre" else None)
                 or Path(compile_command[compile_command.index("--emit-llvm") + 1]),
                 selected_record["sha256"]["inventory_ir"],
             )
@@ -487,7 +487,7 @@ def main() -> None:
         metavar="NAME=JSON",
     )
     parser.add_argument(
-        "--llvm-ir", type=Path, help="Relocated Relar IR; must retain its recorded hash"
+        "--llvm-ir", type=Path, help="Relocated Imre IR; must retain its recorded hash"
     )
     parser.add_argument(
         "--tools",

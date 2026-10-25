@@ -75,17 +75,17 @@
   "top_called_helpers": [
     {
       "address": "0x108702",
-      "callee": "relar_runtime::objects::mappings::gather_str_int",
+      "callee": "imre_runtime::objects::mappings::gather_str_int",
       "inclusive_instructions": 908304
     },
     {
       "address": "0x10943b",
-      "callee": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+      "callee": "<alloc::rc::Rc<imre_runtime::List>>::drop_slow",
       "inclusive_instructions": 172748
     },
     {
       "address": "0x10944d",
-      "callee": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+      "callee": "<alloc::rc::Rc<imre_runtime::List>>::drop_slow",
       "inclusive_instructions": 115404
     },
     {
@@ -115,12 +115,12 @@
     },
     {
       "address": "0x1086a9",
-      "callee": "<relar_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
+      "callee": "<imre_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
       "inclusive_instructions": 20
     },
     {
       "address": "0x109417",
-      "callee": "<relar_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
+      "callee": "<imre_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
       "inclusive_instructions": 20
     }
   ]

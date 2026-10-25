@@ -21,6 +21,12 @@ class Item:
 ACCEPTED = {
     "set_literal_expansion": "values = {1}\nexpanded = {*values}\nexpanded.add(2)\nprint(len(values))\nprint(1 in expanded)\nprint(2 in expanded)\n",
     "dict_literal_expansion": 'values = {"one": 1}\ncopy = {**values}\ncopy["one"] = 2\nprint(values["one"])\nprint(copy["one"])\n',
+    "dict_values_iteration": """
+rows = {"first": [1], "second": [2]}
+for row in rows.values():
+    rows["second"] = [3]
+    print(row[0])
+""",
     "iteration_list_unpacking": "first, second = [1, 2]\nprint(first)\nprint(second)\n",
     "iteration_starred_unpacking": "first, *rest = (1, 2, 3)\nprint(first)\nprint(rest[0])\nprint(rest[1])\n",
     "iteration_mutable_unpacking_leaf": "values = [0]\nvalues[0], other = (1, 2)\nprint(values[0])\nprint(other)\n",
@@ -281,9 +287,22 @@ main()
 # Every rejected program must reach the checker. Cycle cases additionally require
 # the ownership-graph diagnostic, rather than an unsupported-annotation rejection.
 REJECTED = {
+    "counter_wrong_key": "from collections import Counter\nc = Counter[int]()\nc.update(['str'])",
+    "counter_wrong_count": "from collections import Counter\nc = Counter({'key': 'not an int'})",
+    "counter_wrong_generic": "from collections import Counter\nc = Counter[bytes]()",
+    "counter_plain_dict": "from collections import Counter\nc: Counter[str] = {'key': 1}",
+    "counter_schema": """
+        from collections import Counter
+        from dataclasses import dataclass
+        from imre.json import decode
+        @dataclass
+        class Box:
+            counts: Counter[str]
+        box = decode("{}", Box)
+    """,
     "set_empty_without_context": "values = set()\n",
     "set_iterable_constructor": "values: set[int] = set([1, 2])\n",
-    "set_copy_constructor": "original = {1, 2}\nvalues: set[int] = set(original)\n",
+    "set_copy_wrong_element": "original = {1, 2}\nvalues: set[str] = set(original)\n",
     "set_bool_annotation": "values: set[bool] = set()\n",
     "set_bool_literal": "values = {True, False}\n",
     "set_bool_int_literal": "values = {1, True}\n",
@@ -320,7 +339,7 @@ REJECTED = {
     "defaultdict_wrong_value": "from collections import defaultdict\na: defaultdict[str, int] = defaultdict(list)\n",
     "defaultdict_plain_dict": "from collections import defaultdict\na: defaultdict[str, list[int]] = dict()\n",
     "defaultdict_wrong_entry": 'from collections import defaultdict\na: defaultdict[str, list[int]] = defaultdict(list)\na["a"].append("bad")\n',
-    "set_equality": "left = {1}\nright = {1}\nprint(left == right)\n",
+    "set_mixed_equality": 'left = {1}\nright = {"1"}\nprint(left == right)\n',
     "set_subset_comparison": "left = {1}\nright = {1, 2}\nprint(left < right)\n",
     "set_index": "values = {1}\nprint(values[0])\n",
     "set_index_write": "values = {1}\nvalues[0] = 2\n",
@@ -385,7 +404,7 @@ REJECTED = {
     "dict_items_escapes": 'values = {"one": 1}\nview = values.items()\n',
     "dict_items_arguments": 'values = {"one": 1}\nfor key, value in values.items(1):\n    pass\n',
     "dict_keys_view": 'values = {"one": 1}\nfor key in values.keys():\n    pass\n',
-    "dict_values_view": 'values = {"one": 1}\nfor value in values.values():\n    pass\n',
+    "dict_values_view_escape": 'values = {"one": 1}\nview = values.values()\n',
     "dict_first_class_iterator": 'values = {"one": 1}\niterator = iter(values)\n',
     "dict_wrong_items_target": 'values = {"one": 1}\nfor key, value, extra in values.items():\n    pass\n',
     "dict_invariant_values": """
@@ -427,7 +446,7 @@ REJECTED = {
     "iteration_target_type_mismatch": 'value = "text"\nfor value in [1]:\n    pass\n',
     "iteration_tuple_target_arity": "for first, second in [(1, 2, 3)]:\n    pass\n",
     "iteration_range_tuple_target": "for (value,) in range(2):\n    pass\n",
-    "iteration_tuple_iterable": "for value in (1, 2):\n    print(value)\n",
+    "iteration_heterogeneous_tuple": 'for value in (1, "two"):\n    print(value)\n',
     "iteration_optional_iterable": """
         def show(values: list[int] | None) -> None:
             for value in values:
@@ -612,20 +631,6 @@ show(Item("x"))
             return 0
         use([1])
     """,
-    "field_narrowing_across_call": ITEM
-    + """
-class Box:
-    item: Item | None
-    def __init__(self, item: Item | None) -> None:
-        self.item = item
-def clear(box: Box) -> None:
-    box.item = None
-def show(box: Box) -> None:
-    if box.item is not None:
-        clear(box)
-        print(box.item.name)
-show(Box(Item("x")))
-""",
     "list_class_cycle": """
         class Node:
             children: list["Node"]
@@ -716,6 +721,10 @@ ERRORS = {
     ),
     "dict_iteration_insert_size_change": (
         'values = {"first": 1, "second": 2}\nfor key in values:\n    print(key)\n    values["new"] = 3\n',
+        "RuntimeError",
+    ),
+    "dict_values_insert_size_change": (
+        'values = {"first": 1, "second": 2}\nfor value in values.values():\n    print(value)\n    values["new"] = 3\n',
         "RuntimeError",
     ),
     "dict_items_delete_size_change": (
@@ -965,7 +974,7 @@ def main() -> None:
     compiler = str(args.compiler.resolve())
     runtime = str(args.runtime.resolve())
     passed = 0
-    with tempfile.TemporaryDirectory(prefix="relar-containers-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-containers-") as directory:
         temporary = Path(directory)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"
@@ -974,6 +983,8 @@ def main() -> None:
             assert checked.returncode > 0 and checked.stderr, (name, checked)
             if name.endswith("class_cycle"):
                 assert "cyclic heap types" in checked.stderr, (name, checked.stderr)
+            if name == "counter_schema":
+                assert "JSON schemas require ordinary dictionaries" in checked.stderr, checked.stderr
             passed += 1
 
         cases = [

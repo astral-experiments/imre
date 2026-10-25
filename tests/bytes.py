@@ -15,6 +15,10 @@ from files import run_with_failing_output
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "bytes"
 
 REJECTED = {
+    "hashlib_sha256_text": 'from hashlib import sha256\nprint(sha256("text").hexdigest())\n',
+    "hashlib_update_text": 'from hashlib import sha256\nhash_obj = sha256()\nhash_obj.update("data")\n',
+    "hashlib_digest_args": 'from hashlib import sha256\nhash_obj = sha256()\nprint(hash_obj.digest(4))\n',
+    "hashlib_hexdigest_args": 'from hashlib import sha256\nprint(sha256().hexdigest(3))\n',
     "bytes_unicode_literal": 'value = b"é"\n',
     "bytes_mixed_literal": 'value = b"a" "b"\n',
     "bytes_string_annotation": 'value: bytes = "wrong"\n',
@@ -43,7 +47,7 @@ REJECTED = {
     "binary_encoding": 'value = open("out", "wb", encoding="utf-8")\n',
     "binary_update": 'value = open("out", "wb+")\n',
     "binary_bool_size": 'with open("input", "rb") as stream:\n    stream.read(True)\n',
-    "binary_seek": 'with open("input", "rb") as stream:\n    stream.seek(0)\n',
+    "binary_seek_text_offset": 'with open("input", "rb") as stream:\n    stream.seek("start")\n',
     "binary_closed_write": 'with open("out", "wb") as stream:\n    stream.closed = False\n',
 }
 
@@ -131,7 +135,7 @@ def main() -> None:
     if args.sanitize:
         flags.append("--sanitize")
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-bytes-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-bytes-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))

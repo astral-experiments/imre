@@ -16,7 +16,7 @@
       "workload": "empty",
       "median_ms": {
         "cpython": 26.5263185,
-        "relar": 2.15857,
+        "imre": 2.15857,
         "rust_bigint": 2.214409,
         "baseline": 2.157813
       },
@@ -25,7 +25,7 @@
           26.34886275,
           26.65109275
         ],
-        "relar": [
+        "imre": [
           2.08297075,
           2.24438225
         ],
@@ -40,7 +40,7 @@
       },
       "new_vs_baseline_percent": 0.03508181663562926,
       "cpython_speedup": 12.288838675604683,
-      "relar_over_rust": 0.9747837910702133,
+      "imre_over_rust": 0.9747837910702133,
       "rust_gap_percent": -2.521620892978671,
       "baseline_current_iqr_overlap": true
     },
@@ -49,7 +49,7 @@
       "workload": "boundary-128",
       "median_ms": {
         "cpython": 27.5344495,
-        "relar": 2.767549,
+        "imre": 2.767549,
         "rust_bigint": 2.589467,
         "baseline": 2.7598135
       },
@@ -58,7 +58,7 @@
           27.3740125,
           27.6641105
         ],
-        "relar": [
+        "imre": [
           2.71887025,
           2.8426275
         ],
@@ -73,7 +73,7 @@
       },
       "new_vs_baseline_percent": 0.2802906790621895,
       "cpython_speedup": 9.949037758681056,
-      "relar_over_rust": 1.0687716815854382,
+      "imre_over_rust": 1.0687716815854382,
       "rust_gap_percent": 6.877168158543823,
       "baseline_current_iqr_overlap": true
     },
@@ -82,7 +82,7 @@
       "workload": "dense-2048",
       "median_ms": {
         "cpython": 32.773708,
-        "relar": 6.3992975,
+        "imre": 6.3992975,
         "rust_bigint": 6.002639,
         "baseline": 6.484366
       },
@@ -91,7 +91,7 @@
           32.24221175,
           33.726477
         ],
-        "relar": [
+        "imre": [
           6.30886325,
           6.6729795
         ],
@@ -106,7 +106,7 @@
       },
       "new_vs_baseline_percent": -1.3119015798923161,
       "cpython_speedup": 5.121454034603017,
-      "relar_over_rust": 1.0660806855118223,
+      "imre_over_rust": 1.0660806855118223,
       "rust_gap_percent": 6.6080685511822335,
       "baseline_current_iqr_overlap": true
     },
@@ -115,7 +115,7 @@
       "workload": "sparse-2048",
       "median_ms": {
         "cpython": 36.2906765,
-        "relar": 9.269422,
+        "imre": 9.269422,
         "rust_bigint": 8.51129,
         "baseline": 9.2686595
       },
@@ -124,7 +124,7 @@
           36.0349505,
           36.80446675
         ],
-        "relar": [
+        "imre": [
           9.1544775,
           9.389909
         ],
@@ -139,7 +139,7 @@
       },
       "new_vs_baseline_percent": 0.008226648092968247,
       "cpython_speedup": 3.9150959466512583,
-      "relar_over_rust": 1.0890736891822508,
+      "imre_over_rust": 1.0890736891822508,
       "rust_gap_percent": 8.907368918225078,
       "baseline_current_iqr_overlap": true
     },
@@ -148,7 +148,7 @@
       "workload": "dense-16384",
       "median_ms": {
         "cpython": 70.19227,
-        "relar": 27.241035,
+        "imre": 27.241035,
         "rust_bigint": 23.454939,
         "baseline": 27.2972785
       },
@@ -157,7 +157,7 @@
           68.5861835,
           71.04257025
         ],
-        "relar": [
+        "imre": [
           26.868247,
           27.7957795
         ],
@@ -172,7 +172,7 @@
       },
       "new_vs_baseline_percent": -0.20604068643692575,
       "cpython_speedup": 2.5767108334907247,
-      "relar_over_rust": 1.161419989197158,
+      "imre_over_rust": 1.161419989197158,
       "rust_gap_percent": 16.141998919715796,
       "baseline_current_iqr_overlap": true
     },
@@ -181,7 +181,7 @@
       "workload": "sparse-16384",
       "median_ms": {
         "cpython": 101.9221135,
-        "relar": 51.7779675,
+        "imre": 51.7779675,
         "rust_bigint": 42.8095955,
         "baseline": 51.322234
       },
@@ -190,7 +190,7 @@
           100.23999925,
           103.59136625
         ],
-        "relar": [
+        "imre": [
           51.10552575,
           52.4443745
         ],
@@ -205,7 +205,7 @@
       },
       "new_vs_baseline_percent": 0.8879845331752234,
       "cpython_speedup": 1.9684456231311127,
-      "relar_over_rust": 1.2094944344895762,
+      "imre_over_rust": 1.2094944344895762,
       "rust_gap_percent": 20.949443448957616,
       "baseline_current_iqr_overlap": true
     },
@@ -214,7 +214,7 @@
       "workload": "empty",
       "median_ms": {
         "cpython": 27.113682,
-        "relar": 2.2878555,
+        "imre": 2.2878555,
         "rust_bigint": 2.4038115,
         "baseline": 2.2592315
       },
@@ -223,7 +223,7 @@
           26.9402485,
           27.29594875
         ],
-        "relar": [
+        "imre": [
           2.18177775,
           2.5005365
         ],
@@ -238,7 +238,7 @@
       },
       "new_vs_baseline_percent": 1.2669795016579721,
       "cpython_speedup": 11.851133954919792,
-      "relar_over_rust": 0.9517616085953495,
+      "imre_over_rust": 0.9517616085953495,
       "rust_gap_percent": -4.823839140465047,
       "baseline_current_iqr_overlap": true
     },
@@ -247,7 +247,7 @@
       "workload": "boundary-128",
       "median_ms": {
         "cpython": 27.9775355,
-        "relar": 2.8115705,
+        "imre": 2.8115705,
         "rust_bigint": 2.67131,
         "baseline": 2.774287
       },
@@ -256,7 +256,7 @@
           27.77066875,
           28.32736525
         ],
-        "relar": [
+        "imre": [
           2.716915,
           2.9143325
         ],
@@ -271,7 +271,7 @@
       },
       "new_vs_baseline_percent": 1.3438948457747957,
       "cpython_speedup": 9.950856825393494,
-      "relar_over_rust": 1.0525062609730806,
+      "imre_over_rust": 1.0525062609730806,
       "rust_gap_percent": 5.250626097308064,
       "baseline_current_iqr_overlap": true
     },
@@ -280,7 +280,7 @@
       "workload": "dense-2048",
       "median_ms": {
         "cpython": 33.1989495,
-        "relar": 5.843511,
+        "imre": 5.843511,
         "rust_bigint": 5.749227,
         "baseline": 5.792422
       },
@@ -289,7 +289,7 @@
           32.79873475,
           33.73398
         ],
-        "relar": [
+        "imre": [
           5.7388165,
           5.94652375
         ],
@@ -304,7 +304,7 @@
       },
       "new_vs_baseline_percent": 0.8819972025518874,
       "cpython_speedup": 5.681336015282593,
-      "relar_over_rust": 1.0163994220440418,
+      "imre_over_rust": 1.0163994220440418,
       "rust_gap_percent": 1.6399422044041767,
       "baseline_current_iqr_overlap": true
     },
@@ -313,7 +313,7 @@
       "workload": "sparse-2048",
       "median_ms": {
         "cpython": 36.460439,
-        "relar": 8.0524655,
+        "imre": 8.0524655,
         "rust_bigint": 7.8085115,
         "baseline": 8.05197
       },
@@ -322,7 +322,7 @@
           35.9749785,
           37.25581875
         ],
-        "relar": [
+        "imre": [
           7.91607425,
           8.40763425
         ],
@@ -337,7 +337,7 @@
       },
       "new_vs_baseline_percent": 0.0061537735485783784,
       "cpython_speedup": 4.527860318060351,
-      "relar_over_rust": 1.0312420619474019,
+      "imre_over_rust": 1.0312420619474019,
       "rust_gap_percent": 3.1242061947401867,
       "baseline_current_iqr_overlap": true
     },
@@ -346,7 +346,7 @@
       "workload": "dense-16384",
       "median_ms": {
         "cpython": 69.9022195,
-        "relar": 21.6220405,
+        "imre": 21.6220405,
         "rust_bigint": 20.5310235,
         "baseline": 21.5717465
       },
@@ -355,7 +355,7 @@
           69.37203725,
           70.8354325
         ],
-        "relar": [
+        "imre": [
           21.27549225,
           21.95624525
         ],
@@ -370,7 +370,7 @@
       },
       "new_vs_baseline_percent": 0.23314755715304614,
       "cpython_speedup": 3.2329150202081993,
-      "relar_over_rust": 1.0531399226151585,
+      "imre_over_rust": 1.0531399226151585,
       "rust_gap_percent": 5.313992261515854,
       "baseline_current_iqr_overlap": true
     },
@@ -379,7 +379,7 @@
       "workload": "sparse-16384",
       "median_ms": {
         "cpython": 101.6385755,
-        "relar": 42.63947,
+        "imre": 42.63947,
         "rust_bigint": 38.046231,
         "baseline": 42.465085
       },
@@ -388,7 +388,7 @@
           100.3711625,
           104.31314125
         ],
-        "relar": [
+        "imre": [
           41.48943975,
           43.21221725
         ],
@@ -403,7 +403,7 @@
       },
       "new_vs_baseline_percent": 0.410655012229455,
       "cpython_speedup": 2.3836735189250713,
-      "relar_over_rust": 1.120727832409996,
+      "imre_over_rust": 1.120727832409996,
       "rust_gap_percent": 12.072783240999607,
       "baseline_current_iqr_overlap": true
     }

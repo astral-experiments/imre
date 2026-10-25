@@ -23,6 +23,12 @@ from pathlib import Path
 """
 CALL = "run(['command'], capture_output=True, encoding='utf-8')"
 REJECTED = {
+    "rebound_async_capture": (
+        "import asyncio\nasync def outer() -> int:\n"
+        "    value = 1\n    async def read() -> int:\n        return value\n"
+        "    future = read()\n    value = 2\n    return await future\n"
+        "print(asyncio.run(outer()))"
+    ),
     "missing_args": "run(capture_output=True, encoding='utf-8')",
     "duplicate_args": "run(['command'], args=['other'], capture_output=True, encoding='utf-8')",
     "extra_positional": "run(['command'], True, capture_output=True, encoding='utf-8')",
@@ -33,13 +39,9 @@ REJECTED = {
     "optional_args": "args: list[str] | None = None\nrun(args, capture_output=True, encoding='utf-8')",
     "expanded_args": "run(*[['command']], capture_output=True, encoding='utf-8')",
     "expanded_kwargs": "run(['command'], capture_output=True, encoding='utf-8', **{'check': True})",
-    "missing_capture": "run(['command'], encoding='utf-8')",
-    "false_capture": "run(['command'], capture_output=False, encoding='utf-8')",
     "dynamic_capture": "capture = True\nrun(['command'], capture_output=capture, encoding='utf-8')",
-    "missing_encoding": "run(['command'], capture_output=True)",
     "other_encoding": "run(['command'], capture_output=True, encoding='latin-1')",
     "dynamic_encoding": "encoding = 'utf-8'\nrun(['command'], capture_output=True, encoding=encoding)",
-    "false_text": "run(['command'], capture_output=True, encoding='utf-8', text=False)",
     "dynamic_text": "text = True\nrun(['command'], capture_output=True, encoding='utf-8', text=text)",
     "wrong_check": "run(['command'], capture_output=True, encoding='utf-8', check=1)",
     "wrong_cwd": "run(['command'], capture_output=True, encoding='utf-8', cwd=b'directory')",
@@ -49,7 +51,7 @@ REJECTED = {
     "environ_index": "print(os.environ['KEY'])",
     "environ_assignment": "os.environ['KEY'] = 'value'",
     "environ_copy_args": "os.environ.copy(1)",
-    "environ_get": "print(os.environ.get('KEY'))",
+    "environ_wrong_key": "print(os.getenv(1))",
     "stored_run": "callback = run\ncallback(['command'])",
     "construct_result": "CompletedProcess(['command'], 0, '', '')",
     "construct_failure": "CalledProcessError(1, ['command'])",
@@ -62,6 +64,7 @@ REJECTED = {
     "string_timeout": "run(['command'], capture_output=True, encoding='utf-8', timeout='1.0')",
     "optional_integer_timeout": "def launch(duration: int | None) -> None:\n    run(['command'], capture_output=True, encoding='utf-8', timeout=duration)",
     "timeout_text_projection": "try:\n    " + CALL + "\nexcept TimeoutExpired as error:\n    text: str = error.stdout",
+    "timed_base_text_projection": "try:\n    run(['command'], capture_output=True, text=True, timeout=1.0, check=True)\nexcept SubprocessError as error:\n    text: str = error.stdout",
     "timeout_returncode": "try:\n    " + CALL + "\nexcept TimeoutExpired as error:\n    print(error.returncode)",
     "write_timeout_field": "try:\n    " + CALL + "\nexcept TimeoutExpired as error:\n    error.timeout = 1.0",
     "failure_annotation": "def code(error: CalledProcessError) -> int:\n    return error.returncode",
@@ -72,7 +75,6 @@ REJECTED = {
     "stored_check_method": "result = " + CALL + "\ncallback = result.check_returncode\ncallback()",
     "optional_result": "result: CompletedProcess[str] | None = None\nprint(result.stdout)",
     "result_subclass": "class Custom(CompletedProcess):\n    pass",
-    "unsupported_import": "from subprocess import Popen\nPopen(['command'])",
 }
 for name, value in {
     "shell": "True",
@@ -89,6 +91,33 @@ for name, value in {
 for name, value in {"args": "['other']", "returncode": "0", "stdout": "'text'", "stderr": "'text'"}.items():
     REJECTED[f"write_{name}"] = f"result = {CALL}\nresult.{name} = {value}"
 REJECTED["write_error_field"] = "error: Exception = ValueError('message')\nerror.stdout = 'text'"
+
+REDIRECT = """from sys import stderr
+def redirect() -> None:
+    run(['command'], stdout=stderr, check=True)
+"""
+REJECTED["indirect_error_stream"] = REDIRECT + """try:
+    redirect()
+except CalledProcessError as error:
+    print(len(error.stderr))
+"""
+REJECTED["rebound_error_stream"] = REDIRECT + """try:
+    redirect()
+except CalledProcessError as redirected:
+    try:
+        run(['command'], capture_output=True, text=True, check=True)
+    except CalledProcessError as captured:
+        captured = redirected
+        print(len(captured.stderr))
+"""
+REJECTED["reraised_error_stream"] = REDIRECT + """try:
+    redirect()
+except CalledProcessError:
+    try:
+        raise
+    except CalledProcessError as again:
+        print(len(again.output))
+"""
 
 INVALID_ENV = """import os
 import subprocess
@@ -112,7 +141,7 @@ def seed(directory: Path, python: str) -> None:
     (directory / "executable-text").write_bytes(b"printf unexpected > fallback.txt\n")
     (directory / "executable-text").chmod(0o755)
     (directory / "directory" / "bin").mkdir(parents=True)
-    (directory / "directory" / "bin" / "relar-process-child").symlink_to(python)
+    (directory / "directory" / "bin" / "imre-process-child").symlink_to(python)
     (directory / "directory" / "relative-executable").symlink_to(python)
 
 
@@ -140,12 +169,12 @@ def run(
     invalid: tuple[bytes, bytes] | None = None,
 ):
     environment = files.environment()
-    environment.update(RELAR_PROCESS_PARENT="inherited λ", RELAR_PROCESS_OVERRIDE="parent")
+    environment.update(IMRE_PROCESS_PARENT="inherited λ", IMRE_PROCESS_OVERRIDE="parent")
     if empty_name:
         environment[""] = "inherited empty name λ"
     else:
         environment.pop("", None)
-    environment.pop("RELAR_PROCESS_EMPTY", None)
+    environment.pop("IMRE_PROCESS_EMPTY", None)
     if invalid is not None:
         environment = {os.fsencode(key): os.fsencode(value) for key, value in environment.items()}
         environment[invalid[0]] = invalid[1]
@@ -186,7 +215,7 @@ def main() -> None:
     files.check_result(resolved, None, "CPython interpreter")
     python = str(Path(resolved.stdout.decode().strip()).resolve())
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-processes-") as directory, open(os.devnull, "rb") as original:
+    with tempfile.TemporaryDirectory(prefix="imre-processes-") as directory, open(os.devnull, "rb") as original:
         temporary = Path(directory)
         # Preserve an inherited descriptor above the child's deliberately lowered
         # soft limit. Closing only up to RLIMIT_NOFILE would leave this one open.
@@ -209,7 +238,10 @@ def main() -> None:
                     "empty_name": name == "environment",
                 }
                 reference = run([python, "-E", "-B", str(source), *arguments], reference_dir, **options)
-                files.check_result(reference, None, f"CPython {name}")
+                if name == "check_output":
+                    assert reference.returncode == 0 and reference.stderr == b"inherited", reference
+                else:
+                    files.check_result(reference, None, f"CPython {name}")
                 expected_files = snapshot(reference_dir)
                 if name == "stdin_fds":
                     assert b"closed\n" in reference.stdout and reference.stdout.endswith(b"-13\n"), reference.stdout
@@ -217,10 +249,13 @@ def main() -> None:
                     binary = project / f"native-O{level}"
                     built = files.run([compiler, "build", str(source), "--module-root", str(source.parent), "-o", str(binary), "--opt-level", level, *flags], temporary)
                     files.check_result(built, None, f"build {name} O{level}")
-                    native_dir = project / f"relar-O{level}" / "work"
+                    native_dir = project / f"imre-O{level}" / "work"
                     seed(native_dir, python)
                     actual = run([str(binary), *arguments], native_dir, **options)
-                    files.check_result(actual, None, f"Relar {name} O{level}")
+                    if name == "check_output":
+                        assert actual.returncode == 0 and actual.stderr == reference.stderr, actual
+                    else:
+                        files.check_result(actual, None, f"Imre {name} O{level}")
                     assert actual.stdout == reference.stdout, (name, level, actual.stdout, reference.stdout)
                     assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
                     checks += 1
@@ -249,7 +284,7 @@ def main() -> None:
             binary = temporary / f"invalid-environment-O{level}"
             built = files.run([compiler, "build", str(source), "-o", str(binary), "--opt-level", level, *flags], temporary)
             files.check_result(built, None, "build invalid environment boundary")
-            for invalid in [(b"RELAR_INVALID", b"\xff"), (b"RELAR_\xff", b"value")]:
+            for invalid in [(b"IMRE_INVALID", b"\xff"), (b"IMRE_\xff", b"value")]:
                 actual = run([str(binary), python], temporary, invalid=invalid)
                 files.check_result(actual, None, "invalid environment boundary")
                 assert actual.stdout == b"invalid environment\ninvalid environment\nrecovered\n\n", actual.stdout

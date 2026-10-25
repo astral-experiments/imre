@@ -25,24 +25,24 @@
       "commands": [
         {
           "command": [
-            "/tmp/relar-decoder-frozen/relar",
+            "/tmp/imre-decoder-frozen/imre",
             "build",
-            "/home/dev-user/code/oss/relar/examples/route_planner.py",
+            "/home/dev-user/code/oss/imre/examples/route_planner.py",
             "--module-root",
-            "/home/dev-user/code/oss/relar/examples",
+            "/home/dev-user/code/oss/imre/examples",
             "--runtime",
-            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "/tmp/imre-decoder-frozen/normal_runtime.a",
             "--clang",
             "/usr/bin/clang-18",
             "--opt-level",
             "3",
             "--emit-llvm",
-            "/tmp/relar-decoder-final-validation-v3/applications/route/route.ll",
+            "/tmp/imre-decoder-final-validation-v3/applications/route/route.ll",
             "-o",
-            "/tmp/relar-decoder-final-validation-v3/applications/route/route"
+            "/tmp/imre-decoder-final-validation-v3/applications/route/route"
           ],
-          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/route_planner.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/route/route.ll -o /tmp/relar-decoder-final-validation-v3/applications/route/route",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/tmp/imre-decoder-frozen/imre build /home/dev-user/code/oss/imre/examples/route_planner.py --module-root /home/dev-user/code/oss/imre/examples --runtime /tmp/imre-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/imre-decoder-final-validation-v3/applications/route/route.ll -o /tmp/imre-decoder-final-validation-v3/applications/route/route",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:37.499468+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -53,8 +53,8 @@
           "finished_at": "2026-10-19T20:21:38.032340+00:00",
           "seconds": 0.532875455042813,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/route/compile.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/route/compile.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/route/compile.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/route/compile.stderr",
           "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
@@ -63,14 +63,14 @@
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "-I",
             "-B",
-            "/home/dev-user/code/oss/relar/benchmarks/validate.py",
+            "/home/dev-user/code/oss/imre/benchmarks/validate.py",
             "--python",
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "--binary",
-            "/tmp/relar-decoder-final-validation-v3/applications/route/route"
+            "/tmp/imre-decoder-final-validation-v3/applications/route/route"
           ],
-          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/route/route",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/imre/benchmarks/validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/imre-decoder-final-validation-v3/applications/route/route",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:38.036951+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -81,13 +81,13 @@
           "finished_at": "2026-10-19T20:21:38.605983+00:00",
           "seconds": 0.5690394840203226,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/route/validate.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/route/validate.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/route/validate.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/route/validate.stderr",
           "stdout_sha256": "4ab2018f22ceee917cd1217d60ce0ddaa90aa25c66e20a6198489f22c2a4245e",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       ],
-      "validation": "/tmp/relar-decoder-final-validation-v3/applications/route/validation.json",
+      "validation": "/tmp/imre-decoder-final-validation-v3/applications/route/validation.json",
       "counts": {
         "input_cases": 22,
         "routes": 64,
@@ -104,24 +104,24 @@
       "commands": [
         {
           "command": [
-            "/tmp/relar-decoder-frozen/relar",
+            "/tmp/imre-decoder-frozen/imre",
             "build",
-            "/home/dev-user/code/oss/relar/examples/dependency_planner/__main__.py",
+            "/home/dev-user/code/oss/imre/examples/dependency_planner/__main__.py",
             "--module-root",
-            "/home/dev-user/code/oss/relar/examples",
+            "/home/dev-user/code/oss/imre/examples",
             "--runtime",
-            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "/tmp/imre-decoder-frozen/normal_runtime.a",
             "--clang",
             "/usr/bin/clang-18",
             "--opt-level",
             "3",
             "--emit-llvm",
-            "/tmp/relar-decoder-final-validation-v3/applications/dependency/dependency.ll",
+            "/tmp/imre-decoder-final-validation-v3/applications/dependency/dependency.ll",
             "-o",
-            "/tmp/relar-decoder-final-validation-v3/applications/dependency/dependency"
+            "/tmp/imre-decoder-final-validation-v3/applications/dependency/dependency"
           ],
-          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/dependency_planner/__main__.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/dependency/dependency.ll -o /tmp/relar-decoder-final-validation-v3/applications/dependency/dependency",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/tmp/imre-decoder-frozen/imre build /home/dev-user/code/oss/imre/examples/dependency_planner/__main__.py --module-root /home/dev-user/code/oss/imre/examples --runtime /tmp/imre-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/imre-decoder-final-validation-v3/applications/dependency/dependency.ll -o /tmp/imre-decoder-final-validation-v3/applications/dependency/dependency",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:38.613714+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -132,8 +132,8 @@
           "finished_at": "2026-10-19T20:21:39.232447+00:00",
           "seconds": 0.6187355340225622,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/dependency/compile.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/dependency/compile.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/dependency/compile.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/dependency/compile.stderr",
           "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
@@ -142,14 +142,14 @@
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "-I",
             "-B",
-            "/home/dev-user/code/oss/relar/benchmarks/dependency_validate.py",
+            "/home/dev-user/code/oss/imre/benchmarks/dependency_validate.py",
             "--python",
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "--binary",
-            "/tmp/relar-decoder-final-validation-v3/applications/dependency/dependency"
+            "/tmp/imre-decoder-final-validation-v3/applications/dependency/dependency"
           ],
-          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/dependency_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/dependency/dependency",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/imre/benchmarks/dependency_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/imre-decoder-final-validation-v3/applications/dependency/dependency",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:39.236894+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -160,8 +160,8 @@
           "finished_at": "2026-10-19T20:21:42.561194+00:00",
           "seconds": 3.324305917019956,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/dependency/validate.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/dependency/validate.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/dependency/validate.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/dependency/validate.stderr",
           "stdout_sha256": "fbdf5337c10f5ce0588ac81f2385621cfca938145ad38ab440cb5e96c3878b00",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
@@ -170,20 +170,20 @@
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "-I",
             "-B",
-            "/home/dev-user/code/oss/relar/benchmarks/reference/dependency_planner/check_boundaries.py",
+            "/home/dev-user/code/oss/imre/benchmarks/reference/dependency_planner/check_boundaries.py",
             "--python",
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
-            "--relar",
-            "/tmp/relar-decoder-final-validation-v3/applications/dependency/dependency",
+            "--imre",
+            "/tmp/imre-decoder-final-validation-v3/applications/dependency/dependency",
             "--rust-bigint",
-            "/home/dev-user/code/oss/relar/benchmarks/local/dependency-reference-tuned-lto/planner-bigint",
+            "/home/dev-user/code/oss/imre/benchmarks/local/dependency-reference-tuned-lto/planner-bigint",
             "--rust-i64",
-            "/home/dev-user/code/oss/relar/benchmarks/local/dependency-reference-tuned-lto/planner-i64",
+            "/home/dev-user/code/oss/imre/benchmarks/local/dependency-reference-tuned-lto/planner-i64",
             "--output",
-            "/tmp/relar-decoder-final-validation-v3/applications/dependency/boundaries.json"
+            "/tmp/imre-decoder-final-validation-v3/applications/dependency/boundaries.json"
           ],
-          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/reference/dependency_planner/check_boundaries.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --relar /tmp/relar-decoder-final-validation-v3/applications/dependency/dependency --rust-bigint /home/dev-user/code/oss/relar/benchmarks/local/dependency-reference-tuned-lto/planner-bigint --rust-i64 /home/dev-user/code/oss/relar/benchmarks/local/dependency-reference-tuned-lto/planner-i64 --output /tmp/relar-decoder-final-validation-v3/applications/dependency/boundaries.json",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/imre/benchmarks/reference/dependency_planner/check_boundaries.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --imre /tmp/imre-decoder-final-validation-v3/applications/dependency/dependency --rust-bigint /home/dev-user/code/oss/imre/benchmarks/local/dependency-reference-tuned-lto/planner-bigint --rust-i64 /home/dev-user/code/oss/imre/benchmarks/local/dependency-reference-tuned-lto/planner-i64 --output /tmp/imre-decoder-final-validation-v3/applications/dependency/boundaries.json",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:42.562278+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -194,13 +194,13 @@
           "finished_at": "2026-10-19T20:21:47.184157+00:00",
           "seconds": 4.6218877919600345,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/dependency/boundaries.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/dependency/boundaries.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/dependency/boundaries.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/dependency/boundaries.stderr",
           "stdout_sha256": "c58f483b01e76aa29f147d87e88855da7098c8abf08a7340d89bb32e5ce8ebbe",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       ],
-      "validation": "/tmp/relar-decoder-final-validation-v3/applications/dependency/validation.json",
+      "validation": "/tmp/imre-decoder-final-validation-v3/applications/dependency/validation.json",
       "counts": {
         "inputs": 135,
         "valid_plans": 95,
@@ -212,7 +212,7 @@
         "oracle": "graphlib cycle detection, exhaustive ready-set ordering, and independent dependency maximums"
       },
       "boundaries": {
-        "path": "/tmp/relar-decoder-final-validation-v3/applications/dependency/boundaries.json",
+        "path": "/tmp/imre-decoder-final-validation-v3/applications/dependency/boundaries.json",
         "cases": 10,
         "i64_overflow_rejections": 4
       },
@@ -227,24 +227,24 @@
       "commands": [
         {
           "command": [
-            "/tmp/relar-decoder-frozen/relar",
+            "/tmp/imre-decoder-frozen/imre",
             "build",
-            "/home/dev-user/code/oss/relar/examples/incremental_planner/__main__.py",
+            "/home/dev-user/code/oss/imre/examples/incremental_planner/__main__.py",
             "--module-root",
-            "/home/dev-user/code/oss/relar/examples",
+            "/home/dev-user/code/oss/imre/examples",
             "--runtime",
-            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "/tmp/imre-decoder-frozen/normal_runtime.a",
             "--clang",
             "/usr/bin/clang-18",
             "--opt-level",
             "3",
             "--emit-llvm",
-            "/tmp/relar-decoder-final-validation-v3/applications/incremental/incremental.ll",
+            "/tmp/imre-decoder-final-validation-v3/applications/incremental/incremental.ll",
             "-o",
-            "/tmp/relar-decoder-final-validation-v3/applications/incremental/incremental"
+            "/tmp/imre-decoder-final-validation-v3/applications/incremental/incremental"
           ],
-          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/incremental_planner/__main__.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/incremental/incremental.ll -o /tmp/relar-decoder-final-validation-v3/applications/incremental/incremental",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/tmp/imre-decoder-frozen/imre build /home/dev-user/code/oss/imre/examples/incremental_planner/__main__.py --module-root /home/dev-user/code/oss/imre/examples --runtime /tmp/imre-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/imre-decoder-final-validation-v3/applications/incremental/incremental.ll -o /tmp/imre-decoder-final-validation-v3/applications/incremental/incremental",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:47.191281+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -255,8 +255,8 @@
           "finished_at": "2026-10-19T20:21:47.944337+00:00",
           "seconds": 0.753061430004891,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/incremental/compile.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/incremental/compile.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/incremental/compile.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/incremental/compile.stderr",
           "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
@@ -265,20 +265,20 @@
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "-I",
             "-B",
-            "/home/dev-user/code/oss/relar/benchmarks/incremental_validate.py",
+            "/home/dev-user/code/oss/imre/benchmarks/incremental_validate.py",
             "--python",
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "--binary",
-            "/tmp/relar-decoder-final-validation-v3/applications/incremental/incremental",
+            "/tmp/imre-decoder-final-validation-v3/applications/incremental/incremental",
             "--rust-bigint",
-            "/home/dev-user/code/oss/relar/benchmarks/local/incremental-reference-normal-final/planner-bigint",
+            "/home/dev-user/code/oss/imre/benchmarks/local/incremental-reference-normal-final/planner-bigint",
             "--output",
-            "/tmp/relar-decoder-final-validation-v3/applications/incremental/validation.json",
+            "/tmp/imre-decoder-final-validation-v3/applications/incremental/validation.json",
             "--rust-i64",
-            "/home/dev-user/code/oss/relar/benchmarks/local/incremental-reference-normal-final/planner-i64"
+            "/home/dev-user/code/oss/imre/benchmarks/local/incremental-reference-normal-final/planner-i64"
           ],
-          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/incremental_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/incremental/incremental --rust-bigint /home/dev-user/code/oss/relar/benchmarks/local/incremental-reference-normal-final/planner-bigint --output /tmp/relar-decoder-final-validation-v3/applications/incremental/validation.json --rust-i64 /home/dev-user/code/oss/relar/benchmarks/local/incremental-reference-normal-final/planner-i64",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/imre/benchmarks/incremental_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/imre-decoder-final-validation-v3/applications/incremental/incremental --rust-bigint /home/dev-user/code/oss/imre/benchmarks/local/incremental-reference-normal-final/planner-bigint --output /tmp/imre-decoder-final-validation-v3/applications/incremental/validation.json --rust-i64 /home/dev-user/code/oss/imre/benchmarks/local/incremental-reference-normal-final/planner-i64",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:47.950209+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -289,19 +289,19 @@
           "finished_at": "2026-10-19T20:21:53.748043+00:00",
           "seconds": 5.797838086960837,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/incremental/validate.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/incremental/validate.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/incremental/validate.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/incremental/validate.stderr",
           "stdout_sha256": "b1943f145f7742c171578be11b26bd5db4f663dc3e2e47350b50feb663239da7",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       ],
-      "validation": "/tmp/relar-decoder-final-validation-v3/applications/incremental/validation.json",
+      "validation": "/tmp/imre-decoder-final-validation-v3/applications/incremental/validation.json",
       "counts": {
         "oracle_cases": 155,
         "input_targets": 1712,
         "passed_by_engine": {
           "cpython": 155,
-          "relar": 155,
+          "imre": 155,
           "rust_bigint": 155,
           "rust_i64": 138
         },
@@ -381,7 +381,7 @@
         "parser_cases": 17,
         "parser_passed_by_engine": {
           "cpython": 17,
-          "relar": 17,
+          "imre": 17,
           "rust_bigint": 17,
           "rust_i64": 17
         },
@@ -398,24 +398,24 @@
       "commands": [
         {
           "command": [
-            "/tmp/relar-decoder-frozen/relar",
+            "/tmp/imre-decoder-frozen/imre",
             "build",
-            "/home/dev-user/code/oss/relar/examples/batch_planner/__main__.py",
+            "/home/dev-user/code/oss/imre/examples/batch_planner/__main__.py",
             "--module-root",
-            "/home/dev-user/code/oss/relar/examples",
+            "/home/dev-user/code/oss/imre/examples",
             "--runtime",
-            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "/tmp/imre-decoder-frozen/normal_runtime.a",
             "--clang",
             "/usr/bin/clang-18",
             "--opt-level",
             "3",
             "--emit-llvm",
-            "/tmp/relar-decoder-final-validation-v3/applications/batch/batch.ll",
+            "/tmp/imre-decoder-final-validation-v3/applications/batch/batch.ll",
             "-o",
-            "/tmp/relar-decoder-final-validation-v3/applications/batch/batch"
+            "/tmp/imre-decoder-final-validation-v3/applications/batch/batch"
           ],
-          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/batch_planner/__main__.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/batch/batch.ll -o /tmp/relar-decoder-final-validation-v3/applications/batch/batch",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/tmp/imre-decoder-frozen/imre build /home/dev-user/code/oss/imre/examples/batch_planner/__main__.py --module-root /home/dev-user/code/oss/imre/examples --runtime /tmp/imre-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/imre-decoder-final-validation-v3/applications/batch/batch.ll -o /tmp/imre-decoder-final-validation-v3/applications/batch/batch",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:51.319904+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -426,8 +426,8 @@
           "finished_at": "2026-10-19T20:21:52.243528+00:00",
           "seconds": 0.9236291800043546,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/batch/compile.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/batch/compile.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/batch/compile.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/batch/compile.stderr",
           "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
@@ -436,18 +436,18 @@
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "-I",
             "-B",
-            "/home/dev-user/code/oss/relar/benchmarks/batch_validate.py",
+            "/home/dev-user/code/oss/imre/benchmarks/batch_validate.py",
             "--python",
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "--binary",
-            "/tmp/relar-decoder-final-validation-v3/applications/batch/batch",
+            "/tmp/imre-decoder-final-validation-v3/applications/batch/batch",
             "--rust-bigint",
-            "/home/dev-user/code/oss/relar/benchmarks/local/batch-reference-normal-final/planner-batch-bigint",
+            "/home/dev-user/code/oss/imre/benchmarks/local/batch-reference-normal-final/planner-batch-bigint",
             "--output",
-            "/tmp/relar-decoder-final-validation-v3/applications/batch/validation.json"
+            "/tmp/imre-decoder-final-validation-v3/applications/batch/validation.json"
           ],
-          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/batch_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/batch/batch --rust-bigint /home/dev-user/code/oss/relar/benchmarks/local/batch-reference-normal-final/planner-batch-bigint --output /tmp/relar-decoder-final-validation-v3/applications/batch/validation.json",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/imre/benchmarks/batch_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/imre-decoder-final-validation-v3/applications/batch/batch --rust-bigint /home/dev-user/code/oss/imre/benchmarks/local/batch-reference-normal-final/planner-batch-bigint --output /tmp/imre-decoder-final-validation-v3/applications/batch/validation.json",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:52.248471+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -458,18 +458,18 @@
           "finished_at": "2026-10-19T20:21:58.547596+00:00",
           "seconds": 6.299129430030007,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/batch/validate.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/batch/validate.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/batch/validate.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/batch/validate.stderr",
           "stdout_sha256": "ab1b57aca64f8e2228c6ee1ccf5fb6ff21d30b68b61e7f4dafa1a40ce5a3ea94",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       ],
-      "validation": "/tmp/relar-decoder-final-validation-v3/applications/batch/validation.json",
+      "validation": "/tmp/imre-decoder-final-validation-v3/applications/batch/validation.json",
       "counts": {
         "cases": 194,
         "passed_by_engine": {
           "cpython": 194,
-          "relar": 194,
+          "imre": 194,
           "rust_bigint": 194
         },
         "requests": 393,
@@ -489,24 +489,24 @@
       "commands": [
         {
           "command": [
-            "/tmp/relar-decoder-frozen/relar",
+            "/tmp/imre-decoder-frozen/imre",
             "build",
-            "/home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py",
+            "/home/dev-user/code/oss/imre/examples/manifest_planner/__main__.py",
             "--module-root",
-            "/home/dev-user/code/oss/relar/examples",
+            "/home/dev-user/code/oss/imre/examples",
             "--runtime",
-            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "/tmp/imre-decoder-frozen/normal_runtime.a",
             "--clang",
             "/usr/bin/clang-18",
             "--opt-level",
             "3",
             "--emit-llvm",
-            "/tmp/relar-decoder-final-validation-v3/applications/manifest/manifest.ll",
+            "/tmp/imre-decoder-final-validation-v3/applications/manifest/manifest.ll",
             "-o",
-            "/tmp/relar-decoder-final-validation-v3/applications/manifest/manifest"
+            "/tmp/imre-decoder-final-validation-v3/applications/manifest/manifest"
           ],
-          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/manifest/manifest.ll -o /tmp/relar-decoder-final-validation-v3/applications/manifest/manifest",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/tmp/imre-decoder-frozen/imre build /home/dev-user/code/oss/imre/examples/manifest_planner/__main__.py --module-root /home/dev-user/code/oss/imre/examples --runtime /tmp/imre-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/imre-decoder-final-validation-v3/applications/manifest/manifest.ll -o /tmp/imre-decoder-final-validation-v3/applications/manifest/manifest",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:53.760879+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -517,8 +517,8 @@
           "finished_at": "2026-10-19T20:21:54.997786+00:00",
           "seconds": 1.2369945230311714,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/manifest/compile.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/manifest/compile.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/manifest/compile.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/manifest/compile.stderr",
           "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
@@ -527,18 +527,18 @@
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "-I",
             "-B",
-            "/home/dev-user/code/oss/relar/benchmarks/manifest_validate.py",
+            "/home/dev-user/code/oss/imre/benchmarks/manifest_validate.py",
             "--python",
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "--binary",
-            "/tmp/relar-decoder-final-validation-v3/applications/manifest/manifest",
+            "/tmp/imre-decoder-final-validation-v3/applications/manifest/manifest",
             "--rust-bigint",
-            "/home/dev-user/code/oss/relar/benchmarks/local/manifest-reference-normal-final/planner-manifest-bigint",
+            "/home/dev-user/code/oss/imre/benchmarks/local/manifest-reference-normal-final/planner-manifest-bigint",
             "--output",
-            "/tmp/relar-decoder-final-validation-v3/applications/manifest/validation.json"
+            "/tmp/imre-decoder-final-validation-v3/applications/manifest/validation.json"
           ],
-          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/manifest_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/manifest/manifest --rust-bigint /home/dev-user/code/oss/relar/benchmarks/local/manifest-reference-normal-final/planner-manifest-bigint --output /tmp/relar-decoder-final-validation-v3/applications/manifest/validation.json",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/imre/benchmarks/manifest_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/imre-decoder-final-validation-v3/applications/manifest/manifest --rust-bigint /home/dev-user/code/oss/imre/benchmarks/local/manifest-reference-normal-final/planner-manifest-bigint --output /tmp/imre-decoder-final-validation-v3/applications/manifest/validation.json",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:55.006940+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -549,18 +549,18 @@
           "finished_at": "2026-10-19T20:22:03.740031+00:00",
           "seconds": 8.73335864400724,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/manifest/validate.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/manifest/validate.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/manifest/validate.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/manifest/validate.stderr",
           "stdout_sha256": "3ab479b0bf09454bc05717093759cc52b063cf3eb016eff494be31398a007b01",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       ],
-      "validation": "/tmp/relar-decoder-final-validation-v3/applications/manifest/validation.json",
+      "validation": "/tmp/imre-decoder-final-validation-v3/applications/manifest/validation.json",
       "counts": {
         "cases": 196,
         "passed_by_engine": {
           "cpython": 196,
-          "relar": 196,
+          "imre": 196,
           "rust_bigint": 196
         },
         "completed_requests": 199,
@@ -571,7 +571,7 @@
           "cases": 1,
           "passed_by_engine": {
             "cpython": 1,
-            "relar": 1,
+            "imre": 1,
             "rust_bigint": 1
           },
           "checks": [
@@ -619,7 +619,7 @@
                   "returncode": 1,
                   "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
                   "stdout_bytes": 0,
-                  "stderr": "Traceback (most recent call last):\n  File \"/home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py\", line 61, in main\n    if process(path, request_id, report):\n       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py\", line 17, in process\n    report.flush()\n    ~~~~~~~~~~~~^^\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import runpy, sys; sys.path.insert(0, sys.argv[1]); sys.argv = ['manifest_planner', *sys.argv[2:]]; runpy.run_module('manifest_planner', run_name='__main__', alter_sys=True)\n                                                                                                        ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen runpy>\", line 231, in run_module\n  File \"<frozen runpy>\", line 98, in _run_module_code\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py\", line 77, in <module>\n    main()\n    ~~~~^^\n  File \"/home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py\", line 59, in main\n    with open(sys.argv[2], \"w\", encoding=\"utf-8\") as report:\n         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nOSError: [Errno 28] No space left on device\n",
+                  "stderr": "Traceback (most recent call last):\n  File \"/home/dev-user/code/oss/imre/examples/manifest_planner/__main__.py\", line 61, in main\n    if process(path, request_id, report):\n       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/dev-user/code/oss/imre/examples/manifest_planner/__main__.py\", line 17, in process\n    report.flush()\n    ~~~~~~~~~~~~^^\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import runpy, sys; sys.path.insert(0, sys.argv[1]); sys.argv = ['manifest_planner', *sys.argv[2:]]; runpy.run_module('manifest_planner', run_name='__main__', alter_sys=True)\n                                                                                                        ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen runpy>\", line 231, in run_module\n  File \"<frozen runpy>\", line 98, in _run_module_code\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/home/dev-user/code/oss/imre/examples/manifest_planner/__main__.py\", line 77, in <module>\n    main()\n    ~~~~^^\n  File \"/home/dev-user/code/oss/imre/examples/manifest_planner/__main__.py\", line 59, in main\n    with open(sys.argv[2], \"w\", encoding=\"utf-8\") as report:\n         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nOSError: [Errno 28] No space left on device\n",
                   "files": {
                     "good.txt": {
                       "sha256": "1fa11bc9ccb21f80f2a4938db2185744a213bbee828707efba29dd04e592828a",
@@ -632,7 +632,7 @@
                   },
                   "directories": []
                 },
-                "relar": {
+                "imre": {
                   "returncode": 1,
                   "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
                   "stdout_bytes": 0,
@@ -682,24 +682,24 @@
       "commands": [
         {
           "command": [
-            "/tmp/relar-decoder-frozen/relar",
+            "/tmp/imre-decoder-frozen/imre",
             "build",
-            "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py",
+            "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py",
             "--module-root",
-            "/home/dev-user/code/oss/relar/examples",
+            "/home/dev-user/code/oss/imre/examples",
             "--runtime",
-            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "/tmp/imre-decoder-frozen/normal_runtime.a",
             "--clang",
             "/usr/bin/clang-18",
             "--opt-level",
             "3",
             "--emit-llvm",
-            "/tmp/relar-decoder-final-validation-v3/applications/inventory/inventory.ll",
+            "/tmp/imre-decoder-final-validation-v3/applications/inventory/inventory.ll",
             "-o",
-            "/tmp/relar-decoder-final-validation-v3/applications/inventory/inventory"
+            "/tmp/imre-decoder-final-validation-v3/applications/inventory/inventory"
           ],
-          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/inventory/inventory.ll -o /tmp/relar-decoder-final-validation-v3/applications/inventory/inventory",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/tmp/imre-decoder-frozen/imre build /home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py --module-root /home/dev-user/code/oss/imre/examples --runtime /tmp/imre-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/imre-decoder-final-validation-v3/applications/inventory/inventory.ll -o /tmp/imre-decoder-final-validation-v3/applications/inventory/inventory",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:58.232270+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -710,8 +710,8 @@
           "finished_at": "2026-10-19T20:21:58.961631+00:00",
           "seconds": 0.7293632090440951,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/inventory/compile.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/inventory/compile.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/inventory/compile.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/inventory/compile.stderr",
           "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
@@ -720,18 +720,18 @@
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "-I",
             "-B",
-            "/home/dev-user/code/oss/relar/benchmarks/inventory_validate.py",
+            "/home/dev-user/code/oss/imre/benchmarks/inventory_validate.py",
             "--python",
             "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
             "--binary",
-            "/tmp/relar-decoder-final-validation-v3/applications/inventory/inventory",
+            "/tmp/imre-decoder-final-validation-v3/applications/inventory/inventory",
             "--rust-bigint",
-            "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint",
+            "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint",
             "--output",
-            "/tmp/relar-decoder-final-validation-v3/applications/inventory/validation.json"
+            "/tmp/imre-decoder-final-validation-v3/applications/inventory/validation.json"
           ],
-          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/inventory_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/inventory/inventory --rust-bigint /home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint --output /tmp/relar-decoder-final-validation-v3/applications/inventory/validation.json",
-          "cwd": "/home/dev-user/code/oss/relar",
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/imre/benchmarks/inventory_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/imre-decoder-final-validation-v3/applications/inventory/inventory --rust-bigint /home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint --output /tmp/imre-decoder-final-validation-v3/applications/inventory/validation.json",
+          "cwd": "/home/dev-user/code/oss/imre",
           "started_at": "2026-10-19T20:21:58.966740+00:00",
           "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
           "environment_overrides": {
@@ -742,20 +742,20 @@
           "finished_at": "2026-10-19T20:22:10.242489+00:00",
           "seconds": 11.275786496989895,
           "returncode": 0,
-          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/inventory/validate.stdout",
-          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/inventory/validate.stderr",
+          "stdout": "/tmp/imre-decoder-final-validation-v3/applications/inventory/validate.stdout",
+          "stderr": "/tmp/imre-decoder-final-validation-v3/applications/inventory/validate.stderr",
           "stdout_sha256": "80e8f75e19a3561bc3244a00f4febf6a7a3177fb9ef85320e64e87e43030213a",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       ],
-      "validation": "/tmp/relar-decoder-final-validation-v3/applications/inventory/validation.json",
+      "validation": "/tmp/imre-decoder-final-validation-v3/applications/inventory/validation.json",
       "counts": {
         "cases": 204,
         "successful": 139,
         "terminal_errors": 65,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust_bigint"
         ],
         "device_check": {
@@ -765,7 +765,7 @@
               "returncode": 1,
               "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
               "stdout_bytes": 0,
-              "stderr": "Traceback (most recent call last):\n  File \"/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py\", line 21, in main\n    output.flush()\n    ~~~~~~~~~~~~^^\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py\", line 19, in main\n    with open(report_path, \"w\", encoding=\"utf-8\") as output:\n         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import runpy, sys; sys.path.insert(0, sys.argv[1]); sys.argv = ['inventory_reconciliation', *sys.argv[2:]]; runpy.run_module('inventory_reconciliation', run_name='__main__', alter_sys=True)\n                                                                                                                ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen runpy>\", line 231, in run_module\n  File \"<frozen runpy>\", line 98, in _run_module_code\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py\", line 28, in <module>\n    main()\n    ~~~~^^\n  File \"/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py\", line 23, in main\n    raise OSError(\"report: cannot write\")\nOSError: report: cannot write\n",
+              "stderr": "Traceback (most recent call last):\n  File \"/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py\", line 21, in main\n    output.flush()\n    ~~~~~~~~~~~~^^\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py\", line 19, in main\n    with open(report_path, \"w\", encoding=\"utf-8\") as output:\n         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import runpy, sys; sys.path.insert(0, sys.argv[1]); sys.argv = ['inventory_reconciliation', *sys.argv[2:]]; runpy.run_module('inventory_reconciliation', run_name='__main__', alter_sys=True)\n                                                                                                                ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen runpy>\", line 231, in run_module\n  File \"<frozen runpy>\", line 98, in _run_module_code\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py\", line 28, in <module>\n    main()\n    ~~~~^^\n  File \"/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py\", line 23, in main\n    raise OSError(\"report: cannot write\")\nOSError: report: cannot write\n",
               "files": {
                 "orders.txt": {
                   "sha256": "b4f9376165d501dd6231c58f4d0ecc24bb981b1c15c6a4f2c69fb8ad324e58c0",
@@ -778,7 +778,7 @@
               },
               "directories": []
             },
-            "relar": {
+            "imre": {
               "returncode": 1,
               "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
               "stdout_bytes": 0,
@@ -825,6 +825,6 @@
   "caveats": [
     "Language counts include compile-time rejections and combine optimization levels; they are not all distinct programs.",
     "Sanitizers cover generated native code and the custom runtime; the prebuilt Rust standard library is not instrumented.",
-    "The Rust reference has four recorded Unicode repr-message boundaries; Relar is checked against exact CPython messages."
+    "The Rust reference has four recorded Unicode repr-message boundaries; Imre is checked against exact CPython messages."
   ]
 }

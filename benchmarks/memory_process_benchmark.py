@@ -23,7 +23,7 @@ role = Path(sys.argv[0]).name.rsplit('-', 1)[-1]
 assert role in ('old', 'new')
 assert os.environ['TY_MEMORY_REPORT'] == 'json'
 assert os.environ['TY_MAX_PARALLELISM'] == '1'
-assert os.environ['RELAR_PROCESS_SENTINEL'] == 'inherited'
+assert os.environ['IMRE_PROCESS_SENTINEL'] == 'inherited'
 command = [sys.argv[1 if role == 'old' else 2], *sys.argv[4:]]
 completed = subprocess.run(command, input=b'', capture_output=True, check=False)
 directory = Path(sys.argv[3]) / role
@@ -372,7 +372,7 @@ def main():
                 result["amortized_seconds"] = {name: item["median_seconds"] / result["rounds"] for name, item in result["summary"].items()}
             record["compute_workloads" if computed else "filesystem_workloads" if filesystem else "workloads"].append(result)
             args.output.write_text(json.dumps(record, indent=2) + "\n")
-            print(f"{value.label}: original/Relar={result['original_over_relar']:.3f}, Relar/Rust={result['relar_over_rust']:.3f}", flush=True)
+            print(f"{value.label}: original/Imre={result['original_over_imre']:.3f}, Imre/Rust={result['imre_over_rust']:.3f}", flush=True)
     final_hashes = {name: shared.sha256(path) for name, path in paths.items()}
     assert hashes == final_hashes, {name: (digest, final_hashes.get(name)) for name, digest in hashes.items() if final_hashes.get(name) != digest}
     base.verify(prepared, paths, hashes, args, revision, dirty)

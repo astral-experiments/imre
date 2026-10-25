@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from relar.json import decode
+from imre.json import decode
 
 from conformance_report.model import ExpectedError, Location, Position, Positions, Source, TyDiagnostic, WireDiagnostic
 
