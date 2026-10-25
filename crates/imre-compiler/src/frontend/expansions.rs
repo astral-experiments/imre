@@ -8,8 +8,16 @@ impl Checker<'_> {
     fn keyword_dictionary(
         &mut self,
         call: &ast::ExprCall,
-        mut value: Option<Type>,
+        shape: Option<(Type, Type)>,
     ) -> Result<Expr, String> {
+        if shape.is_some_and(|(key, _)| key != Type::Str) {
+            return Err(error(
+                self.source,
+                call,
+                "dictionary keyword entries require string keys",
+            ));
+        }
+        let mut value = shape.map(|(_, value)| value);
         let mut scope = calls::ArgumentScope::default();
         let mut entries = Vec::with_capacity(call.arguments.keywords.len());
         for kw in &call.arguments.keywords {
@@ -24,14 +32,8 @@ impl Checker<'_> {
                 Some(ty) => self.expr_expected(&kw.value, ty)?,
                 None => self.expr(&kw.value)?,
             };
-            value.get_or_insert(item.ty);
-            entries.push((
-                Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Str(name.to_string()),
-                },
-                scope.hold(self, item),
-            ));
+            value = Some(item.ty);
+            entries.push((unpacking::string(name.as_str()), scope.hold(self, item)));
         }
         let value = value.expect("at least one keyword or a contextual value type");
         Ok(scope.finish(Expr {
@@ -106,14 +108,7 @@ impl Checker<'_> {
             }
         }
         if !call.arguments.keywords.is_empty() {
-            if shape.is_some_and(|(key, _)| key != Type::Str) {
-                return Err(error(
-                    self.source,
-                    call,
-                    "dictionary keyword entries require string keys",
-                ));
-            }
-            let kw = self.keyword_dictionary(call, shape.map(|(_, value)| value))?;
+            let kw = self.keyword_dictionary(call, shape)?;
             if sources.is_empty() {
                 return Ok(kw);
             }
@@ -182,15 +177,8 @@ impl Checker<'_> {
         let keywords = if call.arguments.keywords.is_empty() {
             None
         } else {
-            if key_type != Type::Str {
-                return Err(error(
-                    self.source,
-                    call,
-                    "dictionary keyword entries require string keys",
-                ));
-            }
             let owner = self.hidden(ty);
-            let entries = self.keyword_dictionary(call, Some(value_type))?;
+            let entries = self.keyword_dictionary(call, Some((key_type, value_type)))?;
             input.evaluate.push(Statement::Assign(owner, entries));
             clear.push(owner);
             Some(owner)
@@ -266,14 +254,7 @@ impl Checker<'_> {
             }
         }
         if !call.arguments.keywords.is_empty() {
-            if key != Type::Str {
-                return Err(error(
-                    self.source,
-                    call,
-                    "dict.update keyword entries require string keys",
-                ));
-            }
-            args.push(self.keyword_dictionary(call, Some(value))?);
+            args.push(self.keyword_dictionary(call, Some((key, value)))?);
         }
         Ok(Expr {
             ty: Type::None,
