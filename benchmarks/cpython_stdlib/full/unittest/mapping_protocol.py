@@ -21,7 +21,10 @@ def compare(case: Case, left: dict[str, str], right: dict[str, str]) -> None:
 
 case = Case()
 case.assertEqual({"b": "second", "a": "first"}, {"a": "first", "b": "second"})
-case.assertDictEqual({}, {})
+# This entire entry uses only the generic method. Reachable builds must retain
+# its dictionary implementation even when the caller never names that method.
+empty: dict[str, str] = {}
+case.assertEqual(empty, {})
 compare(case, {}, {"key": "value"})
 compare(case, {"different": "a"}, {"missing": "a"})
 compare(case, {"z": "old", "a": "unchanged"}, {"a": "unchanged", "z": "new"})

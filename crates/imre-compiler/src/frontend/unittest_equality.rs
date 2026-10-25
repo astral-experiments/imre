@@ -77,7 +77,16 @@ impl Checker<'_> {
         } else {
             "_baseAssertEqual"
         };
-        let mut signature = self.classes.methods[class][method].clone();
+        let mut signature = self.classes.methods[class]
+            .get(method)
+            .cloned()
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    call,
+                    &format!("native TestCase equality method {method} is unavailable"),
+                )
+            })?;
         signature.params[1].name = a.into();
         signature.params[2].name = b.into();
         self.source_call(call, &signature, Some(receiver.clone()), 1)
