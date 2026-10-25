@@ -22,6 +22,7 @@ mod callables;
 mod calls;
 mod comprehensions;
 mod contexts;
+mod contextvars;
 mod copying;
 mod counter;
 mod csv;
@@ -1527,6 +1528,10 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::StringIo)) => return Ok(Type::StringIO),
+        Some(Binding::Intrinsic(Intrinsic::Context)) => return Ok(Type::Context),
+        Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
+            return Ok(types.context_var(Type::ObjectValue));
+        }
         Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return Ok(Type::LogFormatter),
         Some(Binding::Intrinsic(Intrinsic::HandlerLevelType)) => return Ok(types.string_or_int()),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
@@ -1588,6 +1593,20 @@ fn annotation_with_aliases(
                 expression,
                 "read-only mapping annotations currently require Mapping[str, object]",
             ))
+        }
+        ast::Expr::Subscript(subscript)
+            if let Some(Binding::Intrinsic(
+                kind @ (Intrinsic::ContextVar | Intrinsic::ContextToken),
+            )) = graph.resolve_type(module, &subscript.value) =>
+        {
+            let Type::ContextVar(id) = types.context_var(nested(&subscript.slice)?) else {
+                unreachable!()
+            };
+            Ok(if kind == Intrinsic::ContextVar {
+                Type::ContextVar(id)
+            } else {
+                Type::ContextToken(id)
+            })
         }
         ast::Expr::Subscript(subscript)
             if graph.resolve_type(module, &subscript.value)
@@ -2357,6 +2376,12 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        if matches!(expected, Type::ContextVar(_))
+            && let ast::Expr::Call(call) = expression
+            && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ContextVar))
+        {
+            return self.context_constructor(call, self.types.context_value(expected));
+        }
         if self.present_subscripts.contains(&expression.range()) {
             let value = self.expr(expression)?;
             if self.types.payload(value.ty) == Some(expected) {
@@ -4180,10 +4205,12 @@ impl<'a> Checker<'a> {
         }
         let stored = self.types.directory_value(manager.ty);
         let archive = manager.ty == Type::ZipFile;
+        let token = matches!(manager.ty, Type::ContextToken(_));
         let popen = matches!(manager.ty, Type::Popen(..));
         if temporary.is_none()
             && stored.is_none()
             && !archive
+            && !token
             && !popen
             && !matches!(manager.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
         {
@@ -4217,7 +4244,7 @@ impl<'a> Checker<'a> {
         let (nested, falls) = self.with_items(remaining, body)?;
         protected.extend(nested);
         let mut statements = vec![Statement::Assign(captured, manager)];
-        if temporary.is_none() && stored.is_none() && !archive && !popen {
+        if temporary.is_none() && stored.is_none() && !archive && !popen && !token {
             statements.push(Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
@@ -4229,6 +4256,8 @@ impl<'a> Checker<'a> {
             Builtin::Path(ir::PathOperation::CleanupTemporaryDirectory)
         } else if popen {
             Builtin::Process(ir::ProcessOperation::PopenExit)
+        } else if token {
+            Builtin::ContextVar(ir::ContextOperation::ExitToken)
         } else if archive {
             Builtin::ZipClose
         } else {
@@ -5336,6 +5365,21 @@ impl<'a> Checker<'a> {
                 {
                     let key = self.expr(&compare.operands[0])?;
                     let receiver = Self::string_value(self.expr(&compare.operands[1])?);
+                    if receiver.ty == Type::Context && matches!(key.ty, Type::ContextVar(_)) {
+                        let found = contextvars::op(
+                            ir::ContextOperation::ContextContains,
+                            Type::Bool,
+                            vec![key, receiver],
+                        );
+                        return Ok(if compare.ops[0] == ast::CmpOp::NotIn {
+                            Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Not(Box::new(found)),
+                            }
+                        } else {
+                            found
+                        });
+                    }
                     let receiver = if matches!(receiver.ty, Type::Document(_)) {
                         self.document_map(receiver)
                     } else {
@@ -5587,6 +5631,13 @@ impl<'a> Checker<'a> {
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
+                    if ty == Type::Context || right == Type::Context {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "Context mapping equality requires comparing arbitrary bound Python values",
+                        ));
+                    }
                     if let Some(order) = counter::comparison(self.types, ty, right, op) {
                         ops.push(order);
                         continue;
@@ -5670,6 +5721,9 @@ impl<'a> Checker<'a> {
                         subscript,
                         "runtime generic aliases of builtin classes are unsupported",
                     ));
+                }
+                if list.ty == Type::Context {
+                    return self.context_subscript(list, &subscript.slice);
                 }
                 if list.ty == Type::ModuleNamespace {
                     let key = self.expr_expected(&subscript.slice, Type::Str)?;
@@ -5838,6 +5892,16 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "MISSING"
+                    && self.resolve(&attribute.value)
+                        == Some(Binding::Intrinsic(Intrinsic::ContextToken))
+                {
+                    return Ok(contextvars::op(
+                        ir::ContextOperation::Missing,
+                        Type::ContextMissing,
+                        vec![],
+                    ));
+                }
                 if let Some(flag) = self.command_flag(attribute)? {
                     return Ok(flag);
                 }
@@ -6097,6 +6161,9 @@ impl<'a> Checker<'a> {
                         ty,
                         kind: ExprKind::Builtin(builtin, vec![receiver]),
                     });
+                }
+                if let Some(value) = self.context_attribute(&receiver, attribute.attr.as_str()) {
+                    return Ok(value);
                 }
                 if receiver.ty == Type::StringIO
                     && let Some(value) =
@@ -6673,6 +6740,27 @@ impl<'a> Checker<'a> {
                 return self.sha256_constructor(call, op == Intrinsic::HashNew);
             }
             Some(Binding::Intrinsic(Intrinsic::StringIo)) => return self.string_io(call),
+            Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
+                return self.context_constructor(call, None);
+            }
+            Some(Binding::Intrinsic(kind @ (Intrinsic::Context | Intrinsic::CopyContext))) => {
+                if !call.arguments.args.is_empty() || !call.arguments.keywords.is_empty() {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "Context() and copy_context() take no arguments",
+                    ));
+                }
+                return Ok(contextvars::op(
+                    if kind == Intrinsic::Context {
+                        ir::ContextOperation::New
+                    } else {
+                        ir::ContextOperation::CopyCurrent
+                    },
+                    Type::Context,
+                    vec![],
+                ));
+            }
             Some(Binding::Intrinsic(Intrinsic::BytesIo)) => {
                 let args = self.arguments(
                     call,
@@ -7252,6 +7340,12 @@ impl<'a> Checker<'a> {
                     ty: receiver.ty,
                     kind: ExprKind::Builtin(Builtin::KeyUnion, vec![receiver, other]),
                 });
+            }
+            if matches!(
+                receiver.ty,
+                Type::Context | Type::ContextVar(_) | Type::ContextToken(_)
+            ) {
+                return self.context_method(receiver, attribute.attr.as_str(), call);
             }
             if receiver.ty == Type::StringIO
                 && matches!(
@@ -7980,6 +8074,9 @@ impl<'a> Checker<'a> {
                     ) =>
             {
                 (Builtin::Float, Type::Float)
+            }
+            "len" if args.len() == 1 && args[0].ty == Type::Context => {
+                (Builtin::ContextVar(ir::ContextOperation::Len), Type::Int)
             }
             "len"
                 if args.len() == 1

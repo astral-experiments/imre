@@ -393,6 +393,12 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
                         Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
+                        Storage::Context(_)
+                        | Storage::ContextVar(_)
+                        | Storage::ContextToken(_)
+                        | Storage::TokenMissing => Some(ReprTask::Context(
+                            super::contextvars::repr_view(owner, storage),
+                        )),
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
@@ -482,6 +488,10 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         _ => fail("SystemError", "unsupported resource representation"),
                     })
                 }
+                ReprTask::Context(view) => {
+                    view.write(output);
+                    None
+                }
                 ReprTask::Record(payload, position, written) => {
                     record_field_repr(output, payload, position, written, &mut pending)
                 }
@@ -495,6 +505,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
 }
 
 enum ReprTask {
+    Context(super::contextvars::ReprView),
     Word(usize, WordKind),
     Object(*const Object, usize),
     Record(*const usize, usize, usize),

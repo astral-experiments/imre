@@ -57,6 +57,7 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    ContextVars,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -125,6 +126,10 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    Context,
+    ContextVar,
+    ContextToken,
+    CopyContext,
     GetAnnotations,
     ForwardRef,
     AnnotationTypeRepr,
@@ -358,6 +363,7 @@ impl IntrinsicModule {
             "datetime" => Some(Self::Datetime),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
+            "contextvars" => Some(Self::ContextVars),
             "inspect" => Some(Self::Inspect),
             "linecache" => Some(Self::Linecache),
             "contextlib" => Some(Self::Contextlib),
@@ -488,6 +494,10 @@ impl IntrinsicModule {
             (Self::Abc, "abstractmethod") => Intrinsic::AbstractMethod,
             (Self::Asyncio, "create_subprocess_exec") => Intrinsic::CreateSubprocessExec,
             (Self::Asyncio, "run") => Intrinsic::RunLoop,
+            (Self::ContextVars, "Context") => Intrinsic::Context,
+            (Self::ContextVars, "ContextVar") => Intrinsic::ContextVar,
+            (Self::ContextVars, "Token") => Intrinsic::ContextToken,
+            (Self::ContextVars, "copy_context") => Intrinsic::CopyContext,
             (Self::Asyncio, "new_event_loop") => Intrinsic::NewLoop,
             (Self::Asyncio, "set_event_loop") => Intrinsic::SetLoop,
             (Self::Asyncio, "ensure_future") => Intrinsic::EnsureTask,

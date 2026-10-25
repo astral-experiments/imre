@@ -44,6 +44,7 @@ pub(super) struct Task {
     fiber: RefCell<Option<Fiber>>,
     ready: RefCell<Option<Ready>>,
     active: RefCell<Option<Rc<Object>>>,
+    context: RefCell<Option<Rc<super::contextvars::State>>>,
     outcome: RefCell<Option<Outcome>>,
     scheduled: Cell<bool>,
     cancelled: Cell<bool>,
@@ -96,6 +97,7 @@ impl Task {
             fiber: RefCell::new(None),
             ready: RefCell::new(None),
             active: RefCell::new(None),
+            context: RefCell::new(None),
             outcome: RefCell::new(None),
             scheduled: Cell::new(false),
             cancelled: Cell::new(false),
@@ -110,6 +112,7 @@ impl Task {
         if self.scheduled.replace(true) {
             return;
         }
+        *self.context.borrow_mut() = super::contextvars::capture();
         let call = self.call.take().expect("a new task owns its call");
         *self.fiber.borrow_mut() = Some(Coroutine::new(move |yielder, ()| {
             CURRENT.set(yielder);
@@ -136,6 +139,7 @@ impl Task {
             return false;
         }
         self.ready.take();
+        super::contextvars::swap_task(&mut self.context.borrow_mut());
         swap_active(&mut self.active.borrow_mut());
         CANCELLED.set(self.cancelled.replace(false));
         CURRENT_TASK.replace(Rc::downgrade(self));
@@ -147,6 +151,7 @@ impl Task {
             .resume(());
         CURRENT_TASK.take();
         swap_active(&mut self.active.borrow_mut());
+        super::contextvars::swap_task(&mut self.context.borrow_mut());
         match step {
             CoroutineResult::Yield(ready) => {
                 *self.ready.borrow_mut() = Some(ready);

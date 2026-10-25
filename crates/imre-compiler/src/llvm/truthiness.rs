@@ -77,6 +77,13 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
+                Type::Context => {
+                    let count = self.instruction(format!(
+                        "call i64 @imre_contextvars_len(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i64 {count}, 1"))
+                }
                 Type::ObjectValue => {
                     let bit = self.instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",

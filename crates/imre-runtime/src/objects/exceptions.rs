@@ -459,6 +459,19 @@ impl Error {
         }
     }
 
+    /// Preserve a single object argument while displaying its Python representation.
+    pub(super) fn object_argument(kind: Kind, message: String, argument: OwnedWord) -> Self {
+        Self {
+            kind,
+            payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
+                message: Rc::new(message.into()),
+                args: smallvec::smallvec![argument],
+                os_paths: None,
+            }))),
+            cause: None,
+        }
+    }
+
     fn string_arg(text: impl Into<Str>) -> OwnedWord {
         let word = Rc::into_raw(Rc::new(text.into())) as usize;
         // SAFETY: kind 3 owns the transferred string allocation.
@@ -1354,6 +1367,14 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
+        // SAFETY: this owned word roots either the lookup exception's ContextVar
+        // argument or the token singleton; neither has a user-defined truth hook.
+        5 => unsafe {
+            object(word as *const Object).0.with(|s| match s {
+                Storage::ContextVar(_) | Storage::TokenMissing => true,
+                _ => unreachable!("unexpected boxed truth kind"),
+            })
+        },
         // SAFETY: the tuple remains rooted while its immutable length is read.
         6 => unsafe { super::records::descriptor(word as *const usize) }.length != 0,
         _ => unreachable!(),
