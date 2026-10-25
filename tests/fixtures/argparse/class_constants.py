@@ -16,3 +16,8 @@ print(args.as_class is object)
 print(args.as_class.__name__)
 if args.optional is not None:
     print(args.optional.__name__)
+if None is args.optional:
+    print("absent")
+else:
+    print(args.optional is int)
+print("absent" if args.optional is None else args.optional.__name__)

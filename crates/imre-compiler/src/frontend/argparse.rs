@@ -369,7 +369,9 @@ fn option(
                     None | Some(ast::Expr::NoneLiteral(_)) => None,
                     Some(ast::Expr::StringLiteral(_)) => Some(Type::Str),
                     Some(ast::Expr::BooleanLiteral(_)) => Some(Type::Bool),
-                    Some(v) if builtin_constant(v, module, locals).is_some() => Some(Type::BuiltinClass),
+                    Some(v) if builtin_constant(v, module, locals).is_some() => {
+                        Some(Type::BuiltinClass)
+                    }
                     Some(v) if numeric_literal(v, Type::Int).is_some() => Some(Type::Int),
                     Some(v) if numeric_literal(v, Type::Float).is_some() => Some(Type::Float),
                     _ => return Err(invalid()),
@@ -1458,21 +1460,26 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn enter_namespace_guards(&mut self, test: &ast::Expr, body: &[ast::Stmt]) {
+    pub(super) fn enter_namespace_guards(
+        &mut self,
+        test: &ast::Expr,
+        truth: bool,
+        body: &[ast::Stmt],
+    ) {
         if let ast::Expr::BoolOp(value) = test
-            && value.op == ast::BoolOp::And
+            && (value.op == ast::BoolOp::And && truth || value.op == ast::BoolOp::Or && !truth)
         {
             // A later operand may rebind the receiver even if the body does not.
             let mut reassigned = false;
             for operand in value.values.iter().rev() {
-                if !reassigned && let Some(guard) = self.namespace_guard(operand, body) {
+                if !reassigned && let Some(guard) = self.namespace_guard(operand, truth, body) {
                     self.namespace_guards.push(guard);
                 }
                 if !matches!(operand, ast::Expr::Attribute(attr) if attr.value.is_name_expr()) {
                     reassigned = true
                 }
             }
-        } else if let Some(guard) = self.namespace_guard(test, body) {
+        } else if let Some(guard) = self.namespace_guard(test, truth, body) {
             self.namespace_guards.push(guard);
         }
     }
@@ -1481,11 +1488,26 @@ impl Checker<'_> {
     /// receiver keeps the same binding, even when another alias survives calls.
     pub(super) fn namespace_guard(
         &self,
-        test: &ast::Expr,
+        mut test: &ast::Expr,
+        mut truth: bool,
         body: &[ast::Stmt],
     ) -> Option<(usize, usize)> {
-        let ast::Expr::Attribute(attr) = test else {
-            return None;
+        while let ast::Expr::UnaryOp(unary) = test
+            && unary.op == ast::UnaryOp::Not
+        {
+            truth = !truth;
+            test = &unary.operand;
+        }
+        let attr = match test {
+            ast::Expr::Attribute(attr) if truth => attr,
+            ast::Expr::Compare(compare) => {
+                let (operand, present) = narrowing::none_identity(compare, truth)?;
+                if !present {
+                    return None;
+                }
+                operand.as_attribute_expr()?
+            }
+            _ => return None,
         };
         let name = attr.value.as_name_expr()?.id.as_str();
         let slot = *self.names.get(name)?;
