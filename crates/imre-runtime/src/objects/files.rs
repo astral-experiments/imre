@@ -13,6 +13,7 @@ use super::{
 };
 mod buffered;
 mod gzip;
+mod path_text;
 mod seekable;
 use seekable::Memory;
 

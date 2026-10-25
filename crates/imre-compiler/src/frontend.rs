@@ -328,6 +328,9 @@ const RESERVED: &[&str] = &[
 
 /// These numbers are the sealed exception categories in the runtime ABI.
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
+    if name == "UnicodeEncodeError" {
+        return Some(38);
+    }
     if name == "NotImplementedError" {
         return Some(37);
     }

@@ -37,6 +37,11 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
+            PathOperation::WriteTypeError => self.call(
+                "imre_path_write_type_error",
+                Type::Int,
+                &[&args.last().unwrap().value],
+            ),
             PathOperation::Match { full } => {
                 let name = if args[1].value.ty.is_path() {
                     "imre_path_match_object"
@@ -212,8 +217,10 @@ impl Emitter<'_, '_> {
                     PathOperation::Suffix => "imre_path_suffix",
                     PathOperation::Parent => "imre_path_parent",
                     PathOperation::ReadBytes => "imre_path_read_bytes",
-                    PathOperation::ReadText => "imre_path_read_text",
-                    PathOperation::WriteText => "imre_path_write_text",
+                    PathOperation::ReadText => "imre_path_read_text_options",
+                    PathOperation::WriteText => "imre_path_write_text_options",
+                    PathOperation::WriteUnion { binary: true } => "imre_path_write_bytes_union",
+                    PathOperation::WriteUnion { binary: false } => "imre_path_write_text_union",
                     PathOperation::WriteBytes => "imre_path_write_bytes",
                     PathOperation::Replace => "imre_path_replace",
                     _ => unreachable!("special path ABIs were handled above"),
