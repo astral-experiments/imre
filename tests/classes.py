@@ -28,6 +28,12 @@ CELL = """class Cell:
 
 
 REJECTED = {
+    "read_class_tuple_before_definition": 'def get() -> tuple[str]:\n    return Later.words\nvalue = get()\nclass Later:\n    words = ("late",)\n',
+    "assign_to_class_string": 'class C:\n    label = "fixed"\nC.label = "new"\n',
+    "instance_shadows_class_string": 'class C:\n    label = "fixed"\n    def __init__(self, value: str) -> None:\n        self.label = value\nC("instance")\n',
+    "subclass_rebinds_fixed_string": 'class C:\n    label = "first"\nclass D(C):\n    label = "second"\n',
+    "inherited_name_in_class_expression": 'class C:\n    words = ("a",)\nclass D(C):\n    longer = words + ("b",)\n',
+    "mutable_class_tuple": 'class C:\n    items = (["not fixed"],)\n',
     "copy_hook_wrong_arity": 'import copy\nclass C:\n    def __copy__(self, extra: int) -> int: return extra\ncopy.copy(C())\n',
     "inherited_copy_reduction": 'import copy\nclass Base:\n    def __reduce_ex__(self, protocol: int) -> int: return 0\nclass Child(Base): pass\ncopy.copy(Child())\n',
     "copy_custom_getstate": 'import copy\nclass C:\n    def __getstate__(self) -> int: return 0\ncopy.copy(C())\n',
@@ -220,7 +226,7 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "property_setters.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "mapping_abc.py"]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "property_setters.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "mapping_abc.py"]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)

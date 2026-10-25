@@ -48,6 +48,22 @@ impl<'a> Visitor<'a> for References<'_> {
             self.found.attributes.insert("__copy__".to_owned());
             self.found.instance_attributes.insert("__copy__".to_owned());
         }
+        // Only a supplied, successfully bound width can invoke __index__.
+        if let ast::Expr::Call(call) = expr
+            && let ast::Expr::Attribute(attr) = call.func.as_ref()
+            && attr.attr.as_str() == "expandtabs"
+            && call.arguments.args.len() + call.arguments.keywords.len() == 1
+            && call
+                .arguments
+                .keywords
+                .first()
+                .is_none_or(|kw| kw.arg.as_deref() == Some("tabsize"))
+        {
+            self.found.attributes.insert("__index__".to_owned());
+            self.found
+                .instance_attributes
+                .insert("__index__".to_owned());
+        }
         if !matches!(expr, ast::Expr::Name(n) if n.ctx == ast::ExprContext::Store)
             && let Some(Binding::Value(id)) = self.graph.resolve(self.module, expr)
         {

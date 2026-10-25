@@ -65,6 +65,7 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -83,6 +84,7 @@ impl Builtin {
             Self::Text(operation) => Contract::new(
                 match operation {
                     TextOperation::SplitLineEnds
+                    | TextOperation::ExpandTabs
                     | TextOperation::Lower
                     | TextOperation::Capitalize
                     | TextOperation::Split(_)
@@ -158,9 +160,9 @@ impl Builtin {
                     | PathOperation::Stem
                     | PathOperation::Suffix
                     | PathOperation::IsAbsolute
-                    | PathOperation::Exists
-                    | PathOperation::IsFile
-                    | PathOperation::IsDir => false,
+                    | PathOperation::Info
+                    | PathOperation::InfoRepr
+                    | PathOperation::Query(_) => false,
                 },
                 PreservesLists,
             ),
@@ -179,7 +181,9 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::TimeSleep | Self::PercentScalar => Contract::new(true, PreservesLists),
+            Self::TimeSleep | Self::PercentScalar | Self::WarningFilter(_) => {
+                Contract::new(true, PreservesLists)
+            }
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
@@ -253,6 +257,9 @@ impl Builtin {
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
                 | ProcessOperation::RmTree
+                | ProcessOperation::CopyTree(_)
+                | ProcessOperation::IgnorePatterns
+                | ProcessOperation::TreeErrorArgs
                 | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
@@ -276,6 +283,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::BytesGet
+            | Self::WrapperAttributes(_)
             | Self::Chr
             | Self::IntegerPower
             | Self::ModularPower
@@ -298,6 +306,7 @@ impl Builtin {
             | Self::NamespaceDict
             | Self::NamespaceGet
             | Self::DictCopy
+            | Self::DictFromKeysTarget
             | Self::DeepCopy
             | Self::RecordCopy
             | Self::JsonDecode(_)
@@ -377,6 +386,7 @@ impl Builtin {
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
             | Self::DirectoryContextView
+            | Self::TextStreamView
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile(_)
@@ -420,6 +430,7 @@ impl Builtin {
             | Self::FileReadline
             | Self::GzipOpen
             | Self::BytesIo
+            | Self::StringIo(_)
             | Self::BinarySeek
             | Self::BinaryTell
             | Self::ZipOpenFile
@@ -475,6 +486,7 @@ impl Builtin {
             | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictClear
+            | Self::ListClear
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
@@ -556,6 +568,9 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::WrapperAttributes(fields) => {
+                args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
+            }
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
             }
@@ -858,6 +873,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_flush"
                 | "imre_text_close"
                 | "imre_bytes_io"
+                | "imre_string_io"
+                | "imre_string_io_value"
+                | "imre_string_io_read"
+                | "imre_string_io_seek"
+                | "imre_string_io_position"
                 | "imre_binary_seek"
                 | "imre_binary_tell"
                 | "imre_zip_open_file"
@@ -882,6 +902,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice"
                 | "imre_list_slice_sum"
                 | "imre_str_get"
+                | "imre_str_expandtabs"
                 | "imre_str_lower"
                 | "imre_str_capitalize"
                 | "imre_str_slice"
@@ -897,6 +918,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_list_copy"
                 | "imre_record_shallow_copy"
                 | "imre_dict_copy"
+                | "imre_dict_fromkeys_target"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
