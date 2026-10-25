@@ -347,6 +347,7 @@ fn emit_program(
         uses_sys_argv,
         uses_orig_argv,
         uses_linecache,
+        uses_builtins_last: module.uses_builtins_last(),
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -533,6 +534,7 @@ struct Emitter<'a, 'module> {
     uses_sys_argv: bool,
     uses_orig_argv: bool,
     uses_linecache: bool,
+    uses_builtins_last: bool,
     has_extensions: bool,
 }
 
@@ -1773,6 +1775,9 @@ impl Emitter<'_, '_> {
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
             }
+            if self.uses_builtins_last {
+                self.line("call void @imre_builtins_clear()");
+            }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
@@ -1807,6 +1812,9 @@ impl Emitter<'_, '_> {
             self.cleanup_globals();
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
+            }
+            if self.uses_builtins_last {
+                self.line("call void @imre_builtins_clear()");
             }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
@@ -3809,7 +3817,24 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
-            Builtin::RegexCompile(pattern) => self.pooled_literal(pattern.as_bytes(), returns),
+            Builtin::RegexCompile { source, spelling } => {
+                // Distinct Python spellings may compile to the same engine pattern.
+                // A non-UTF-8 prefix separates this record from legacy UTF-8 literals.
+                let mut bytes = vec![0xff];
+                bytes.extend_from_slice(&(spelling.len() as u64).to_le_bytes());
+                bytes.extend_from_slice(spelling.as_bytes());
+                bytes.extend_from_slice(source.as_bytes());
+                self.pooled_literal(&bytes, returns)
+            }
+            Builtin::RegexSpelling => self.call("imre_regex_spelling", returns, &[&args[0].value]),
+            Builtin::UnittestCompilePattern => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_unittest_compile_pattern(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::Timed(operation) => {
                 use crate::ir::TimedOperation::*;
                 let name = match operation {
@@ -4463,6 +4488,38 @@ impl Emitter<'_, '_> {
                         .checked_instruction(format!("call i64 @imre_ord(i64 {word}, i32 {kind})")),
                     small_integer: true,
                 }
+            }
+            Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
+            Builtin::BuiltinsHasLast => {
+                let bit = self.instruction("call i32 @imre_builtins_has_last()");
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::BuiltinsDeleteLast => {
+                self.void_call("imre_builtins_del_last", &[]);
+                none()
+            }
+            Builtin::BuiltinsSetLast | Builtin::SysDisplayHook => {
+                let value = &args[0].value;
+                let kind = if value.ty == Type::ObjectValue {
+                    u32::MAX
+                } else {
+                    representation_kind(value.ty, &self.module.types)
+                };
+                let word = self.word(value);
+                if matches!(builtin, Builtin::SysDisplayHook) {
+                    self.checked_line(format!(
+                        "call void @imre_sys_displayhook(i32 {kind}, i64 {word})"
+                    ));
+                } else {
+                    self.line(format!(
+                        "call void @imre_builtins_set_last(i32 {kind}, i64 {word})"
+                    ));
+                }
+                none()
             }
             Builtin::IntegerPower => {
                 self.call("imre_int_pow", Type::Int, &[&args[0].value, &args[1].value])
@@ -5269,6 +5326,17 @@ impl Emitter<'_, '_> {
                 },
                 _ => unreachable!("float conversion was checked"),
             },
+            Builtin::LengthResult => {
+                let value = self.checked_instruction(format!(
+                    "call i64 @imre_length_result(i64 {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Int,
+                    operand: value,
+                    small_integer: false,
+                }
+            }
             Builtin::Len if args[0].value.ty == Type::StringIterable => {
                 self.call("imre_string_iterable_len", Type::Int, &[&args[0].value])
             }
@@ -5792,9 +5860,11 @@ impl Emitter<'_, '_> {
                     ))
                 } else {
                     let default = default.unwrap();
-                    self.instruction(format!(
+                    let word = self.instruction(format!(
                         "call i64 @imre_dict_get_default(ptr {receiver}, i64 {key}, i64 {default})"
-                    ))
+                    ));
+                    self.check_key_comparison(args[1].value.ty);
+                    word
                 };
                 if self
                     .module
@@ -5903,6 +5973,7 @@ impl Emitter<'_, '_> {
                     "call i32 @imre_{family}_contains(ptr {}, i64 {key})",
                     args[1].value.operand
                 ));
+                self.check_key_comparison(args[0].value.ty);
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
@@ -6227,6 +6298,7 @@ impl Emitter<'_, '_> {
             "call i32 @imre_dict_try_{op}(ptr {}, i64 {key}, ptr %mapping_key_word)",
             args[0].value.operand
         ));
+        self.check_key_comparison(args[1].value.ty);
         let found = self.instruction(format!("icmp ne i32 {byte}, 0"));
         let (present, absent, end) = (self.label(), self.label(), self.label());
         self.branch(&found, &present, &absent);
@@ -6316,6 +6388,12 @@ impl Emitter<'_, '_> {
 
     /// Converts a typed value to the runtime's word representation without
     /// changing ownership. The slot's representation tag controls reclamation.
+    fn check_key_comparison(&mut self, key: Type) {
+        if matches!(key, Type::Tuple(_) | Type::Class(_)) {
+            self.check_error();
+        }
+    }
+
     fn key_word(&mut self, value: &Value) -> String {
         if self.module.types.fallible_key(value.ty) {
             self.checked_line(format!(
@@ -6673,6 +6751,8 @@ impl Emitter<'_, '_> {
         ));
         if insert {
             self.check_error();
+        } else {
+            self.check_key_comparison(value.ty);
         }
     }
 
@@ -7742,6 +7822,12 @@ declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
+declare ptr @imre_builtins_last()
+declare i32 @imre_builtins_has_last()
+declare void @imre_builtins_set_last(i32, i64)
+declare void @imre_builtins_del_last()
+declare void @imre_builtins_clear()
+declare void @imre_sys_displayhook(i32, i64)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
@@ -7774,6 +7860,7 @@ declare void @imre_args_clear()
 declare void @imre_int_retain(i64)
 declare void @imre_int_release(i64)
 declare i64 @imre_int_literal(ptr, i64)
+declare i64 @imre_length_result(i64)
 declare i64 @imre_int_binary(i64, i64, i32)
 declare i32 @imre_int_compare(i64, i64)
 declare void @imre_print_int(i64)
@@ -7781,6 +7868,8 @@ declare void @imre_print_bool(i32)
 declare void @imre_print_none()
 declare ptr @imre_str_static_literal(ptr, i64)
 declare ptr @imre_regex_compile(ptr, i64)
+declare ptr @imre_regex_spelling(ptr)
+declare ptr @imre_unittest_compile_pattern(ptr)
 declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
@@ -8588,6 +8677,48 @@ mod tests {
                     .unwrap()
                     .contains("call i32 @imre_error_pending()"),
                 "{symbol}"
+            );
+        }
+    }
+
+    #[test]
+    fn tuple_key_lookup_errors_precede_use_of_the_result() {
+        let body = function_body(
+            r#"
+def check(a: str, b: str) -> None:
+    left = ((a, 0), 0)
+    right = ((b, 0), 0)
+    values = {left: 1}
+    members = {left}
+    print(right in values)
+    print(right in members)
+    print(values.get(right, 7))
+    found = values.get(right)
+    if found is not None:
+        print(found)
+    removed = values.pop(right, None)
+    if removed is not None:
+        print(removed)
+    members.discard(right)
+
+check("a", "a")
+"#,
+        );
+        for call in [
+            "imre_dict_contains",
+            "imre_set_contains",
+            "imre_dict_get_default",
+            "imre_dict_try_get",
+            "imre_dict_try_pop",
+            "imre_set_discard",
+        ] {
+            let (_, result) = body.split_once(&format!("@{call}(")).unwrap();
+            assert!(
+                result
+                    .lines()
+                    .take(2)
+                    .any(|line| line.contains("@imre_error_pending()")),
+                "{call} must propagate a failed tuple-key comparison"
             );
         }
     }
