@@ -14,24 +14,36 @@ disables terminal color for the process it launches. This is a native body with
 host-assisted class setup. No implementation of `stop()` runs on the host.
 
 ```python
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from suite_inventory import load_suite
-from suite_native import Toolchain, native_method, run_in_fixtures, testcase_fixture
+from full.unittest.run import reference_skips
+from suite_evidence import validate_pair
+from suite_inventory import load_suite, verify_files, verify_interpreter_tests
+from suite_native import Toolchain, native_method, run_evidence, testcase_fixture
 
 # Run from benchmarks/cpython_stdlib with the pinned, test-enabled interpreter.
-source = Path("full/unittest/upstream/Lib/test/test_unittest/test_result.py").resolve()
+root = Path("full/unittest").resolve()
+source = root / "upstream/Lib/test/test_unittest/test_result.py"
 test_id = "test.test_unittest.test_result.Test_TestResult.test_stop"
+manifest = json.loads((root / "UPSTREAM.json").read_text())
+reference = json.loads((root / "reference-linux.json").read_text())
+verify_files(root / "upstream", manifest["files"])
+verify_interpreter_tests(manifest)
+reports = []
 for level in (0, 3):
     tools = Toolchain(Path("/path/to/imre"), Path("/path/to/libimre_runtime.a"),
                       Path("/path/to/clang"), level)
     with TemporaryDirectory() as work:
-        execute = native_method(tools, Path(work), source, "Test_TestResult",
-                                test_id, testcase_fixture("bool"))
-        evidence, failures, skips = run_in_fixtures(
-            load_suite("test.test_unittest"), {test_id: execute})
-        assert not failures and not skips
-        assert evidence[test_id][0]["execution"] == "native-body"
+        execute = native_method(tools, Path(work), source, "Test_TestResult", test_id,
+                                testcase_fixture("bool"), operation=("imre", "unittest.TestResult.stop"))
+        report = run_evidence(load_suite("test.test_unittest"), {test_id: execute}, reference,
+                              level, exceptions=reference_skips(level))
+    row, = [r for r in report["records"] if r["id"] == test_id]
+    assert row["outcome"] == "pass" and row["classification"] == "native-body-host-fixture"
+    assert row["roles"] == {"body": "imre", "assertions": "imre", "operation": "imre", "fixture": "mixed"}
+    reports.append(report)
+validate_pair(reports, reference)
 ```
 
 Use `verify_files` on your vendored manifest and `verify_interpreter_tests` on
@@ -48,11 +60,9 @@ A decorated method requires a dedicated adapter; class and module fixtures
 execute on CPython. If the test requires populated instance state, reproduce or
 transfer that state into the native fixture before crediting its body.
 
-For host-driven operations, pass a callback to `run_in_fixtures` instead.
+For host-driven operations, pass a callback to `run_evidence` instead.
 It receives the original case and bound method after setup. Bind only the
 operations implemented by Imre, run the original method, and return evidence
-of the actual native calls. The shared runner returns per-occurrence evidence,
-failures and skips. Check all three and reconcile them with the **complete**
-reference denominator. A method using both native and host product operations
-is mixed even when its assertions pass. A method with no native operation earns
-no native credit.
+of the actual native calls. See the [versioned evidence contract](NATIVE_EVIDENCE.md)
+for per-occurrence records, exact exception policies and rollup validation.
+The original `run_in_fixtures` callback interface remains available.
