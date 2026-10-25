@@ -1,0 +1,25 @@
+# Descriptor pressure in the original Popen parent
+
+Both `test_no_leaking` fixtures open files until EMFILE, close ten of them,
+and launch 15 children in succession with stdin, stdout and stderr piped.
+The earlier adapter created a fresh native process plus control pipes on every
+call and retained those pipes in the host. This obscured what leaked.
+
+The [new driver](pressure_fixture.py) starts one native parent. It receives all
+1,011 original open file descriptions at their original numbers, restores their
+CLOEXEC flags, and verifies its entire descriptor table and soft limit against
+the fixture before launching any child. It uses stdin/stdout to control the
+parent. After **each** original communicate it checks that every parent fd still
+has the same number and target. Independently, pid-specific traces identify
+every successful CPython data-child exec and the same native parent's 15 waits.
+
+The [O0 and O3 measurements](pressure-linux.json) passed both upstream bodies
+and their assertions on the host. The ordinary native parent used poll and the
+NoPoll parent used pselect6. This is evidence for two host-driven native
+operations per level. The recorded build combines [the selector implementation](https://github.com/astral-sh/imre/pull/682)
+with main `fce4734`; these counts do not imply fully native fixtures.
+
+Run the pinned interpreter with `pressure_fixture.py --imre ... --runtime ...
+--clang ... --opt-level 0 --result ...`, then repeat at O3 on Linux with
+`strace` and procfs. `pressure_evidence.py PREVIOUS RESULT` updates only
+these two rows and validates all 353 occurrences at both levels.
