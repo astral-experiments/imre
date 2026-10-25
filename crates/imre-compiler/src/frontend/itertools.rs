@@ -49,7 +49,7 @@ impl Checker<'_> {
                 .arguments
                 .args
                 .iter()
-                .map(|node| self.cursor_index(node))
+                .map(|node| self.integer_index(node))
                 .collect::<Result<Vec<_>, _>>()?;
             let args = match args.as_slice() {
                 [stop] => vec![pipelines::integer(0), stop.clone(), pipelines::integer(1)],
