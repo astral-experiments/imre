@@ -638,7 +638,10 @@ pub unsafe extern "C" fn imre_argparse_text(
     let text: Str = if usage {
         parser.usage(help::width())
     } else {
-        parser.help(description)
+        match parser.help(description) {
+            Ok(help) => help,
+            Err(error) => return error.returning(std::ptr::null()),
+        }
     }
     .into();
     match output {
@@ -720,11 +723,14 @@ pub unsafe extern "C" fn imre_argparse_parse(
         Ok(values) => values,
         Err(Stop::Exception(error)) => return error.returning(std::ptr::null_mut()),
         Err(Stop::Help(active)) => {
-            let help = active.help(if std::ptr::eq(active, &parser) {
+            let help = match active.help(if std::ptr::eq(active, &parser) {
                 description
             } else {
                 ""
-            });
+            }) {
+                Ok(help) => help,
+                Err(error) => return error.returning(std::ptr::null_mut()),
+            };
             if crate::write_output(|writer| {
                 writer.write_all(help.trim_end_matches('\n').as_bytes())
             })

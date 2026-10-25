@@ -14,7 +14,9 @@ from suite_inventory import cases, load_suite
 # The original setUp builds two unused host parsers. These methods construct
 # their own parser; every parse/format call goes through the compiled program.
 METHODS = {
-    "test_dest", "test_optional_subparsers", "test_required_subparsers_default",
+    "test_abbreviation", "test_dest", "test_help_blank", "test_help_non_breaking_spaces",
+    "test_optional_subparsers", "test_parse_known_args_with_single_dash_option",
+    "test_required_subparsers_default",
     "test_required_subparsers_no_destination_error", "test_required_subparsers_via_attribute",
     "test_required_subparsers_via_kwarg", "test_subparser_title_help",
 }

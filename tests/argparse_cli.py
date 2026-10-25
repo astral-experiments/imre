@@ -22,6 +22,7 @@ CASES = {
         ["--note", "red"], ["--note=42"],
     ],
     "format": [[], ["--help"], ["--mode", "text"], ["--unknown"]],
+    "blank_help": [[], ["format"], ["print"], ["parse"]],
     "counts": [
         [], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
         ["--", "a", "b"], ["a", "--", "--", "b"], ["a", "b", "-v", "c"],
@@ -190,6 +191,8 @@ def main():
                     samples.extend(([mode, "--unknown"], width, color) for mode in ("bare", "pos") for color in (False, True))
                 if name == "groups":
                     samples.extend((["foo", "check", "--help"], width, color) for color in (False, True))
+                if name == "blank_help":
+                    samples.extend(([], width, color) for color in (False, True))
             for width in (" 34\t", "+3_4", "٣٤", "3__4", "9" * 20, "0" * 4300 + "34"):
                 samples.append((["--help"], width, False))
             for separator in ("\x1c", "\x1d", "\x1e", "\x1f"):
