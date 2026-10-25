@@ -123,7 +123,7 @@ impl Reachable {
                             let name = method.name.as_str();
                             // These protocols have implicit call sites in the supported language.
                             // An unsupported operator still fails when checking its expression.
-                            let property = refs.found.properties.contains(name) && method.decorator_list.iter().any(|d| matches!(&d.expression, ast::Expr::Name(n) if n.id == "property"));
+                            let property = refs.found.properties.contains(name) && method.decorator_list.iter().any(|d| matches!(&d.expression, ast::Expr::Name(n) if n.id == "property") || graph.resolve(id.module, &d.expression) == Some(Binding::Intrinsic(Intrinsic::CachedProperty)));
                             if (property
                                 || refs.found.attributes.contains(name)
                                 || matches!(
@@ -198,6 +198,7 @@ fn known_decorator(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> b
             Intrinsic::Dataclass
                 | Intrinsic::AbstractMethod
                 | Intrinsic::ContextManager
+                | Intrinsic::CachedProperty
                 | Intrinsic::FunctionCache
         ))
     ) || matches!(expr, ast::Expr::Name(name) if matches!(name.id.as_str(), "property" | "classmethod" | "staticmethod") && graph.resolve(module, expr).is_none())
