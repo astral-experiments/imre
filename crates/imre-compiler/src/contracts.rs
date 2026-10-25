@@ -114,6 +114,10 @@ impl Builtin {
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ContextExit
+                    | PathOperation::Join
+                    | PathOperation::JoinObject
+                    | PathOperation::Parent
+                    | PathOperation::IsRelativeTo
                     | PathOperation::ReadText
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
@@ -144,19 +148,15 @@ impl Builtin {
                     | PathOperation::OsExists
                     | PathOperation::New
                     | PathOperation::PureNew(_)
-                    | PathOperation::JoinObject
                     | PathOperation::Drive
                     | PathOperation::Root
                     | PathOperation::Anchor
                     | PathOperation::CountPart
-                    | PathOperation::IsRelativeTo
                     | PathOperation::AsPosix
-                    | PathOperation::Join
                     | PathOperation::Text
                     | PathOperation::Name
                     | PathOperation::Stem
                     | PathOperation::Suffix
-                    | PathOperation::Parent
                     | PathOperation::IsAbsolute
                     | PathOperation::Exists
                     | PathOperation::IsFile
@@ -818,6 +818,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_input"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
+                | "imre_path_join"
+                | "imre_path_join_object"
+                | "imre_path_parent"
                 | "imre_path_read_bytes"
                 | "imre_path_read_text"
                 | "imre_path_write_text"
