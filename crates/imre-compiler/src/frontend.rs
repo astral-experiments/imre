@@ -5967,7 +5967,7 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
-            if name.id == "repr" {
+            if name.id == "repr" || (name.id == "str" && self.types.element(args[0].ty).is_some()) {
                 if !dataclass_values::can_format(args[0].ty, self.types, self.classes) {
                     return Err(error(
                         self.source,
