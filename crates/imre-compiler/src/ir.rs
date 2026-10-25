@@ -62,6 +62,7 @@ pub(crate) enum Type {
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
+    ZipInfo,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
@@ -151,6 +152,7 @@ impl std::fmt::Display for Type {
             Self::Logger => "logging.Logger",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
+            Self::ZipInfo => "zipfile.ZipInfo",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
@@ -419,6 +421,18 @@ pub(crate) enum CounterOp {
     Negative,
 }
 
+/// Public ZIP entry metadata read from the central directory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ZipField {
+    Name,
+    Size,
+    CompressedSize,
+    Crc,
+    Method,
+    ExternalAttr,
+    IsDir,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     DirectoryContextView,
@@ -464,7 +478,8 @@ pub(crate) enum Builtin {
     SystemExitCodeEqual {
         reversed: bool,
     },
-    SysExit,
+    /// Evaluates and roots all arguments, then raises the last (an exception).
+    RaiseException,
     WallTime,
     Logging(LogOperation),
     Input,
@@ -557,6 +572,18 @@ pub(crate) enum Builtin {
         hex: bool,
     },
     Sha256Copy,
+    BytesIo,
+    BinarySeek,
+    BinaryTell,
+    ZipOpenFile,
+    ZipGetInfo,
+    ZipInfoList,
+    ZipMember,
+    ZipRead,
+    ZipTest,
+    ZipFilename,
+    ZipMinReadSize,
+    ZipField(ZipField),
     ZipOpen,
     ZipNamelist,
     ZipClose,
@@ -588,7 +615,10 @@ pub(crate) enum Builtin {
     RStrip,
     SysArgv,
     /// The child layout descriptors follow the literal subcommand order.
-    ParseArgs(Vec<usize>),
+    ParseArgs {
+        children: Vec<usize>,
+        process_argv: bool,
+    },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
     ExactRecord(usize),
@@ -789,6 +819,9 @@ pub(crate) enum PathOperation {
     OsExists,
     New,
     Join,
+    Match {
+        full: bool,
+    },
     WithName,
     Text,
     Name,
@@ -840,7 +873,15 @@ pub(crate) enum PosixPathOperation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
     Get,
+    AddLevel,
+    LevelName,
+    LevelForName,
+    CheckLevel,
+    Names,
+    Numbers,
+    NamesCopy,
     Configure,
+    ConfigureName,
     Name,
     Level,
     Root,

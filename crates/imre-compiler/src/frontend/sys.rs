@@ -2,9 +2,62 @@
 use super::*;
 
 impl Checker<'_> {
+    /// The runtime uses UTF-8 for both strings and text paths.
+    fn encoding_call(&mut self, call: &ast::ExprCall, name: &str) -> Result<Expr, String> {
+        if call.arguments.is_empty() {
+            return Ok(unpacking::string("utf-8"));
+        }
+        let count = call.arguments.args.len();
+        let message = if call.arguments.keywords.is_empty() {
+            format!("sys.{name}() takes no arguments ({count} given)")
+        } else {
+            format!("sys.{name}() takes no keyword arguments")
+        };
+        self.sys_type_error(call, Type::Str, message)
+    }
+
+    fn sys_type_error(
+        &mut self,
+        call: &ast::ExprCall,
+        ty: Type,
+        message: String,
+    ) -> Result<Expr, String> {
+        let mut args = Vec::new();
+        for argument in &call.arguments.args {
+            args.push(self.expr(argument)?);
+        }
+        for keyword in &call.arguments.keywords {
+            if keyword.arg.is_none() {
+                return Err(error(
+                    self.source,
+                    keyword,
+                    "expanded keyword arguments are unsupported",
+                ));
+            }
+            args.push(self.expr(&keyword.value)?);
+        }
+        args.push(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(message))),
+            },
+        });
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::RaiseException, args),
+        })
+    }
+
     pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::SysExit)) {
-            return self.system_exit(call, true).map(Some);
+        match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::SysExit)) => {
+                return self.system_exit(call, true).map(Some);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysEncoding(name))) => {
+                return self.encoding_call(call, name).map(Some);
+            }
+            _ => {}
         }
         let ast::Expr::Attribute(attribute) = &*call.func else {
             return Ok(None);
@@ -73,7 +126,7 @@ impl Checker<'_> {
         Ok(if raise {
             Expr {
                 ty: Type::None,
-                kind: ExprKind::Builtin(Builtin::SysExit, vec![exception]),
+                kind: ExprKind::Builtin(Builtin::RaiseException, vec![exception]),
             }
         } else {
             exception

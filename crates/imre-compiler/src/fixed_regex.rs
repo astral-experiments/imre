@@ -98,7 +98,7 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
                 output.push(c);
                 can_repeat = c == '.';
             }
-            '$' if input.peek().is_none() => {
+            '$' if input.peek().is_none() || verbose && verbose_tail(input.clone()) => {
                 // Remember a consumed final newline so the runtime can exclude it
                 // from group zero. Dots are not valid in Python group names.
                 output.push_str(r"(?P<imre.eol>\n)?\z");
@@ -310,6 +310,30 @@ fn count(input: &mut Input<'_>, output: &mut String) -> Result<bool, String> {
     }
     output.push_str(&digits);
     Ok(true)
+}
+
+/// A terminal dollar may be followed by ignored layout and comments in VERBOSE mode.
+fn verbose_tail(mut input: Input<'_>) -> bool {
+    while let Some(c) = input.next() {
+        if verbose_space(c) {
+            continue;
+        }
+        if c != '#' {
+            return false;
+        }
+        while let Some(c) = input.next() {
+            match c {
+                '\\' => {
+                    if input.next().is_none() {
+                        return false;
+                    }
+                }
+                '\n' => break,
+                _ => {}
+            }
+        }
+    }
+    true
 }
 
 fn verbose_space(c: char) -> bool {

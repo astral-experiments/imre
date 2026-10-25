@@ -692,11 +692,6 @@ impl Parsers {
                         _ => None,
                     }.and_then(|expr| method(expr, builder, "parse_args"))
                         .ok_or_else(|| module.error(ctor, "literal add_argument declarations must be followed by an assignment or return of parse_args()"))?;
-                    if !parse.arguments.args.is_empty() || !parse.arguments.keywords.is_empty() {
-                        return Err(
-                            module.error(parse, "argparse parse_args() reads process arguments")
-                        );
-                    }
                     for builder in builders {
                         let mut outside = ContainsName(builder, false);
                         outside.visit_body(&function.body[..start]);
@@ -801,20 +796,46 @@ impl Checker<'_> {
                 kind: ExprKind::Str(String::new()),
             },
         };
+        let explicit = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([], []) => None,
+            ([value], []) => Some(value),
+            ([], [keyword]) if keyword.arg.as_ref().is_some_and(|name| name == "args") => {
+                Some(&keyword.value)
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "argparse parse_args accepts one argument list",
+                ));
+            }
+        };
+        let explicit = explicit.filter(|value| !matches!(value, ast::Expr::NoneLiteral(_)));
+        let argv_type = self.types.list(Type::Str);
+        let argv = match explicit {
+            Some(value) => self.expr_expected(value, argv_type)?,
+            None => Expr {
+                ty: argv_type,
+                kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
+            },
+        };
         Ok(Some(Expr {
             ty: Type::Class(parser.class),
             kind: ExprKind::Builtin(
-                Builtin::ParseArgs(parser.children.clone()),
+                Builtin::ParseArgs {
+                    children: parser.children.clone(),
+                    process_argv: explicit.is_none(),
+                },
                 vec![
                     Expr {
                         ty: Type::Str,
                         kind: ExprKind::Str(parser.schema.clone()),
                     },
                     description,
-                    Expr {
-                        ty: self.types.list(Type::Str),
-                        kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
-                    },
+                    argv,
                 ],
             ),
         }))
