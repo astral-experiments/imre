@@ -183,7 +183,10 @@ impl Value {
             ));
         }
         Ok(match &view.nodes[index] {
-            Node::Deferred(array) => Self::from_json_at(array.view(), array.view().index, depth)?,
+            Node::Deferred(array) => {
+                let child = array.try_view()?;
+                Self::from_json_at(child, child.index, depth)?
+            }
             Node::Null => Self::Null,
             Node::Bool(x) => Self::Bool(*x),
             Node::Integer(x) => Self::Integer(x.clone()),
@@ -400,7 +403,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             18 => usize::from(matches!(doc(a), Value::String(_))),
             19 => {
                 let mut repr = String::new();
-                doc(a).view()?.write_repr(&mut repr);
+                doc(a).view()?.try_write_repr(&mut repr)?;
                 StrOwner::into_raw(StrOwner::new(Str::new(repr))) as usize
             }
             20 => usize::from(doc(a).truth()),
@@ -421,7 +424,9 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 }
                 result?;
                 if op == 22 {
-                    StrOwner::into_raw(StrOwner::new(Str::new(text))) as usize
+                    StrOwner::into_raw(
+                        StrOwner::try_new(Str::from(text)).map_err(|_| Error::allocation())?,
+                    ) as usize
                 } else {
                     0
                 }
