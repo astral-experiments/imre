@@ -84,7 +84,11 @@ Option().updated(unknown=True)
     "property_augmentation": PROPERTY + "item = Item(1)\nitem.double += 3\n",
     "property_call": PROPERTY + "Item(1).double()\n",
     "property_extra_parameter": PROPERTY.replace("def double(self)", "def double(self, extra: int)"),
-    "property_setter": PROPERTY + "    @double.setter\n    def double(self, value: int) -> None:\n        self.value = value // 2\n",
+    "frozen_property_setter_assignment": PROPERTY.replace("@dataclass\n", "@dataclass(frozen=True)\n")
+        + "    @double.setter\n    def double(self, value: int) -> None:\n        print(value)\nItem(1).double = 4\n",
+    "cached_property_has_no_setter": "from functools import cached_property\n"
+        + PROPERTY.replace("@property", "@cached_property")
+        + "    @double.setter\n    def double(self, value: int) -> None:\n        self.value = value // 2\n",
     "property_recursion": PROPERTY.replace("return self.value * 2", "return self.double"),
     "classmethod_recursion": METHOD.replace("return cls(value)", "return cls.make(value)"),
     "classmethod_missing_receiver": METHOD.replace("def make(cls, value: int)", "def make(value: int)"),
