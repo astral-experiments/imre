@@ -134,6 +134,7 @@ pub(crate) enum Intrinsic {
     Declaration(&'static str),
     ArgumentParser,
     ArgparseNamespace,
+    BooleanOptionalAction,
     RawDescriptionHelpFormatter,
     FutureAnnotations,
     ShallowCopy,
@@ -143,6 +144,9 @@ pub(crate) enum Intrinsic {
     GetLevelName,
     AddLevelName,
     LevelNamesMapping,
+    HandlerRename,
+    HandlerLookup,
+    HandlerLevelType,
     LevelMap { names: bool },
     LogRecord,
     MakeLogRecord,
@@ -305,6 +309,8 @@ pub(crate) enum Intrinsic {
     Copy(CopyOperation),
     RmTree,
     CopyTree,
+    Move,
+    DestInSrc,
     IgnorePatterns,
     ShutilError,
     SameFileError,
@@ -574,6 +580,7 @@ impl IntrinsicModule {
             (Self::Errno, _) => Intrinsic::ErrnoAttribute,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
+            (Self::Argparse, "BooleanOptionalAction") => Intrinsic::BooleanOptionalAction,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
                 Intrinsic::RawDescriptionHelpFormatter
             }
@@ -684,6 +691,8 @@ impl IntrinsicModule {
             }
             (Self::Shutil, "rmtree") => Intrinsic::RmTree,
             (Self::Shutil, "copytree") => Intrinsic::CopyTree,
+            (Self::Shutil, "move") => Intrinsic::Move,
+            (Self::Shutil, "_destinsrc") => Intrinsic::DestInSrc,
             (Self::Shutil, "ignore_patterns") => Intrinsic::IgnorePatterns,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
@@ -1201,6 +1210,25 @@ impl SourceGraph {
     }
 }
 
+fn stdlib_attribute(
+    modules: &[SourceModule],
+    owner: ModuleId,
+    target: IntrinsicModule,
+    attr: &ast::ExprAttribute,
+) -> Option<Binding> {
+    if target == IntrinsicModule::Importlib
+        && attr.attr.as_str() == "machinery"
+        && modules[owner]
+            .machinery_import
+            .is_some_and(|at| at <= attr.start())
+    {
+        return Some(Binding::IntrinsicModule(
+            IntrinsicModule::ImportlibMachinery,
+        ));
+    }
+    stdlib_symbol(modules, target, attr.attr.as_str())
+}
+
 fn resolve_binding(
     modules: &[SourceModule],
     module: ModuleId,
@@ -1224,26 +1252,7 @@ fn resolve_binding(
     }
 }
 
-fn stdlib_attribute(
-    modules: &[SourceModule],
-    owner: ModuleId,
-    target: IntrinsicModule,
-    attr: &ast::ExprAttribute,
-) -> Option<Binding> {
-    if target == IntrinsicModule::Importlib
-        && attr.attr.as_str() == "machinery"
-        && modules[owner]
-            .machinery_import
-            .is_some_and(|at| at <= attr.start())
-    {
-        return Some(Binding::IntrinsicModule(
-            IntrinsicModule::ImportlibMachinery,
-        ));
-    }
-    stdlib_symbol(modules, target, attr.attr.as_str())
-}
-
-const LOGGING_CLASSES: &str = "__imre_logging_classes__";
+pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
 const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
 
@@ -1270,7 +1279,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
-                    (IntrinsicModule::Logging, ast::Stmt::ClassDef(_))
+                    (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))))
         })
     })
@@ -1765,6 +1774,27 @@ impl<'a> Loader<'a> {
                     return Err("wildcard imports are unsupported".into());
                 }
                 let name = self.import_name(id, import)?;
+                if import.level == 0 && name == "imre._logging" {
+                    if !self.modules[id].is_bundled(LOGGING_CLASSES) {
+                        return Err("the private logging implementation is not importable".into());
+                    }
+                    for alias in &import.names {
+                        let method = match alias.name.as_str() {
+                            "_rename_handler" => Intrinsic::HandlerRename,
+                            "_lookup_handler" => Intrinsic::HandlerLookup,
+                            "_Level" => Intrinsic::HandlerLevelType,
+                            _ => {
+                                return Err(format!(
+                                    "unknown private logging symbol: {}",
+                                    alias.name
+                                ));
+                            }
+                        };
+                        let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                        self.bind(id, local.as_str(), Binding::Intrinsic(method), alias)?;
+                    }
+                    return Ok(());
+                }
                 if import.level == 0
                     && let Some(module) = self.intrinsic_module(&name, Some(&import.names))?
                 {
