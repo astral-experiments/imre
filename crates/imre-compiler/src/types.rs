@@ -115,6 +115,7 @@ impl Types {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::JsonRoot
@@ -430,6 +431,7 @@ impl Types {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => Some(true),
@@ -665,6 +667,7 @@ impl Types {
             }
             match ty {
                 Type::TextIO
+                | Type::CsvReader
                 | Type::BinaryIO
                 | Type::ZipFile
                 | Type::AsyncProcess(_)

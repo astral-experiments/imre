@@ -65,6 +65,7 @@ pub(crate) enum Type {
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
     ZipInfo,
+    CsvReader,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
@@ -155,6 +156,7 @@ impl std::fmt::Display for Type {
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
+            Self::CsvReader => "CSV reader",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
@@ -570,6 +572,8 @@ pub(crate) enum Builtin {
     Decode,
     Sha256Hex,
     Sha256New,
+    HashNew,
+    HashAvailable,
     Sha256Update,
     Sha256Digest {
         hex: bool,
@@ -625,6 +629,16 @@ pub(crate) enum Builtin {
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
     ExactRecord(usize),
+    CsvReader {
+        delimiter: char,
+        quote: Option<char>,
+        escape: Option<char>,
+        flags: u32,
+    },
+    CsvNext {
+        required: bool,
+    },
+    CsvLineNumber,
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
     JsonLoads,

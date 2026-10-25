@@ -9,13 +9,21 @@ The text suite also compiles three complete CPython `ReTests` methods:
 assertions check capture references and replacement escapes in `re.sub`.
 Run `tests/text.py` with the compiler, runtime, Python oracle and clang paths.
 
+## Native CSV reader tests
+
+`native_csv.py` compiles 18 complete, unchanged reader methods from CPython's
+`TestDialectExcel`. A nineteenth multiline method supplies its original fixture
+from CPython because it assigns a reserved builtin name. A typed file fixture compares every native row and field
+against the original expected values. A second fixture compares errors, physical
+line counts, Unicode, input mutation and incremental consumption with CPython.
+
 ## Native SHA-256 tests
 
 `native_zipfile.py` runs four unchanged constructor error tests from CPython's ZIP suite. CPython owns the file setup and assertions; a native child opens the files and reports the exception. Separate successful opens check directory order, duplicate names and access after close. Pass the same arguments as the JSON runner, optionally with `--opt-level 0` or `3`.
 
 `native_hashlib.py` takes the same arguments as the JSON runner. In each of CPython’s four `test_case_sha256_*` vectors, the original unittest checks the hex digest, raw digest and digest size from a single native hash object. Alternate constructors and `file_digest` run on CPython and are counted separately.
 
-The runner also compiles the unchanged `test_sha256_gil` and `test_sha256_update_over_4gb` method bodies and their equality checks. CPython supplies the private extension threshold for the first fixture. The second updates the same object with a 1 MiB buffer 4,096 times, then adds a final 11 bytes and checks CPython’s expected digest.
+The runner also compiles the unchanged `test_sha256_gil`, `test_sha256_update_over_4gb`, and `test_new_upper_to_lower` method bodies and their equality checks. CPython supplies the private extension threshold for the first fixture. The second updates the same object with a 1 MiB buffer 4,096 times, then adds a final 11 bytes and checks CPython’s expected digest.
 
 ## Native POSIX path cases
 
