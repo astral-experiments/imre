@@ -27,6 +27,20 @@ POSITIONAL_ONLY = (
 CLASS = "class Item:\n    value: int\n    def __init__(self, value: int = 1) -> None:\n        self.value = value\n    def add(self, *, amount: int) -> int:\n        return self.value + amount\n"
 
 REJECTED = {
+    "forwarded_cached_target": 'from functools import cache\n@cache\ndef target(*, x: int = 1) -> int:\n    return x\ndef wrapper(**options) -> int:\n    return target(**options)\nprint(wrapper())\n',
+    "forwarded_unknown_keyword": 'def target(*, x: int = 1) -> int:\n    return x\ndef wrapper(**options) -> int:\n    return target(**options)\nprint(wrapper(missing=2))\n',
+    "forwarded_keyword_mapping_escapes": 'def target(*, x: int = 1) -> int:\n    return x\ndef wrapper(**options) -> int:\n    print(repr(options))\n    return target(**options)\n',
+    "forwarded_callee_shadowed": 'def target(*, x: int = 1) -> int:\n    return x\ndef wrapper(target: int, **options) -> int:\n    return target(**options)\n',
+    "forwarded_option_shadows_local": 'def target(*, x: int = 1) -> int:\n    return x\ndef wrapper(**options) -> int:\n    x = 3\n    return target(**options)\n',
+    "forwarded_required_keyword": 'def target(*, x: int) -> int:\n    return x\ndef wrapper(**options) -> int:\n    print("entered")\n    return target(**options)\n',
+    "unguarded_optional_unpack": FUNCTION + "def unchecked(row: tuple[int, int] | None) -> int:\n    return add(*row)\nprint(unchecked(None))\n",
+    "invalidated_optional_unpack": FUNCTION + "def overwritten(row: tuple[int, int] | None) -> int:\n    if row is None:\n        return 0\n    row = None\n    return add(*row)\nprint(overwritten((1, 2)))\n",
+    "spread_too_many": FUNCTION + "print(add(*(1, 2, 3, 4)))\n",
+    "spread_wrong_type": FUNCTION + "print(add(*(\"a\", 2)))\n",
+    "spread_keyword_conflict": 'def f(x: int) -> int:\n    return x\nprint(f(*(1,), x=2))\n',
+    "annotated_keywords_remain_unproven": 'def accept(x: int) -> str:\n    return "ok"\ndef f(x: int | None) -> str:\n    options = {"x": x}\n    return accept(**options)\nprint(f(None))\n',
+    "spread_keywords_stay_closed": 'def f(x: int) -> int:\n    return x\nkwargs = {"x": 2}\nprint(f(*(), **kwargs))\n',
+
     "unexpected_keyword": FUNCTION + "print(add(first=1, unknown=2))\n",
     "duplicate_positional_keyword": FUNCTION + "print(add(1, first=2))\n",
     "duplicate_keyword": FUNCTION + "print(add(first=1, first=2))\n",
@@ -43,7 +57,8 @@ REJECTED = {
     "starred_arguments": FUNCTION + "print(add(*[1, 2]))\n",
     "expanded_keywords": FUNCTION + 'print(add(**{"first": 1}))\n',
     "variadic_positional_parameter": "def take(*values: int) -> None:\n    pass\ntake(1)\n",
-    "variadic_keyword_parameter": "def take(**values: int) -> None:\n    pass\ntake(first=1)\n",
+    "untyped_keyword_rest": "def take(**values) -> None:\n    pass\ntake(first=1)\n",
+    "wrong_keyword_rest_type": 'def take(**values: int) -> None:\n    pass\ntake(first="bad")\n',
     "list_default": "def take(values: list[int] = []) -> None:\n    pass\n",
     "dictionary_default": "def take(values: dict[str, int] = {}) -> None:\n    pass\n",
     "set_default": "def take(values: set[int] = {1}) -> None:\n    pass\n",

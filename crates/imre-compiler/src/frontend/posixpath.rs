@@ -3,6 +3,79 @@ use super::*;
 use crate::ir::PosixPathOperation;
 
 impl Checker<'_> {
+    /// Consume a concrete path sequence once. Display elements use the closed
+    /// str/bytes union when needed, so mixed types reach Python's runtime error.
+    fn posix_commonpath(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        let expression = if let ast::Expr::Call(call) = expression
+            && self.is_builtin_iter(call)
+            && call.arguments.keywords.is_empty()
+            && let [sequence] = call.arguments.args.as_ref()
+        {
+            sequence
+        } else {
+            expression
+        };
+        let elements = match expression {
+            ast::Expr::List(s) => Some(s.elts.as_slice()),
+            ast::Expr::Tuple(s) => Some(s.elts.as_slice()),
+            _ => None,
+        };
+        let value = if let Some(elements) = elements {
+            let values = elements
+                .iter()
+                .map(|item| self.fspath_argument(item))
+                .collect::<Result<Vec<_>, _>>()?;
+            let ty = if values.is_empty() || values.iter().all(|v| v.ty == Type::Str) {
+                Type::Str
+            } else if values.iter().all(|v| v.ty == Type::Bytes) {
+                Type::Bytes
+            } else {
+                self.types.union(&[Type::Str, Type::Bytes]).unwrap()
+            };
+            let values = values
+                .into_iter()
+                .zip(elements)
+                .map(|(v, e)| self.coerce(v, ty, e))
+                .collect::<Result<Vec<_>, _>>()?;
+            Expr {
+                ty: self.types.list(ty),
+                kind: ExprKind::List(values),
+            }
+        } else {
+            self.expr(expression)?
+        };
+        let ty = if value.ty == Type::None {
+            Type::Str
+        } else {
+            match self.types.element(value.ty) {
+                Some(Type::Path) => Type::Str,
+                Some(ty @ (Type::Str | Type::Bytes)) => ty,
+                Some(ty)
+                    if self
+                        .types
+                        .members(ty)
+                        .is_some_and(|parts| parts == [Type::Str, Type::Bytes]) =>
+                {
+                    ty
+                }
+                _ => {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "commonpath requires a list of str, bytes or pathlib.Path",
+                    ));
+                }
+            }
+        };
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(
+                Builtin::PosixPath(PosixPathOperation::Commonpath),
+                vec![value],
+            ),
+        })
+    }
+
     pub(super) fn posix_path(
         &mut self,
         call: &ast::ExprCall,
@@ -11,6 +84,7 @@ impl Checker<'_> {
         calls::reject_unpacking(call, self.source)?;
         let join = operation == PosixPathOperation::Join;
         let param = match operation {
+            PosixPathOperation::Commonpath => "paths",
             PosixPathOperation::Join => "a",
             PosixPathOperation::Normpath | PosixPathOperation::Abspath => "path",
             _ => "p",
@@ -40,6 +114,9 @@ impl Checker<'_> {
                 ));
             }
         };
+        if operation == PosixPathOperation::Commonpath {
+            return self.posix_commonpath(first);
+        }
         let mut operands = Vec::with_capacity(1 + rest.len());
         for expression in std::iter::once(first).chain(rest) {
             operands.push((expression, self.expr(expression)?));

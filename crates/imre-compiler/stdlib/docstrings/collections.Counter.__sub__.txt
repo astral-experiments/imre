@@ -1,0 +1,5 @@
+Subtract count, but keep only results with positive counts.
+
+>>> Counter('abbbc') - Counter('bccd')
+Counter({'b': 2, 'a': 1})
+

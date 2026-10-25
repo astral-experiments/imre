@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_logging",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_logging.py": "c1dc06e02d965781df0498a444aa0a333bd28a85"
+  },
+  "reference_files": {
+    "Lib/test/certdata/keycert.pem": "43ad52c2af507b464b3d9679fb1a68f67671c583",
+    "Lib/test/support/__init__.py": "6635ec3474e12ec6a2f684a1a93b6ec08df49a37",
+    "Lib/test/support/asyncore.py": "870e42837640deba4c85586f1f9879f7ca3e5b81",
+    "Lib/test/support/import_helper.py": "4c7eac0b7eb674f508fe40e8ad1e0f2b184fa533",
+    "Lib/test/support/logging_helper.py": "12fcca4f0f08d9b445ac84f6a1920c8bcb3badf4",
+    "Lib/test/support/os_helper.py": "2c45fe2369ec36b574258e701bfc078114c5499d",
+    "Lib/test/support/script_helper.py": "46ce950433ddf64726630e2e6ef679d8eefab116",
+    "Lib/test/support/smtpd.py": "6537679db9ad24f22c5071d8139b1efca354ffd4",
+    "Lib/test/support/socket_helper.py": "a41e487f3e4bc52012425e30eab9b430a3b3a7ab",
+    "Lib/test/support/threading_helper.py": "cf87233f0e2e938a9f2e7d7906844ca009416432",
+    "Lib/test/support/warnings_helper.py": "5f6f14afd74a6ee9e9c415a4a83b93724fd12957"
+  }
+}
