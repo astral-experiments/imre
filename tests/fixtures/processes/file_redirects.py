@@ -92,14 +92,15 @@ with open("redirect-output", "wb") as higher:
         print(same_filename(failure, missing))
 
 large_buffer = 2**65
-print(subprocess.Popen(["/bin/true"], bufsize=large_buffer).wait())
-print(subprocess.Popen(["/bin/true"], stdout=subprocess.DEVNULL, bufsize=-large_buffer).wait())
+exit_zero = ["/bin/sh", "-c", "exit 0"]
+print(subprocess.Popen(exit_zero, bufsize=large_buffer).wait())
+print(subprocess.Popen(exit_zero, stdout=subprocess.DEVNULL, bufsize=-large_buffer).wait())
 try:
     subprocess.Popen([missing], stdout=subprocess.PIPE, bufsize=large_buffer)
 except OverflowError as overflow:
     print(str(overflow))
 try:
-    subprocess.Popen(["/bin/true"], stdout=destination, stderr=subprocess.PIPE, bufsize=large_buffer)
+    subprocess.Popen(exit_zero, stdout=destination, stderr=subprocess.PIPE, bufsize=large_buffer)
 except ValueError as closed:
     print(str(closed))
 try:
