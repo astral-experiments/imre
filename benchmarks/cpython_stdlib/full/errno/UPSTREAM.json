@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_errno",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_errno.py": "e7f185c6b1a1812cbe3db181c41c5a5d43be6984"
+  }
+}

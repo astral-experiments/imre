@@ -1,4 +1,4 @@
-"""Check or update the six cached Path.info observations in the full occurrence report."""
+"""Check or update the measured Path.info and readlink methods in the full report."""
 
 import argparse
 from collections import Counter
@@ -9,7 +9,7 @@ import sys
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1])]
-from native_metadata import METHODS
+from native_metadata import METHODS, SYMLINK_METHODS
 from suite_evidence import validate_pair, write_reports
 
 
@@ -23,6 +23,7 @@ def main():
     parser.add_argument('--baseline', type=Path, default=HERE / 'evidence-linux.json')
     parser.add_argument('--result', type=Path)
     parser.add_argument('--imre-commit')
+    parser.add_argument('--links', action='store_true', help='select the four upstream symlink and readlink occurrences')
     args = parser.parse_args()
     if (bool(args.result) != bool(args.imre_commit)
             or args.imre_commit and not re.fullmatch(r'[0-9a-f]{40}', args.imre_commit)):
@@ -33,7 +34,7 @@ def main():
     for pair in (baseline, measurements):
         validate_pair(pair, reference)
     ids = {f'test.test_pathlib.test_pathlib.{cls}.{name}'
-           for cls in ('PathTest', 'PosixPathTest') for name in METHODS}
+           for cls in ('PathTest', 'PosixPathTest') for name in (SYMLINK_METHODS if args.links else METHODS)}
     for report in baseline:
         level = report['opt_level']
         measured = next(r for r in measurements if r['opt_level'] == level)
@@ -60,7 +61,8 @@ def main():
                 if without_revision(old) != without_revision(new):
                     raise ValueError(f'different observation for {new["id"]} at O{level}')
         report['counts'] = dict(sorted(Counter(r['classification'] for r in report['records']).items()))
-        print(f'O{level}: {len(rows)} unchanged Path.info methods with native assertions; CPython setup/teardown')
+        label = 'link' if args.links else 'Path.info'
+        print(f'O{level}: {len(rows)} unchanged {label} methods with native assertions; CPython setup/teardown')
     if args.result:
         write_reports(args.result, baseline, reference)
 
