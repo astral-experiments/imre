@@ -127,6 +127,66 @@ impl Pattern {
         }
     }
 
+    /// Expand literal runs and captures for each leftmost, nonempty match.
+    /// Searching a range in the original text preserves start/end anchor semantics.
+    fn substitute(
+        &mut self,
+        text: &str,
+        template: &[u8],
+    ) -> Result<Option<String>, std::collections::TryReserveError> {
+        let mut output = String::new();
+        let mut consumed = 0;
+        let mut append = |part: &str| {
+            output.try_reserve(part.len())?;
+            output.push_str(part);
+            Ok::<_, std::collections::TryReserveError>(())
+        };
+        loop {
+            let input = Input::new(text).span(consumed..text.len());
+            if self
+                .regex
+                .search_slots_with(&mut self.cache, &input, &mut self.slots)
+                .is_none()
+            {
+                break;
+            }
+            let start = self.slots[0].unwrap().get();
+            if let Some(slot) = self.final_newline_slot
+                && let Some(nl) = self.slots[slot]
+            {
+                self.slots[1] = Some(nl);
+            }
+            append(&text[consumed..start])?;
+            let mut program = template;
+            while !program.is_empty() {
+                let (tag, rest) = program.split_at(4);
+                let tag = u32::from_le_bytes(tag.try_into().unwrap());
+                if tag & (1 << 31) == 0 {
+                    let (literal, rest) = rest.split_at(tag as usize);
+                    append(str::from_utf8(literal).expect("validated replacement literal"))?;
+                    program = rest;
+                } else {
+                    let i = ((tag & !(1 << 31)) as usize) * 2;
+                    if let Some(a) = self.slots[i] {
+                        append(&text[a.get()..self.slots[i + 1].unwrap().get()])?;
+                    }
+                    program = rest;
+                }
+            }
+            consumed = self.slots[1].unwrap().get();
+            debug_assert!(consumed > start);
+            if consumed == text.len() {
+                break;
+            }
+        }
+        if consumed == 0 {
+            Ok(None)
+        } else {
+            append(&text[consumed..])?;
+            Ok(Some(output))
+        }
+    }
+
     fn could_match(&self, text: &[u8], at_start: bool) -> bool {
         self.required.is_empty()
             || self
@@ -287,6 +347,38 @@ pub unsafe extern "C" fn imre_regex_compile(data: *const u8, len: usize) -> *con
         unsafe { str::from_utf8_unchecked(std::slice::from_raw_parts(data, len)) }
     };
     handle(Storage::RegexPattern(Box::new(Pattern::new(source))))
+}
+
+/// Substitute all matches; a miss retains the original string.
+///
+/// # Safety
+/// Root the compiled nonempty pattern and text. The compiler supplies an encoded
+/// replacement of exactly `len` bytes, with valid capture indices and UTF-8 runs.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_sub(
+    pattern: *const Object,
+    text: *const Str,
+    template: *const u8,
+    len: usize,
+) -> *const Str {
+    // SAFETY: the static template is initialized even for an empty replacement;
+    // neither the matching engine nor substitution can reenter the pattern.
+    unsafe {
+        let template = std::slice::from_raw_parts(template, len);
+        object(pattern).0.with_mut(|storage| {
+            let Storage::RegexPattern(compiled) = storage else {
+                unreachable!()
+            };
+            match compiled.substitute(&*text, template) {
+                Ok(Some(output)) => Rc::into_raw(Rc::new(Str::from(output))),
+                Ok(None) => Rc::into_raw(acquire_rc(text as usize)),
+                Err(_) => {
+                    super::exceptions::sequence_allocation_failed();
+                    ptr::null()
+                }
+            }
+        })
+    }
 }
 
 /// Returns a rooted snapshot of the leftmost match, or a null optional on a miss.

@@ -5173,6 +5173,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::RegexSub)) => return self.sub_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
             )) => {
