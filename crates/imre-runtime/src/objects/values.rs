@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
+use super::exceptions::Error;
 use super::records::descriptor;
 use super::words::{NULLABLE, WordKind};
 use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
@@ -141,6 +142,12 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
             let kind = WordKind::new(*left_layout.kinds.add(index));
             let left_word = kind.read_record_field(left.add(index));
             let right_word = kind.read_record_field(right.add(index));
+            if left_layout.is_value_struct() && kind.raw() == 7 {
+                if super::structs::float_key(left_word) != super::structs::float_key(right_word) {
+                    return Comparison::Done(false);
+                }
+                continue;
+            }
             if !matches!(kind.raw() & !NULLABLE, 5 | 6 | 9) {
                 if !scalar_equal(left_word, right_word, kind) {
                     return Comparison::Done(false);
@@ -181,6 +188,13 @@ unsafe fn integer_equal(left: usize, right: usize) -> bool {
 /// Each word is rooted and uses `kind`. All descendant ownership graphs are
 /// acyclic and remain immutable throughout this nonreentrant traversal.
 pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
+    // SAFETY: both words remain rooted under the shared descriptor.
+    unsafe { try_equal(left, right, kind) }.unwrap_or_else(|error| error.returning(false))
+}
+
+/// # Safety
+/// The words must remain rooted and match the same concrete or nullable kind.
+pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Result<bool, Error> {
     let mut pending = Vec::new();
     let mut current = (left, right, kind, 0);
     loop {
@@ -221,10 +235,10 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
             }
         };
         match step {
-            Comparison::Done(false) => return false,
+            Comparison::Done(false) => return Ok(false),
             Comparison::Done(true) => match pending.pop() {
                 Some(next) => current = next,
-                None => return true,
+                None => return Ok(true),
             },
             Comparison::Child {
                 left: child_left,
@@ -233,6 +247,7 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                 resume,
             } => {
                 if let Some(position) = resume {
+                    pending.try_reserve(1).map_err(|_| Error::allocation())?;
                     pending.push((left, right, kind, position));
                 }
                 current = (child_left, child_right, child_kind, 0);
@@ -298,6 +313,12 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
         object(left).0.with(|left| {
             object(right).0.with(|right| match (left, right) {
                 (Storage::Sequence(left), Storage::Sequence(right)) => {
+                    match (left.rows(), right.rows()) {
+                        (Some(a), Some(b)) => return Comparison::Done(a.equal(b)),
+                        (Some(a), None) => return Comparison::Done(a.equal_words(right)),
+                        (None, Some(b)) => return Comparison::Done(b.equal_words(left)),
+                        (None, None) => {}
+                    }
                     let (left, right) = (left.resolved(), right.resolved());
                     if left.kind != right.kind || left.values.len() != right.values.len() {
                         return Comparison::Done(false);
@@ -424,6 +445,26 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                             }
                         }
                         Storage::Sequence(values) => {
+                            if let Some(rows) = values.rows() {
+                                output.push('[');
+                                for i in 0..rows.len() {
+                                    if i != 0 {
+                                        output.push_str(", ");
+                                    }
+                                    // Struct fields are scalars: formatting never queues a child.
+                                    let next = fields_repr(
+                                        output,
+                                        rows.row(i).as_ptr(),
+                                        rows.layout(),
+                                        0,
+                                        0,
+                                        &mut pending,
+                                    );
+                                    debug_assert!(next.is_none());
+                                }
+                                output.push(']');
+                                return None;
+                            }
                             let values = values.resolved();
                             if position == 0 {
                                 output.push('[');
@@ -444,6 +485,26 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         }
                         Storage::Dictionary(mapping) => {
                             format_entry(owner, mapping.repr_entry(output, position), &mut pending)
+                        }
+                        Storage::ChainMap(maps) => {
+                            if position == 0 {
+                                if pending.iter().any(|task| matches!(task, ReprTask::Object(active, _) if *active == owner)) {
+                                    output.push_str("...");
+                                    return None;
+                                }
+                                output.push_str("ChainMap(");
+                            }
+                            let mapping = maps.0.with(|s| s.sequence().values.get(position).copied());
+                            if let Some(mapping) = mapping {
+                                if position != 0 {
+                                    output.push_str(", ");
+                                }
+                                pending.push(ReprTask::Object(owner, position + 1));
+                                Some(ReprTask::Object(mapping as *const Object, 0))
+                            } else {
+                                output.push(')');
+                                None
+                            }
                         }
                         Storage::SimpleNamespace(dict) => dict
                             .0
@@ -482,9 +543,14 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         _ => fail("SystemError", "unsupported resource representation"),
                     })
                 }
-                ReprTask::Record(payload, position, written) => {
-                    record_field_repr(output, payload, position, written, &mut pending)
-                }
+                ReprTask::Record(payload, position, written) => fields_repr(
+                    output,
+                    payload,
+                    descriptor(payload),
+                    position,
+                    written,
+                    &mut pending,
+                ),
                 ReprTask::KeySeparator => {
                     output.push_str(": ");
                     None
@@ -579,15 +645,14 @@ unsafe fn text<'a>(pointer: *const u8, length: usize) -> &'a str {
     unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(pointer, length)) }
 }
 
-unsafe fn record_field_repr(
+unsafe fn fields_repr(
     output: &mut String,
     payload: *const usize,
+    layout: &super::records::RecordDescriptor,
     position: usize,
     mut written: usize,
     pending: &mut Vec<ReprTask>,
 ) -> Option<ReprTask> {
-    // SAFETY: the caller roots a fully initialized record and its descriptor.
-    let layout = unsafe { descriptor(payload) };
     // SAFETY: public record representations always have static semantic metadata.
     let semantics = unsafe { layout.semantics.as_ref() }
         .unwrap_or_else(|| fail("SystemError", "internal records have no representation"));
