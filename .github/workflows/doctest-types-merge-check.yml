@@ -16,9 +16,9 @@ jobs:
       - name: Check out the exact prospective merge, without this validation workflow
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 6d274f2a054e985de34b58164e08ee563fad4a45
+          ref: f969a330482f0b75c22c5e09b2bcb8298fd56bb4
           persist-credentials: false
-      - run: test "$(git rev-parse 'HEAD^{tree}')" = f964ac4cc13601dd1a76b99615dcae5bc7f0a109
+      - run: test "$(git rev-parse 'HEAD^{tree}')" = 67fb669d3fe24e595bf836e2736b77d2a059ba7b
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
@@ -112,3 +112,7 @@ jobs:
           PYTHON
       - name: Test compiler and runtime library changes in the same build
         run: cargo test --locked -j 2 -p imre-compiler -p imre-runtime --lib --features imre-compiler/verify-ir
+      - name: Check retained line endings, Unicode whitespace, and rmtree error filenames with the merged compiler
+        run: |
+          python3 -B tests/text_line_methods_upstream.py --compiler "$PWD/target/debug/imre" --runtime "$PWD/target/debug/libimre_runtime.a" --clang /usr/bin/clang-18
+          python3 -B benchmarks/cpython_stdlib/full/shutil/native_rmtree.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/rmtree.json"
