@@ -16,9 +16,9 @@ jobs:
       - name: Check out the exact prospective merge, without this validation workflow
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: b7bb90be1abffbdefff46db00d1520755c2b290d
-          persist-credentials: false
-      - run: test "$(git rev-parse 'HEAD^{tree}')" = ee150a852652ca183ffb2347249c6803cc963fef
+          ref: e696f836d1c390b461cf0261198d61188cb7de14
+          persist-credentials: true
+      - run: test "$(git rev-parse 'HEAD^{tree}')" = 3016f37d1fe69600e3ee3b05051712dfd8fdc701
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
