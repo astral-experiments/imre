@@ -83,3 +83,77 @@ Running regrtest again with `-u cpu -m '*test_leaking_fds_on_error'` passes
 both previously gated IDs on CPython, each performing 1,024 failed launches.
 They remain eligible for native execution. This supplemental run does not
 change the results of the default reference command.
+
+## Pipes and communication
+
+The same native-body command now executes 11 unchanged methods (the keys
+under `native_body_host_fixtures` in its result) at both levels. It covers stdin writes,
+stdout/stderr reads, merged output, EOF/closed state, and `communicate` with
+zero or one pipe. `ProcessTestCase.test_communicate_stdout` and
+`test_communicate_stderr` now have native-parent evidence as well as the older
+child-only observation. The native body of
+`test_post_timeout_communicate_sends_input` is attempted and reported under
+`blocked`: the compiler does not infer that its exception handler calling
+`self.fail()` cannot return. The original body is not rewritten.
+
+The differential `tests/fixtures/processes/popen_pipes.py` fixture also checks
+a 200,000-byte exchange on all three pipes, recovery after a zero deadline,
+rejection of new input, repeated output, text newline conversion, and shared
+descriptor/close state. It is not another upstream ID.
+
+## Original fixtures and per-ID evidence
+
+Use the shared [suite runner](../../SUITE_RUNNER.md) from
+[#508](https://github.com/astral-sh/imre/pull/508) to run these bodies under
+the pinned release's module, class, and instance hooks. In
+`native_body_host_fixtures`, the body, assertions, and subprocess operation
+execute in Imre; the fixtures execute in CPython. The literal Python helpers
+launched by the methods still execute in the specified CPython interpreter.
+
+[host_popen.py](host_popen.py) runs original host bodies and assertions, with a
+persistent Imre parent performing the requested Popen operations. The transport
+returns the native status, stdout, stderr, and exception message. In particular,
+the post-timeout test performs both communicate calls on the same native child.
+It records which calls actually ran. [audit.py](audit.py) exercises this route
+in isolation for every eligible reference ID, with the CPU resource enabled.
+A successful host assertion with no native operation, a subprocess operation
+executed inside a CPython child, or a check of the wrong process's descriptor
+table is not a native subprocess pass.
+
+Run either script with the same flags as `native_bodies.py`. The latter's
+`blocked` and the audit's failed/blocked rows remain in the denominator.
+
+[native-linux.json](native-linux.json) records the strongest evidence for each
+of the **353** IDs on the pipes implementation. Both levels produced the same
+category totals. Repeated operations, including timeout retries, retain their
+separate counts if the levels differ.
+
+| Execution of the tested operation | -O0 | -O3 |
+| --- | ---: | ---: |
+| Native body, assertions, and subprocess operation; original host fixtures | 11 | 11 |
+| Host body and assertions, verified native subprocess operation | 36 | 36 |
+| Mixed (including a subprocess operation inside a CPython child) | 8 | 8 |
+| Reference-only | 6 | 6 |
+| Blocked | 227 | 227 |
+| Failed | 26 | 26 |
+| Original reference skip, with individual reason | 39 | 39 |
+| **Total** | **353** | **353** |
+
+There are zero end-to-end native unittest fixture executions. Eight of the 36
+host-driven IDs use the older `native_subprocess.py` reconstructed host case;
+the other 28 use the original CPython fixtures. String argument sequences are
+transported by value to the native launcher. This route does not establish
+tuple identity, ownership of inherited host descriptors, or a native
+`SelectSelector` when the NoPoll fixture patches the host module. The Linux
+reference passes the strace case outside the devbox sandbox. An unavailable
+worker fixture is a blocker rather than a new reference skip.
+
+The host can verify a closed pipe after a native context exit raises an
+`OSError`. The control process continues using that same native handle to
+check the reaped status. Arguments containing NUL travel in separate files:
+both invalid commands reach Imre instead of failing at the host's exec call.
+
+To regenerate the report, run `audit.py`, `native_bodies.py`, and
+`../../native_subprocess.py` for each level, capturing the latter's combined
+output. Pass the two files from each command, in level order, to
+`report.py --audit O0 O3 --bodies O0 O3 --run-log O0 O3 --imre-revision REV --result FILE`.

@@ -120,7 +120,9 @@ fn decode(bytes: &Rc<Bytes>) -> Result<Cow<'_, str>, Error> {
 pub unsafe extern "C" fn imre_json_loads_bytes(bytes: *const Bytes) -> *const Object {
     // SAFETY: the caller supplies live immutable bytes until the parse completes.
     let bytes = unsafe { acquire_rc::<Bytes>(bytes as usize) };
-    let result = decode(&bytes).and_then(|text| super::readonly::loads(&text));
+    let result = decode(&bytes).and_then(|text| {
+        super::readonly::loads(&text, || Rc::new(crate::Str::from(text.as_ref())))
+    });
     finish(result, std::ptr::null())
 }
 

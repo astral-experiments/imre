@@ -533,6 +533,51 @@ pub unsafe extern "C" fn imre_bytes_decode(value: *const Bytes) -> *const Str {
     finish(result, std::ptr::null())
 }
 
+/// Decode strict ASCII, reporting the first offending byte as CPython does.
+///
+/// # Safety
+/// The caller roots the immutable input through validation and copying.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_decode_ascii(value: *const Bytes) -> *const Str {
+    // SAFETY: the exact bytes remain owned by the caller.
+    let data = unsafe { &*value };
+    let result = if let Some((i, byte)) = data.iter().enumerate().find(|(_, b)| !b.is_ascii()) {
+        Err(Error::new(
+            Kind::UnicodeDecodeError,
+            format!(
+                "'ascii' codec can't decode byte 0x{byte:02x} in position {i}: ordinal not in range(128)"
+            ),
+        ))
+    } else {
+        let text = std::str::from_utf8(data).expect("ASCII is valid UTF-8");
+        Str::try_new(text)
+            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map_err(|_| Error::allocation())
+    };
+    finish(result, std::ptr::null())
+}
+
+/// Encode bytes with the URL-safe alphabet and include standard Base64 padding.
+///
+/// # Safety
+/// The caller roots the immutable byte input. The result owns its bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_urlsafe_b64encode(value: *const Bytes) -> *const Bytes {
+    use base64::{Engine, engine::general_purpose::URL_SAFE};
+    // SAFETY: the exact bytes remain rooted until encoding finishes.
+    let data = unsafe { &*value };
+    let result = (|| {
+        let n = base64::encoded_len(data.len(), true).ok_or_else(Error::allocation)?;
+        let mut encoded = allocate(n)?;
+        encoded.resize(n, 0);
+        URL_SAFE
+            .encode_slice(data, &mut encoded)
+            .expect("exact Base64 capacity");
+        Ok(Rc::into_raw(Rc::new(encoded)))
+    })();
+    finish(result, std::ptr::null())
+}
+
 /// Splits a strict UTF-8 decode without copying the whole input.
 ///
 /// # Safety

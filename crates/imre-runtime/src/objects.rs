@@ -55,6 +55,7 @@ enum Storage {
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     Repeat(itertools::Repeat),
+    IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
@@ -82,6 +83,7 @@ enum Storage {
     Logger(Rc<Str>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
+    LogRecord(Box<logging::record::Record>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
 }

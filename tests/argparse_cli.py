@@ -29,6 +29,7 @@ CASES = {
         ["--items", "red", "green"],
         ["--items=red", "green"],
         ["--items", "-0.125", "-.９", "--verbose"],
+        ["--items", "-\U00011de0"],
         ["--item-kind=blue", "--items", "red"],
         ["--items", "red", "--", "tail"],
         ["--help=none"],
@@ -93,6 +94,7 @@ CASES = {
         ["one", "-v", "two"], ["one", "--", "-v", "--"], ["--", "--", "tail"],
         ["one", "--unknown", "two"], ["--unknown", "one"], ["one", "--help"],
     ],
+    "method_args": [[]],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
 }
 REJECTED = {
