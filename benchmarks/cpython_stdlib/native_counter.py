@@ -16,11 +16,11 @@ METHODS = {"test_total": 1, "test_invariant_for_the_in_operator": 6, "test_eq": 
            "test_le": 2, "test_lt": 2, "test_ge": 2, "test_gt": 2}
 
 
-def source(method, body):
+def assertion_fixture(method, class_name="Case"):
     ty = "int" if method == "test_total" else "Counter[str]"
     return f"""from collections import Counter
 
-class Case:
+class {class_name}:
     checks: int
 
     def __init__(self) -> None:
@@ -43,7 +43,11 @@ class Case:
     def assertNotEqual(self, left: {ty}, right: {ty}) -> None:
         self.assertTrue(left != right)
 
-""".encode() + body + f"\ncase = Case()\ncase.{method}()\nprint(case.checks)\n".encode()
+"""
+
+
+def source(method, body):
+    return assertion_fixture(method).encode() + body + f"\ncase = Case()\ncase.{method}()\nprint(case.checks)\n".encode()
 
 
 def main():

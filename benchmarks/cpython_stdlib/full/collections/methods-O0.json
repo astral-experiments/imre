@@ -1,0 +1,72 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "opt_level": 0,
+  "operation": "native Imre Counter",
+  "tests": {
+    "test.test_collections.TestCounter.test_eq": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "60f59bc732ad2880965d2b92b61975e1b1627b926f369b5650a3fcc8fb88eb47"
+      }
+    ],
+    "test.test_collections.TestCounter.test_ge": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "0cfa2bfaef1c0edc0921109f1948fe46d21cd523c667925c9560f65d010590ab"
+      }
+    ],
+    "test.test_collections.TestCounter.test_gt": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "ec0001c6fd12796bd2f8eb57de80d99f37c6e0210a65188953f027d0e3895467"
+      }
+    ],
+    "test.test_collections.TestCounter.test_invariant_for_the_in_operator": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "e7617c0968c241b981206b2dfabb2b1e00b7703f9abc5aa03103fb648974b5d9"
+      }
+    ],
+    "test.test_collections.TestCounter.test_le": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "7253520f6237ebe9f87f61085433bec9026023bba7dc39563417cda457446512"
+      }
+    ],
+    "test.test_collections.TestCounter.test_lt": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "746150baae9bea9d08b9d7a01f37df2339ab40ccd4fca1d16fef0e4045565e5a"
+      }
+    ],
+    "test.test_collections.TestCounter.test_total": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "2df0ee692238ec6c283b680fc22ec954def93ab097c1c50daec0b41c4c77de2e"
+      }
+    ]
+  },
+  "failures": [],
+  "skips": []
+}
