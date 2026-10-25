@@ -370,6 +370,7 @@ impl Builtin {
             | Self::IntBounded { .. }
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
+            | Self::IsBuiltinSubclass
             | Self::IsNone
             | Self::JsonIsInt
             | Self::Len
@@ -401,6 +402,8 @@ impl Builtin {
             | Self::NominalIdentity
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
+            | Self::ForwardRefField(_)
+            | Self::NewForwardRef
             | Self::ClassNameView
             | Self::StrEnumName
             | Self::StrEnumValue
