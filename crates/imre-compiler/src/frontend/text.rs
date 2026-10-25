@@ -580,6 +580,50 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Text(operation), returns, arguments))
     }
 
+    /// CPython turns a missing or incompatible split('\n') into a catchable TypeError.
+    pub(super) fn dedent_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let source = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([arg], []) => arg,
+            ([], [kw]) if kw.arg.as_deref() == Some("text") => &kw.value,
+            _ => return self.text_function(call, "text", TextOperation::Dedent),
+        };
+        let value = self.expr(source)?;
+        let name = match value.ty {
+            Type::None => "NoneType",
+            Type::Int => "int",
+            Type::Bool => "bool",
+            Type::Float => "float",
+            Type::Bytes => "bytes",
+            Type::List(_) | Type::ListInt | Type::ByteOutput => "list",
+            Type::Dict(_) => "dict",
+            Type::Set(_) => "set",
+            Type::Tuple(_) => "tuple",
+            _ => {
+                let value = self.coerce(value, Type::Str, source)?;
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Text(TextOperation::Dedent), vec![value]),
+                });
+            }
+        };
+        let exception = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(format!(
+                    "expected str object, not '{name}'"
+                )))),
+            },
+        };
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::RaiseException, vec![value, exception]),
+        })
+    }
+
     /// Binds standard-library functions taking one positional or named string.
     pub(super) fn text_function(
         &mut self,
