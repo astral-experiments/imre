@@ -890,8 +890,7 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
         {
             self.operations.push(call.start());
             self.visit_arguments(&call.arguments);
-        } else if self.allow_calls
-            && let ast::Expr::Call(call) = node
+        } else if let ast::Expr::Call(call) = node
             && self.registration_errors.contains_key(&call.start())
         {
             self.visit_arguments(&call.arguments);
@@ -1062,114 +1061,129 @@ impl Parsers {
                             .iter_non_variadic_params()
                             .map(|p| p.name().to_string()),
                     );
-                    let registration_errors = registration::failures(
-                        &function.body[start + 1..],
-                        builder,
-                        graph,
-                        module_id,
-                        &locals,
-                        flags.prefixes,
-                    );
-                    let read_options = |builder: &str,
-                                        flags: &Flags,
-                                        index: &mut usize,
-                                        mut names: HashSet<String>,
-                                        builders: &mut Vec<String>|
-                     -> Result<RegisteredArguments, String> {
-                        let mut args = RegisteredArguments::default();
-                        let mut spellings = HashSet::new();
-                        let mut group_names = HashMap::new();
-                        let mut mutex_names = HashMap::new();
-                        while let Some(stmt) = function.body.get(*index) {
-                            if let Some((group, call)) =
-                                assigned_call(Some(stmt), builder, "add_argument_group")
-                            {
-                                register(group, builders)?;
-                                builders.push(group.id.to_string());
-                                group_names.insert(group.id.as_str(), args.groups.len());
-                                args.groups.push(argument_group(call, module)?);
-                                *index += 1;
-                                continue;
-                            }
-                            if let Some((group, owner, call)) =
-                                assigned_method(stmt, "add_mutually_exclusive_group")
-                                && (owner == builder || group_names.contains_key(owner))
-                            {
-                                register(group, builders)?;
-                                let kw = keywords(call, &["required"], module)?;
-                                if !call.arguments.args.is_empty() {
-                                    return Err(module.error(
-                                        call,
-                                        "mutually exclusive groups require named arguments",
-                                    ));
+                    let mut registration_errors = HashMap::new();
+                    let mut read_options =
+                        |builder: &str,
+                         flags: &Flags,
+                         index: &mut usize,
+                         mut names: HashSet<String>,
+                         builders: &mut Vec<String>|
+                         -> Result<RegisteredArguments, String> {
+                            let failures = |owner, from| {
+                                registration::failures(
+                                    &function.body[from..],
+                                    owner,
+                                    graph,
+                                    module_id,
+                                    &locals,
+                                    flags.prefixes,
+                                )
+                            };
+                            registration_errors.extend(failures(builder, *index));
+                            let mut args = RegisteredArguments::default();
+                            let mut spellings = HashSet::new();
+                            let mut group_names = HashMap::new();
+                            let mut mutex_names = HashMap::new();
+                            while let Some(stmt) = function.body.get(*index) {
+                                if let Some((group, call)) =
+                                    assigned_call(Some(stmt), builder, "add_argument_group")
+                                {
+                                    register(group, builders)?;
+                                    builders.push(group.id.to_string());
+                                    registration_errors
+                                        .extend(failures(group.id.as_str(), *index + 1));
+                                    group_names.insert(group.id.as_str(), args.groups.len());
+                                    args.groups.push(argument_group(call, module)?);
+                                    *index += 1;
+                                    continue;
                                 }
-                                let required = match kw.get("required") {
-                                    None | Some(ast::Expr::NoneLiteral(_)) => false,
-                                    Some(ast::Expr::BooleanLiteral(value)) => value.value,
-                                    Some(expr) => {
+                                if let Some((group, owner, call)) =
+                                    assigned_method(stmt, "add_mutually_exclusive_group")
+                                    && (owner == builder || group_names.contains_key(owner))
+                                {
+                                    register(group, builders)?;
+                                    let kw = keywords(call, &["required"], module)?;
+                                    if !call.arguments.args.is_empty() {
                                         return Err(module.error(
-                                            *expr,
-                                            "group required must be a literal bool or None",
+                                            call,
+                                            "mutually exclusive groups require named arguments",
                                         ));
                                     }
+                                    let required = match kw.get("required") {
+                                        None | Some(ast::Expr::NoneLiteral(_)) => false,
+                                        Some(ast::Expr::BooleanLiteral(value)) => value.value,
+                                        Some(expr) => {
+                                            return Err(module.error(
+                                                *expr,
+                                                "group required must be a literal bool or None",
+                                            ));
+                                        }
+                                    };
+                                    builders.push(group.id.to_string());
+                                    registration_errors
+                                        .extend(failures(group.id.as_str(), *index + 1));
+                                    mutex_names.insert(
+                                        group.id.as_str(),
+                                        (
+                                            args.mutex_required.len(),
+                                            group_names.get(owner).copied(),
+                                        ),
+                                    );
+                                    args.mutex_required.push(required);
+                                    *index += 1;
+                                    continue;
+                                }
+                                let ast::Stmt::Expr(stmt) = stmt else { break };
+                                let Some((owner, add)) =
+                                    method_receiver(&stmt.value, "add_argument")
+                                else {
+                                    break;
                                 };
-                                builders.push(group.id.to_string());
-                                mutex_names.insert(
-                                    group.id.as_str(),
-                                    (args.mutex_required.len(), group_names.get(owner).copied()),
-                                );
-                                args.mutex_required.push(required);
-                                *index += 1;
-                                continue;
-                            }
-                            let ast::Stmt::Expr(stmt) = stmt else { break };
-                            let Some((owner, add)) = method_receiver(&stmt.value, "add_argument")
-                            else {
-                                break;
-                            };
-                            let mutex = mutex_names.get(owner).copied();
-                            let group = group_names.get(owner).copied().or_else(|| mutex?.1);
-                            if owner != builder && group.is_none() && mutex.is_none() {
-                                break;
-                            }
-                            if registration_errors.contains_key(&add.start()) {
-                                *index += 1;
-                                continue;
-                            }
-                            let mut field =
-                                option(add, graph, module_id, types, classes, flags, &locals)?;
-                            if let Some(group) = group {
-                                field.option["group"] = json!(group);
-                            }
-                            if let Some((id, _)) = mutex {
-                                if field.option["required"] == true {
+                                let mutex = mutex_names.get(owner).copied();
+                                let group = group_names.get(owner).copied().or_else(|| mutex?.1);
+                                if owner != builder && group.is_none() && mutex.is_none() {
+                                    break;
+                                }
+                                if registration_errors.contains_key(&add.start()) {
+                                    *index += 1;
+                                    continue;
+                                }
+                                let mut field =
+                                    option(add, graph, module_id, types, classes, flags, &locals)?;
+                                if let Some(group) = group {
+                                    field.option["group"] = json!(group);
+                                }
+                                if let Some((id, _)) = mutex {
+                                    if field.option["required"] == true {
+                                        return Err(module.error(
+                                            add,
+                                            "mutually exclusive arguments must be optional",
+                                        ));
+                                    }
+                                    field.option["mutex"] = json!(id);
+                                }
+                                for value in std::iter::once(&field.option["flag"])
+                                    .chain(field.option["aliases"].as_array().unwrap())
+                                {
+                                    let spelling = value.as_str().unwrap();
+                                    if !spellings.insert(spelling.to_owned()) {
+                                        return Err(module.error(
+                                            add,
+                                            "argparse option spellings must be unique",
+                                        ));
+                                    }
+                                }
+                                if !names.insert(field.name.clone()) {
                                     return Err(module.error(
                                         add,
-                                        "mutually exclusive arguments must be optional",
+                                        "argparse arguments require unique destination fields",
                                     ));
                                 }
-                                field.option["mutex"] = json!(id);
+                                args.options.push(field);
+                                *index += 1;
                             }
-                            for value in std::iter::once(&field.option["flag"])
-                                .chain(field.option["aliases"].as_array().unwrap())
-                            {
-                                let spelling = value.as_str().unwrap();
-                                if !spellings.insert(spelling.to_owned()) {
-                                    return Err(module
-                                        .error(add, "argparse option spellings must be unique"));
-                                }
-                            }
-                            if !names.insert(field.name.clone()) {
-                                return Err(module.error(
-                                    add,
-                                    "argparse arguments require unique destination fields",
-                                ));
-                            }
-                            args.options.push(field);
-                            *index += 1;
-                        }
-                        Ok(args)
-                    };
+                            Ok(args)
+                        };
                     let mut index = start + 1;
                     let RegisteredArguments {
                         options,

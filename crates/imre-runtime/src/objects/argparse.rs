@@ -764,24 +764,25 @@ pub unsafe extern "C" fn imre_argparse_parse(
     // SAFETY: these immutable inputs remain rooted during parsing and construction.
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
     let parser = Parser::from_schema(schema);
+    let mut owners = Vec::new();
+    let mut args = Vec::new();
     // SAFETY: argv is a rooted list[str]; take independent string owners before
     // reading the argument values or constructing the output namespace.
-    let owners = unsafe {
+    let reserved = unsafe {
         argv.0.with(|storage| {
             let sequence = storage.sequence();
             sequence.check_kind(3);
-            sequence
-                .values
-                .iter()
-                .skip(usize::from(process_argv))
-                .map(|&word| super::acquire_rc::<Str>(word))
-                .collect::<Vec<_>>()
+            let words = sequence.values.iter().skip(usize::from(process_argv));
+            owners.try_reserve_exact(words.len())?;
+            args.try_reserve_exact(words.len())?;
+            owners.extend(words.map(|&word| super::acquire_rc::<Str>(word)));
+            Ok::<_, std::collections::TryReserveError>(())
         })
     };
-    let args = owners
-        .iter()
-        .map(|value| value.as_str())
-        .collect::<Vec<_>>();
+    if reserved.is_err() {
+        return Error::allocation().returning(std::ptr::null_mut());
+    }
+    args.extend(owners.iter().map(|value| value.as_str()));
     let parsed = match parser.parse(&args).and_then(|parsed| {
         if !pair_layout.is_null() || parsed.extras.is_empty() {
             Ok(parsed)
