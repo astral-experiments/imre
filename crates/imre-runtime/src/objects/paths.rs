@@ -493,7 +493,7 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
 }
 
 /// # Safety
-/// Root the path and replacement component until the owned new path or error is returned.
+/// Root the path and any non-null replacement component. Null represents Python None.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_with_name(
     path: *const Object,
@@ -503,7 +503,7 @@ pub unsafe extern "C" fn imre_path_with_name(
     let result = unsafe {
         object(path)
             .0
-            .with(|storage| storage.replace_name(&*replacement))
+            .with(|storage| storage.replace_name(replacement.as_ref()))
     };
     finish(result, std::ptr::null())
 }

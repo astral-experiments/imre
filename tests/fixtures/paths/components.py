@@ -21,6 +21,23 @@ def failing_option() -> bool:
     raise ValueError('evaluated walk_up')
 
 
+def check_none(path: PureWindowsPath, replacement: str | None) -> None:
+    try:
+        print(str(path.with_suffix(replacement)))
+    except ValueError as error:
+        print(str(error))
+    except TypeError as error:
+        print(str(error))
+    try:
+        print(str(path.with_stem(replacement)))
+    except ValueError as error:
+        print(str(error))
+    try:
+        print(str(path.with_name(replacement)))
+    except ValueError as error:
+        print(str(error))
+
+
 for spelling in ["", "/", "//", "a/b", "a/../b", "a/.", "/a", "//a", "x/../a"]:
     for base in ["", "/", "//", "a", "a/b", "x/..", "/x/..", "a/../b", "a/../x"]:
         for walk in [False, True]:
@@ -52,6 +69,8 @@ for spelling in ["", "/", "a/b", "x/a..", ".a.b.", "..", "//server/share"]:
 
 p = PureWindowsPath('a.tar.gz')
 extensions = p.suffixes
+for spelling in ['/', 'a', 'a.gz']:
+    check_none(PureWindowsPath(spelling), None)
 extensions.append('.changed')
 print('|'.join(extensions))
 print('|'.join(p.suffixes))

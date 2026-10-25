@@ -322,6 +322,8 @@ impl Checker<'_> {
                 for kw in &call.arguments.keywords {
                     values.push(self.expr(&kw.value)?);
                 }
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
                 return Ok(self.bad_relative_argument(
                     values,
                     result,
@@ -444,13 +446,7 @@ impl Checker<'_> {
         }
         if matches!(
             name,
-            "mkdir"
-                | "unlink"
-                | "replace"
-                | "resolve"
-                | "with_name"
-                | "with_stem"
-                | "with_suffix"
+            "mkdir" | "unlink" | "replace" | "resolve" | "with_name" | "with_stem" | "with_suffix"
         ) {
             return self.path_call(receiver, name, call);
         }
@@ -627,17 +623,17 @@ impl Checker<'_> {
             "with_name" => (
                 PathOperation::WithName,
                 receiver.ty,
-                vec![parameter("name", Type::Str, None)],
+                vec![parameter("name", self.types.optional(Type::Str), None)],
             ),
             "with_stem" => (
                 PathOperation::WithStem,
                 receiver.ty,
-                vec![parameter("stem", Type::Str, None)],
+                vec![parameter("stem", self.types.optional(Type::Str), None)],
             ),
             "with_suffix" => (
                 PathOperation::WithSuffix,
                 receiver.ty,
-                vec![parameter("suffix", Type::Str, None)],
+                vec![parameter("suffix", self.types.optional(Type::Str), None)],
             ),
             _ => unreachable!("only path methods with parameters have this signature"),
         };

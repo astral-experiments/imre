@@ -19,7 +19,9 @@ impl Storage {
         }
     }
 
-    pub(super) fn replace_name(&self, replacement: &Str) -> Result<*const Object> {
+    pub(super) fn replace_name(&self, replacement: Option<&Str>) -> Result<*const Object> {
+        let replacement =
+            replacement.ok_or_else(|| Error::new(Kind::ValueError, "Invalid name None"))?;
         if let Storage::PurePath(p) = self {
             return p.with_name(replacement);
         }
@@ -81,7 +83,7 @@ pub unsafe extern "C" fn imre_path_relative_to(
 }
 
 /// # Safety
-/// The path and new component are live throughout validation; the result owns its path.
+/// The path and any non-null replacement are rooted; null represents Python None.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_change_extension(
     path: *const Object,
@@ -91,22 +93,22 @@ pub unsafe extern "C" fn imre_path_change_extension(
     // SAFETY: no callback invalidates the immutable path or replacement string.
     let result = unsafe {
         object(path).0.with(|s| {
-            let value = &*value;
+            let value = value.as_ref();
             let name = s.basename();
             let (old_stem, old_suffix) = name.split_at(suffix_start(name).unwrap_or(name.len()));
             if stem != 0 {
                 if old_suffix.is_empty() {
                     return s.replace_name(value);
                 }
-                if value.is_empty() {
+                let Some(value) = value.filter(|v| !v.is_empty()) else {
                     return Err(Error::new(
                         Kind::ValueError,
                         format!("{} has a non-empty suffix", s.path_repr()),
                     ));
-                }
+                };
                 let mut name = value.clone();
                 name.push_str(old_suffix);
-                s.replace_name(&name)
+                s.replace_name(Some(&name))
             } else {
                 if old_stem.is_empty() {
                     return Err(Error::new(
@@ -114,6 +116,12 @@ pub unsafe extern "C" fn imre_path_change_extension(
                         format!("{} has an empty name", s.path_repr()),
                     ));
                 }
+                let value = value.ok_or_else(|| {
+                    Error::new(
+                        Kind::TypeError,
+                        "can only concatenate str (not \"NoneType\") to str",
+                    )
+                })?;
                 if !value.is_empty() && !value.starts_with('.') {
                     return Err(Error::new(
                         Kind::ValueError,
@@ -122,7 +130,7 @@ pub unsafe extern "C" fn imre_path_change_extension(
                 }
                 let mut name = Str::from(old_stem);
                 name.push_str(value);
-                s.replace_name(&name)
+                s.replace_name(Some(&name))
             }
         })
     };
