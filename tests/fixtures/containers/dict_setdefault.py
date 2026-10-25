@@ -40,6 +40,10 @@ def main() -> None:
     print(tuples.setdefault((7, "k"), "first"))
     print(tuples.setdefault((7, "k"), "second"))
     print(tuples)
+    nested: dict[tuple[tuple[int, str], int], int] = {}
+    for n in [1, 1, 2]:
+        print(nested.setdefault(((n, "k"), 0), len(nested)))
+    print(nested)
     counts = Counter("aba")
     print(counts.setdefault("a", 5))
     print(Counter.setdefault(counts, "e", 5))
