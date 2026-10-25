@@ -19,7 +19,7 @@ On Linux, 215 executions passed. `TestCEncodeBasestringAscii.test_overflow` has 
 
 ## Full native evidence
 
-The [v1 report](evidence-linux.json) covers the entire package at each optimization level. There is one package denominator, including its submodules, the two backend fixtures, and both CLI variants. It was exercised on Imre `7630556901c9936c9ca112f7fb2f4e52f3706fd3`. At each level, 11 complete native method bodies ran under 22 host fixture IDs; 34 additional fixture IDs called native operations from host methods. The remaining 160 occurrences are 98 blocked, 12 failed, 38 reference-only, 11 individually reviewed backend/private API exclusions, and the single upstream skip. The report includes partial calls, concrete diagnostics and source locations.
+The [v1 report](evidence-linux.json) covers the entire package at each optimization level. There is one package denominator, including its submodules, the two backend fixtures, and both CLI variants. It was exercised on Imre `7ae3a85460f356bd64c3e39991f9d4af7af6fd0a`. At each level, 12 complete native methods ran under 24 host fixture IDs; 40 additional fixture IDs called native operations from host methods. The remaining 152 occurrences are 98 blocked, four failed, 38 reference-only, 11 individually reviewed backend/private API exclusions, and the single upstream skip. The report includes partial calls, concrete diagnostics and source locations.
 
 ```sh
 python -B benchmarks/cpython_stdlib/full/json/evidence.py \
@@ -29,7 +29,7 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
     benchmarks/cpython_stdlib/full/json/reference-linux.json /tmp/json-evidence.json
 ```
 
-The 12 failed fixture occurrences cover key identity, structured error fields and excessive nesting. The [doctest handoff](DOCTEST.md) identifies the first shared intact-package import blocker. Native results from other branches enter this report after their product changes land and the fixtures run again.
+The four failed fixture occurrences cover key identity and excessive nesting. The [doctest handoff](DOCTEST.md) identifies the first shared intact-package import blocker.
 
 ## Native calls with host assertions
 
@@ -43,4 +43,6 @@ The [native report](native-linux.json) records both `-O0` and `-O3`. The [shared
 
 ## Compiled upstream methods
 
-Run `bodies.py` with the same options as `native.py`. It uses the [shared suite runner](../../SUITE_RUNNER.md) to compile each complete verified method into a typed native fixture. The original CPython module, class, and instance fixtures run on the host. The child process executes the unmodified body, its assertions, and standard JSON operations in Imre. Both CPython fixture IDs call the same native executable. The [body report](bodies-linux.json) records per-ID execution evidence and source hashes at both levels. Each level passed 22 fixture executions from 11 methods, including all 55,295 iterations of the Unicode escape sweep in each fixture. Ten of the 11 sources also have host-driven evidence above.
+Run `bodies.py` with the same options as `native.py`. It uses the [shared suite runner](../../SUITE_RUNNER.md) to compile each complete verified method into a native fixture. The original CPython module, class, and instance fixtures run on the host. The child process executes the unmodified body, its assertions, and standard JSON operations in Imre. Both CPython fixture IDs call the same native executable. The [body report](bodies-linux.json) records per-ID execution evidence and source hashes at both levels. Each level passed 24 fixture executions from 12 methods. Each fixture ran all 55,295 iterations of the Unicode escape sweep, and all 34 inputs in the JSON checker failure test.
+
+Run `sweep.py` with the same flags to try every one of the 112 defining unittest methods with the native TestCase and the pinned module declarations and class helpers it references. The [sweep](routine-sweep-linux.json) records the outcome for each definition and its fixture IDs at O0 and O3. With this general fixture, two methods completed, three compiled but failed at runtime, 106 had compile or decorator blockers, and one retained its upstream resource skip. These are alternate attempts at the same occurrences, not an additional denominator. The typed fixture checks above cover another ten methods. For example, the general integer assertion projects the decoded results of the three `test_parse` round trips to int; it fails when those results are lists or dictionaries.
