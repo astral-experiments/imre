@@ -764,6 +764,25 @@ impl Checker<'_> {
         }
     }
 
+    /// Keep the original bytes or path owner until the native launch. An absent
+    /// path has a null word; every present value has its own exact storage kind.
+    fn optional_exec_path(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        let value = self.expr(expression)?;
+        let ty = self.types.payload(value.ty).unwrap_or(value.ty);
+        let ty = match ty {
+            Type::None | Type::StrLiteral(_) => Type::Str,
+            Type::Str | Type::Bytes | Type::Path | Type::PurePath(_) => ty,
+            _ => {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "an executable or cwd requires str, bytes, Path or None",
+                ));
+            }
+        };
+        self.coerce(value, self.types.optional(ty), expression)
+    }
+
     /// call and check_call accept the same Popen arguments with an extra wait deadline.
     pub(super) fn popen(
         &mut self,
@@ -810,6 +829,8 @@ impl Checker<'_> {
             ("text", Type::Bool, Some(boolean(false))),
             ("encoding", Type::Bool, Some(boolean(false))),
             ("close_fds", Type::Bool, Some(boolean(true))),
+            ("executable", directory, Some(absent(directory))),
+            ("shell", Type::Bool, Some(boolean(false))),
         ]
         .into_iter()
         .enumerate()
@@ -839,9 +860,10 @@ impl Checker<'_> {
             match index {
                 0 => checker.command_argument(arg),
                 1 if matches!(arg, ast::Expr::NoneLiteral(_)) => Ok(default_bufsize()),
-                2 => checker.optional_path_argument(arg),
+                2 | 10 => checker.optional_exec_path(arg),
                 4..=8 => Ok(boolean(false)), // effect-free literals checked by stream_plan
-                10 => checker.deadline_value(arg),
+                11 => checker.condition(arg),
+                12 => checker.deadline_value(arg),
                 _ => checker.expr_expected(arg, params[index].ty),
             }
         })?;
