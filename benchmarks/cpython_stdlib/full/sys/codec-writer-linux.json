@@ -1,0 +1,42 @@
+{
+  "source": "b46541aed4a902859aacaf89268139090fe26a65",
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "case": "test.test_logging.EncodingTest.test_encoding_cyrillic_unicode",
+  "method_sha256": "c7fdda1ada09790ab5fdbafd1fb35eee75ac211d17116ed87f4507aa8294a863",
+  "runs": {
+    "0": {
+      "complete_native_blocker": "Compiling <tmp>/method-O0/case.py (-O0)\n<tmp>/method-O0/case.py:17:19: Imre: name is not a local value; globals and first-class functions are unsupported",
+      "whole_negative": "codec_writer_invalid.py:10:41: Imre: parameter \"value\" is positional-only",
+      "reachable_negative": "codec_writer_invalid.py:10:41: Imre: parameter \"value\" is positional-only"
+    },
+    "3": {
+      "complete_native_blocker": "Compiling <tmp>/method-O3/case.py (-O3)\n<tmp>/method-O3/case.py:17:19: Imre: name is not a local value; globals and first-class functions are unsupported",
+      "whole_negative": "codec_writer_invalid.py:10:41: Imre: parameter \"value\" is positional-only",
+      "reachable_negative": "codec_writer_invalid.py:10:41: Imre: parameter \"value\" is positional-only"
+    }
+  },
+  "native_writer": {
+    "source": "benchmarks/cpython_stdlib/full/sys/codec_writer.py",
+    "source_sha256": "b6d9f357b3164c6d29d648612b7cc7b3978a64c8c4e2314d6493eb13195940da",
+    "observations": [
+      {
+        "opt_level": 0,
+        "mode": null,
+        "stdout_bytes": 477,
+        "stdout_sha256": "2f0222f0d102fa51463f3d33bcef0d6db3c55aee5dca09e9d99d6824b4d1e391",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exit": 0
+      },
+      {
+        "opt_level": 3,
+        "mode": null,
+        "stdout_bytes": 477,
+        "stdout_sha256": "2f0222f0d102fa51463f3d33bcef0d6db3c55aee5dca09e9d99d6824b4d1e391",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exit": 0
+      }
+    ]
+  },
+  "original_native_operations": 0,
+  "original_blocking_operation": "handler = logging.StreamHandler(writer)"
+}

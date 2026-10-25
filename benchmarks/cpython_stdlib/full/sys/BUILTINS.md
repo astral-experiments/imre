@@ -39,7 +39,7 @@ line 1650. The filesystem helper now calls native lookup; `charmap_build` remain
 The [native codec fixture](codec_lookup.py) compares aliases and cache identity, canonical
 names, exact encoded/decoded results and consumed lengths, errors, and the five fixed
 UTF byte-order marks with pinned Python. The stateless registry supports ASCII, Latin-1,
-UTF-8, UTF-8 with signature and Windows-1251. Search-function registration, stream codecs, other
+UTF-8, UTF-8 with signature and Windows-1251. Search-function registration, stream readers, other
 encodings, mutable CodecInfo attributes, and surrogate-preserving text need further work.
 
 The pinned os and logging suites use different parts of this registry. In
@@ -52,6 +52,11 @@ obtains `codecs.getwriter('cp1251')`, sets its class encoding, and logs into a
 wrapped `io.BytesIO`. A [separate codec control](codec_cp1251.py) compares all
 255 defined bytes with pinned CPython, checks the undefined byte and error
 handlers, and encodes the exact Cyrillic message and newline. The [Linux results
-at O0 and O3](codec-cp1251-linux.json) include both this and the existing codec control. The original
-method still needs a mutable writer class, stream delivery and its logging
-fixture. These consumer occurrences stay with their respective suite reports.
+at O0 and O3](codec-cp1251-linux.json) include both this and the existing codec control.
+
+The [writer control](codec_writer.py) uses the registry's real shared writer classes, their mutable
+encoding label, and independent writer instances. It checks the delivered bytes, error policy,
+UTF-8 signature resets and the retained binary stream at both levels. The [receipt](codec-writer-linux.json)
+also records the untouched logging method's next compiler error: `logging.StreamHandler(writer)`.
+The [memory-stream prerequisite](https://github.com/astral-sh/imre/pull/978) implements
+`io.BytesIO.getvalue()` for the final assertion. These consumer occurrences stay with their respective suite reports.

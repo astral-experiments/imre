@@ -15,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures, testcase_fixture
+from suite_native import NativeCompileError, Toolchain, native_method, run_evidence, run_in_fixtures, testcase_fixture
 from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
 import argv_case
@@ -78,12 +78,22 @@ def select(toolchain, work, source, module):
         raise AssertionError("unexpected output from language version checks")
 
     # Process regressions use the real hooks and retained objects; none adds a test ID.
-    for filename in ("active_exception.py", "display_values.py", "codec_lookup.py", "codec_cp1251.py"):
+    for filename in ("active_exception.py", "display_values.py", "codec_lookup.py", "codec_cp1251.py", "codec_writer.py"):
         exercise = HERE / filename
         ref = subprocess.run([sys.executable, exercise], capture_output=True, check=True, timeout=15)
         binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))
         if output(binary) != (ref.stdout, ref.stderr):
             raise AssertionError(f"{filename}: native output differs from CPython")
+
+    child = directory(work, "codec-writer-invalid")
+    try:
+        toolchain.build((HERE / "codec_writer_invalid.py").read_bytes(), child)
+    except NativeCompileError as error:
+        expected = f'{child}/case.py:10:41: Imre: parameter "value" is positional-only'
+        if str(error).splitlines()[-1] != expected:
+            raise AssertionError(("nested writer argument diagnostic", str(error))) from error
+    else:
+        raise AssertionError("a writer keyword suppressed a nested positional-only error")
 
     encoding = toolchain.build((HERE / "encoding_driver.py").read_bytes(), directory(work, "encoding"))
 
