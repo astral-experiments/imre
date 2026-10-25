@@ -214,6 +214,7 @@ pub(crate) enum Intrinsic {
     Partial,
     Placeholder,
     Reduce,
+    CmpToKey,
     TomlDumps,
     TomliLoads,
     TomliLoad,
@@ -660,6 +661,7 @@ impl IntrinsicModule {
             (Self::Functools, "partial") => Intrinsic::Partial,
             (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
             (Self::Functools, "reduce") => Intrinsic::Reduce,
+            (Self::Functools, "cmp_to_key") => Intrinsic::CmpToKey,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
             (Self::Tomli, "load") => Intrinsic::TomliLoad,
@@ -1198,6 +1200,11 @@ impl SourceGraph {
     pub(crate) fn checked_index_read(&self, module: ModuleId, read: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::CheckedIndexRead(read));
+    }
+
+    /// The accelerated result of cmp_to_key remains callable after binding an object.
+    pub(crate) fn checked_callable_key(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::CallableKey(call));
     }
 
     /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).

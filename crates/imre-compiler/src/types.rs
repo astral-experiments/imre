@@ -190,6 +190,9 @@ impl Types {
                 storage.shapes.get(id),
                 Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
             ),
+            Type::CmpKey(id, bound) => {
+                matches!(storage.shapes.get(id), Some(Shape::PartialFrame(fields)) if fields.len() == if bound { 2 } else { 1 })
+            }
             Type::ForwardRef(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Tuple(fields)) if fields.len() == 5)
             }
@@ -1466,7 +1469,7 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
-        if let Type::ForwardRef(id) | Type::AnnotationValue(id) = ty {
+        if let Type::ForwardRef(id) | Type::AnnotationValue(id) | Type::CmpKey(id, _) = ty {
             return self.fields(Type::Tuple(id)).unwrap();
         }
         if let Type::ModuleSpec(id) = ty {

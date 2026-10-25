@@ -355,6 +355,13 @@ impl Checker<'_> {
                 if receiver.ty == Type::LogFormatter {
                     return self.formatter_set(receiver, attribute, value);
                 }
+                if let Type::CmpKey(frame, true) = receiver.ty
+                    && attribute.attr.as_str() == "obj"
+                {
+                    let cell = self.cmp_field(receiver, frame, 1);
+                    let value = self.coerce(value, self.types.element(cell.ty).unwrap(), target)?;
+                    return Ok(Statement::SetItem(cell, pipelines::integer(0), value));
+                }
                 if let Type::SimpleNamespace(id) = receiver.ty {
                     let name = self.namespace_attr_name(attribute)?;
                     let item = self.types.mapping(Type::Dict(id)).unwrap().1;
