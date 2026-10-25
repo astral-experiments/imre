@@ -1541,6 +1541,7 @@ pub(crate) enum ProcessOperation {
     },
     FastCopy(u32),
     FastCopyBlocksize,
+    CopyBufferSize,
     FastCopyFlag {
         method: u32,
         set: bool,

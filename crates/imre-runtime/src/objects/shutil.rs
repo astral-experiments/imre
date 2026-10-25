@@ -20,6 +20,18 @@ use super::exceptions::{
 };
 use super::{Bytes, Int, Str};
 
+const COPY_BUFSIZE: usize = if cfg!(windows) {
+    1024 * 1024
+} else {
+    256 * 1024
+};
+
+/// Return the default buffer size of this runtime's platform as a Python int.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_shutil_copy_buffer_size() -> usize {
+    Int::from_usize(COPY_BUFSIZE).into_raw()
+}
+
 /// os.confstr("CS_PATH") returns None for an indeterminate value, or raises
 /// OSError for a failed POSIX query. os.defpath is consulted only when the
 /// Python attribute or configuration name is unavailable.

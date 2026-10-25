@@ -16,7 +16,7 @@ pub unsafe extern "C" fn imre_shutil_copyfileobj(
     let result: Result<()> = unsafe {
         (|| {
             let size = Int::borrow(size);
-            let default_size = Int::small(256 * 1024).unwrap();
+            let default_size = Int::from_usize(super::COPY_BUFSIZE);
             let size = if size.as_small() == Some(0) {
                 &default_size
             } else {

@@ -5097,7 +5097,10 @@ impl<'a> Checker<'a> {
                 Intrinsic::CopyBufsize => {
                     return Ok(Expr {
                         ty: Type::Int,
-                        kind: ExprKind::Int("262144".into()),
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::CopyBufferSize),
+                            vec![],
+                        ),
                     });
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),

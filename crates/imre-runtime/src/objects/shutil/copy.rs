@@ -120,7 +120,7 @@ fn copy_data(src: &Name, dst: &Name) -> Result<()> {
             }
             // Explicit buffered fallback: std::io::copy may select exactly the
             // kernel operation which has just failed or been disabled.
-            let mut reader = io::BufReader::with_capacity(256 * 1024, &mut input);
+            let mut reader = io::BufReader::with_capacity(super::COPY_BUFSIZE, &mut input);
             loop {
                 let buf = reader.fill_buf().map_err(errno_error)?;
                 if buf.is_empty() {

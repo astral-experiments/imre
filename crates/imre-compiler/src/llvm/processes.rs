@@ -684,6 +684,9 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
+            ProcessOperation::CopyBufferSize => {
+                self.call("imre_shutil_copy_buffer_size", Type::Int, &[])
+            }
             ProcessOperation::FastCopyBlocksize => self.call(
                 "imre_shutil_fastcopy_blocksize",
                 Type::Int,

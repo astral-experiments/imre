@@ -7354,6 +7354,7 @@ declare void @imre_shutil_register_pack(ptr, i64, i32, i64, i32, ptr, ptr, ptr, 
 declare void @imre_os_unlink(ptr, i32, i64, i32)
 declare void @imre_shutil_fastcopy(i32, ptr, ptr, i64)
 declare i64 @imre_shutil_fastcopy_blocksize(i64)
+declare i64 @imre_shutil_copy_buffer_size()
 declare i32 @imre_shutil_fastcopy_flag(i32)
 declare void @imre_shutil_set_fastcopy_flag(i32, i32)
 declare void @imre_subprocess_check(ptr)
