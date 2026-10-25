@@ -42,7 +42,7 @@ def observe(name, level, body, body_rev, probes):
         if state == "blocked":
             proof["product_probe"]["diagnostic"] = row["diagnostic"]
             if counts:
-                observed_native = any(counts.get(field) for field in ("native_calls", "lookups", "snapshots", "clears"))
+                observed_native = any(counts.get(field) for field in ("native_calls", "lookups", "snapshots", "clears", "parameter_reads"))
                 observed_host = any(v for k, v in counts.items() if k.startswith("host_"))
                 loc = roles(body="cpython", fixture="cpython", assertions="unknown",
                             operation="mixed" if observed_native and observed_host else
@@ -53,11 +53,14 @@ def observe(name, level, body, body_rev, probes):
             host = counts.get("host_binding", 0)
             detail = f"Imre evaluated {native} folds; {host} calls reached the host argument binder."
         else:
-            native = counts.get("lookups", 0) + counts.get("clears", 0) + counts.get("snapshots", 0)
+            native = sum(counts.get(field, 0) for field in ("lookups", "clears", "snapshots", "parameter_reads"))
             host = sum(v for k, v in counts.items() if k.startswith("host_"))
             detail = ("Imre retained each cache and decided hits, misses, insertion, eviction, counters, "
                       "and clears. CPython invoked the user callback on a miss. Host observations: "
                       + repr({k: v for k, v in counts.items() if k.startswith("host_")}))
+            if counts.get("parameter_reads"):
+                detail = (f"Imre constructed {counts['parameter_reads']} fresh cache_parameters dictionaries. "
+                          "CPython decoded the returned values and ran the original dictionary assertions.")
         proof.update(operation=detail, fixture="Original CPython module/class/instance hooks, test method and assertion helpers.")
         loc = roles(body="cpython", assertions="cpython", fixture="cpython",
                     operation="mixed" if native and host else "imre" if native else "cpython")

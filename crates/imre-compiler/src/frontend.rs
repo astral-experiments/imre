@@ -1958,6 +1958,12 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
+        if self.types.cache_signature(value.ty) == Some(expected) {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            });
+        }
         if expected == Type::StringIterable
             && (self.types.element(value.ty) == Some(Type::Str)
                 || self

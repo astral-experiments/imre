@@ -1,5 +1,6 @@
 """Run pinned cache methods with a persistent native cache for each decorated function."""
 import argparse
+import ast
 from collections import Counter
 import inspect
 import json
@@ -165,6 +166,15 @@ class Wrapper:
             raise RuntimeError("cache_clear did not finish")
         self.counts["clears"] += 1
 
+    def cache_parameters(self):
+        self.start(self.shape if self.shape is not None else (int,) * self.arity)
+        self.send(3)
+        tag, _, payload = self.read().partition(" ")
+        if tag != "parameters":
+            raise RuntimeError(f"unexpected cache_parameters response: {tag}")
+        self.counts["parameter_reads"] += 1
+        return ast.literal_eval(payload)
+
     @property
     def __wrapped__(self):
         self.counts["host_wrapper_metadata"] += 1
@@ -199,7 +209,6 @@ BLOCKERS = {
     "test_lru_cache_threaded": "native cache state is thread-local; suite requires one cache shared across threads",
     "test_lru_cache_threaded2": "simultaneous misses in one shared cache require native cross-thread state",
     "test_lru_cache_threaded3": "simultaneous misses and eviction require native cross-thread state",
-    "test_lru_cache_parameters": "cache_parameters is not yet implemented",
     "test_lru_method": "native method descriptors and int subclass cache keys are not yet supported",
 }
 
@@ -228,7 +237,7 @@ def exercise(build, case, original, counts):
     finally:
         for wrapper in reversed(wrappers):
             wrapper.close()
-    if not counts["lookups"] and not counts["snapshots"]:
+    if not any(counts[k] for k in ("lookups", "snapshots", "clears", "parameter_reads")):
         raise UnsupportedFixture("no native cache operation executed")
     mixed = counts["host_wrapper_metadata"] or counts["host_named_fields"] or counts["host_exception_state"]
     return {"status": "mixed" if mixed else "host_driven_native_operation", **counts}
