@@ -1972,7 +1972,7 @@ fn annotation_with_aliases(
                     || matches!(
                         graph.resolve_type(module, receiver),
                         Some(Binding::Intrinsic(
-                            Intrinsic::DefaultDict | Intrinsic::ChainMap
+                            Intrinsic::DefaultDict | Intrinsic::ChainMap | Intrinsic::OrderedDict
                         ))
                     ) =>
             {
@@ -2025,6 +2025,10 @@ fn annotation_with_aliases(
                         ));
                     }
                     Ok(types.default_list_dict(key_type, value_type))
+                } else if graph.resolve_type(module, receiver)
+                    == Some(Binding::Intrinsic(Intrinsic::OrderedDict))
+                {
+                    Ok(types.ordered_dict(key_type, value_type))
                 } else {
                     Ok(types.dict(key_type, value_type))
                 }
@@ -2534,9 +2538,12 @@ impl<'a> Checker<'a> {
         {
             return Ok(json::select(value, expected, None, None));
         }
-        if (self.types.is_default_list_dict(value.ty) || self.types.is_counter(value.ty))
+        if (self.types.is_default_list_dict(value.ty)
+            || self.types.is_counter(value.ty)
+            || self.types.is_ordered_dict(value.ty))
             && !self.types.is_default_list_dict(expected)
             && !self.types.is_counter(expected)
+            && !self.types.is_ordered_dict(expected)
             && self.types.mapping(value.ty) == self.types.mapping(expected)
         {
             return Ok(Expr {
@@ -2840,6 +2847,11 @@ impl<'a> Checker<'a> {
                     && self.types.mapping(concrete).is_some() =>
             {
                 self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
+            }
+            ast::Expr::Call(call)
+                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) =>
+            {
+                self.ordered_dict_constructor(call, self.types.mapping(concrete))?
             }
             ast::Expr::Call(call) if self.is_defaultdict_constructor(&call.func) => {
                 let (key, value) = self.types.mapping(concrete).ok_or_else(|| {
@@ -6195,6 +6207,17 @@ impl<'a> Checker<'a> {
                         ops.push(order);
                         continue;
                     }
+                    if (self.types.is_ordered_dict(ty) || self.types.is_ordered_dict(right))
+                        && self.types.mapping(ty) == self.types.mapping(right)
+                        && matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                    {
+                        ops.push(if op == ast::CmpOp::Eq {
+                            Compare::Equal
+                        } else {
+                            Compare::NotEqual
+                        });
+                        continue;
+                    }
                     let numeric = matches!(ty, Type::Int | Type::Float)
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
@@ -7198,6 +7221,9 @@ impl<'a> Checker<'a> {
         if let Some(expanded) = self.expand_closed_call(call) {
             return self.call_on(&expanded, receiver);
         }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) {
+            return self.ordered_dict_constructor(call, None);
+        }
         if let Some(Binding::Intrinsic(
             kind @ (Intrinsic::TomliLoads
             | Intrinsic::TomliLoad
@@ -7352,7 +7378,7 @@ impl<'a> Checker<'a> {
                 || matches!(
                     self.resolve(&method.value),
                     Some(Binding::Intrinsic(
-                        Intrinsic::Counter | Intrinsic::DefaultDict
+                        Intrinsic::Counter | Intrinsic::DefaultDict | Intrinsic::OrderedDict
                     ))
                 ))
         {
@@ -7457,37 +7483,7 @@ impl<'a> Checker<'a> {
             && call.arguments.args.is_empty()
             && !call.arguments.keywords.is_empty()
         {
-            let mut entries = Vec::with_capacity(call.arguments.keywords.len());
-            for keyword in &call.arguments.keywords {
-                let name = keyword.arg.as_ref().expect("unpacking excluded");
-                let value = self.expr(&keyword.value)?;
-                entries.push((
-                    Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str(name.to_string()),
-                    },
-                    value,
-                ));
-            }
-            let first = entries[0].1.ty;
-            let value = if entries.iter().all(|(_, v)| v.ty == first) {
-                first
-            } else {
-                Type::ObjectValue
-            };
-            let entries = entries
-                .into_iter()
-                .zip(&*call.arguments.keywords)
-                .map(|((key, v), kw)| Ok((key, self.coerce(v, value, &kw.value)?)))
-                .collect::<Result<Vec<_>, String>>()?;
-            return Ok(Expr {
-                ty: self.types.dict(Type::Str, value),
-                kind: ExprKind::Dict {
-                    key: Type::Str,
-                    value,
-                    entries,
-                },
-            });
+            return self.dict_constructor(call, None);
         }
         if self.unshadowed_builtin(&call.func, "set")
             && let [input] = call.arguments.args.as_ref()

@@ -609,6 +609,7 @@ impl Builtin {
             | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
+            | Self::OrderedDict
             | Self::CounterNew
             | Self::ChainMapNew
             | Self::ChainMapMaps

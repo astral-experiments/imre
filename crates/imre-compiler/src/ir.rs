@@ -1207,6 +1207,7 @@ pub(crate) enum Builtin {
     ModuleParentPrefix,
     ModuleCacheFromOrigin,
     CachePath(CachePathOperation),
+    OrderedDict,
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,

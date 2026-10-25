@@ -6395,6 +6395,7 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::OrderedDict => self.call("imre_ordered_dict", returns, &[&args[0].value]),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::ChainMapNew => self.call("imre_chainmap_new", returns, &[&args[0].value]),
             Builtin::ChainMapMaps => self.call("imre_chainmap_maps", returns, &[&args[0].value]),
@@ -8740,6 +8741,7 @@ declare i64 @imre_namespace_get(ptr, ptr)
 declare void @imre_namespace_delete(ptr, ptr)
 declare ptr @imre_dict_copy(ptr)
 declare ptr @imre_dict_fromkeys_target(ptr, ptr)
+declare ptr @imre_ordered_dict(ptr)
 declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
