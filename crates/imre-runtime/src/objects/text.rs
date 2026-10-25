@@ -62,15 +62,37 @@ thread_local! {
 
 /// Reuses immutable owners for empty and single Latin-1 strings.
 pub(super) fn owned_string(value: &str) -> StrOwner {
+    let Ok(owner) = owned_string_with(value, |text| {
+        Ok::<_, std::convert::Infallible>(StrOwner::new(Str::new(text)))
+    });
+    owner
+}
+
+pub(super) fn try_owned_string(value: &str) -> Result<StrOwner> {
+    owned_string_with(value, |text| {
+        let text = Str::try_new(text).map_err(|_| Error::allocation())?;
+        StrOwner::try_new(text).map_err(|_| Error::allocation())
+    })
+}
+
+fn owned_string_with<E>(
+    value: &str,
+    new: impl FnOnce(&str) -> std::result::Result<StrOwner, E>,
+) -> std::result::Result<StrOwner, E> {
     let index = match value.as_bytes() {
         [] => 256,
         [byte] => usize::from(*byte),
         // These UTF-8 lead bytes encode U+0080 through U+00FF.
         [0xc2 | 0xc3, _] => value.chars().next().unwrap() as usize,
-        _ => return StrOwner::new(Str::new(value)),
+        _ => return new(value),
     };
     SHORT_STRINGS.with_borrow_mut(|strings| {
-        StrOwner::clone(strings[index].get_or_insert_with(|| StrOwner::new(Str::new(value))))
+        let slot = &mut strings[index];
+        let owner = match slot {
+            Some(owner) => owner,
+            None => slot.insert(new(value)?),
+        };
+        Ok(owner.clone())
     })
 }
 
@@ -615,6 +637,15 @@ mod tests {
             let actual = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
             assert_eq!(actual.as_str(), message);
         }
+    }
+
+    #[test]
+    fn refused_short_string_does_not_poison_the_cache() {
+        SHORT_STRINGS.with_borrow_mut(|strings| strings[0xe9] = None);
+        assert!(owned_string_with("é", |_| Err(())).is_err());
+        let owner = try_owned_string("é").ok().unwrap();
+        let cached = owned_string_with("é", |_| Err(())).unwrap();
+        assert!(StrOwner::ptr_eq(&owner, &cached));
     }
 
     #[test]

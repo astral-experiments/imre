@@ -1723,14 +1723,17 @@ pub unsafe extern "C" fn imre_mapping_iter_next(
         object(value).0.with_mut(|storage| match storage {
             Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
-            Storage::LineIterator(iterator) => Ok(iterator.next()),
+            Storage::LineIterator(iterator) => iterator.next(),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
-            _ => storage.mapping_iterator_mut().next(),
+            _ => storage
+                .mapping_iterator_mut()
+                .next()
+                .map_err(|error| Error::new(Kind::RuntimeError, error.message())),
         })
     };
     let next = match next {
         Ok(next) => next,
-        Err(error) => return Error::new(Kind::RuntimeError, error.message()).returning(0),
+        Err(error) => return error.returning(0),
     };
     let Some((key, item)) = next else {
         return 0;
