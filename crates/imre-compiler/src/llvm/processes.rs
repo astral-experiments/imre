@@ -239,6 +239,53 @@ impl Emitter<'_, '_> {
                 self.checked_line(instruction);
                 none()
             }
+            ProcessOperation::Popen { streams } => {
+                let cwd =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+                let env =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_popen(ptr {}, ptr {cwd}, ptr {env}, i32 {streams})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::PopenArgs => self.call("imre_popen_args", returns, &[&args[0].value]),
+            ProcessOperation::PopenPid => self.call("imre_popen_pid", returns, &[&args[0].value]),
+            ProcessOperation::PopenStatus { poll } => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_popen_status(ptr {}, i1 {})",
+                    args[0].value.operand,
+                    u8::from(poll)
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::PopenWait => {
+                let kind = if args[1].value.ty == Type::Int { 2 } else { 7 };
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_popen_wait(ptr {}, i32 {kind}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::PopenExit => {
+                self.checked_line(format!(
+                    "call void @imre_popen_exit(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            ProcessOperation::PopenSignal => {
+                self.checked_line(format!(
+                    "call void @imre_popen_signal(ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
             ProcessOperation::AsyncSpawn { stdout, stderr } => {
                 let cwd =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));

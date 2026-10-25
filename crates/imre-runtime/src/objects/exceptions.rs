@@ -41,6 +41,10 @@ pub(crate) enum Kind {
     RuntimeError = 10,
     EOFError = 11,
     OSError = 12,
+    // Module-specific OSError subclasses have stable, separately assigned ABI IDs.
+    ShutilError = 64,
+    SameFileError = 65,
+    SpecialFileError = 66,
     TypeError = 13,
     AttributeError = 14,
     MemoryError = 15,
@@ -66,10 +70,8 @@ pub(crate) enum Kind {
     StopIteration = 35,
     BadZipFile = 36,
     NotImplementedError = 37,
-    // 38 belongs to _csv.Error; keep the shutil family in its own ABI range.
-    ShutilError = 64,
-    SameFileError = 65,
-    SpecialFileError = 66,
+    NameError = 39,
+    UnboundLocalError = 40,
 }
 
 impl Kind {
@@ -88,6 +90,9 @@ impl Kind {
             10 => Self::RuntimeError,
             11 => Self::EOFError,
             12 => Self::OSError,
+            64 => Self::ShutilError,
+            65 => Self::SameFileError,
+            66 => Self::SpecialFileError,
             13 => Self::TypeError,
             14 => Self::AttributeError,
             15 => Self::MemoryError,
@@ -113,9 +118,8 @@ impl Kind {
             35 => Self::StopIteration,
             36 => Self::BadZipFile,
             37 => Self::NotImplementedError,
-            64 => Self::ShutilError,
-            65 => Self::SameFileError,
-            66 => Self::SpecialFileError,
+            39 => Self::NameError,
+            40 => Self::UnboundLocalError,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -135,6 +139,9 @@ impl Kind {
             Self::RuntimeError => "RuntimeError",
             Self::EOFError => "EOFError",
             Self::OSError => "OSError",
+            Self::ShutilError => "Error",
+            Self::SameFileError => "SameFileError",
+            Self::SpecialFileError => "SpecialFileError",
             Self::TypeError => "TypeError",
             Self::AttributeError => "AttributeError",
             Self::MemoryError => "MemoryError",
@@ -160,15 +167,15 @@ impl Kind {
             Self::StopIteration => "StopIteration",
             Self::BadZipFile => "BadZipFile",
             Self::NotImplementedError => "NotImplementedError",
-            Self::ShutilError => "Error",
-            Self::SameFileError => "SameFileError",
-            Self::SpecialFileError => "SpecialFileError",
+            Self::NameError => "NameError",
+            Self::UnboundLocalError => "UnboundLocalError",
         }
     }
 
     fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
+            Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::Exception => !matches!(
                 self,
                 Self::BaseException | Self::SystemExit | Self::CancelledError

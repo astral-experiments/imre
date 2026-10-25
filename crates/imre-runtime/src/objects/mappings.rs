@@ -1720,6 +1720,7 @@ pub unsafe extern "C" fn imre_mapping_iter_next(
     // SAFETY: the rooted iterator snapshots independent owners before returning.
     let next = unsafe {
         object(value).0.with_mut(|storage| match storage {
+            Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
