@@ -12,6 +12,7 @@ impl Checker<'_> {
             FnmatchOperation::Match => &["name", "pat"],
             FnmatchOperation::Filter { .. } => &["names", "pat"],
             FnmatchOperation::Translate => &["pat"],
+            FnmatchOperation::Parts => &["pat", "star", "question_mark"],
         };
         let params: Vec<_> = names
             .iter()
@@ -47,7 +48,7 @@ impl Checker<'_> {
                         "fnmatch filtering requires a list of str or bytes",
                     ));
                 }
-            } else if op == FnmatchOperation::Translate {
+            } else if matches!(op, FnmatchOperation::Translate | FnmatchOperation::Parts) {
                 checker.expect(Type::Str, value.ty, source)?;
             } else if !matches!(value.ty, Type::Str | Type::Bytes) {
                 return Err(error(
@@ -62,6 +63,9 @@ impl Checker<'_> {
             FnmatchOperation::Match => Type::Bool,
             FnmatchOperation::Filter { .. } => args.values[args.order[0]].ty,
             FnmatchOperation::Translate => Type::Str,
+            FnmatchOperation::Parts => self
+                .types
+                .tuple(vec![self.types.list(Type::Str), Type::ListInt]),
         };
         Ok(self.ordered_builtin(Builtin::Fnmatch(op), returns, args))
     }

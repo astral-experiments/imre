@@ -3844,6 +3844,17 @@ impl Emitter<'_, '_> {
                 use crate::ir::FnmatchOperation;
                 let first = &args[0].value;
                 match operation {
+                    FnmatchOperation::Parts => {
+                        let tuple = self.record(returns);
+                        self.line(format!(
+                            "call void @imre_fnmatch_parts(ptr {}, ptr {}, ptr {}, ptr {})",
+                            first.operand,
+                            args[1].value.operand,
+                            args[2].value.operand,
+                            tuple.operand
+                        ));
+                        tuple
+                    }
                     FnmatchOperation::Translate => {
                         self.call("imre_fnmatch_translate", returns, &[first])
                     }
@@ -6296,6 +6307,7 @@ declare i32 @imre_path_match(ptr, ptr, i64, i32)
 declare i32 @imre_fnmatch(ptr, ptr, i32, i32)
 declare ptr @imre_fnmatch_filter(ptr, ptr, i32, i32)
 declare ptr @imre_fnmatch_translate(ptr)
+declare void @imre_fnmatch_parts(ptr, ptr, ptr, ptr)
 declare i32 @imre_path_match_object(ptr, ptr, i64, i32)
 declare ptr @imre_pure_path_new(i32)
 declare ptr @imre_path_join_object(ptr, ptr)

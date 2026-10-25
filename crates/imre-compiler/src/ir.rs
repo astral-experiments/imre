@@ -934,6 +934,7 @@ pub(crate) enum FnmatchOperation {
     Match,
     Filter { inverse: bool },
     Translate,
+    Parts,
 }
 
 /// POSIX lexical operations preserve raw str or bytes spellings.

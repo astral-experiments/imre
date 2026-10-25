@@ -67,7 +67,7 @@ pub unsafe extern "C" fn imre_fnmatch_filter(
 ) -> *const Object {
     // SAFETY: the pattern's tag and the list layout were checked at the call site.
     let pattern = Pattern::component(&unsafe { spelling(pat, pat_bytes != 0) });
-    let result = unsafe { object(names) }.0.with(|storage| {
+    let filter = |storage: &super::Storage| {
         let source = storage.sequence();
         let name_bytes = source.kind.raw() == 8;
         let mut output = Words::new(source.kind.raw());
@@ -89,7 +89,9 @@ pub unsafe extern "C" fn imre_fnmatch_filter(
             }
         }
         Ok(Rc::into_raw(output.into_object()))
-    });
+    };
+    // SAFETY: names remains rooted; the scan does not call back into Python.
+    let result = unsafe { object(names).0.with(filter) };
     finish(result, std::ptr::null())
 }
 
@@ -180,4 +182,30 @@ pub unsafe extern "C" fn imre_fnmatch_translate(pat: *const Str) -> *const Str {
             .map_err(|_| Error::allocation()),
         std::ptr::null(),
     )
+}
+
+/// # Safety
+/// Root all strings and a new zeroed tuple for the parts and star-index lists.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_fnmatch_parts(
+    pat: *const Str,
+    star: *const Str,
+    question: *const Str,
+    out: *mut *const (),
+) {
+    // SAFETY: the compiler keeps all three exact string handles alive.
+    let (parts, stars) =
+        unsafe { translated_parts((&*pat).as_str(), (&*star).as_str(), (&*question).as_str()) };
+    let mut words = Words::new(3);
+    for part in parts {
+        words
+            .values
+            .push(Rc::into_raw(Rc::new(Str::from(part))) as usize);
+    }
+    let indices = crate::new_list(stars.into_iter().map(crate::Int::from_usize).collect());
+    // SAFETY: both slots in the fresh tuple now receive their independent owners.
+    unsafe {
+        out.write(Rc::into_raw(words.into_object()).cast());
+        out.add(1).write(indices.cast());
+    }
 }

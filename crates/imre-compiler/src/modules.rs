@@ -375,6 +375,7 @@ impl IntrinsicModule {
                 })
             }
             (Self::Fnmatch, "translate") => Intrinsic::Fnmatch(FnmatchOperation::Translate),
+            (Self::Fnmatch, "_translate") => Intrinsic::Fnmatch(FnmatchOperation::Parts),
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
             (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
