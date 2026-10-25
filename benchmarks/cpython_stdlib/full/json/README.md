@@ -19,7 +19,7 @@ On Linux, 215 executions passed. `TestCEncodeBasestringAscii.test_overflow` has 
 
 ## Full native evidence
 
-The [v1 report](evidence-linux.json) covers the entire package at each optimization level. There is one package denominator, including its submodules, the two backend fixtures, and both CLI variants. It was exercised on Imre `7630556901c9936c9ca112f7fb2f4e52f3706fd3`. At each level, 11 complete native method bodies ran under 22 host fixture IDs; 34 additional fixture IDs called native operations from host methods. The remaining 160 occurrences are 98 blocked, 12 failed, 38 reference-only, 11 individually reviewed backend/private API exclusions, and the single upstream skip. The report includes partial calls, concrete diagnostics and source locations.
+The [v1 report](evidence-linux.json) covers the entire package at each optimization level. There is one package denominator, including its submodules, the two backend fixtures, and both CLI variants. It was exercised on Imre `7630556901c9936c9ca112f7fb2f4e52f3706fd3`; the JSON error-field rows are reconciled with the native report from `86388501b53afc2a7143054e76b037e0433713ad`, which was already in this report's landed parent. At each level, 11 complete native method bodies ran under 22 host fixture IDs; 42 additional fixture IDs called native operations from host methods. The remaining 152 occurrences are 98 blocked, 4 failed, 38 reference-only, 11 individually reviewed backend/private API exclusions, and the single upstream skip. The report includes partial calls, concrete diagnostics and source locations.
 
 ```sh
 python -B benchmarks/cpython_stdlib/full/json/evidence.py \
@@ -29,7 +29,7 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
     benchmarks/cpython_stdlib/full/json/reference-linux.json /tmp/json-evidence.json
 ```
 
-The 12 failed fixture occurrences cover key identity, structured error fields and excessive nesting. The [doctest handoff](DOCTEST.md) identifies the first shared intact-package import blocker. Native results from other branches enter this report after their product changes land and the fixtures run again.
+The four failed fixture occurrences cover key identity and excessive nesting. The [doctest handoff](DOCTEST.md) identifies the first shared intact-package import blocker. Native results from other branches enter this report after their product changes land and the fixtures run again.
 
 ## Native calls with host assertions
 
