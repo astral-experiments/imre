@@ -4515,6 +4515,18 @@ impl<'a> Checker<'a> {
             });
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
+            if let Some((flags, executable)) = &self.graph.command_startup {
+                match symbol {
+                    Intrinsic::SysExecutable => return Ok(unpacking::string(executable.clone())),
+                    Intrinsic::SysDontWriteBytecode => {
+                        return Ok(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Bool(flags.dont_write_bytecode),
+                        });
+                    }
+                    _ => {}
+                }
+            }
             match symbol {
                 Intrinsic::OpenFlag(name) => {
                     return Ok(Expr {
@@ -4546,24 +4558,6 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
-                Intrinsic::SysExecutable if self.graph.command_startup.is_some() => {
-                    return Ok(unpacking::string(
-                        self.graph.command_startup.as_ref().unwrap().1.clone(),
-                    ));
-                }
-                Intrinsic::SysDontWriteBytecode if self.graph.command_startup.is_some() => {
-                    return Ok(Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Bool(
-                            self.graph
-                                .command_startup
-                                .as_ref()
-                                .unwrap()
-                                .0
-                                .dont_write_bytecode,
-                        ),
-                    });
-                }
                 Intrinsic::SysExecutable | Intrinsic::SysPlatform | Intrinsic::OsName => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
@@ -5280,30 +5274,8 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
-                if let Some((flags, _)) = &self.graph.command_startup
-                    && self.resolve(&attribute.value)
-                        == Some(Binding::Intrinsic(Intrinsic::SysFlags))
-                {
-                    let flag = match attribute.attr.as_str() {
-                        "safe_path" => {
-                            return Ok(Expr {
-                                ty: Type::Bool,
-                                kind: ExprKind::Bool(flags.safe_path),
-                            });
-                        }
-                        "isolated" | "ignore_environment" => flags.isolated,
-                        "dont_write_bytecode" => flags.dont_write_bytecode,
-                        "no_user_site" => flags.no_user_site,
-                        "utf8_mode" => flags.utf8_mode,
-                        _ => {
-                            return Err(error(
-                                self.source,
-                                attribute,
-                                "unsupported sys.flags field",
-                            ));
-                        }
-                    };
-                    return Ok(pipelines::integer(i64::from(flag)));
+                if let Some(flag) = self.command_flag(attribute)? {
+                    return Ok(flag);
                 }
                 if attribute.attr.as_str() == "join"
                     && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")

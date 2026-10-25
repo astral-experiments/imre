@@ -67,7 +67,7 @@ impl CompileOptions {
         filesystem: watch::FileSystem<'_>,
     ) -> Result<modules::SourceGraph, String> {
         if let Some(command) = &self.command {
-            return modules::SourceGraph::command(command, &self.extension_paths, filesystem);
+            return modules::SourceGraph::command(command, self, filesystem);
         }
         modules::SourceGraph::load_with(
             path,
@@ -389,8 +389,15 @@ fn verify_after(module: &ir::Module, stage: &str) -> Result<(), String> {
     }
 }
 
-/// Applies Python's source preprocessing before Ruff, ty, and source-range checks.
-fn normalize_source(source: &str) -> Result<Cow<'_, str>, String> {
+/// Python applies file encodings and source-file indentation policy only to disk input.
+#[derive(Clone, Copy, PartialEq)]
+enum SourceKind {
+    File,
+    Command,
+}
+
+/// Normalize physical newlines before Ruff, ty, and source-range checks.
+fn normalize_source(source: &str, kind: SourceKind) -> Result<Cow<'_, str>, String> {
     if source.contains('\0') {
         return Err("source code cannot contain null bytes".into());
     }
@@ -401,7 +408,10 @@ fn normalize_source(source: &str) -> Result<Cow<'_, str>, String> {
     } else {
         Cow::Borrowed(source)
     };
-    check_encoding(&source)?;
+    // A -c operand is already decoded; Python ignores file encoding cookies here.
+    if kind == SourceKind::File {
+        check_encoding(&source)?;
+    }
     Ok(source)
 }
 

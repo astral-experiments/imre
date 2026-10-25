@@ -74,7 +74,7 @@ pub(super) fn parse(
         .into_string()
         .map_err(|_| "interpreter path is not UTF-8")?;
     Ok(PythonCommand {
-        source,
+        source: dedent(source),
         flags,
         executable,
     })
@@ -92,4 +92,39 @@ fn operand(
         .ok_or_else(|| format!("{option} requires an argument"))?
         .into_string()
         .map_err(|_| format!("{option} requires a UTF-8 argument"))
+}
+
+/// Python 3.14 removes a shared literal space/tab prefix before compiling `-c`.
+/// Lines that contain only those characters do not determine the prefix.
+fn dedent(source: String) -> String {
+    let mut margin: Option<&str> = None;
+    for line in source.split('\n') {
+        let body = line.trim_start_matches([' ', '\t']);
+        if body.is_empty() {
+            continue;
+        }
+        let indent = &line[..line.len() - body.len()];
+        let shared = margin.map_or(indent.len(), |previous| {
+            previous
+                .bytes()
+                .zip(indent.bytes())
+                .take_while(|(a, b)| a == b)
+                .count()
+        });
+        if shared == 0 {
+            return source;
+        }
+        margin = Some(&indent[..shared]);
+    }
+    let Some(margin) = margin else { return source };
+    let mut result = String::new();
+    for (i, line) in source.split('\n').enumerate() {
+        if i != 0 {
+            result.push('\n');
+        }
+        if !line.trim_start_matches([' ', '\t']).is_empty() {
+            result.push_str(&line[margin.len()..]);
+        }
+    }
+    result
 }
