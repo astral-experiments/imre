@@ -25,6 +25,14 @@ fn invalid_aggregate(ty: Type, types: &Types) -> bool {
         || types.is_dispatch_registry(ty)
     {
         false
+    } else if matches!(ty, Type::VarTuple(_)) {
+        // A completed display cannot acquire a reference to itself. Its fields
+        // own the same callable records as locals; mutable containers and class
+        // fields still reject storing the tuple through contains_callable().
+        types
+            .children(ty)
+            .into_iter()
+            .any(|field| invalid_aggregate(field, types))
     } else if let Some(payload) = types.payload(ty) {
         invalid_aggregate(payload, types)
     } else {
@@ -325,6 +333,7 @@ impl Checker<'_> {
             ));
         }
         let id = self.helpers.reserve();
+        let omitted_free = self.unbound_assert_captures();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -334,6 +343,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.local_iter = bound.contains("iter");
         helper.class = self.class;

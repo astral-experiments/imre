@@ -9,6 +9,9 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "registration_errors": [[], ["const"], ["invalid"], ["both"], ["effects"], ["interrupt"],
+                            ["nested-group"], ["nested-child"], ["nested-child-group"],
+                            ["mutex-group"], ["mutex-child"], ["mutex-child-name"]],
     "class_constants": [[], ["--as-class"], ["--optional"], ["--as-class", "--optional"],
                         ["--help"], ["--as-class=value"], ["--text", "<class 'tuple'>"]],
     "boolean_options": [
@@ -17,6 +20,17 @@ CASES = {
         ["--no-extra=x"], ["-vx", "--no-quiet"], ["--no-f", "-x", "--no-e"],
         ["prefix"], ["prefix", "+ββ"], ["prefix", "++m", "--no-e"],
         ["prefix", "++no-mode"], ["prefix", "/v"], ["prefix", "--help"],
+    ],
+    "mutually_exclusive": [
+        [], ["-aaa"], ["-ab"], ["-ba"], ["-hba"], ["-ahb"], ["-abh"], ["-hab=2"],
+        ["-ahi"], ["-ahi", "bad"], ["-abi", "bad"], ["-a", "--integer", "bad"],
+        ["-a", "--integer", "3"], ["-i", "3", "-i", "4"], ["-a", "--pick"],
+        ["-a", "path", "--pick=x"], ["-a", "--pick=x", "path"], ["-a", "--", "file"],
+        ["-a", "--unknown"], ["empty"], ["empty", "--help"], ["child", "run"],
+        ["child", "run", "--help"], ["child", "run", "-x"], ["child", "run", "-x", "-y", "1"],
+        ["toggle"], ["toggle", "--help"], ["toggle", "--no-fe"], ["toggle", "--no-feature", "-ff"],
+        ["toggle", "-f", "--no-feature"], ["toggle", "-fxh"], ["toggle", "-hfx"],
+        ["toggle", "--no-feature", "-x"], ["toggle", "-x", "--no-feature"],
     ],
     "numbers": [
         [], ["--help"], ["-i", "１２_３"], ["-i", "123456789012345678901234567890"],
