@@ -1044,7 +1044,7 @@ impl Checker<'_> {
         if !reverse && iterable.ty == Type::CsvReader {
             return Ok(self.prepare_csv_reader(iterable));
         }
-        if !reverse && matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
+        if !reverse && matches!(iterable.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
             return Ok(self.prepare_file_lines(iterable));
         }
         let mapping = self.types.mapping(iterable.ty);

@@ -83,6 +83,7 @@ impl Type {
             | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
+            | Self::StringIO
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -144,6 +145,7 @@ impl Type {
             | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
+            | Self::StringIO
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -727,6 +729,7 @@ impl Emitter<'_, '_> {
             | Type::Path
             | Type::PurePath(_)
             | Type::TextIO
+            | Type::StringIO
             | Type::EventLoop
             | Type::Coroutine(_)
             | Type::Task(_)
@@ -3356,6 +3359,7 @@ impl Emitter<'_, '_> {
                 | Type::ImportException
                 | Type::TimeoutExpired
                 | Type::TextIO
+                | Type::StringIO
                 | Type::CompletedProcess(..)
                 | Type::BinaryIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
@@ -3558,6 +3562,7 @@ impl Emitter<'_, '_> {
                 | Builtin::DictAsBase
                 | Builtin::RecordView
                 | Builtin::DirectoryContextView
+                | Builtin::TextStreamView
         ) {
             let value = self.expr(&expressions[0]);
             return Value {
@@ -3689,7 +3694,8 @@ impl Emitter<'_, '_> {
             | Builtin::ClassNameView
             | Builtin::DictAsBase
             | Builtin::RecordView
-            | Builtin::DirectoryContextView => {
+            | Builtin::DirectoryContextView
+            | Builtin::TextStreamView => {
                 unreachable!("representation-preserving views transfer the operand owner directly")
             }
             Builtin::StringContains | Builtin::BytesContains | Builtin::ExceptionMatchesAny => {
@@ -4552,7 +4558,7 @@ impl Emitter<'_, '_> {
             } => {
                 let source = &args[0].value;
                 let source_kind = match source.ty {
-                    Type::TextIO => 1,
+                    Type::TextIO | Type::StringIO => 1,
                     Type::Str => 2,
                     _ => 0,
                 };
@@ -4708,6 +4714,21 @@ impl Emitter<'_, '_> {
                 self.call(symbol, returns, &[&args[0].value])
             }
             Builtin::Sha256Copy => self.call("imre_sha256_copy", Type::Sha256, &[&args[0].value]),
+            Builtin::StringIo(operation) => {
+                use crate::ir::StringIoOperation as Op;
+                let symbol = match operation {
+                    Op::New => "imre_string_io",
+                    Op::Value => "imre_string_io_value",
+                    Op::Read => "imre_string_io_read",
+                    Op::Seek => "imre_string_io_seek",
+                    Op::Position => "imre_string_io_position",
+                };
+                self.call(
+                    symbol,
+                    returns,
+                    &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
+                )
+            }
             Builtin::BytesIo => self.call("imre_bytes_io", returns, &[&args[0].value]),
             Builtin::BinarySeek => self.call(
                 "imre_binary_seek",
@@ -5754,6 +5775,7 @@ impl Emitter<'_, '_> {
                     | Type::Path
                     | Type::PurePath(_)
                     | Type::TextIO
+                    | Type::StringIO
                     | Type::EventLoop
                     | Type::Coroutine(_)
                     | Type::Task(_)
@@ -6002,6 +6024,7 @@ impl Emitter<'_, '_> {
             | Type::Path
             | Type::PurePath(_)
             | Type::TextIO
+            | Type::StringIO
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -6077,6 +6100,7 @@ impl Emitter<'_, '_> {
             | Type::Path
             | Type::PurePath(_)
             | Type::TextIO
+            | Type::StringIO
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -6666,6 +6690,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Path
         | Type::PurePath(_)
         | Type::TextIO
+        | Type::StringIO
         | Type::EventLoop
         | Type::Coroutine(_)
         | Type::Task(_)
@@ -7050,6 +7075,11 @@ declare ptr @imre_sha256_digest(ptr)
 declare ptr @imre_sha256_hexdigest(ptr)
 declare ptr @imre_sha256_copy(ptr)
 declare ptr @imre_bytes_io(ptr)
+declare ptr @imre_string_io(i64, i64)
+declare ptr @imre_string_io_value(ptr)
+declare ptr @imre_string_io_read(ptr, i64, i1)
+declare i64 @imre_string_io_seek(ptr, i64, i64)
+declare i64 @imre_string_io_position(ptr, i64, i1)
 declare i64 @imre_binary_seek(ptr, i64, i64)
 declare i64 @imre_binary_tell(ptr)
 declare ptr @imre_zip_open_file(ptr)
