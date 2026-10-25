@@ -5115,6 +5115,20 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::UrlsafeB64encode)) => {
+                let args = self.arguments(
+                    call,
+                    &[Parameter {
+                        name: "s".into(),
+                        ty: Type::Bytes,
+                        kind: ParameterKind::PositionalOrKeyword,
+                        default: None,
+                        sign_only: false,
+                    }],
+                    None,
+                )?;
+                return Ok(self.ordered_builtin(Builtin::UrlsafeB64encode, Type::Bytes, args));
+            }
             Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
@@ -5465,6 +5479,15 @@ impl<'a> Checker<'a> {
                 return Ok(Expr {
                     ty,
                     kind: ExprKind::Builtin(builtin, args),
+                });
+            }
+            if receiver.ty == Type::Bytes
+                && attribute.attr.as_str() == "decode"
+                && matches!(call.arguments.args.as_ref(), [ast::Expr::StringLiteral(s)] if s.value.to_str().eq_ignore_ascii_case("ascii"))
+            {
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::DecodeAscii, vec![receiver]),
                 });
             }
             if call.arguments.args.is_empty()

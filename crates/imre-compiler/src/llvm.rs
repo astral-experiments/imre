@@ -4013,6 +4013,12 @@ impl Emitter<'_, '_> {
             },
             Builtin::Encode => self.call("imre_str_encode", Type::Bytes, &[&args[0].value]),
             Builtin::Decode => self.call("imre_bytes_decode", Type::Str, &[&args[0].value]),
+            Builtin::DecodeAscii => {
+                self.call("imre_bytes_decode_ascii", Type::Str, &[&args[0].value])
+            }
+            Builtin::UrlsafeB64encode => {
+                self.call("imre_urlsafe_b64encode", Type::Bytes, &[&args[0].value])
+            }
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
             Builtin::Sha256Update => {
@@ -5750,6 +5756,8 @@ declare ptr @imre_bytes_iter(ptr)
 declare ptr @imre_str_encode(ptr)
 declare ptr @imre_bytes_decode_splitlines(ptr)
 declare ptr @imre_bytes_decode(ptr)
+declare ptr @imre_bytes_decode_ascii(ptr)
+declare ptr @imre_urlsafe_b64encode(ptr)
 declare ptr @imre_sha256_hex(ptr)
 declare ptr @imre_sha256_new(ptr)
 declare void @imre_sha256_update(ptr, ptr)

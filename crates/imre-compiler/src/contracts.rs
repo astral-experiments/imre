@@ -189,6 +189,8 @@ impl Builtin {
             ),
             Self::BytesGet
             | Self::Decode
+            | Self::DecodeAscii
+            | Self::UrlsafeB64encode
             | Self::DecodeSplitLines
             | Self::DictGet
             | Self::JsonDecode(_)
@@ -575,6 +577,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_repeat"
                 | "imre_bytes_decode_splitlines"
                 | "imre_bytes_decode"
+                | "imre_bytes_decode_ascii"
+                | "imre_urlsafe_b64encode"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"

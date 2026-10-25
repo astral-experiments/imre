@@ -98,6 +98,7 @@ jobs:
         run: python3 benchmarks/cpython_stdlib/native_subprocess.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Run vendored CPython methods against native Imre
         run: |
+          python3 benchmarks/cpython_stdlib/native_base64.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-base64.json"
           python3 benchmarks/cpython_stdlib/native_hashlib.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-hashlib.json"
           python3 benchmarks/cpython_stdlib/native_paths.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --result "$RUNNER_TEMP/cpython-paths.json"
           python3 benchmarks/cpython_stdlib/native_shutil.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil.json"

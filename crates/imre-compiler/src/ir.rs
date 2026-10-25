@@ -535,6 +535,8 @@ pub(crate) enum Builtin {
     BytesIter,
     Encode,
     Decode,
+    DecodeAscii,
+    UrlsafeB64encode,
     Sha256Hex,
     Sha256New,
     Sha256Update,
