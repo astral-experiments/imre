@@ -570,6 +570,15 @@ impl Error {
         }
     }
 
+    /// Use Python's argument-free MemoryError when an operation exhausts memory.
+    pub(super) fn memory_error() -> Self {
+        Self {
+            kind: Kind::MemoryError,
+            payload: Some(Payload::Empty),
+            cause: None,
+        }
+    }
+
     pub(super) fn key(key: OwnedWord) -> Self {
         Self {
             kind: Kind::KeyError,
@@ -596,6 +605,9 @@ impl Error {
 
     fn into_object(self) -> Rc<Object> {
         match self.payload {
+            Some(Payload::Empty) if self.kind == Kind::MemoryError && self.cause.is_none() => {
+                MEMORY_ERROR.with_borrow(Rc::clone)
+            }
             Some(payload) => exception_with_cause(self.kind, payload, self.cause),
             None => SEQUENCE_ALLOCATION_ERROR.with_borrow(Rc::clone),
         }
@@ -626,6 +638,8 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 }
 
 thread_local! {
+    static MEMORY_ERROR: RefCell<Rc<Object>> =
+        RefCell::new(new_exception(Kind::MemoryError, Payload::Empty));
     static RECORD_ALLOCATION_ERROR: RefCell<Rc<Object>> = RefCell::new(new_exception(
         Kind::MemoryError, Rc::new(Str::new("record allocation failed")),
     ));
@@ -645,6 +659,7 @@ thread_local! {
 /// Prepare allocation errors and exception state before generated code starts.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_record_error_init() {
+    MEMORY_ERROR.with(|_| ());
     RECORD_ALLOCATION_ERROR.with(|_| ());
     SEQUENCE_ALLOCATION_ERROR.with(|_| ());
     PENDING.with(|_| ());
@@ -745,9 +760,13 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
     }
     PENDING.with_borrow(|slot| {
         let Some(pending) = slot.as_ref() else { return };
-        if let Some(template) = [&RECORD_ALLOCATION_ERROR, &SEQUENCE_ALLOCATION_ERROR]
-            .into_iter()
-            .find(|template| template.with_borrow(|cached| Rc::ptr_eq(cached, pending)))
+        if let Some(template) = [
+            &RECORD_ALLOCATION_ERROR,
+            &SEQUENCE_ALLOCATION_ERROR,
+            &MEMORY_ERROR,
+        ]
+        .into_iter()
+        .find(|template| template.with_borrow(|cached| Rc::ptr_eq(cached, pending)))
         {
             // Move the spare into the cache. Existing aliases keep the exact pending
             // exception and its traceback, including an alias saved before a re-raise.

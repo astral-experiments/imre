@@ -33,7 +33,7 @@ fn output_size(source: &str, width: usize, max_chars: usize) -> Result<usize> {
         bytes = bytes
             .checked_add(text.len())
             .and_then(|n| n.checked_add(spaces))
-            .ok_or_else(Error::allocation)?;
+            .ok_or_else(Error::memory_error)?;
     }
     Ok(bytes)
 }
@@ -54,7 +54,7 @@ pub unsafe extern "C" fn imre_str_expandtabs(source: *const Str, tabsize: usize)
                 return Ok(source);
             }
             let bytes = output_size(text, width, isize::MAX as usize)?;
-            let mut result = Str::try_with_capacity(bytes).map_err(|_| Error::allocation())?;
+            let mut result = Str::try_with_capacity(bytes).map_err(|_| Error::memory_error())?;
             const SPACES: &str = "                                                                ";
             for (part, mut spaces) in spans(text, width) {
                 result.push_str(part);
