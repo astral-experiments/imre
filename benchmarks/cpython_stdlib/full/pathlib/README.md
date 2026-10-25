@@ -39,15 +39,23 @@ includes all seven child suites; adding their counts again would duplicate them.
 All 391 skips name their fixture, original reason and pinned source condition.
 There are no additional exclusions.
 
-The current Linux report replays all cohorts on `e6fda91`, with the
+The original constructor report replays all cohorts on `e6fda91`, with the
 [whole-method probe from that compiler](body-probes-segments-linux.json)
-accounting for the remaining occurrences. To reproduce it:
+accounting for the remaining occurrences. The current report replaces its seven
+constructor observations with measurements from `4375dae` after #995.
+Reproduce the two steps with their respective native binaries:
 
 ```sh
 python -B -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
     --imre-commit e6fda919601a5ea86386d231388162e7a39be706 \
     --body-report benchmarks/cpython_stdlib/full/pathlib/body-probes-segments-linux.json \
+    --result /tmp/pathlib-constructors.json
+python -B -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py \
+    --imre /path/to/4375dae/imre --runtime /path/to/4375dae/libimre_runtime.a --clang /path/to/clang \
+    --imre-commit 4375dae659c1d6e00f3ee8c452b7d33e1f21fca1 --cohort segments --result /tmp/pathlib-segments.json
+python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --segments /tmp/pathlib-segments.json \
+    --baseline /tmp/pathlib-constructors.json --imre-commit 4375dae659c1d6e00f3ee8c452b7d33e1f21fca1 \
     --result /tmp/pathlib-current.json
 ```
 
@@ -122,11 +130,13 @@ joins them, calls stat three times and reads 19 integer fields. The adapter
 rejects any host pathlib, `os.stat` or `os.lstat` call in those bodies.
 
 The constructor cohort (`--cohort segments`) measures seven original methods
-on `e6fda91`. The two concrete classes run their complete unexpected-keyword
+on `e6fda91` and again on `4375dae`. The two concrete classes run their complete unexpected-keyword
 method and its assertion in Imre under the CPython fixture. On the five core
 pure and concrete classes, CPython drives the three `assertRaisesRegex`
 checks in `test_bytes_exc_message`; Imre constructs the paths and raises each
-`TypeError`, including for `PureWindowsPath` on Linux. Verify the role and
+`TypeError`, including for `PureWindowsPath` on Linux. After native regex
+contexts landed in #995, compiling the complete body reaches `P(b'a')`;
+the indirect call still cannot omit its optional second argument. Verify the roles and
 call counts with `metadata_receipt.py --segments /tmp/pathlib-segments.json`.
 
 The [link](../../../../tests/fixtures/paths/links.py) and
@@ -243,7 +253,7 @@ both reachable-only checks (line 1613). A separate hosted check with the full
 CPython `Lib` on the module search path stopped at the package's first
 `import os` in all four modes because that root contains an `os.py`.
 With [the inherited exception layout change](https://github.com/astral-sh/imre/pull/971)
-(hosted trees `97a191b` and `d724fad`, then exact local head `95595eb`), both normal entry points passed line 133 and stopped at
+(hosted trees `97a191b` and `d724fad`, then exact local heads `95595eb` and `1091f9e`), both normal entry points passed line 133 and stopped at
 `_MemoryWatchdog.__init__` assigning `self.procfile` on line 1155. Both
 reachable-only entries still stopped on line 1613. The coordinator's source root
 and the shared runner with verified vendored files gave identical diagnostics.

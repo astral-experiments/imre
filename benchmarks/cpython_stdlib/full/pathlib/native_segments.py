@@ -50,9 +50,17 @@ class NativeCase(unittest.TestCase):
             return native_method(tools, directory, MODULE, 'PurePathTest', case.id(), fixture,
                                  operation=('imre', description))(case, original)
         except NativeCompileError as exc:
-            line = re.search(r'case\.py:(\d+):\d+: Imre:', str(exc))
-            if not line or 'self.assertRaisesRegex(TypeError, message)' not in (
-                    directory / 'case.py').read_text(encoding='utf-8').splitlines()[int(line[1]) - 1]:
+            line = re.search(r'case\.py:(\d+):\d+: Imre: ([^\n]+)', str(exc))
+            if not line:
+                raise
+            source = (directory / 'case.py').read_text(encoding='utf-8').splitlines()[int(line[1]) - 1].strip()
+            # After #995 the body enters its regex context, then reaches the
+            # saved constructor's omitted second argument. Other failures surface.
+            if (source, line[2]) not in {
+                ('with self.assertRaisesRegex(TypeError, message):', 'unknown class method'),
+                ("P(b'a')", 'indirect calls require the full positional Callable signature; '
+                             'keywords and omitted defaults are unsupported'),
+            }:
                 raise
             reason = str(exc).replace(str(directory), '<case>').strip()
 
