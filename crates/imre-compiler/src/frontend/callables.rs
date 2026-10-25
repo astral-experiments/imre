@@ -218,8 +218,10 @@ impl Checker<'_> {
                 signature.returns
             },
         );
-        let ty = if receiver.is_none() && self.classes.cached.contains_key(&signature.id) {
-            self.types.declared_cache(ty, signature.id)
+        let ty = if receiver.is_none()
+            && let Some(&policy) = self.classes.cached.get(&signature.id)
+        {
+            self.types.declared_cache(ty, signature.id, policy)
         } else {
             ty
         };

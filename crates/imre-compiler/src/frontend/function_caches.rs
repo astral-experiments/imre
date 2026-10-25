@@ -314,24 +314,11 @@ impl Checker<'_> {
         let frame = self
             .types
             .partial_frame(vec![callable.ty, table.cache_state()]);
-        // update_wrapper copies the inner wrapper's cache_parameters attribute.
-        // Eviction and cache_info still belong to the newly created wrapper.
-        let parameters = self
-            .types
-            .cached_function(callable.ty)
-            .map(|inner| inner.parameters)
-            .or_else(|| {
-                self.types
-                    .cache_declaration(callable.ty)
-                    .map(|(_, id)| self.classes.cached[&id])
-            })
-            .unwrap_or(policy);
         let layout = crate::types::CachedFunction {
             callable: callable.ty,
             frame,
             table,
             capacity: policy.capacity,
-            parameters,
         };
         let id = self.helpers.reserve();
         self.helpers.finish(
@@ -359,7 +346,7 @@ impl Checker<'_> {
             kind: ExprKind::Tuple(vec![callable, state]),
         };
         Ok(Some(Expr {
-            ty: self.types.cached_callable(layout),
+            ty: self.types.cached_callable(layout, id, policy),
             kind: ExprKind::Callable {
                 function: id,
                 receiver: Some(Box::new(frame)),
@@ -417,7 +404,7 @@ impl Checker<'_> {
                 return Ok(None);
             }
             if name == "cache_parameters" {
-                return self.cache_parameters(policy, wrapper, call).map(Some);
+                return self.cache_parameters(Some(policy), wrapper, call).map(Some);
             }
             let table = cache_table(self.types, &params, result);
             let state = builtin(Builtin::ModuleCache(id), table.cache_state(), vec![]);
@@ -428,9 +415,7 @@ impl Checker<'_> {
                 return Ok(None);
             };
             if name == "cache_parameters" {
-                return self
-                    .cache_parameters(layout.parameters, Some(wrapper), call)
-                    .map(Some);
+                return self.cache_parameters(None, Some(wrapper), call).map(Some);
             }
             if name == "__wrapped__" {
                 return self
@@ -472,8 +457,8 @@ impl Checker<'_> {
 
     /// Return a fresh ordered dictionary, preserving the Python types of both values.
     fn cache_parameters(
-        &self,
-        policy: Policy,
+        &mut self,
+        declaration: Option<Policy>,
         receiver: Option<Expr>,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
@@ -484,19 +469,36 @@ impl Checker<'_> {
                 "cache_parameters takes no arguments",
             ));
         }
-        let typed = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(policy.typed),
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        let (size, typed) = if let Some(policy) = declaration {
+            body.extend(receiver.map(Statement::Expr));
+            let typed = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(policy.typed),
+            };
+            (
+                self.document_coerce(cache_size(policy.capacity), documents::ANY, call)?,
+                self.document_coerce(typed, documents::ANY, call)?,
+            )
+        } else {
+            let wrapper = receiver.expect("an applied cache has a native wrapper");
+            let ty = wrapper.ty;
+            let slot = self.hidden(ty);
+            body.push(Statement::Assign(slot, wrapper));
+            clear.push(slot);
+            let parameter = |typed| {
+                builtin(
+                    Builtin::CacheParameter(typed),
+                    documents::ANY,
+                    vec![local(slot, ty)],
+                )
+            };
+            (parameter(false), parameter(true))
         };
         let entries = vec![
-            (
-                unpacking::string("maxsize"),
-                self.document_coerce(cache_size(policy.capacity), documents::ANY, call)?,
-            ),
-            (
-                unpacking::string("typed"),
-                self.document_coerce(typed, documents::ANY, call)?,
-            ),
+            (unpacking::string("maxsize"), size),
+            (unpacking::string("typed"), typed),
         ];
         let result = Expr {
             ty: self.types.dict(Type::Str, documents::ANY),
@@ -506,7 +508,14 @@ impl Checker<'_> {
                 entries,
             },
         };
-        Ok(after_receiver(receiver, result))
+        Ok(Expr {
+            ty: result.ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(result),
+                clear,
+            },
+        })
     }
 
     fn cache_snapshot(&self, capacity: i64, stat: impl Fn(u32) -> Expr) -> Expr {

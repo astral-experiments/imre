@@ -39,7 +39,6 @@ pub(crate) struct CachedFunction {
     pub frame: Type,
     pub table: Type,
     pub capacity: i64,
-    pub parameters: CachePolicy,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -66,6 +65,7 @@ pub(crate) struct NamedTuple {
 struct Storage {
     shapes: Vec<Shape>,
     named_tuples: HashMap<DefinitionId, Rc<NamedTuple>>,
+    cache_adapters: HashMap<usize, CachePolicy>,
     exceptions: Vec<NamedException>,
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
@@ -629,8 +629,14 @@ impl Types {
     }
 
     /// A module cache keeps its declaration's identity when bound to another name.
-    pub(crate) fn declared_cache(&self, callable: Type, id: usize) -> Type {
+    pub(crate) fn declared_cache(&self, callable: Type, id: usize, policy: CachePolicy) -> Type {
+        self.0.borrow_mut().cache_adapters.insert(id, policy);
         Type::Callable(self.intern(Shape::DeclaredCache(callable, id)))
+    }
+
+    /// Adapter identity survives storage in a parameter or return typed as Callable.
+    pub(crate) fn cache_adapter(&self, function: usize) -> Option<CachePolicy> {
+        self.0.borrow().cache_adapters.get(&function).copied()
     }
 
     pub(crate) fn cache_declaration(&self, ty: Type) -> Option<(Type, usize)> {
@@ -641,7 +647,28 @@ impl Types {
         }
     }
 
-    pub(crate) fn cached_callable(&self, layout: CachedFunction) -> Type {
+    /// The public positional ABI of a wrapper, including nested applied caches.
+    pub(crate) fn cache_signature(&self, ty: Type) -> Option<Type> {
+        let shapes = self.0.borrow();
+        let mut current = ty;
+        while let Type::Callable(id) = current {
+            current = match shapes.shapes.get(id)? {
+                Shape::DeclaredCache(underlying, _) => *underlying,
+                Shape::CachedCallable(cache) => cache.callable,
+                Shape::Callable(..) => return (current != ty).then_some(current),
+                _ => return None,
+            };
+        }
+        None
+    }
+
+    pub(crate) fn cached_callable(
+        &self,
+        layout: CachedFunction,
+        id: usize,
+        policy: CachePolicy,
+    ) -> Type {
+        self.0.borrow_mut().cache_adapters.insert(id, policy);
         Type::Callable(self.intern(Shape::CachedCallable(layout)))
     }
 

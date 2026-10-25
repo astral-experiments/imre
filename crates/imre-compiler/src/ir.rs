@@ -760,6 +760,8 @@ pub(crate) enum Builtin {
     CacheInsert(i64),
     CacheStat(u32),
     CacheClear,
+    /// Read the public maxsize (false) or typed (true) of a constructed cache.
+    CacheParameter(bool),
     CallableContext,
     HashStr,
     HashRecord,

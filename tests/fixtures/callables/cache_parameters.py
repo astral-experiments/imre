@@ -16,6 +16,21 @@ def choose() -> Callable[[int], int]:
     return identity
 
 
+def choose_cached(flag: bool) -> Callable[[int], int]:
+    print(flag)
+    if flag:
+        return declared
+    return identity
+
+
+def report_erased(fn: Callable[[int], int]) -> None:
+    outer = lru_cache(3)(fn)
+    print(repr(outer.cache_parameters()))
+    print(outer.cache_info()[2])
+    print(outer(7))
+    print(outer(7))
+
+
 def call(fn: Callable[[int], int], value: int) -> int:
     return fn(value)
 
@@ -48,6 +63,12 @@ def exercise() -> None:
     print(declared.cache_info()[3])
     alias.cache_clear()
     print(declared.cache_info()[3])
+
+    report_erased(choose_cached(False))
+    report_erased(choose_cached(True))
+    report_erased(unlimited)
+    print(unlimited.cache_info()[3])
+    report_erased(lru_cache(9223372036854775807, typed=True)(identity))
 
 
 exercise()
