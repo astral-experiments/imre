@@ -5789,6 +5789,11 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
+            if attribute.attr.as_str() == "lower"
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.text_method(Self::string_value(receiver), "lower", call);
+            }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
