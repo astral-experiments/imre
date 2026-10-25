@@ -42,12 +42,8 @@
       ]
     },
     "test.test_sys.SysModuleTest.test_ioencoding_nonascii": {
-      "status": "pass",
-      "execution": "host-driven-native",
-      "body": "CPython; child source: Imre",
-      "assertions": "CPython",
-      "fixture_execution": "CPython module/class/instance hooks",
-      "child_sha256": "1a63a0572c34482cedb75d0835392866200128b18a4bd5365f26954c3cc12c94"
+      "status": "upstream-skip",
+      "reason": "requires FS encoding to match locale"
     },
     "test.test_sys.TestSysJIT.test_jit_is_available": {
       "status": "pass",

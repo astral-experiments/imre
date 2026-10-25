@@ -8,7 +8,6 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
@@ -18,6 +17,8 @@ from suite_inventory import cases, load_suite, verify_files, verify_interpreter_
 from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures
 from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
+import jit_case
+import locale_case
 
 MODULE = "test.test_sys"
 SYS = MODULE + ".SysModuleTest."
@@ -53,13 +54,17 @@ def output(binary):
     return result.stdout, result.stderr
 
 
-def select(toolchain, work, source, module):
-    executions = {}
+def method_hashes(source):
     lines = source.read_bytes().splitlines(keepends=True)
-    pinned_methods = {(cls.name, method.name): hashlib.sha256(b"".join(
+    return {(cls.name, method.name): hashlib.sha256(b"".join(
         lines[min([method.lineno, *(d.lineno for d in method.decorator_list)]) - 1:method.end_lineno]
     )).hexdigest() for cls in ast.parse(b"".join(lines)).body if isinstance(cls, ast.ClassDef)
        for method in cls.body if isinstance(method, ast.FunctionDef)}
+
+
+def select(toolchain, work, source, module):
+    executions = {}
+    pinned_methods = method_hashes(source)
     for cls, method, fixture, operation in [
         ("SysModuleTest", "test_43581", STRING_EQUAL, "sys.__stdout__.encoding and sys.__stderr__.encoding"),
         ("ActiveExceptionTests", "test_sys_exception_no_exception", EXCEPTION_EQUAL, "sys.exception() outside a handler"),
@@ -121,97 +126,27 @@ def select(toolchain, work, source, module):
     for method in ("test_getdefaultencoding", "test_getfilesystemencoding"):
         executions[SYS + method] = encoding_case
 
-    def nonascii(case, original):
-        sources = []
+    executions[locale_case.CASE_ID] = locale_case.observer(
+        module, toolchain, work / "nonascii-child", pinned_methods["SysModuleTest", "test_ioencoding_nonascii"])
 
-        def popen(argv, **kwargs):
-            if len(argv) != 3 or argv[:2] != [sys.executable, "-c"]:
-                raise ValueError(f"unexpected child: {argv!r}")
-            data = argv[2].encode()
-            child = toolchain.build(data, directory(work, "nonascii-child"))
-            sources.append(hashlib.sha256(data).hexdigest())
-            return subprocess.Popen([child], **kwargs)
-
-        with patch.object(module, "subprocess", SimpleNamespace(Popen=popen, PIPE=subprocess.PIPE)):
-            original()
-        if len(sources) != 1:
-            raise AssertionError(sources)
-        return {"execution": "host-driven-native", "body": "CPython; child source: Imre",
-                "assertions": "CPython", "fixture_execution": "CPython module/class/instance hooks",
-                "child_sha256": sources[0],
-                "observation": {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
-                                "evidence": {"operation": "native child prints the original non-ASCII value through stdout",
-                                             "fixture": "upstream CPython locale/subprocess decorators, child environment and pipes",
-                                             "assertions": "original CPython comparison with os.fsencode",
-                                             "method_sha256": pinned_methods[type(case).__name__, case._testMethodName],
-                                             "native_calls": 1, "child_sha256": sources[0], "opt_level": toolchain.level}}}
-
-    executions[SYS + "test_ioencoding_nonascii"] = nonascii
-    from test.support import script_helper
-    # This probes whether the *fixture interpreter* needs its environment.
-    # It does not call any JIT predicate under test.
-    script_helper.interpreter_requires_environment()
-    jit = toolchain.build(b"from sys import _jit\nprint(_jit.is_available())\n",
-                          directory(work, "jit-available"))
-
-    def jit_case(case, original):
-        calls = []
-        children = []
-
-        def available():
-            stdout, stderr = output(jit)
-            value = ast.literal_eval(stdout.decode())
-            if stderr or type(value) is not bool:
-                raise AssertionError((stdout, stderr))
-            calls.append("sys._jit.is_available")
-            return value
-
-        def popen(argv, **kwargs):
-            if argv[:-1] != [sys.executable, "-X", "faulthandler", "-c"]:
-                raise ValueError(f"unexpected fixture invocation: {argv!r}")
-            data = argv[-1].encode()
-            dest = directory(work, f"{case._testMethodName}-child-{len(children)}")
-            child = toolchain.build(data, dest)
-            children.append({"sha256": hashlib.sha256(data).hexdigest(),
-                             "PYTHON_JIT": kwargs["env"]["PYTHON_JIT"]})
-            # The original assert_python_ok controls its environment, pipes,
-            # cleanup and status assertion. The child executes the original source.
-            return subprocess.Popen([child], **kwargs)
-
-        fixture = SimpleNamespace(Popen=popen, PIPE=subprocess.PIPE, _cleanup=subprocess._cleanup)
-        with patch.object(module, "sys", SimpleNamespace(_jit=SimpleNamespace(is_available=available))), \
-                patch.object(script_helper, "subprocess", fixture):
-            original()
-        if len(calls) != 1 or [child["PYTHON_JIT"] for child in children] != ["0", "1"]:
-            raise AssertionError((calls, children))
-        return {"execution": "mixed", "body": "CPython; both child sources: Imre",
-                "assertions": "Imre in each child; CPython checks child status",
-                "fixture_execution": "CPython unittest hooks and original assert_python_ok",
-                "calls": calls, "children": children,
-                "observation": {
-                    "roles": roles(body="cpython", assertions="mixed", operation="imre", fixture="cpython"),
-                    "evidence": {
-                        "operation": "native sys._jit.is_available() in the parent query and the native predicate in both children",
-                        "fixture": "original CPython unittest lifecycle, assert_python_ok, environment and pipes",
-                        "assertions": "both original child assert statements execute in Imre; CPython asserts each exit status",
-                        "method_sha256": pinned_methods[type(case).__name__, case._testMethodName],
-                        "native_calls": len(calls) + len(children), "children": children, "opt_level": toolchain.level,
-                    },
-                }}
-
+    jit = jit_case.observer(module, toolchain, work, pinned_methods)
     for method in ("test_jit_is_available", "test_jit_is_enabled"):
-        executions[f"{MODULE}.TestSysJIT.{method}"] = jit_case
+        executions[f"{MODULE}.TestSysJIT.{method}"] = jit
     return executions
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("imre", "runtime", "clang", "result"):
+    for name in ("imre", "runtime", "clang"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--opt-level", type=int, choices=(0, 3), required=True)
     parser.add_argument("--cpython-source", type=Path)
     parser.add_argument("--evidence", type=Path, help="write the versioned report for this optimization level")
+    parser.add_argument("--result", type=Path, help="write legacy full-suite outcomes")
+    parser.add_argument("--locale-audit", type=Path, help="compare this host configuration on the one unchanged locale case")
     args = parser.parse_args()
+    if bool(args.locale_audit) == bool(args.result) or (args.locale_audit and args.evidence):
+        parser.error("choose --result [--evidence] or --locale-audit")
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5):
         parser.error("run with the test-enabled CPython 3.14.5 release")
     manifest = json.loads((STDLIB / "UPSTREAM.json").read_text())
@@ -236,6 +171,15 @@ def main():
         raise ValueError("discovered IDs or upstream revision differ from the reference")
     toolchain = Toolchain(args.imre, args.runtime, args.clang, args.opt_level)
     with tempfile.TemporaryDirectory(prefix="imre-test-sys-") as tmp:
+        if args.locale_audit:
+            hash_ = method_hashes(source)["SysModuleTest", "test_ioencoding_nonascii"]
+            locale_case.audit(args.locale_audit, test_sys, toolchain, Path(tmp) / "child", hash_, manifest["commit"])
+            return
+        if args.evidence:
+            config = locale_case.settings()
+            if (config["LC_CTYPE"], config["utf8_mode"], config["filesystem_encoding"],
+                    config["preferred_encoding"]) != ("C.UTF-8", 0, "utf-8", "UTF-8"):
+                parser.error(f"canonical Linux report requires the recorded C.UTF-8 reference settings: {config}")
         executions = select(toolchain, Path(tmp), source, test_sys)
         if args.evidence:
             preflight = blocked_methods(toolchain, Path(tmp), source, reference, executions, test_sys)
