@@ -13,7 +13,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_evidence import roles, write_reports
-from suite_native import NativeCompileError, Toolchain, compile_blocker, method_bytes, native_method, run_evidence, testcase_fixture
+from suite_native import (NativeCompileError, NativeDefaultMethod, Toolchain, compile_blocker,
+                          method_bytes, native_method, run_evidence, testcase_fixture)
 
 PREFIX = "test.test_unittest."
 ASSERTIONS = {
@@ -94,7 +95,7 @@ def run(args, level, root):
     reference = json.loads((HERE / "reference-linux.json").read_text())
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
-    lang = Toolchain(args.imre, args.runtime, args.clang, level)
+    lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
     for name in ["equality_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
                  "callable_binding", *("context_" + family for family in families)]:
@@ -108,7 +109,7 @@ def run(args, level, root):
             raise AssertionError(f"{program.name} differs from CPython: {observed!r} != {oracle!r}")
     driver = root / "assertions"
     driver.mkdir()
-    executions, blocked, measured_blockers = {}, {}, set()
+    executions, native_defaults, blocked, measured_blockers = {}, {}, {}, set()
     host = {PREFIX + "test_assertions.TestLongMessage." + name: op for name, op in ASSERTIONS.items()}
     try:
         binary = lang.build((HERE / "assertion_driver.py").read_bytes(), driver)
@@ -142,6 +143,10 @@ def run(args, level, root):
         case_id = PREFIX + f"{module}.{owner}.{method}"
         directory = root / method
         directory.mkdir()
+        if module == "testmock.testmock" and method not in MOCK_BLOCKERS:
+            blob = manifest["files"][path.relative_to(HERE / "upstream").as_posix()]
+            native_defaults[case_id, 1] = NativeDefaultMethod(lang, directory, path, blob, operation)
+            continue
         fixture = testcase_fixture("bool" if method == "test_stop" else None)
         if module == "testmock.testmock":
             fixture = "from unittest.mock import Mock\n" + fixture
@@ -163,7 +168,7 @@ def run(args, level, root):
                 )
             blocked[case_id, 1] = observation
     report = run_evidence(load_suite(manifest["module"]), executions, reference, level,
-                          preflight=blocked, exceptions=reference_skips(level))
+                          preflight=blocked, native_defaults=native_defaults, exceptions=reference_skips(level))
     failures = [r for r in report["records"]
                 if (r["outcome"] not in {"pass", "not-run"}
                     and not (r["outcome"] == "blocked" and r["id"] in measured_blockers))
@@ -189,6 +194,7 @@ def main():
     for option in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + option, type=Path, required=True)
     parser.add_argument("--cpython-source", type=Path)
+    parser.add_argument("--reachable-only", action="store_true", help="build all native entries in reachable-only mode")
     parser.add_argument("--exception-family", action="append", choices=("csv", "import"), default=[],
                         help="explicitly require a family control (csv and import are checked by default)")
     args = parser.parse_args()
