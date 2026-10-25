@@ -35,13 +35,17 @@ pub(super) fn adapters(
         return;
     }
     output.common().push_str("%callable = type { ptr, ptr }\n");
-    for (name, kind) in [("callable", 6)]
+    let cached = targets
+        .iter()
+        .any(|(id, _, _)| module.types.cache_adapter(*id).is_some());
+    for (name, kinds, length) in [("callable", "i32 0, i32 6", 2)]
         .into_iter()
-        .chain(enum_receiver.then_some(("callable_enum", 10)))
+        .chain(enum_receiver.then_some(("callable_enum", "i32 0, i32 10", 2)))
+        .chain(cached.then_some(("cache_callable", "i32 0, i32 6, i32 0, i32 0", 4)))
     {
         writeln!(
             output.entry_buffer(),
-            "@kinds_{name} = private unnamed_addr constant [2 x i32] [i32 0, i32 {kind}]"
+            "@kinds_{name} = private unnamed_addr constant [{length} x i32] [{kinds}]"
         )
         .unwrap();
         writeln!(
@@ -51,7 +55,7 @@ pub(super) fn adapters(
                 "constant",
                 "{ i64, ptr, ptr }"
             ),
-            "{{ i64 2, ptr @kinds_{name}, ptr null }}"
+            "{{ i64 {length}, ptr @kinds_{name}, ptr null }}"
         )
         .unwrap();
     }
@@ -139,13 +143,35 @@ impl Emitter<'_, '_> {
         let scalar = receiver
             .as_ref()
             .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
-        let result = self.record_with_layout(ty, if scalar { "callable_enum" } else { "callable" });
+        let policy = self.module.types.cache_adapter(function);
+        let layout = if policy.is_some() {
+            "cache_callable"
+        } else if scalar {
+            "callable_enum"
+        } else {
+            "callable"
+        };
+        let result = self.record_with_layout(ty, layout);
         let target = self.output.adapter_ref(function, receiver.is_some());
         self.line(format!("store ptr @{target}, ptr {}", result.operand));
         let context = self.instruction(format!(
             "getelementptr %callable, ptr {}, i32 0, i32 1",
             result.operand
         ));
+        if let Some(policy) = policy {
+            // Applied caches capture the actual wrappee in the first field of
+            // their frame. A statically decorated declaration has no frame.
+            let source = receiver.as_ref().map_or_else(
+                || "null".to_owned(),
+                |frame| self.instruction(format!("load ptr, ptr {}", frame.operand)),
+            );
+            self.line(format!(
+                "call void @imre_callable_copy_cache_policy(ptr {}, ptr {source}, i64 {}, i32 {})",
+                result.operand,
+                policy.capacity,
+                u32::from(policy.typed)
+            ));
+        }
         if let Some(receiver) = receiver {
             self.line(format!(
                 "store {} {}, ptr {context}",
