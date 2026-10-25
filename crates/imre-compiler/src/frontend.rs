@@ -4305,15 +4305,6 @@ impl<'a> Checker<'a> {
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        if let Some(Binding::Intrinsic(Intrinsic::OpenFlag(name))) = self.resolve(expression) {
-            return Ok(Expr {
-                ty: Type::Int,
-                kind: ExprKind::Builtin(
-                    Builtin::Process(ir::ProcessOperation::OpenFlag(name)),
-                    vec![],
-                ),
-            });
-        }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level) | Intrinsic::SignalNumber(level),
         )) = self.resolve(expression)
@@ -4366,6 +4357,15 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
+                Intrinsic::OpenFlag(name) => {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::OpenFlag(name)),
+                            vec![],
+                        ),
+                    });
+                }
                 Intrinsic::HashAvailable => {
                     return Ok(Expr {
                         ty: self.types.set(Type::Str),
