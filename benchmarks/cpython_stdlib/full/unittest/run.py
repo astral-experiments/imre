@@ -3,6 +3,7 @@ import argparse
 import hashlib
 from collections import Counter
 from contextlib import contextmanager
+from dataclasses import replace
 import json
 from pathlib import Path
 import subprocess
@@ -15,6 +16,7 @@ from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_evidence import roles, write_reports
 from suite_native import (NativeCompileError, NativeDefaultMethod, Toolchain, compile_blocker,
                           method_bytes, native_method, run_evidence, testcase_fixture)
+import patch_cases
 
 PREFIX = "test.test_unittest."
 ASSERTIONS = {
@@ -107,12 +109,14 @@ def check_assertion(binary, operation, level):
     return run
 
 
-def run(args, level, root):
+def run(args, level, root, fixture_root):
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
     reference = json.loads((HERE / "reference-linux.json").read_text())
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
+    patches = patch_cases.methods()
+    patch_compiler = replace(lang, module_root=fixture_root)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
     for name in ["truth_protocol", "equality_protocol", "mapping_protocol", "dictionary_patch", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
                  "callable_binding", "context_regex", *("context_" + family for family in families)]:
@@ -145,9 +149,7 @@ def run(args, level, root):
                          "testAssertEqualMultipleLinesMissingNewlineTerminator",
                          "testAssertEqualMultipleLinesMismatchedNewlinesTerminators",
                          "testAssertMultiLineEqual", *EQUALITY_BLOCKERS)),
-        *(("testmock.testpatch", "PatchTest", method, "unittest.mock.patch.dict and restoration")
-          for method in ("test_patch_dict_as_context_manager", "test_patch_dict_start_stop",
-                         "test_patch_dict_stop_without_start")),
+        *(("testmock.testpatch", "PatchTest", method, "unittest.mock.patch.dict and restoration") for method in patches),
         *(("testmock.testmock", "MockTest", method, operation) for method, operation in DEFAULT_MOCK_METHODS.items()),
         ("testmock.testmock", "MockTest", "test_assert_called_exception_message",
          "unittest.TestCase.assertRaisesRegex and unittest.mock.Mock.assert_called"),
@@ -160,7 +162,12 @@ def run(args, level, root):
         directory.mkdir()
         if module == "testmock.testpatch" or (module == "testmock.testmock" and method in DEFAULT_MOCK_METHODS):
             blob = manifest["files"][path.relative_to(HERE / "upstream").as_posix()]
-            native_defaults[case_id, 1] = NativeDefaultMethod(lang, directory, path, blob, ("imre", operation))
+            compiler = lang
+            if module == "testmock.testpatch":
+                compiler = patch_compiler
+                (directory / "__init__.py").touch()
+                (directory / "test").symlink_to(fixture_root / "test", target_is_directory=True)
+            native_defaults[case_id, 1] = NativeDefaultMethod(compiler, directory, path, blob, ("imre", operation))
             continue
         fixture = testcase_fixture("bool" if method == "test_stop" else None)
         if module == "testmock.testmock":
@@ -187,6 +194,15 @@ def run(args, level, root):
             blocked[case_id, 1] = observation
     report = run_evidence(load_suite(manifest["module"]), executions, reference, level,
                           preflight=blocked, native_defaults=native_defaults, exceptions=reference_skips(level))
+    previous = patch_cases.known_blockers(args.reachable_only, level)
+    for row in report['records']:
+        if row['id'].startswith(PREFIX + 'testmock.testpatch.PatchTest.'):
+            method = row['id'].rsplit('.', 1)[-1]
+            if method in patches:
+                if patch_cases.recorded_blocker(row, previous.get(row['id']), patches[method], fixture_root):
+                    measured_blockers.add(row['id'])
+                if row['outcome'] == 'pass' and method not in patch_cases.REVIEWED:
+                    raise ValueError(f"{row['id']}: review the original operation and assertions before publishing a new pass")
     failures = [r for r in report["records"]
                 if (r["outcome"] not in {"pass", "not-run"}
                     and not (r["outcome"] == "blocked" and r["id"] in measured_blockers))
@@ -225,12 +241,15 @@ def main():
     verify_interpreter_tests(manifest)
     reports = []
     failed = False
-    for level in (0, 3):
-        with tempfile.TemporaryDirectory() as work:
-            report, bad = run(args, level, Path(work))
-        print(f"-O{level}: {report['counts']}")
-        failed |= bad
-        reports.append(report)
+    with tempfile.TemporaryDirectory() as fixture:
+        fixture_root = Path(fixture)
+        patch_cases.stage(fixture_root, args.cpython_source)
+        for level in (0, 3):
+            with tempfile.TemporaryDirectory() as work:
+                report, bad = run(args, level, Path(work), fixture_root)
+            print(f"-O{level}: {report['counts']}")
+            failed |= bad
+            reports.append(report)
     write_reports(args.result, reports, json.loads((HERE / "reference-linux.json").read_text()))
     return int(failed)
 
