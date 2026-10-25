@@ -1,95 +1,78 @@
-name: Argparse 818 prospective runtime
+name: Argparse pinned suite evidence
 on:
   workflow_dispatch:
+    inputs:
+      revision:
+        description: Exact argparse source revision
+        type: choice
+        required: true
+        options:
+          - '71ffc22719423ad434d0389a08e6d80395aece01'
+          - 'ca977019d95d473818bc5bab8043d5c02a218dd8'
 permissions:
   contents: read
 jobs:
-  prospective:
+  evidence:
     runs-on: github-ubuntu-24.04-x86_64-4
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
+      REVISION: ${{ inputs.revision }}
       CARGO_BUILD_JOBS: 2
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_DEV_INCREMENTAL: false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 067a0f070801f2df51ca0aadb00db9908ab71374
-          fetch-depth: 0
-          persist-credentials: true
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
-      - name: Install LLVM 18
-        run: sudo apt-get update && sudo apt-get install -y clang-18
-      - name: Test the actual prospective tree and record its provenance
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-argparse
+          sparse-checkout: Lib
+          persist-credentials: false
+      - name: Verify the complete original CPython suite and reference
         shell: bash
         run: |
           set -euo pipefail
-          base_checkout="$PWD"
-          pr=067a0f070801f2df51ca0aadb00db9908ab71374
-          cat > "$RUNNER_TEMP/argparse-driver" <<'SH'
-          #!/bin/sh
-          if test "$1" = build; then
-            shift
-            exec "$GITHUB_WORKSPACE/target/debug/imre" build --no-cache "$@"
-          fi
-          exec "$GITHUB_WORKSPACE/target/debug/imre" "$@"
-          SH
-          chmod +x "$RUNNER_TEMP/argparse-driver"
-          cat > "$RUNNER_TEMP/argparse-cross.py" <<'PY'
-          import os
-          from pathlib import Path
-          import subprocess
-          import sys
-          from tempfile import TemporaryDirectory
-          root = Path(os.environ["GITHUB_WORKSPACE"])
-          driver = Path(os.environ["RUNNER_TEMP"], "argparse-driver")
-          runtime = root / "target/debug/libimre_runtime.a"
-          for name in ("benchmarks/cpython_stdlib/full/types/namespaces.py",
-                       "benchmarks/cpython_stdlib/full/inspect/static_attributes.py",
-                       "tests/fixtures/paths/walking.py", "tests/fixtures/processes/file_redirects.py",
-                       "tests/fixtures/text/line_methods.py"):
-              source = root / name
-              with TemporaryDirectory() as tmp:
-                  directory = Path(tmp)
-                  ref_dir = directory / "cpython"
-                  ref_dir.mkdir()
-                  def observed(argv, cwd):
-                      p = subprocess.run(argv, cwd=cwd, capture_output=True, timeout=90)
-                      return p.returncode, p.stdout, p.stderr
-                  expected = observed([sys.executable, "-B", source], ref_dir)
-                  assert expected[0] == 0, (name, expected)
-                  for level in ("0", "3"):
-                      output = directory / ("native-" + level)
-                      native_dir = directory / ("case-" + level)
-                      native_dir.mkdir()
-                      subprocess.run([driver, "build", source, "--runtime", runtime, "--clang", "/usr/bin/clang-18",
-                                      "--quiet", "--opt-level", level, "-o", output], check=True)
-                      actual = observed([output], native_dir)
-                      assert actual == expected, (name, level, expected, actual)
-              print(name, "O0/O3 exit, stdout, stderr matched", flush=True)
-          PY
-          for attempt in 1 2 3 4 5; do
-            git fetch --no-tags origin refs/heads/main
-            base=$(git rev-parse FETCH_HEAD)
-            tree=$(git merge-tree --write-tree "$base" "$pr")
-            candidate=$(git -c user.name='Argparse preflight' -c user.email='noreply@github.com' commit-tree "$tree" -p "$base" -p "$pr" -m 'Hosted validation of PR #818')
-            git checkout --detach "$candidate"
-            test "$(git rev-parse HEAD^{tree})" = "$tree"
-            echo "Attempt $attempt: base=$base pr=$pr tree=$tree"
-            cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
-            cargo test --locked -j 2 -p imre-runtime --lib
-            python3 tests/argparse_cli.py --compiler "$RUNNER_TEMP/argparse-driver" --runtime "$base_checkout/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
-            python3 "$RUNNER_TEMP/argparse-cross.py"
-            echo "Passed: base=$base pr=$pr tree=$tree (-O0 and -O3 stdout, stderr and exit; runtime ownership)." >> "$GITHUB_STEP_SUMMARY"
-            git fetch --no-tags origin refs/heads/main
-            latest=$(git rev-parse FETCH_HEAD)
-            if git diff --quiet "$base" "$latest" -- crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py; then
-              echo "Verified product source through main=$latest; tree=$tree (base=$base, pr=$pr)."
-              exit 0
-            fi
-            echo "Main changed during the tests; rebuilding the next prospective tree."
-          done
-          echo "Main kept changing through all five attempts; inspect the tested trees before merging." >&2
-          exit 1
+          test "$(git rev-parse HEAD)" = "$REVISION"
+          test "$(git -C .cpython-argparse rev-parse HEAD)" = 5607950ef232dad16d75c0cf53101d9649d89115
+          mkdir -p "$RUNNER_TEMP/argparse-receipts"
+          export PYTHONPATH="$GITHUB_WORKSPACE/.cpython-argparse/Lib"
+          python3 -B benchmarks/cpython_stdlib/suite_inventory.py benchmarks/cpython_stdlib/full/argparse/UPSTREAM.json --result "$RUNNER_TEMP/argparse-receipts/reference-linux.json"
+          cmp benchmarks/cpython_stdlib/full/argparse/reference-linux.json "$RUNNER_TEMP/argparse-receipts/reference-linux.json"
+      - name: Build the same native compiler and runtime revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang-18
+          cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+          {
+            git rev-parse HEAD HEAD^{tree}
+            git -C .cpython-argparse rev-parse HEAD
+            python3 --version
+            rustc --version
+            /usr/bin/clang-18 --version
+            sha256sum target/debug/imre target/debug/libimre_runtime.a
+          } > "$RUNNER_TEMP/argparse-receipts/build.txt"
+      - name: Run all 1893 occurrences at O0 and O3
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$GITHUB_WORKSPACE/.cpython-argparse/Lib" PYTHONUNBUFFERED=1
+          out="$RUNNER_TEMP/argparse-receipts"
+          python3 -B benchmarks/cpython_stdlib/full/argparse/evidence.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --imre-revision "$REVISION" --result "$out/evidence-linux.json" | tee "$out/run.log"
+          python3 -B benchmarks/cpython_stdlib/suite_evidence.py "$out/reference-linux.json" "$out/evidence-linux.json" | tee "$out/validation.log"
+      - name: Preserve the versioned results and build receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: argparse-evidence-${{ inputs.revision }}
+          path: ${{ runner.temp }}/argparse-receipts/
+          if-no-files-found: error
+          retention-days: 14
