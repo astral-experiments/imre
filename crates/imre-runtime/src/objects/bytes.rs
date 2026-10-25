@@ -640,7 +640,9 @@ pub unsafe extern "C" fn imre_bytes_decode_splitlines(value: *const Bytes) -> *c
     let result = std::str::from_utf8(bytes)
         // SAFETY: this caller still roots the exact byte object passed to the failing decode.
         .map_err(|error| decode_owned_error(unsafe { super::acquire_rc(value as usize) }, error))
-        .and_then(|text| super::split_lines(text, |range| super::text::owned_string(&text[range])));
+        .and_then(|text| {
+            super::split_lines(text, |range| super::text::try_owned_string(&text[range]))
+        });
     finish(result, std::ptr::null())
 }
 
@@ -807,7 +809,7 @@ mod tests {
         let error = unsafe { Rc::from_raw(imre_error_take()) };
         // SAFETY: error roots the exception, and repr transfers a new string owner.
         let repr = unsafe {
-            Rc::from_raw(crate::objects::exceptions::imre_exception_repr(Rc::as_ptr(
+            crate::StrOwner::from_raw(crate::objects::exceptions::imre_exception_repr(Rc::as_ptr(
                 &error,
             )))
         };
