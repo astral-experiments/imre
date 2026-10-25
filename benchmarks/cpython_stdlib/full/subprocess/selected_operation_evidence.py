@@ -135,7 +135,12 @@ def selected(report, attempts, revision, tree):
             body="cpython", assertions="cpython", operation="imre", fixture="mixed"
         )
         if name.endswith(".test_communicate_eintr"):
-            assert op["native_deliveries"] == 2 and len(op["launches"]) == 2
+            assert (
+                op["native_deliveries"]
+                == op["original_handler_calls"]
+                == len(op["launches"])
+                == 2
+            )
             assert [x["stream"] for x in op["launches"]] == ["stdout", "stderr"]
             for launch in op["launches"]:
                 assert (
@@ -149,7 +154,7 @@ def selected(report, attempts, revision, tree):
             operation = "native communicate retried both interrupted reads on the same fd, reached EOF and reaped each original child"
             fixture = (
                 host
-                + "; native signal disposition follows the original host signal fixture"
+                + "; both native SIGUSR1 deliveries invoked the original host handler before communicate returned"
             )
         else:
             assert name.endswith(".test_select_unbuffered")

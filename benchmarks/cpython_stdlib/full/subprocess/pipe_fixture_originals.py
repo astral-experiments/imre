@@ -60,7 +60,7 @@ def eintr_source(select_only):
     return (
         text
         + selector
-        + 'fixture_pipes.arm()\nmode=input()\nwhile mode!="quit":\n    if mode=="stdout":\n        drive_stdout()\n    else:\n        drive_stderr()\n    mode=input()\nprint(fixture_pipes.disarm())\n'
+        + 'fixture_pipes.arm(int(sys.argv[1]))\nmode=input()\nwhile mode!="quit":\n    if mode=="stdout":\n        drive_stdout()\n    else:\n        drive_stderr()\n    mode=input()\nprint(fixture_pipes.disarm())\n'
     ).encode()
 
 
@@ -99,7 +99,7 @@ def site(tc, root):
     s.mkdir()
     (s / "Python.h").write_bytes(subprocess.check_output([tc.imre, "extension-header"]))
     (s / "fixture_pipes.pyi").write_text(
-        "def arm() -> None: ...\ndef disarm() -> int: ...\ndef share_fd(channel: int, fd: int, /) -> None: ...\n"
+        "def arm(channel: int, /) -> None: ...\ndef disarm() -> int: ...\ndef share_fd(channel: int, fd: int, /) -> None: ...\n"
     )
     subprocess.run(
         [
@@ -254,6 +254,8 @@ class Context:
 
     def communicate(self):
         self.a.send("communicate")
+        assert self.a.channel.recv(1) == bytes([signal.SIGUSR1])
+        signal.raise_signal(signal.SIGUSR1)
         result = tuple(ast.literal_eval(self.a.read().decode()) for _ in range(2))
         assert result == ((b"", None) if self.stream == "stdout" else (None, b""))
         return result
@@ -269,6 +271,18 @@ def eintr(tc, site, root, case, orig, upstream):
     binary = build(tc, root, site, eintr_source(no_poll))
     actor = None
     children = []
+    host_callbacks = []
+    previous_profile = sys.getprofile()
+
+    def observe(frame, event, arg):
+        if (
+            event == "call"
+            and frame.f_code.co_name == "handler"
+            and frame.f_code.co_filename == upstream.__file__
+        ):
+            host_callbacks.append(frame.f_locals["signum"])
+        if previous_profile is not None:
+            previous_profile(frame, event, arg)
 
     def launch(args, **kw):
         nonlocal actor
@@ -293,17 +307,20 @@ def eintr(tc, site, root, case, orig, upstream):
         return Context(actor, pid, stream)
 
     try:
+        sys.setprofile(observe)
         with patch.object(
             upstream, "subprocess", SimpleNamespace(Popen=launch, PIPE=subprocess.PIPE)
         ):
             orig()
     finally:
+        sys.setprofile(previous_profile)
         if actor:
             owner = actor.parent()
             actor.send("quit")
             deliveries = int(actor.read())
             actor.done()
     assert deliveries == 2 and [s for s, p in children] == ["stdout", "stderr"]
+    assert host_callbacks == [signal.SIGUSR1, signal.SIGUSR1]
     calls = []
     for stream, pid in children:
         lines, child = actor.verify_child(
@@ -351,6 +368,7 @@ def eintr(tc, site, root, case, orig, upstream):
         actor_sha256=sha(binary),
         selector="SelectSelector" if no_poll else "PollSelector",
         native_deliveries=deliveries,
+        original_handler_calls=len(host_callbacks),
         launches=calls,
     )
 

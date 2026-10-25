@@ -3,18 +3,32 @@
 #define _POSIX_C_SOURCE 200809L
 #include <Python.h>
 #include <errno.h>
+#include <limits.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
 static volatile sig_atomic_t deliveries;
+static volatile sig_atomic_t channel;
 static struct sigaction previous;
 static int armed;
-static void count(int signum) { (void)signum; ++deliveries; }
+static void count(int signum) {
+    int saved = errno;
+    unsigned char byte = (unsigned char)signum;
+    if (write((int)channel, &byte, 1) != 1) _exit(121);
+    ++deliveries;
+    errno = saved;
+}
 
 static PyObject *arm(PyObject *self, PyObject *args) {
     (void)self;
-    if (!PyArg_ParseTuple(args, ":arm")) return NULL;
+    unsigned long fd;
+    if (!PyArg_ParseTuple(args, "k:arm", &fd)) return NULL;
+    if (fd < 3 || fd > INT_MAX) {
+        PyErr_SetString(PyExc_RuntimeError, "invalid fixture notification channel"); return NULL;
+    }
+    channel = (sig_atomic_t)fd;
     struct sigaction action = {0};
     action.sa_handler = count;
     if (armed || sigemptyset(&action.sa_mask) || sigaction(SIGUSR1, &action, &previous)) {

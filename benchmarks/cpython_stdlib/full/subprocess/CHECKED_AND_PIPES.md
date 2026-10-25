@@ -28,6 +28,9 @@ Three other unchanged methods retain **host bodies and assertions**. For
 `test_communicate_eintr` (both selector fixtures), the original children sent
 SIGUSR1 to their native parent. Its stdout and stderr reads were interrupted
 and retried on the same fd; both reached EOF and both children were reaped.
+The handler in the native parent forwarded each delivery over the fixture socket.
+The original Python signal callback ran once for each data child before the
+corresponding `communicate()` returned.
 The one-pipe path made no selector calls. For `test_select_unbuffered`, the
 host's select received the same open file description via SCM_RIGHTS. The
 native read took four bytes; FIONREAD found one byte left in the kernel. The

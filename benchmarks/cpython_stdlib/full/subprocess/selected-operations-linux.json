@@ -818,7 +818,7 @@
       "pipe_fixtures": {
         "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
         "opt_level": 0,
-        "fixture_sha256": "98aca0131bad47d52ecd8dab305992b47f9ad39dce87b00f613197dc4387c97e",
+        "fixture_sha256": "00e7fdc6d9313f3c93263f7a33f241ba102506e2241be64bcd8d97c79761d23b",
         "toolchain": {
           "imre": "a4dd50a8eb37a8e60721eb880790006165ee973ac0960955e293666ca105c2dd",
           "runtime": "f8d2e4f4fe190f4132c1d9c84e432213113c5d0d9d7feb9b370e0a5508e96c7d",
@@ -838,7 +838,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "2a8af8ecbf9b802634e9c4537f8becadd2fe2cb0eae12eec3e72b7a6fdefd347",
+                "actor_sha256": "525496f0daf280559551900c91be37e79731b1c0b78285aecec44035c361e1c2",
                 "read_bytes": 4,
                 "remaining_kernel_bytes": 1,
                 "same_open_file_description": "SCM_RIGHTS",
@@ -860,9 +860,10 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "61ed94c0720fed25e05e7329d2e8b1fc509e62ac9fe70b5eaca1c0e663fec997",
+                "actor_sha256": "25035776d3eb20bf26428a5c840768d49f88251d4159c1e455d04696818d36d7",
                 "selector": "PollSelector",
                 "native_deliveries": 2,
+                "original_handler_calls": 2,
                 "launches": [
                   {
                     "stream": "stdout",
@@ -901,9 +902,10 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "061d324eae217e5c71b947a4a98a90352bca131ab116d3523bfe5f09fd822512",
+                "actor_sha256": "bc2a9860708aa39d2be2145ce93220f5ac29741c1428f3016fef637be50dc35d",
                 "selector": "SelectSelector",
                 "native_deliveries": 2,
+                "original_handler_calls": 2,
                 "launches": [
                   {
                     "stream": "stdout",
@@ -1747,7 +1749,7 @@
       "pipe_fixtures": {
         "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
         "opt_level": 3,
-        "fixture_sha256": "98aca0131bad47d52ecd8dab305992b47f9ad39dce87b00f613197dc4387c97e",
+        "fixture_sha256": "00e7fdc6d9313f3c93263f7a33f241ba102506e2241be64bcd8d97c79761d23b",
         "toolchain": {
           "imre": "a4dd50a8eb37a8e60721eb880790006165ee973ac0960955e293666ca105c2dd",
           "runtime": "f8d2e4f4fe190f4132c1d9c84e432213113c5d0d9d7feb9b370e0a5508e96c7d",
@@ -1767,7 +1769,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "9462abf84404d9b495edbd17f1e1f5ada83b3fc46f5d60f83f932178a4243394",
+                "actor_sha256": "04d5ddec1213820a5c61edb2d194132409b7d996c2ca41351a039cbc78bf2475",
                 "read_bytes": 4,
                 "remaining_kernel_bytes": 1,
                 "same_open_file_description": "SCM_RIGHTS",
@@ -1789,9 +1791,10 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "12801a110745b09e800b75d602f5156fedb0187a8d4bdaf25a448161cc8f8068",
+                "actor_sha256": "aff0b66e06235e2d84ea3d3ccd1acbe5571a6b5942e2449451a29c072dd69b35",
                 "selector": "PollSelector",
                 "native_deliveries": 2,
+                "original_handler_calls": 2,
                 "launches": [
                   {
                     "stream": "stdout",
@@ -1830,9 +1833,10 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "ed08bbbd7b482b6ac80a3825367d82686d0ea77e8c79e5c3ba216b9530a8ebf2",
+                "actor_sha256": "801c430130842f87bd67ae962c0874e10ad931b7f1fc3bd0e3c44c7738a37b94",
                 "selector": "SelectSelector",
                 "native_deliveries": 2,
+                "original_handler_calls": 2,
                 "launches": [
                   {
                     "stream": "stdout",
