@@ -151,6 +151,43 @@
           ]
         }
       }
+    },
+    {
+      "operation": "unchanged package import and runner startup on the prospective walk merge",
+      "imre_base_commit": "13759fbb3a8069ef1154430b4efe5907792a9af7",
+      "imre_pr_head": "906b10a80a61bbf4efc5cd05cc5c2ae82689e32a",
+      "imre_tree": "a86efec74b8ff8e64f1dce00faff6bb5685da113",
+      "checks": {
+        "imports-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        },
+        "imports-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_imports.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        },
+        "run-all": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        },
+        "run-reachable": {
+          "check_exit": 1,
+          "phase": "check",
+          "diagnostic": [
+            "Lib/imre_pathlib_run.py:1:1: Imre: Lib/test/test_pathlib/__init__.py:2:1: Imre: Lib/test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+          ]
+        }
+      },
+      "test_bodies_executed": 0
     }
   ],
   "next_shared_blocker": "inspect import at Lib/test/support/__init__.py:9; four unchanged entry-point/mode checks, zero upstream methods reached"

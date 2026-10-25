@@ -4,6 +4,7 @@ import argparse
 from contextlib import chdir
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -123,6 +124,7 @@ def main():
     for option in ('imre', 'runtime', 'clang', 'result'):
         parser.add_argument('--' + option, required=True, type=Path)
     parser.add_argument('--cpython-source', type=Path)
+    parser.add_argument('--imre-commit', help='full source commit used to build both supplied native artifacts')
     parser.add_argument('--body-report', type=Path,
                         help='use the complete O0/O3 whole-method probe from the same compiler for remaining IDs')
     parser.add_argument('--cohort', choices=cohorts, action='append')
@@ -139,6 +141,10 @@ def main():
         raise ValueError('reference release does not match vendored tests')
     imre, runtime, clang = (p.resolve() for p in (args.imre, args.runtime, args.clang))
     body_report = json.loads(args.body_report.read_bytes()) if args.body_report else None
+    if args.imre_commit and not re.fullmatch(r'[0-9a-f]{40}', args.imre_commit):
+        parser.error('--imre-commit requires a full lowercase Git object ID')
+    if body_report and body_report['imre_commit'] != args.imre_commit:
+        parser.error('--body-report requires a matching --imre-commit for the supplied compiler and runtime')
     reports = []
     with tempfile.TemporaryDirectory(prefix='pl-') as tmp, chdir(tmp):
         for level in (0, 3):
@@ -154,6 +160,10 @@ def main():
             preflight = report_blockers(body_report, reference, level, adapters) if body_report else None
             report = run_evidence(load_suite('test.test_pathlib'), adapters, reference, level, preflight=preflight,
                                   exceptions=exceptions(reference, level))
+            if args.imre_commit:
+                for row in report['records']:
+                    if row['outcome'] == 'pass':
+                        row['evidence']['imre_commit'] = args.imre_commit
             print(f"O{level}: {report['counts']}", flush=True)
             reports.append(report)
     write_reports(args.result, reports, reference)

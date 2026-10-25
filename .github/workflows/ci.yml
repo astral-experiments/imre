@@ -185,7 +185,8 @@ jobs:
             python3 benchmarks/cpython_stdlib/full/pathlib/native_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-files-O$level.json"
             python3 benchmarks/cpython_stdlib/full/pathlib/walk_matrix.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$level"
           done
-          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --result "$RUNNER_TEMP/cpython-path-components-walk.json"
+          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --cohort basics --result "$RUNNER_TEMP/cpython-path-components-walk-basics.json"
+          python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/pathlib/reference-linux.json benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
       - name: Account for every CPython itertools ID under its original fixtures
         run: |
           dir=benchmarks/cpython_stdlib/full/itertools

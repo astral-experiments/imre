@@ -44,6 +44,7 @@ Generate both levels with the test-enabled 3.14.5 interpreter and validate them:
 ```sh
 python -B benchmarks/cpython_stdlib/full/pathlib/evidence.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
+    --imre-commit 906b10a80a61bbf4efc5cd05cc5c2ae82689e32a \
     --body-report benchmarks/cpython_stdlib/full/pathlib/body-probes-linux.json \
     --result benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
 python3 benchmarks/cpython_stdlib/suite_evidence.py \
@@ -51,8 +52,10 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
     benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
 ```
 
-The recorded method runs used walking head `ea9845a`; the whole-body diagnostics
-used published main `c306c73`. Each observation names its compiler revision.
+Both the audited adapters and the complete-method probes used the same compiler
+and runtime, built from walking head `906b10a`. Each observed or blocked row
+records that commit. The 978 per-method probe results and diagnostics matched
+between optimization levels.
 
 The lexical runner dispatches each original method under its upstream class.
 It checks that class and its separator before starting the typed native receiver.
@@ -99,7 +102,8 @@ in CPython, then compiles the original method and its `_check` helpers using nat
 receivers. It tries native unittest.TestCase assertions, then a typed native assertion
 fixture if compilation fails. It retains each diagnostic and never reruns a completed
 method with another fixture. It verifies the pinned definitions and preserves original wrappers. At
-each level, 109 entries completed in Imre, 409 encountered their first compiler
+each level, 111 entries completed in Imre (83 with native unittest and 28 with
+typed native assertions), 407 encountered their first compiler
 diagnostic in the upstream method, 421 in a fixture or dependency, and 39 had
 an original wrapper that the native fixture could not execute. A completed probe
 earns pass credit only after its operations and assertions have been verified.
@@ -119,7 +123,7 @@ python -B -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/body_s
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
     --work /tmp/pathlib-bodies
 python3 benchmarks/cpython_stdlib/full/pathlib/body_report.py --work /tmp/pathlib-bodies \
-    --imre-commit c306c73a8495f808bb84974c9a8d69c6d5648723 \
+    --imre-commit 906b10a80a61bbf4efc5cd05cc5c2ae82689e32a \
     --result benchmarks/cpython_stdlib/full/pathlib/body-probes-linux.json
 ```
 
@@ -147,5 +151,6 @@ On the combined compiler head `03977539` both check modes reached the
 `annotationlib` import. The wrong-name guard raised the reference `ImportError`
 without running child initialization. Published main `c306c73` confirmed that stop for
 both entry points. After annotationlib landed in #586, all four checks on walking
-head `ea9845a` reached `inspect` in `test/support/__init__.py:9`. These checks
-execute no upstream method.
+head `ea9845a` reached `inspect` in `test/support/__init__.py:9`. The prospective
+walk merge against main `13759fb` confirmed the same four outcomes. These
+checks execute no upstream method.
