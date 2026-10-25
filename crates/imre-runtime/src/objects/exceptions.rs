@@ -18,6 +18,9 @@ use ruff_python_literal::escape::{Escape, UnicodeEscape};
 use super::words::{OwnedWord, WordKind};
 use super::{Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
+mod os;
+pub(super) use os::Filename;
+
 #[repr(C)]
 pub struct NamedDescriptor {
     name: *const u8,
@@ -306,6 +309,7 @@ enum Payload {
 struct BuiltinArguments {
     message: Rc<Str>,
     args: smallvec::SmallVec<[OwnedWord; 5]>,
+    os_paths: Option<Box<os::Filenames>>,
 }
 
 struct JsonError {
@@ -457,8 +461,42 @@ impl Error {
         unsafe { OwnedWord::from_owned(value.into_raw(), WordKind::new(2)) }
     }
 
-    /// OSError retains its errno and strerror as args; a filename appears only in its message.
-    pub(super) fn from_errno(kind: Kind, errno: i32, description: &str, message: String) -> Self {
+    /// Store errno and strerror in args and retain original path values separately.
+    pub(super) fn from_errno(
+        kind: Kind,
+        errno: i32,
+        description: &str,
+        filename: Option<Filename>,
+        filename2: Option<Filename>,
+    ) -> Self {
+        let mut message = format!("[Errno {errno}] {description}");
+        let os_paths = filename.map(|first| {
+            let paths = Box::new(os::Filenames {
+                first,
+                second: filename2,
+            });
+            paths.append_message(&mut message);
+            paths
+        });
+        Self::errno_arguments(kind, errno, description, message, os_paths)
+    }
+
+    pub(super) fn from_errno_message(
+        kind: Kind,
+        errno: i32,
+        description: &str,
+        message: String,
+    ) -> Self {
+        Self::errno_arguments(kind, errno, description, message, None)
+    }
+
+    fn errno_arguments(
+        kind: Kind,
+        errno: i32,
+        description: &str,
+        message: String,
+        os_paths: Option<Box<os::Filenames>>,
+    ) -> Self {
         let args = [
             Self::int_arg(crate::Int::small(i64::from(errno)).unwrap()),
             Self::string_arg(description),
@@ -468,6 +506,7 @@ impl Error {
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
                 message: Rc::new(message.into()),
                 args: args.into_iter().collect(),
+                os_paths,
             }))),
             cause: None,
         }
@@ -496,6 +535,7 @@ impl Error {
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
                 message: Rc::new(message.into()),
                 args: args.into_iter().collect(),
+                os_paths: None,
             }))),
             cause: None,
         }

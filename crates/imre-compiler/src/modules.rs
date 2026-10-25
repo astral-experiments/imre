@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::{CopyOperation, PosixPathOperation};
+use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -65,12 +65,14 @@ pub(crate) enum IntrinsicModule {
     Dataclasses,
     Difflib,
     Logging,
+    LoggingConfig,
     LoggingHandlers,
     Datetime,
     Abc,
     Asyncio,
     Contextlib,
     Functools,
+    Fnmatch,
     Time,
     Tomli,
     TomliW,
@@ -128,6 +130,8 @@ pub(crate) enum Intrinsic {
     ClockConverter(bool),
     LogRecordFlag(u8),
     BasicConfig,
+    DictConfig,
+    FileConfig,
     LogLevel(i64),
     Abc,
     AbstractMethod,
@@ -272,10 +276,12 @@ pub(crate) enum Intrinsic {
     Environ,
     GetEnv,
     GetCwd,
+    Strerror,
     Fd(crate::ir::FdOperation),
     OpenFlag(&'static str),
     FsPath,
     PosixPath(PosixPathOperation),
+    Fnmatch(FnmatchOperation),
     Unquote,
 }
 
@@ -292,12 +298,14 @@ impl IntrinsicModule {
         match name {
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
+            "logging.config" => Some(Self::LoggingConfig),
             "logging.handlers" => Some(Self::LoggingHandlers),
             "datetime" => Some(Self::Datetime),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
+            "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
@@ -348,11 +356,14 @@ impl IntrinsicModule {
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
+        if self == Self::Logging && name == "config" {
+            return Some(Binding::IntrinsicModule(Self::LoggingConfig));
+        }
         if self == Self::Os {
             if name == "path" {
                 return Some(Binding::IntrinsicModule(Self::PosixPath));
             }
-            if let Some(symbol) = os::descriptor(name) {
+            if let Some(symbol) = os::symbol(name) {
                 return Some(Binding::Intrinsic(symbol));
             }
         }
@@ -386,6 +397,8 @@ impl IntrinsicModule {
             (Self::Logging, "_nameToLevel") => Intrinsic::LevelMap { names: true },
             (Self::Logging, "_levelToName") => Intrinsic::LevelMap { names: false },
             (Self::Logging, "basicConfig") => Intrinsic::BasicConfig,
+            (Self::LoggingConfig, "dictConfig") => Intrinsic::DictConfig,
+            (Self::LoggingConfig, "fileConfig") => Intrinsic::FileConfig,
             (Self::Logging, "DEBUG") => Intrinsic::LogLevel(10),
             (Self::Logging, "INFO") => Intrinsic::LogLevel(20),
             (Self::Abc, "ABC") => Intrinsic::Abc,
@@ -411,6 +424,18 @@ impl IntrinsicModule {
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
+            (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
+                Intrinsic::Fnmatch(FnmatchOperation::Match {
+                    normcase: name == "fnmatch",
+                })
+            }
+            (Self::Fnmatch, "filter" | "filterfalse") => {
+                Intrinsic::Fnmatch(FnmatchOperation::Filter {
+                    inverse: name == "filterfalse",
+                })
+            }
+            (Self::Fnmatch, "translate") => Intrinsic::Fnmatch(FnmatchOperation::Translate),
+            (Self::Fnmatch, "_translate") => Intrinsic::Fnmatch(FnmatchOperation::Parts),
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
             (Self::Functools, "partial") => Intrinsic::Partial,
             (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
