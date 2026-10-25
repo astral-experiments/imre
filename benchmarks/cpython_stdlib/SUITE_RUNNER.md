@@ -58,6 +58,13 @@ whether the owner's runner received its own `--reachable-only` switch.
 A record whose declared mode disagrees with the compiler, or a missing build
 at either optimization level, appears in `mode_errors` and fails the run.
 
+## Discover methods on a known class
+
+To discover method names in native code, pass a statically known class to
+`unittest.defaultTestLoader.getTestCaseNames`. The [verified loader example](full/unittest/NATIVE_LOADER.md)
+uses CPython's original `bar.test_bar.PassingTest` and documents which module
+and suite runner calls still fail.
+
 ## A verified upstream example
 
 This is the `test_stop` case used by [the unittest gate](full/unittest/run.py).
