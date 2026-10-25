@@ -82,6 +82,7 @@ def native_body(case, original, module, tools, work):
             binary = tools.build(source, folder)
         except NativeCompileError as error:
             diagnostic = str(error).replace(str(folder) + os.sep, "").strip()
+            diagnostic = diagnostic.removeprefix(f"Compiling case.py (-O{tools.level})\n")
             attempts[binding] = {"diagnostic": diagnostic}
             found = re.search(r"case\.py:(\d+):(\d+):", diagnostic)
             if found:
@@ -138,6 +139,7 @@ def main():
             if binding:
                 evidence["operation"] = "os.pipe2"
                 return {"status": "native_body_host_fixture", "method_sha256": digest, "binding": binding,
+                        "host_fixtures": hooks,
                         "observation": {"roles": roles(body="imre", assertions="imre", operation="imre",
                                                        fixture="mixed"), "evidence": evidence}}
             if sys.platform != "linux":
@@ -154,12 +156,17 @@ def main():
                     return getattr(os, name)(*args)
                 return observed
             view.read, view.write = observer("read"), observer("write")
-            trace = []
-            case.addCleanup(lambda: trace.extend(calls))
+            trace, entries = [], []
+            def collect_calls():
+                entries.extend(calls)
+                trace.extend("os." + ("pipe2" if call.startswith("pipe2_") else call) for call in calls)
+            case.addCleanup(collect_calls)
             with patch.object(module, "os", view):
                 original()
-            evidence.update(operation="os.pipe2; descriptor checks", native_calls=trace, host_calls=host)
+            evidence.update(operation="os.pipe2; descriptor checks", native_calls=trace,
+                            native_driver_entries=entries, host_calls=host)
             return {"status": "mixed" if host else "host_driven_native", "method_sha256": digest,
+                    "host_fixtures": hooks, "native_calls": trace, "host_calls": host,
                     "observation": {"roles": roles(body="cpython", assertions="cpython",
                         operation="mixed" if host else "imre", fixture="cpython"), "evidence": evidence}}
         with chdir(work):
