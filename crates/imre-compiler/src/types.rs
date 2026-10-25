@@ -206,6 +206,7 @@ impl Types {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
             | Type::Sha256
@@ -628,6 +629,7 @@ impl Types {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
             | Type::Sha256

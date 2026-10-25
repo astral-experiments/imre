@@ -110,6 +110,7 @@ impl Type {
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
+            | Self::CodecInfo
             | Self::Poll
             | Self::Socket
             | Self::Sha256
@@ -191,6 +192,7 @@ impl Type {
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
+            | Self::CodecInfo
             | Self::Poll
             | Self::Socket
             | Self::Sha256
@@ -834,6 +836,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
             | Type::Sha256
@@ -3557,6 +3560,7 @@ impl Emitter<'_, '_> {
                 | Type::StrDescriptor(_)
                 | Type::PlainObject
                 | Type::PathInfo
+                | Type::CodecInfo
                 | Type::Poll
                 | Type::Socket
                 | Type::Sha256
@@ -5204,6 +5208,19 @@ impl Emitter<'_, '_> {
             Builtin::CsvLineNumber => {
                 self.call("imre_csv_line_number", Type::Int, &[&args[0].value])
             }
+            Builtin::CodecLookup => {
+                self.call("imre_codec_lookup", Type::CodecInfo, &[&args[0].value])
+            }
+            Builtin::CodecName => self.call("imre_codec_name", Type::Str, &[&args[0].value]),
+            Builtin::CodecEncode | Builtin::CodecDecode => self.call(
+                if matches!(builtin, Builtin::CodecEncode) {
+                    "imre_codec_encode"
+                } else {
+                    "imre_codec_decode"
+                },
+                returns,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::Socket(op) => self.socket_operation(*op, &args, returns),
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::HashNew => self.call(
@@ -5788,6 +5805,7 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::Len if args[0].value.ty == Type::CodecInfo => small(4),
             Builtin::Len if args[0].value.ty == Type::StringIterable => {
                 self.call("imre_string_iterable_len", Type::Int, &[&args[0].value])
             }
@@ -6830,6 +6848,7 @@ impl Emitter<'_, '_> {
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
                     | Type::PathInfo
+                    | Type::CodecInfo
                     | Type::Poll
                     | Type::Socket
                     | Type::Sha256
@@ -7112,6 +7131,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
             | Type::Sha256
@@ -7207,6 +7227,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
             | Type::Sha256
@@ -7821,6 +7842,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::PlainObject
         | Type::SimpleNamespace(_)
         | Type::PathInfo
+        | Type::CodecInfo
         | Type::Poll
         | Type::Socket
         | Type::Sha256
@@ -8260,6 +8282,10 @@ declare void @imre_socket_setsockopt(ptr, i64, i64, i64)
 declare void @imre_socket_setsockopt_bytes(ptr, i64, i64, ptr)
 declare i64 @imre_socket_getsockopt(ptr, i64, i64)
 declare ptr @imre_sha256_new(ptr)
+declare ptr @imre_codec_lookup(ptr)
+declare ptr @imre_codec_name(ptr)
+declare ptr @imre_codec_encode(ptr, ptr, ptr)
+declare ptr @imre_codec_decode(ptr, ptr, ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()
 declare void @imre_sha256_update(ptr, ptr)

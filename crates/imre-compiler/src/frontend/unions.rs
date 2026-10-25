@@ -211,6 +211,9 @@ impl Checker<'_> {
             );
             return Ok(classes);
         }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::CodecInfoClass)) {
+            return Ok(vec![InstanceType::Exact(Type::CodecInfo)]);
+        }
         if let Some(Binding::Intrinsic(Intrinsic::IoBase(base))) = self.resolve(expression) {
             return Ok(vec![InstanceType::IoBase(base)]);
         }

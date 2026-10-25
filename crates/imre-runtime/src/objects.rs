@@ -17,6 +17,7 @@ mod bytes;
 mod cache_paths;
 mod calendar;
 mod chainmap;
+mod codecs;
 mod contexts;
 mod copying;
 mod csv;
@@ -124,6 +125,7 @@ enum Storage {
     ModuleNamespace(Rc<errno::Registry>),
     ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
+    CodecInfo(codecs::Codec),
     Exception(exceptions::Exception),
     ObjectValue(OwnedWord),
     File(Box<files::FileState>),
