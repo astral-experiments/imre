@@ -95,6 +95,7 @@ impl Types {
             | Type::TextIO
             | Type::BinaryIO
             | Type::Path
+            | Type::PurePath(_)
             | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::TaskGroup
@@ -251,6 +252,7 @@ impl Types {
                 | Type::Enum(_)
                 | Type::Bytes
                 | Type::Path
+                | Type::PurePath(_)
         ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
     }
 
@@ -267,6 +269,7 @@ impl Types {
             | Type::Enum(_)
             | Type::Bytes
             | Type::Path
+            | Type::PurePath(_)
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) => self
@@ -406,6 +409,7 @@ impl Types {
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::Path
+            | Type::PurePath(_)
             | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::Coroutine(_)

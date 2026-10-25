@@ -120,6 +120,12 @@ impl Builtin {
                     | PathOperation::Scripts
                     | PathOperation::OsExists
                     | PathOperation::New
+                    | PathOperation::PureNew(_)
+                    | PathOperation::JoinObject
+                    | PathOperation::Drive
+                    | PathOperation::Root
+                    | PathOperation::Anchor
+                    | PathOperation::AsPosix
                     | PathOperation::Join
                     | PathOperation::Text
                     | PathOperation::Name
@@ -207,6 +213,7 @@ impl Builtin {
             ),
             Self::BytesGet
             | Self::Decode
+            | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
             | Self::DictGet
@@ -247,6 +254,7 @@ impl Builtin {
             | Self::Encode
             | Self::Sha256Hex
             | Self::Sha256New
+            | Self::HashAvailable
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
             | Self::Sha256Copy
@@ -624,6 +632,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
                 | "imre_bytes_decode"
+                | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"

@@ -38,13 +38,23 @@ struct OptionSpec {
     path_default: bool,
     help: String,
     optional: bool,
+    group: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct ArgumentGroup {
+    title: Option<String>,
+    description: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct Parser {
+    #[serde(default)]
     prog: String,
     raw: bool,
     options: Vec<OptionSpec>,
+    #[serde(default)]
+    groups: Vec<ArgumentGroup>,
     subcommands: Option<Subcommands>,
 }
 
@@ -492,8 +502,9 @@ pub unsafe extern "C" fn imre_argparse_parse(
 ) -> *mut usize {
     // SAFETY: these immutable inputs remain rooted during parsing and construction.
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
-    let parser: Parser = serde_json::from_str(schema)
+    let mut parser: Parser = serde_json::from_str(schema)
         .unwrap_or_else(|_| fail("SystemError", "invalid argparse schema"));
+    parser.set_child_programs();
     // SAFETY: argv is a rooted list[str]; take independent string owners before
     // reading the argument values or constructing the output namespace.
     let owners = unsafe {

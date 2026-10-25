@@ -114,6 +114,99 @@ pub(super) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Exp
     Ok(Expr { ty, kind })
 }
 
+pub(super) fn starred(call: &ast::ExprCall) -> bool {
+    call.arguments
+        .args
+        .iter()
+        .any(|arg| matches!(arg, ast::Expr::Starred(_)))
+}
+
+/// The value of a spread field is already checked when its fixed tuple is evaluated.
+pub(super) enum Supplied<'a> {
+    Source(&'a ast::Expr),
+    Field(Expr, &'a ast::Expr),
+}
+
+impl<'a> Supplied<'a> {
+    pub(super) fn site(&self) -> &'a ast::Expr {
+        match self {
+            Self::Source(node) | Self::Field(_, node) => node,
+        }
+    }
+
+    pub(super) fn value(self, checker: &mut Checker<'_>) -> Result<Expr, String> {
+        match self {
+            Self::Source(node) => checker.expr(node),
+            Self::Field(value, _) => Ok(value),
+        }
+    }
+
+    pub(super) fn checked(
+        self,
+        checker: &mut Checker<'_>,
+        ty: Type,
+        sign_only: bool,
+    ) -> Result<Expr, String> {
+        match self {
+            Self::Source(node) => checker.direct_argument(node, ty, sign_only),
+            Self::Field(value, node) => checker.direct_value(value, node, ty, sign_only),
+        }
+    }
+}
+
+/// Roots source expressions in Python evaluation order while expanding fixed tuples.
+#[derive(Default)]
+pub(super) struct ArgumentScope {
+    body: Vec<Statement>,
+    clear: Vec<usize>,
+}
+
+impl ArgumentScope {
+    pub(super) fn hold(&mut self, checker: &mut Checker<'_>, value: Expr) -> Expr {
+        let slot = checker.hidden(value.ty);
+        self.body.push(Statement::Assign(slot, value));
+        self.clear.push(slot);
+        checker.local(slot)
+    }
+
+    pub(super) fn spread(
+        &mut self,
+        checker: &mut Checker<'_>,
+        argument: &ast::ExprStarred,
+    ) -> Result<Vec<Expr>, String> {
+        let value = checker.expr(&argument.value)?;
+        let fields = checker.types.fields(value.ty).ok_or_else(|| {
+            error(
+                checker.source,
+                argument,
+                "starred argument requires a fixed tuple",
+            )
+        })?;
+        let tuple = self.hold(checker, value);
+        Ok(fields
+            .into_iter()
+            .enumerate()
+            .map(|(index, ty)| Expr {
+                ty,
+                kind: ExprKind::Field(Box::new(tuple.clone()), index),
+            })
+            .collect())
+    }
+
+    pub(super) fn finish(self, value: Expr) -> Expr {
+        if self.body.is_empty() {
+            return value;
+        }
+        Expr {
+            ty: value.ty,
+            kind: ExprKind::Scope {
+                body: self.body,
+                clear: self.clear,
+                value: Box::new(value),
+            },
+        }
+    }
+}
 /// Every dispatch route uses a closed signature, including methods reached
 /// through iterable consumers before ordinary call-expression lowering.
 pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(), String> {
@@ -161,27 +254,75 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         mut check: impl FnMut(&mut Self, usize, &ast::Expr) -> Result<Expr, String>,
     ) -> Result<ir::CallArgs, String> {
+        self.bind_supplied(call, params, receiver, None, |checker, index, argument| {
+            let Supplied::Source(node) = argument else {
+                unreachable!("only source calls expand tuples")
+            };
+            check(checker, index, node)
+        })
+    }
+
+    pub(super) fn bind_supplied(
+        &mut self,
+        call: &ast::ExprCall,
+        params: &[Parameter],
+        receiver: Option<Expr>,
+        mut scope: Option<&mut ArgumentScope>,
+        mut check: impl FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
+    ) -> Result<ir::CallArgs, String> {
         let offset = usize::from(receiver.is_some());
-        let mut values = receiver.into_iter().collect::<Vec<_>>();
+        let mut values = Vec::new();
         let mut order = vec![usize::MAX; params.len() + offset];
-        if offset != 0 {
+        if let Some(value) = receiver {
+            values.push(if let Some(scope) = scope.as_deref_mut() {
+                scope.hold(self, value)
+            } else {
+                value
+            });
             order[0] = 0;
         }
-        // Without starred arguments Python requires all positional expressions
-        // before keyword expressions, so these two lists retain source order.
-        for (index, argument) in call.arguments.args.iter().enumerate() {
-            params
-                .get(index)
-                .filter(|parameter| parameter.kind != ParameterKind::KeywordOnly)
-                .ok_or_else(|| error(self.source, argument, "too many positional arguments"))?;
-            order[index + offset] = values.len();
-            values.push(check(self, index, argument)?);
+        let mut positional = 0;
+        for arg in &call.arguments.args {
+            let mut bind = |checker: &mut Self,
+                            input,
+                            scope: Option<&mut ArgumentScope>|
+             -> Result<(), String> {
+                params
+                    .get(positional)
+                    .filter(|parameter| parameter.kind != ParameterKind::KeywordOnly)
+                    .ok_or_else(|| error(checker.source, arg, "too many positional arguments"))?;
+                order[positional + offset] = values.len();
+                let value = check(checker, positional, input)?;
+                values.push(if let Some(scope) = scope {
+                    scope.hold(checker, value)
+                } else {
+                    value
+                });
+                positional += 1;
+                Ok(())
+            };
+            if let ast::Expr::Starred(star) = arg {
+                let scope = scope
+                    .as_deref_mut()
+                    .ok_or_else(|| error(self.source, arg, "argument unpacking is unsupported"))?;
+                for field in scope.spread(self, star)? {
+                    bind(self, Supplied::Field(field, arg), Some(scope))?;
+                }
+            } else {
+                bind(self, Supplied::Source(arg), scope.as_deref_mut())?;
+            }
         }
         for keyword in &call.arguments.keywords {
             let name = keyword
                 .arg
                 .as_ref()
-                .expect("call lowering rejects argument unpacking")
+                .ok_or_else(|| {
+                    error(
+                        self.source,
+                        keyword,
+                        "keyword argument unpacking is unsupported",
+                    )
+                })?
                 .as_str();
             let index = params
                 .iter()
@@ -209,7 +350,12 @@ impl Checker<'_> {
                 ));
             }
             order[index + offset] = values.len();
-            values.push(check(self, index, &keyword.value)?);
+            let value = check(self, index, Supplied::Source(&keyword.value))?;
+            values.push(if let Some(scope) = scope.as_deref_mut() {
+                scope.hold(self, value)
+            } else {
+                value
+            });
         }
         for (index, parameter) in params.iter().enumerate() {
             if order[index + offset] == usize::MAX {

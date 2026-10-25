@@ -1265,6 +1265,7 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
+        Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(crate::ir::ProcessCapture::TEXT));
         }
@@ -4258,6 +4259,12 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
+                Intrinsic::HashAvailable => {
+                    return Ok(Expr {
+                        ty: self.types.set(Type::Str),
+                        kind: ExprKind::Builtin(Builtin::HashAvailable, vec![]),
+                    });
+                }
                 Intrinsic::OsDevnull => {
                     return Ok(Expr {
                         ty: Type::Str,
@@ -4450,9 +4457,7 @@ impl<'a> Checker<'a> {
                     left = Self::string_value(left);
                     right = Self::string_value(right);
                 }
-                if binary.op == ast::Operator::Div
-                    && (left.ty == Type::Path || right.ty == Type::Path)
-                {
+                if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
                     return self.path_join(left, right, binary);
                 }
                 if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
@@ -4722,7 +4727,8 @@ impl<'a> Checker<'a> {
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
                         && matches!((ty, right), (Type::Class(_), Type::Class(_)));
-                    if !numeric && !records {
+                    let paths = ty.is_path() && right.is_path();
+                    if !numeric && !records && !paths {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
@@ -4997,7 +5003,7 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
                 }
-                if receiver.ty == Type::Path {
+                if receiver.ty.is_path() {
                     return self.path_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::AsyncProcess(_)) {
@@ -5241,6 +5247,34 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
+        if calls::starred(call) {
+            if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
+                && let Some(signature) = self.functions.get(&definition)
+            {
+                return self.source_call(call, &signature.clone(), None, 0);
+            }
+            if let ast::Expr::Attribute(method) = &*call.func
+                && self.resolve(&call.func).is_none()
+            {
+                if let Some(class) = self.class_reference(&method.value) {
+                    return self.class_method_call(call, method, class, None);
+                }
+                let object = match receiver {
+                    Some(value) => value,
+                    None => self.expr(&method.value)?,
+                };
+                if let Type::Class(class) | Type::StrEnum(class) | Type::Enum(class) = object.ty
+                    && self.classes.methods[class].contains_key(method.attr.as_str())
+                {
+                    return self.class_method_call(call, method, class, Some(object));
+                }
+            }
+            return Err(error(
+                self.source,
+                call,
+                "argument unpacking requires a source-defined function or method",
+            ));
+        }
         calls::reject_unpacking(call, self.source)?;
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
             && let [input] = call.arguments.args.as_ref()
@@ -5346,7 +5380,9 @@ impl<'a> Checker<'a> {
                 check_string(target, self.source)?;
                 return self.typed_expr(value);
             }
-            Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
+            Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
+                return self.sha256_constructor(call, op == Intrinsic::HashNew);
+            }
             Some(Binding::Intrinsic(Intrinsic::BytesIo)) => {
                 let args = self.arguments(
                     call,
@@ -5468,7 +5504,10 @@ impl<'a> Checker<'a> {
             self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::Path))
         ) {
-            return self.path_constructor(call);
+            return self.path_constructor(call, Type::Path);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) = self.resolve(&call.func) {
+            return self.path_constructor(call, Type::PurePath(flavor));
         }
         if matches!(
             self.resolve(&call.func),
@@ -5515,20 +5554,7 @@ impl<'a> Checker<'a> {
                 .get(&definition)
                 .ok_or_else(|| error(self.source, call, "definition is not a callable function"))?
                 .clone();
-            if self.classes.cached.contains(&signature.id) && !call.arguments.keywords.is_empty() {
-                return Err(error(
-                    self.source,
-                    call,
-                    "cached calls currently require a positional key",
-                ));
-            }
-            if self.inference.is_some() {
-                let (ty, args) = self.infer_call(call, &signature, None, 0)?;
-                return Ok(self.call_value(&signature, ty, args));
-            }
-            let args = self.arguments(call, &signature.params, None)?;
-            self.calls.insert(signature.id);
-            return Ok(self.call_value(&signature, signature.returns, args));
+            return self.source_call(call, &signature, None, 0);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))
             || !matches!(&*call.func, ast::Expr::Name(_) | ast::Expr::Attribute(_))
@@ -5592,7 +5618,7 @@ impl<'a> Checker<'a> {
             } else {
                 receiver
             };
-            if receiver.ty == Type::Path {
+            if receiver.ty.is_path() {
                 return self.path_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::CompletedProcess(_)) {
@@ -6027,10 +6053,7 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(builtin, args),
             });
         }
-        if args.len() == 1
-            && args[0].ty == Type::Path
-            && matches!(name.id.as_str(), "str" | "print")
-        {
+        if args.len() == 1 && args[0].ty.is_path() && matches!(name.id.as_str(), "str" | "print") {
             let text = paths::operation(ir::PathOperation::Text, Type::Str, args);
             return Ok(if name.id == "str" {
                 text
