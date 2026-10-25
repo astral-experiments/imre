@@ -11,6 +11,39 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            PathOperation::WithStem | PathOperation::WithSuffix | PathOperation::RelativeTo => {
+                let (name, flag) = if matches!(operation, PathOperation::RelativeTo) {
+                    (
+                        "imre_path_relative_to",
+                        self.instruction(format!("zext i1 {} to i32", args[2].value.operand)),
+                    )
+                } else {
+                    (
+                        "imre_path_change_extension",
+                        u32::from(matches!(operation, PathOperation::WithStem)).to_string(),
+                    )
+                };
+                let operand = self.checked_instruction(format!(
+                    "call ptr @{name}(ptr {}, ptr {}, i32 {flag})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            PathOperation::IsRelativeTo => {
+                let answer = self.instruction(format!(
+                    "call i32 @imre_path_is_relative_to(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {answer}, 0")),
+                    small_integer: false,
+                }
+            }
             PathOperation::Drive | PathOperation::Root | PathOperation::Anchor => {
                 let part = match operation {
                     PathOperation::Drive => 0,
@@ -207,6 +240,7 @@ impl Emitter<'_, '_> {
                     PathOperation::CountPart => "imre_path_count_part",
                     PathOperation::Stem => "imre_path_stem",
                     PathOperation::Suffix => "imre_path_suffix",
+                    PathOperation::Suffixes => "imre_path_suffixes",
                     PathOperation::Parent => "imre_path_parent",
                     PathOperation::ReadBytes => "imre_path_read_bytes",
                     PathOperation::ReadText if args.len() == 1 => "imre_path_read_text",

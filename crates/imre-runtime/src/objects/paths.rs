@@ -13,6 +13,7 @@ use num_traits::ToPrimitive;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
+mod components;
 mod matching;
 mod pure;
 mod traversal;
@@ -498,29 +499,11 @@ pub unsafe extern "C" fn imre_path_with_name(
     path: *const Object,
     replacement: *const Str,
 ) -> *const Object {
-    use super::exceptions::string_repr;
     // SAFETY: both inputs are rooted and lexical operations cannot invoke callbacks.
     let result = unsafe {
-        object(path).0.with(|storage| {
-            if let Storage::PurePath(p) = storage {
-                return p.with_name(&*replacement);
-            }
-            let path = storage.path();
-            let replacement = &*replacement;
-            if replacement.is_empty() || replacement.as_str() == "." || replacement.contains('/') {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    format!("Invalid name {}", string_repr(replacement)),
-                ));
-            }
-            if name(path).is_empty() {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    format!("PosixPath({}) has an empty name", string_repr(path)),
-                ));
-            }
-            Ok(new_path(join(parent(path), replacement)))
-        })
+        object(path)
+            .0
+            .with(|storage| storage.replace_name(&*replacement))
     };
     finish(result, std::ptr::null())
 }
