@@ -315,20 +315,70 @@ fn option(
         };
         required = value.value;
     }
-    if let Some(&action) = kw.get("action") {
-        match literal(action, module)? {
-            "store" => {}
-            "store_true"
-                if !positional
-                    && !kw.contains_key("type")
-                    && !kw.contains_key("nargs")
-                    && !kw.contains_key("const")
-                    && !kw.contains_key("choices") =>
+    let action = kw
+        .get("action")
+        .map(|expr| literal(expr, module))
+        .transpose()?
+        .unwrap_or("store");
+    let zero = action != "store";
+    if zero
+        && (positional
+            || kw.contains_key("type")
+            || kw.contains_key("nargs")
+            || kw.contains_key("choices")
+            || action != "store_const" && kw.contains_key("const"))
+    {
+        return Err(module.error(call, "unsupported argparse action or action keywords"));
+    }
+    match action {
+        "store" => {}
+        "store_true" | "store_false" => element = Type::Bool,
+        "count" => {
+            if let Some(value) = kw.get("default")
+                && !matches!(value, ast::Expr::NoneLiteral(_))
+                && numeric_literal(value, Type::Int).is_none()
             {
-                element = Type::Bool
+                return Err(
+                    module.error(call, "argparse count requires an integer or None default")
+                );
             }
-            _ => return Err(module.error(action, "unsupported argparse action or action keywords")),
+            element = Type::Int;
         }
+        "store_const" => {
+            let values = ["const", "default"]
+                .into_iter()
+                .filter_map(|key| kw.get(key).copied())
+                .filter(|v| !matches!(v, ast::Expr::NoneLiteral(_)))
+                .collect::<Vec<_>>();
+            if !values.is_empty()
+                && values
+                    .iter()
+                    .all(|v| matches!(v, ast::Expr::BooleanLiteral(_)))
+            {
+                element = Type::Bool;
+            } else if !values.is_empty()
+                && values
+                    .iter()
+                    .all(|v| numeric_literal(v, Type::Int).is_some())
+            {
+                element = Type::Int;
+            } else if !values.is_empty()
+                && values
+                    .iter()
+                    .all(|v| numeric_literal(v, Type::Float).is_some())
+            {
+                element = Type::Float;
+            } else if !values
+                .iter()
+                .all(|v| v.is_string_literal_expr() || numeric_literal(v, Type::Int).is_some())
+            {
+                return Err(module.error(
+                    call,
+                    "argparse store_const requires representable literal values",
+                ));
+            }
+        }
+        _ => return Err(module.error(call, "unsupported argparse action")),
     }
     // argparse converts strings but preserves an integer supplied as a default
     // or constant, even when the action would read a string from argv.
@@ -349,12 +399,19 @@ fn option(
     let int_constant = kw.get("const").is_some_and(|v| mixed_integer(v));
     let constant_number;
     let constant = match kw.get("const").copied() {
-        None if element == Type::Bool => Some("True"),
+        None if action == "store_true" => Some("True"),
+        None if action == "store_false" => Some("False"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
-        Some(value) if nargs == "optional" && value.is_string_literal_expr() => {
+        Some(ast::Expr::BooleanLiteral(value)) if action == "store_const" => {
+            Some(if value.value { "True" } else { "False" })
+        }
+        Some(value)
+            if (nargs == "optional" || action == "store_const")
+                && value.is_string_literal_expr() =>
+        {
             Some(literal(value, module)?)
         }
-        Some(value) if nargs == "optional" => {
+        Some(value) if nargs == "optional" || action == "store_const" => {
             constant_number = stored_number(value).ok_or_else(|| {
                 module.error(
                     value,
@@ -432,7 +489,8 @@ fn option(
     let enum_default_text;
     let default_number;
     let default = match kw.get("default").copied() {
-        None if element == Type::Bool => Some("False"),
+        None if action == "store_true" => Some("False"),
+        None if action == "store_false" => Some("True"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
         Some(expr @ ast::Expr::StringLiteral(_))
             if element == Type::Str
@@ -525,7 +583,7 @@ fn option(
             .is_some_and(|v| numeric_literal(v, ty).is_some())
     };
     let optional = (!required && default.is_none() && !(positional && nargs == "zero_or_more"))
-        || (!positional && nargs == "optional" && constant.is_none());
+        || ((!positional && nargs == "optional" || action == "store_const") && constant.is_none());
     let list_default = many && !required && default.is_some();
     let ty = if many {
         let list = types.list(element);
@@ -557,7 +615,7 @@ fn option(
         name: dest.clone(),
         annotation: flag.clone(),
         ty: if optional { types.optional(ty) } else { ty },
-        option: json!({ "flag": flag_name, "dest": dest, "positional": positional, "aliases": aliases, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
+        option: json!({ "flag": flag_name, "dest": dest, "positional": positional, "aliases": aliases, "action": action, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
             "choices": choices, "range":range, "has_choices": kw.contains_key("choices"), "int_default": int_default || element == Type::Int && numeric_kw("default", element),
             "int_constant": int_constant || element == Type::Int && numeric_kw("const", element),
             "float_default": element == Type::Float && numeric_kw("default", element),
