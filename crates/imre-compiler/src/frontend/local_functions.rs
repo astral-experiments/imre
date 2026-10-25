@@ -79,9 +79,7 @@ fn callback_parameter(def: &ast::StmtFunctionDef) -> bool {
                     if b.op == ast::Operator::Mod
                         && matches!(&*b.left, ast::Expr::StringLiteral(s) if single_dispatch::text_conversion(s.value.to_str()))
                         && matches!(&*b.right, ast::Expr::Tuple(t) if matches!(t.elts.as_slice(), [ast::Expr::Name(n)] if n.id == self.0)) =>
-                {
-                    ()
-                }
+                    {}
                 ast::Expr::Name(n)
                     if n.id == self.0
                         || matches!(n.id.as_str(), "locals" | "vars" | "eval" | "exec") =>
