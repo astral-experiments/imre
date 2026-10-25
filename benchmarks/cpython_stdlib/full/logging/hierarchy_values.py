@@ -20,6 +20,13 @@ snapshot = root.getChildren()
 snapshot.discard(ancestor)
 print(ancestor in root.getChildren())
 print(ancestor in snapshot)
+early = getLogger("ro.early")
+ro = getLogger("ro")
+ro.setLevel(10)
+late = getLogger("ro.late")
+print(repr((early.parent is root, late.parent is ro)))
+print(repr((early.getEffectiveLevel(), late.getEffectiveLevel())))
+print(repr((early in ro.getChildren(), late in ro.getChildren())))
 levels = {ancestor: 1, middle: 2, child: 3}
 levels[getLogger("Δ.deep.child")] = 4
 print(len(levels))
