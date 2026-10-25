@@ -541,6 +541,10 @@ impl Launch {
         streams: u32,
         descriptors: [RawFd; 3],
     ) -> io::Result<Child> {
+        // STDOUT in the stdin slot reaches child descriptor setup as fd -2.
+        if (streams >> 12) & 15 == 5 {
+            return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
         // Check the original descriptor table before duplicating anything. A
         // duplicate for stdout must not make a closed stderr descriptor valid.
         for fd in descriptors.into_iter().filter(|&fd| fd >= 0) {
