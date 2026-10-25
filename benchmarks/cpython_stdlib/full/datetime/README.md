@@ -31,3 +31,5 @@ cmp "$suite/native-linux.json" /tmp/datetime-native.json
 ```
 
 `datetime.now` currently requires an explicit fixed `timezone`. Local/DST rules, custom `tzinfo` classes, date/time parsing, general timedelta arithmetic, pickling, and datetime subtraction from another datetime are outside this slice. Loading the full unchanged datetime suite under native Imre remains a separate milestone.
+
+Existing `datetime.time` construction and comparison in timed logging handlers have a [separate native fixture](../logging/timed_lifecycle.py).

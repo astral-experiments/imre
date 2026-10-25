@@ -2,7 +2,7 @@
 
 Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) on Linux. Dotted APIs such as `os.path` appear under their parent. Private modules and third-party packages are outside this inventory.
 
-**At a glance:** 51 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 24 public modules with recorded suites, 72 complete test executions pass natively at both optimization levels; 8,324 of 8,324 upstream executions have a classification.
+**At a glance:** 51 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 25 public modules with recorded suites, 72 complete test executions pass natively at both optimization levels; 9,422 of 9,422 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -24,7 +24,7 @@ Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://g
 | `copy` | Yes | Shallow and deep copies of supported containers and fixed-layout objects. [Evidence](../benchmarks/cpython_stdlib/full/copy/README.md) | [6 / 81](../benchmarks/cpython_stdlib/full/copy/) | 4 |
 | `csv` | Yes | Read rows and apply supported CSV dialect options. [Evidence](../benchmarks/cpython_stdlib/full/csv/README.md) | [18 / 128](../benchmarks/cpython_stdlib/full/csv/) | 7 |
 | `dataclasses` | Yes | Construct fixed-field dataclasses with defaults and factories. [Evidence](../tests/fixtures/dataclasses/record_factories.py) | — | — |
-| `datetime` | Yes | `datetime.time` construction, comparison and use in timed logging handlers. [Evidence](../benchmarks/cpython_stdlib/full/logging/timed_lifecycle.py) | — | — |
+| `datetime` | Yes | Construct and compare `datetime.time` for timed logging; construct fixed-offset datetimes and timezones, and add timedeltas. [Evidence](../benchmarks/cpython_stdlib/full/datetime/README.md) | [0 / 1,098](../benchmarks/cpython_stdlib/full/datetime/) | 4 |
 | `difflib` | Yes | `ndiff` on sequences of lines. [Evidence](../tests/fixtures/iterables/ndiff.py) | — | — |
 | `doctest` | Yes | `DocTestSuite` and execution of selected original docstring examples. [Evidence](../benchmarks/cpython_stdlib/full/doctest/README.md) | — | — |
 | `email` | Reachable only | Selected `message`, `parser` and `policy` declarations bind in unreachable code. [Evidence](../crates/imre-compiler/src/modules/declarations.rs) | — | — |
