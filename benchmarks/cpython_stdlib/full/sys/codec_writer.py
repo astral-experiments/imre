@@ -3,6 +3,14 @@ import codecs
 import io
 
 
+def written(stream: io.BytesIO) -> bytes:
+    position = stream.tell()
+    stream.seek(0)
+    data = stream.read()
+    stream.seek(position)
+    return data
+
+
 def markers() -> None:
     cls = codecs.getwriter("utf-8-sig")
     stream = io.BytesIO()
@@ -11,12 +19,16 @@ def markers() -> None:
     writer.write("x")
     writer.reset()
     writer.write("Y")
-    print(repr(stream.getvalue()))
+    print(repr(written(stream)))
     stream2 = io.BytesIO()
     other = cls(errors="strict", stream=stream2)
     print(writer is other)
     other.write("z")
-    print(repr(stream2.getvalue()))
+    print(repr(written(stream2)))
+    direct_stream = io.BytesIO()
+    direct = codecs.lookup("latin1").streamwriter(stream=direct_stream)
+    direct.write("é")
+    print(repr(written(direct_stream)))
 
 
 def main() -> None:
@@ -37,17 +49,17 @@ def main() -> None:
     print(writer.errors)
     print(writer.write("до свидания\n"))
     writer.flush()
-    print(repr(stream.getvalue()))
+    print(repr(written(stream)))
     try:
         writer.write("A☃B")
     except UnicodeEncodeError as error:
         print(str(error))
-    print(repr(stream.getvalue()))
+    print(repr(written(stream)))
     alias.encoding = "a class label"
     print(cls.encoding)
     writer2 = codecs.getwriter("1251")(stream, "replace")
     writer2.write("А☃")
-    print(repr(stream.getvalue()))
+    print(repr(written(stream)))
     writer.close()
     print(stream.closed)
     try:

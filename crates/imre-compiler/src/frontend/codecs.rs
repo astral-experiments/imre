@@ -51,6 +51,12 @@ impl Checker<'_> {
             parameter("errors", Type::Str, Some(unpacking::string("strict"))),
         ];
         let args = self.arguments(call, &parameters, Some(class))?;
+        // The typeshed protocol marks these positional-only, but concrete writers
+        // accept both names. The native binder has checked each value above.
+        for keyword in &call.arguments.keywords {
+            self.graph
+                .checked_positional_keyword(self.module, keyword.range());
+        }
         Ok(self.ordered_builtin(Builtin::CodecStream(Stream::New), Type::CodecWriter, args))
     }
 
@@ -145,6 +151,10 @@ impl Checker<'_> {
         attr: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if attr.attr.as_str() == "streamwriter" {
+            let class = writer_op(Stream::Class, Type::CodecWriterClass, vec![receiver]);
+            return self.codec_writer_new(call, class);
+        }
         let (op, input_type, result_type) = match attr.attr.as_str() {
             "encode" => (Builtin::CodecEncode, Type::Str, Type::Bytes),
             "decode" => (Builtin::CodecDecode, Type::Bytes, Type::Str),
