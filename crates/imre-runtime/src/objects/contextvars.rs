@@ -147,7 +147,13 @@ impl ReprView {
             Self::Context(owner) => write!(out, "<_contextvars.Context object at {owner:p}>"),
             Self::Var(owner, var) => {
                 let key = owner as usize;
-                let inserted = REPR.with_borrow_mut(|seen| seen.insert(key));
+                let inserted = REPR.with_borrow_mut(|seen| {
+                    if seen.contains(&key) {
+                        return Ok(false);
+                    }
+                    seen.try_reserve(1).map_err(|_| std::fmt::Error)?;
+                    Ok(seen.insert(key))
+                })?;
                 if !inserted {
                     return out.write_str("...");
                 }
