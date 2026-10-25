@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bindings import Boundary, PRIVATE, Probe
 from bodies import compiled
 from deep_decode import DRIVER as DEEP_DRIVER, METHOD as DEEP_METHOD, fixture as deep_fixture
-from key_identity import METHOD as KEY_METHOD, owner_fixture
+from key_identity import METHOD as KEY_METHOD, OPERATIONS as KEY_OPERATIONS, SOURCE as KEY_SOURCE
+from key_identity import native_identity_control, native_key_fixture, owner_fixture
 from formatting import METHODS as FORMATTING, Native as NativeFormatter, formatting_method
 from native import counts
 from reference import BENCH, COMMIT, HERE, routine, verify
@@ -24,7 +25,7 @@ sys.path.insert(0, str(BENCH))
 from native_json_values import Native
 from suite_evidence import ROLES, build_report, occurrence_keys, roles, write_reports
 from suite_inventory import cases, load_suite
-from suite_native import Toolchain, run_in_fixtures
+from suite_native import Toolchain, method_bytes, native_method, run_in_fixtures
 
 UNOBSERVED = dict.fromkeys(ROLES, "unobserved")
 
@@ -62,6 +63,18 @@ def intact_startup():
     return f"ordinary: {summaries[False]}; --reachable-only: {summaries[True]}"
 
 
+@cache
+def direct_doctest(source, level):
+    """Report the observed direct suite separately from the original package fixture."""
+    report = json.loads((HERE / "doctest-direct-linux.json").read_bytes())
+    row, = (row for row in report["levels"][str(level)].values() if source in row["ids"])
+    if row["outcome"] == "blocked":
+        return row["diagnostic"].splitlines()[-1]
+    if row["outcome"] == "pass":
+        return "direct native suite passed outside the original package fixture"
+    raise ValueError(f"unexpected direct doctest result for {source}: {row}")
+
+
 def missing(source, reference, variant, level):
     """Record individually verified exceptions; ordinary API failures stay in scope."""
     if isinstance(reference, dict):
@@ -84,8 +97,7 @@ def missing(source, reference, variant, level):
             "revisit": f"Run {source} if Imre exposes the corresponding CPython backend identity or private factory.",
         }
     if source.startswith("json"):
-        case_blocker = "io.StringIO at example 7" if source == "json" else "json.encoder.JSONEncoder at example 1"
-        why = f"native DocTestSuite is blocked by {case_blocker}; intact package: {intact_startup()} (DOCTEST.md)"
+        why = f"{direct_doctest(source, level)}; intact package: {intact_startup()} (DOCTEST.md)"
     elif ".test_tool." in source:
         why = "original subprocess invokes CPython -m json or json.tool; a native module entry point is required"
     else:
@@ -175,6 +187,28 @@ def run(tools, directory, reference):
         return obs
 
     executions.update(dict.fromkeys(ids[KEY_METHOD], native_keys))
+    # Only choose the body observation if its actual native assertions also
+    # reject different key owners and a nonempty memo. The focused report
+    # separately retains the general TestCase and repr transport attempts.
+    control = native_identity_control(tools, key_dir / "assertion-control")
+    if control["outcome"] == "pass":
+        body_dir = key_dir / "original-body"
+        body_dir.mkdir()
+        helper = method_bytes(KEY_SOURCE, "TestDecode", "check_keys_reuse")
+        body = native_method(tools, body_dir, KEY_SOURCE, "TestDecode", ids[KEY_METHOD][0],
+                             native_key_fixture(), operation=("imre", KEY_OPERATIONS))
+
+        def native_key_body(case, original):
+            try:
+                result = body(case, original)["observation"]
+            except AssertionError as exc:
+                return {"outcome": "failure", "roles": roles(body="imre", assertions="imre", operation="imre", fixture="mixed"),
+                        "reason": str(exc), "evidence": {"source": KEY_METHOD, "opt_level": tools.level,
+                            "fixture": "CPython module/class/instance hooks; native instance in child", "operation": KEY_OPERATIONS}}
+            return {"outcome": "pass", "roles": result["roles"], "evidence": {**result["evidence"], "source": KEY_METHOD,
+                    "helper_sha256": hashlib.sha256(helper).hexdigest(), "negative_control": control["operation"]}}
+
+        executions.update(dict.fromkeys(ids[KEY_METHOD], native_key_body))
 
     formatter = NativeFormatter(tools, directory)
     for short in FORMATTING:

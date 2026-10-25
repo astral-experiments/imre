@@ -4,15 +4,16 @@ use super::{
     Error, Int, Kind, Object, OwnedWord, Str, finish, itertools, literal_string, records, unions,
     words::WordKind,
 };
+use crate::StrOwner;
 use records::RecordDescriptor;
-use std::{cell::Cell, ops::Range, rc::Rc};
+use std::{cell::Cell, ops::Range};
 
 enum Grammar {
     Markup,
     Field,
 }
 pub(super) struct Cursor {
-    input: Rc<Str>,
+    input: StrOwner,
     position: Cell<usize>,
     grammar: Grammar,
     row: &'static RecordDescriptor,
@@ -40,16 +41,16 @@ fn tuple<const N: usize>(
     Ok(unsafe { OwnedWord::from_owned(record as usize, WordKind::new(6)) })
 }
 
-fn substring(input: &Rc<Str>, span: Range<usize>) -> usize {
+fn substring(input: &StrOwner, span: Range<usize>) -> usize {
     let s = if span.start == 0 && span.end == input.len() {
-        Rc::clone(input)
+        StrOwner::clone(input)
     } else {
         literal_string(&input[span])
     };
-    Rc::into_raw(s) as usize
+    StrOwner::into_raw(s) as usize
 }
 
-fn key(input: &Rc<Str>, key: grammar::Key) -> usize {
+fn key(input: &StrOwner, key: grammar::Key) -> usize {
     match key {
         grammar::Key::Integer(n) => unions::integer(Int::from_usize(n)),
         grammar::Key::Text(span) => substring(input, span),
@@ -61,11 +62,11 @@ fn syntax(message: &'static str) -> Error {
 
 impl Cursor {
     fn create(
-        input: Rc<Str>,
+        input: StrOwner,
         position: usize,
         grammar: Grammar,
         row: &'static RecordDescriptor,
-    ) -> Rc<Object> {
+    ) -> crate::ObjectOwner {
         itertools::adapter(itertools::Adapter::Format(Self {
             input,
             position: Cell::new(position),
@@ -118,11 +119,8 @@ pub unsafe extern "C" fn imre_formatter_parser(
     row: &'static RecordDescriptor,
 ) -> *const Object {
     // SAFETY: the caller roots the input; the cursor acquires another reference.
-    let input = unsafe {
-        Rc::increment_strong_count(input);
-        Rc::from_raw(input)
-    };
-    Rc::into_raw(Cursor::create(input, 0, Grammar::Markup, row))
+    let input = unsafe { StrOwner::acquire_word(input as usize) };
+    crate::ObjectOwner::into_raw(Cursor::create(input, 0, Grammar::Markup, row))
 }
 
 /// # Safety
@@ -135,17 +133,15 @@ pub unsafe extern "C" fn imre_formatter_field_name_split(
     row: &'static RecordDescriptor,
 ) -> *mut usize {
     // SAFETY: the caller roots the input; the cursor acquires another reference.
-    let input = unsafe {
-        Rc::increment_strong_count(input);
-        Rc::from_raw(input)
-    };
+    let input = unsafe { StrOwner::acquire_word(input as usize) };
     let value = grammar::first(&input)
         .map_err(syntax)
         .and_then(|(first, pos)| {
             tuple(outer, || {
                 [
                     key(&input, first),
-                    Rc::into_raw(Cursor::create(input, pos, Grammar::Field, row)) as usize,
+                    crate::ObjectOwner::into_raw(Cursor::create(input, pos, Grammar::Field, row))
+                        as usize,
                 ]
             })
         })

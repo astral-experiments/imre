@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use notify::event::{AccessKind, AccessMode, ModifyKind};
 use notify::{EventKind, RecursiveMode, Watcher};
 
-use crate::analysis::AnalysisCache;
+use crate::IncrementalCompiler;
 
 #[derive(Default)]
 pub(crate) struct FileSystem<'a>(Option<&'a mut Inputs>);
@@ -287,7 +287,7 @@ impl Inputs {
 }
 
 pub(crate) fn check(
-    cache: &mut AnalysisCache,
+    cache: &mut IncrementalCompiler,
     path: &Path,
     module_root: Option<&Path>,
     options: &crate::CompileOptions,

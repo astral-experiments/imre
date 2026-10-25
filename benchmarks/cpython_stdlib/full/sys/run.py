@@ -14,12 +14,13 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures, testcase_fixture
+from suite_native import NativeCompileError, Toolchain, native_method, run_evidence, run_in_fixtures, testcase_fixture
 from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
 import argv_case
 import jit_case
 import locale_case
+import thread_case
 from metadata import metadata_observer
 
 MODULE = "test.test_sys"
@@ -66,6 +67,10 @@ def select(toolchain, work, source, module):
         executions[case_id] = native_method(toolchain, directory(work, method),
                                              source, cls, case_id, fixture, operation=("imre", operation))
 
+    thread = toolchain.build((HERE / "thread_info.py").read_bytes(), directory(work, "thread-info"))
+    thread_case.check_record(thread, toolchain.clang)
+    executions[SYS + "test_thread_info"] = thread_case.observer(
+        module, thread, pinned_methods["SysModuleTest", "test_thread_info"], toolchain.level)
     impl = toolchain.build((HERE / "metadata_driver.py").read_bytes(), directory(work, "implementation"))
     executions[SYS + "test_implementation"] = metadata_observer(module, impl, toolchain.level)
     identity = subprocess.run([impl, "identity"], check=True, capture_output=True, text=True, timeout=15)
@@ -93,6 +98,23 @@ def select(toolchain, work, source, module):
         binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))
         if output(binary) != (ref.stdout, ref.stderr):
             raise AssertionError(f"{filename}: native output differs from CPython")
+
+    exercise = HERE / "intern_values.py"
+    ref = subprocess.run([sys.executable, "-B", exercise], capture_output=True, check=True, timeout=15)
+    binary = toolchain.build(exercise.read_bytes(), directory(work, "intern-values"))
+    if output(binary) != (ref.stdout, ref.stderr):
+        raise AssertionError("native string interning differs from CPython")
+
+    invalid = HERE / "intern-binder/intern-nested-invalid.py"
+    folder = directory(work, "intern-nested-invalid")
+    try:
+        toolchain.build(invalid.read_bytes(), folder)
+    except NativeCompileError as error:
+        expected = f'{folder}/case.py:6:23: Imre: parameter "value" is positional-only'
+        if str(error).splitlines()[-1] != expected:
+            raise AssertionError(("nested sys.intern diagnostic", str(error))) from error
+    else:
+        raise AssertionError("sys.intern accepted a bad call inside its argument")
 
     encoding = toolchain.build((HERE / "encoding_driver.py").read_bytes(), directory(work, "encoding"))
 

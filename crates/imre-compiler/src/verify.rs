@@ -157,6 +157,7 @@ impl Verifier<'_> {
         let fields = match receiver {
             Type::Class(class) => self.module.class_fields[class].clone(),
             Type::Tuple(_) => self.module.types.fields(receiver).unwrap(),
+            Type::ModuleSpec(id) => self.module.types.module_spec_fields(id),
             Type::SysImplementation => crate::version::implementation_fields(&self.module.types),
             Type::CompletedProcess(capture, cmd) => {
                 return match field {
@@ -318,6 +319,7 @@ impl Verifier<'_> {
                 | Builtin::JsonDump(ty)
                 | Builtin::TomlDecode(ty)
                 | Builtin::DictTryGet(ty)
+                | Builtin::ChainMapGet(ty)
                 | Builtin::DictTryPop(ty),
                 _,
             ) => self.ty(*ty),
@@ -415,9 +417,13 @@ impl Verifier<'_> {
                 Ok(())
             }
             ExprKind::Tuple(values) => {
-                let fields = types
-                    .fields(value.ty)
-                    .ok_or("tuple expression has non-tuple type")?;
+                let fields = if let Type::ModuleSpec(id) = value.ty {
+                    types.module_spec_fields(id)
+                } else {
+                    types
+                        .fields(value.ty)
+                        .ok_or("tuple expression has non-tuple type")?
+                };
                 require(fields.len() == values.len(), "tuple field count mismatch")?;
                 for (value, field) in values.iter().zip(fields) {
                     same(value.ty, field)?;
@@ -613,8 +619,10 @@ mod tests {
 
     fn empty() -> Module {
         Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
