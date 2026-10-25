@@ -470,14 +470,36 @@ impl<W: Write> Write for Output<W> {
 
 impl<W: Write> BinaryOutput<W> {
     #[cold]
-    fn write_all_slow(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.flush_buffer()?;
-        if bytes.len() >= self.buffer.capacity() {
-            self.stdout.write_all(bytes)
-        } else {
-            self.buffer.extend_from_slice(bytes);
-            Ok(())
+    fn write_all_slow(&mut self, mut bytes: &[u8]) -> io::Result<()> {
+        if let Err(error) = self.flush_buffer() {
+            return self.buffer_after_error(bytes, error);
         }
+        while !bytes.is_empty() && bytes.len() >= self.buffer.capacity() {
+            match self.stdout.write(bytes) {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(count) => bytes = &bytes[count..],
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return self.buffer_after_error(bytes, error),
+            }
+        }
+        self.buffer.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    /// After a nonblocking write stalls, keep as much of the new input as fits
+    /// behind the unwritten portion of the previous buffer.
+    fn buffer_after_error(&mut self, bytes: &[u8], error: io::Error) -> io::Result<()> {
+        if error.kind() != io::ErrorKind::WouldBlock {
+            return Err(error);
+        }
+        self.buffer.drain(..self.written);
+        self.written = 0;
+        let count = bytes.len().min(self.buffer.capacity() - self.buffer.len());
+        self.buffer.extend_from_slice(&bytes[..count]);
+        if count < bytes.len() {
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn flush_buffer(&mut self) -> io::Result<()> {
@@ -1688,6 +1710,53 @@ mod tests {
         );
         output.flush().unwrap();
         assert_eq!(output.stdout.bytes, b"partial");
+    }
+
+    #[test]
+    fn nonblocking_output_keeps_the_suffix_that_fits() {
+        struct Pipe<'a>(&'a mut [u8]);
+
+        impl Write for Pipe<'_> {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if self.0.is_empty() && !bytes.is_empty() {
+                    return Err(io::ErrorKind::WouldBlock.into());
+                }
+                self.0.write(bytes)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        for (prefix, next, fits) in [
+            ("", "abcdef", true),
+            ("abc", "def", true),
+            ("", "abcdefg", false),
+            ("abc", "defg", false),
+        ] {
+            let mut pipe = [0; 2];
+            let mut restored = [0; 4];
+            let mut output = BinaryOutput {
+                stdout: Pipe(&mut pipe),
+                buffer: Vec::with_capacity(4),
+                written: 0,
+            };
+            output.write_all(prefix.as_bytes()).unwrap();
+            let result = output.write_all(next.as_bytes()).map_err(|e| e.kind());
+            assert_eq!(
+                result,
+                if fits {
+                    Ok(())
+                } else {
+                    Err(io::ErrorKind::WouldBlock)
+                }
+            );
+            output.stdout = Pipe(&mut restored);
+            output.flush().unwrap();
+            assert_eq!(&pipe, b"ab");
+            assert_eq!(&restored, b"cdef");
+        }
     }
 
     #[test]
