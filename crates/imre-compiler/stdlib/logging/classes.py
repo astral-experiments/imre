@@ -86,6 +86,26 @@ def getHandlerByName(name: str) -> Handler | None:
     return _lookup_handler(name)
 
 
+class NullHandler(Handler):
+    lock: None
+
+    def __init__(self, level: _Level = 0) -> None:
+        super().__init__(level)
+        self.lock = None
+
+    def handle(self, record: LogRecord | None):
+        pass
+
+    def emit(self, record: LogRecord | None) -> None:
+        pass
+
+    def createLock(self) -> None:
+        self.lock = None
+
+    def _at_fork_reinit(self) -> None:
+        pass
+
+
 class BufferingFormatter:
     linefmt: Formatter
 
