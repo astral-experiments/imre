@@ -29,6 +29,9 @@ Hello, world!
 Imre compiles a restricted subset of Python into native executables that run
 without a Python installation.
 
+The [standard library support table](docs/stdlib.md) lists the operations and
+CPython test coverage for each module.
+
 For a complete example, Imre can build Ruff’s conformance reporter directly
 from its original Python file. The executable runs two versions of ty against
 a typing checkout and renders their differences. [Run the reporter](examples/conformance_report/README.md#run-directly-from-a-checkout).
@@ -88,7 +91,11 @@ Other projects make different trade-offs:
   [mypyc](https://mypyc.readthedocs.io/) use types to optimize code running
   within CPython, so compiled modules can interact with ordinary Python code.
 
-For module-by-module examples and CPython test coverage, see [standard library support](docs/stdlib.md). The [supported subset](docs/subset.md) and [design](docs/design.md) describe the language itself.
+Use [`@imre.struct`](docs/subset.md#immutable-value-structs) for immutable scalar
+records: a `list[Point]` can store the fields of each point inline. The same source
+runs on CPython with Imre’s standard library.
+
+For more, see the [design](docs/design.md) and [supported subset](docs/subset.md).
 
 ## Benchmarks
 
