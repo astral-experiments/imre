@@ -4787,18 +4787,41 @@ impl Emitter<'_, '_> {
             Builtin::Sha256Copy => self.call("imre_sha256_copy", Type::Sha256, &[&args[0].value]),
             Builtin::StringIo(operation) => {
                 use crate::ir::StringIoOperation as Op;
-                let symbol = match operation {
-                    Op::New => "imre_string_io",
-                    Op::Value => "imre_string_io_value",
-                    Op::Read => "imre_string_io_read",
-                    Op::Seek => "imre_string_io_seek",
-                    Op::Position => "imre_string_io_position",
+                let call = |this: &mut Self, symbol| {
+                    this.call(
+                        symbol,
+                        returns,
+                        &args.iter().map(|a| &a.value).collect::<Vec<_>>(),
+                    )
                 };
-                self.call(
-                    symbol,
-                    returns,
-                    &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
-                )
+                match operation {
+                    Op::Newlines => {
+                        let mut layout = |n| {
+                            self.output.global_ref(format!(
+                                "layout_{}",
+                                record_name(self.module.types.tuple(vec![Type::Str; n]))
+                            ))
+                        };
+                        let pair = layout(2);
+                        let triple = layout(3);
+                        let file = &args[0].value.operand;
+                        let operand = self.checked_instruction(format!(
+                            "call i64 @imre_string_io_newlines(ptr {file}, ptr @{pair}, ptr @{triple})"
+                        ));
+                        Value {
+                            ty: returns,
+                            operand,
+                            small_integer: false,
+                        }
+                    }
+                    Op::Capability => call(self, "imre_string_io_capable"),
+                    Op::Readlines => call(self, "imre_string_io_readlines"),
+                    Op::New => call(self, "imre_string_io"),
+                    Op::Value => call(self, "imre_string_io_value"),
+                    Op::Read => call(self, "imre_string_io_read"),
+                    Op::Seek => call(self, "imre_string_io_seek"),
+                    Op::Position => call(self, "imre_string_io_position"),
+                }
             }
             Builtin::BytesIo => self.call("imre_bytes_io", returns, &[&args[0].value]),
             Builtin::BinarySeek => self.call(
@@ -7173,6 +7196,9 @@ declare ptr @imre_sha256_hexdigest(ptr)
 declare ptr @imre_sha256_copy(ptr)
 declare ptr @imre_bytes_io(ptr)
 declare ptr @imre_string_io(i64, i64)
+declare i64 @imre_string_io_newlines(ptr, ptr, ptr)
+declare i1 @imre_string_io_capable(ptr)
+declare ptr @imre_string_io_readlines(ptr, i64)
 declare ptr @imre_string_io_value(ptr)
 declare ptr @imre_string_io_read(ptr, i64, i1)
 declare i64 @imre_string_io_seek(ptr, i64, i64)
