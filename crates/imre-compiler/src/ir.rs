@@ -295,6 +295,7 @@ pub(crate) struct ClassMetadata {
     pub enum_members: Vec<(String, String)>,
     /// A closed frozen layout whose generated constructor only stores its fields.
     pub frozen_initializer: Option<usize>,
+    pub value_struct: bool,
     pub dataclass_eq: bool,
     pub dataclass_repr: bool,
     pub toml_hash: bool,
@@ -642,6 +643,7 @@ pub(crate) enum Builtin {
     ExceptionMatchesAny,
     LiteralStringView,
     StringListContains,
+    StructListContains,
     StringContains,
     /// Immutable byte subsequence; operands are evaluated needle first.
     BytesContains,
@@ -724,6 +726,11 @@ pub(crate) enum Builtin {
     ImportErrorReset,
     ImportErrorRejectReset,
     BoxValue,
+    ObjectRecordProject(usize),
+    ObjectRecordIdentity {
+        class: usize,
+        reversed: bool,
+    },
     MappingObjectGet,
     ExceptionTupleView,
     ExceptionFieldRepr,
@@ -754,6 +761,7 @@ pub(crate) enum Builtin {
         percent: bool,
         positive_sign: u8,
     },
+    TupleGet,
     ListGet,
     /// A live-length guard proves a private cursor or constant index is in
     /// bounds, with no intervening mutation or user code. Returns an owned

@@ -113,6 +113,15 @@ impl Emitter<'_, '_> {
         self.instruction(format!("icmp ne i32 {matched}, 0"))
     }
 
+    /// Borrow the payload only if this erased value retains the exact record.
+    pub(super) fn boxed_record(&mut self, value: &Value, class: usize) -> String {
+        let layout = self.output.global_ref(format!("layout_class_{class}"));
+        self.instruction(format!(
+            "call ptr @imre_object_record_payload(ptr {}, ptr @{layout})",
+            value.operand
+        ))
+    }
+
     /// Inspect exception and record layouts only after proving the payload is present
     /// and selecting its tag if it is part of a finite union.
     pub(super) fn instance_test(&mut self, value: &Value, classes: &[InstanceType]) -> String {
@@ -153,13 +162,26 @@ impl Emitter<'_, '_> {
             .iter()
             .filter(|(_, ty)| classes.iter().any(|class| class.accepts(*ty)))
             .fold(0, |mask, (kind, _)| mask | 1 << *kind);
-            let kind = self.instruction(format!(
-                "call i32 @imre_system_exit_code_kind(ptr {})",
-                value.operand
-            ));
-            let bit = self.instruction(format!("shl i32 1, {kind}"));
-            let matched = self.instruction(format!("and i32 {bit}, {mask}"));
-            return self.instruction(format!("icmp ne i32 {matched}, 0"));
+            let mut matched = (mask != 0).then(|| {
+                let kind = self.instruction(format!(
+                    "call i32 @imre_system_exit_code_kind(ptr {})",
+                    value.operand
+                ));
+                let bit = self.instruction(format!("shl i32 1, {kind}"));
+                let found = self.instruction(format!("and i32 {bit}, {mask}"));
+                self.instruction(format!("icmp ne i32 {found}, 0"))
+            });
+            for class in classes {
+                if let InstanceType::Exact(Type::Class(class)) = class {
+                    let ptr = self.boxed_record(value, *class);
+                    let found = self.instruction(format!("icmp ne ptr {ptr}, null"));
+                    matched = Some(match matched {
+                        Some(previous) => self.instruction(format!("or i1 {previous}, {found}")),
+                        None => found,
+                    });
+                }
+            }
+            return matched.unwrap_or_else(|| "false".into());
         }
         let mut result = "false".to_owned();
         for &class in classes {

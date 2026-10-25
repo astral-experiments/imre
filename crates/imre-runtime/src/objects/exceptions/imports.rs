@@ -226,7 +226,18 @@ pub unsafe extern "C" fn imre_exception_field_repr(value: *const Object) -> *con
     }
 }
 
-fn type_name(kind: WordKind) -> &'static str {
+fn type_name(kind: WordKind, word: usize) -> String {
+    if kind.raw() == 6 {
+        // SAFETY: kind 6 roots the record and its compiler-emitted UTF-8 class name.
+        unsafe {
+            if let Some(s) = records::descriptor(word as *const usize).class_semantics() {
+                return std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                    s.name, s.name_len,
+                ))
+                .to_owned();
+            }
+        }
+    }
     match kind.raw() {
         0 => "NoneType",
         1 => "bool",
@@ -237,6 +248,7 @@ fn type_name(kind: WordKind) -> &'static str {
         8 => "bytes",
         _ => unreachable!("checked exception field"),
     }
+    .to_owned()
 }
 
 fn length(kind: WordKind, word: usize) -> Option<usize> {
@@ -245,7 +257,10 @@ fn length(kind: WordKind, word: usize) -> Option<usize> {
         match kind.raw() {
             3 => Some((&*(word as *const Str)).chars().count()),
             4 => Some((&*(word as *const crate::List)).0.with(|v| v.len())),
-            6 => Some(records::descriptor(word as *const usize).length),
+            6 => {
+                let layout = records::descriptor(word as *const usize);
+                layout.class_semantics().is_none().then_some(layout.length)
+            }
             8 => Some((&*(word as *const Bytes)).len()),
             _ => None,
         }
@@ -267,7 +282,7 @@ pub unsafe extern "C" fn imre_exception_field_len(value: *const Object) -> usize
         Some(n) => Int::from_usize(n).into_raw(),
         None => Error::new(
             Kind::TypeError,
-            format!("object of type '{}' has no len()", type_name(kind)),
+            format!("object of type '{}' has no len()", type_name(kind, word)),
         )
         .returning(0),
     }
@@ -294,7 +309,7 @@ pub unsafe extern "C" fn imre_exception_field_index(
         let Some(len) = length(kind, word) else {
             return Error::new(
                 Kind::TypeError,
-                format!("'{}' object is not subscriptable", type_name(kind)),
+                format!("'{}' object is not subscriptable", type_name(kind, word)),
             )
             .returning(std::ptr::null());
         };

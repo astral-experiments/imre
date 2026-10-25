@@ -307,6 +307,7 @@ pub(crate) enum Intrinsic {
     Any,
     TomlDecode,
     Dataclass,
+    Struct,
     DataclassField,
     AsDict,
     SelfType,
@@ -711,6 +712,7 @@ impl IntrinsicModule {
             (Self::Json, "JSONDecodeError") => Intrinsic::JsonDecodeError,
             (Self::ImreJson, "encode") => Intrinsic::JsonEncode,
             (Self::ImreToml, "decode") => Intrinsic::TomlDecode,
+            (Self::Imre, "struct") => Intrinsic::Struct,
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
@@ -1002,13 +1004,11 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::BuiltinImport(alias));
     }
 
-    /// Record the exact list read proved by lowering a fixed-width tuple spread.
+    /// Record an integer access with a proved native indexing implementation.
     /// Other diagnostics at this index or inside the receiver remain visible.
-    pub(crate) fn checked_tuple_list_read(&self, module: ModuleId, read: TextRange) {
-        if self.session.has_tuple_spreads(module) {
-            self.checked_diagnostics.borrow_mut()[module]
-                .push(CheckedDiagnostic::TupleListRead(read));
-        }
+    pub(crate) fn checked_index_read(&self, module: ModuleId, read: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::CheckedIndexRead(read));
     }
 
     /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
