@@ -31,16 +31,22 @@
         "native_calls": 2
       },
       "test.test_shutil.TestCopy.test_dont_copy_file_onto_link_to_itself": {
-        "status": "mixed",
-        "native_calls": 1,
-        "native": "copyfile",
-        "host": "unittest assertions and shutil.rmtree in the method's finally block"
+        "status": "host_driven_native",
+        "native_calls": 2,
+        "calls_by_operation": {
+          "copyfile": 1,
+          "rmtree": 1
+        },
+        "removed_directory": true
       },
       "test.test_shutil.TestCopy.test_dont_copy_file_onto_symlink_to_itself": {
-        "status": "mixed",
-        "native_calls": 1,
-        "native": "copyfile",
-        "host": "unittest assertions and shutil.rmtree in the method's finally block"
+        "status": "host_driven_native",
+        "native_calls": 2,
+        "calls_by_operation": {
+          "copyfile": 1,
+          "rmtree": 1
+        },
+        "removed_directory": true
       },
       "test.test_shutil.TestCopy.test_copy": {
         "status": "host_driven_native",
@@ -63,8 +69,26 @@
         "native_calls": 3
       },
       "test.test_shutil.TestCopy.test_copy_return_value": {
-        "status": "host_driven_native",
-        "native_calls": 4
+        "status": "native_body_host_fixture",
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "28cfe0a8d55255f315399cf57eb978b6073f1921afdcae609598e4de55040f95",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "shutil.copy and shutil.copy2",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "28cfe0a8d55255f315399cf57eb978b6073f1921afdcae609598e4de55040f95"
+          }
+        }
       },
       "test.test_shutil.TestCopy.test_copy_symlinks": {
         "status": "host_driven_native",
@@ -133,16 +157,22 @@
         "native_calls": 2
       },
       "test.test_shutil.TestCopy.test_dont_copy_file_onto_link_to_itself": {
-        "status": "mixed",
-        "native_calls": 1,
-        "native": "copyfile",
-        "host": "unittest assertions and shutil.rmtree in the method's finally block"
+        "status": "host_driven_native",
+        "native_calls": 2,
+        "calls_by_operation": {
+          "copyfile": 1,
+          "rmtree": 1
+        },
+        "removed_directory": true
       },
       "test.test_shutil.TestCopy.test_dont_copy_file_onto_symlink_to_itself": {
-        "status": "mixed",
-        "native_calls": 1,
-        "native": "copyfile",
-        "host": "unittest assertions and shutil.rmtree in the method's finally block"
+        "status": "host_driven_native",
+        "native_calls": 2,
+        "calls_by_operation": {
+          "copyfile": 1,
+          "rmtree": 1
+        },
+        "removed_directory": true
       },
       "test.test_shutil.TestCopy.test_copy": {
         "status": "host_driven_native",
@@ -165,8 +195,26 @@
         "native_calls": 3
       },
       "test.test_shutil.TestCopy.test_copy_return_value": {
-        "status": "host_driven_native",
-        "native_calls": 4
+        "status": "native_body_host_fixture",
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "28cfe0a8d55255f315399cf57eb978b6073f1921afdcae609598e4de55040f95",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "shutil.copy and shutil.copy2",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 3,
+            "method_sha256": "28cfe0a8d55255f315399cf57eb978b6073f1921afdcae609598e4de55040f95"
+          }
+        }
       },
       "test.test_shutil.TestCopy.test_copy_symlinks": {
         "status": "host_driven_native",

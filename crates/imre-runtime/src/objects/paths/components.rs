@@ -1,6 +1,7 @@
 //! Lexical component operations borrow parsed path flavors and never access the filesystem.
 
 use super::*;
+use crate::StrOwner;
 use crate::objects::exceptions::string_repr;
 use crate::objects::words::Words;
 
@@ -8,15 +9,18 @@ impl Storage {
     fn parsed<T>(&self, f: impl FnOnce(&PurePath) -> Result<T>) -> Result<T> {
         match self {
             Self::PurePath(path) => f(path),
-            _ => f(&PurePath::new(false, vec![Rc::clone(self.path_text())])?),
+            _ => f(&PurePath::new(
+                false,
+                vec![StrOwner::clone(self.path_text())],
+            )?),
         }
     }
 
-    fn path_repr(&self) -> String {
-        match self {
-            Self::PurePath(p) => format!("{}({})", p.class(), string_repr(&p.as_posix())),
+    fn path_repr(&self) -> Result<String> {
+        Ok(match self {
+            Self::PurePath(p) => format!("{}({})", p.class(), string_repr(p.as_posix()?.as_str())),
             _ => format!("PosixPath({})", string_repr(self.path())),
-        }
+        })
     }
 
     pub(super) fn replace_name(&self, replacement: Option<&Str>) -> Result<*const Object> {
@@ -34,7 +38,7 @@ impl Storage {
         if self.basename().is_empty() {
             return Err(Error::new(
                 Kind::ValueError,
-                format!("{} has an empty name", self.path_repr()),
+                format!("{} has an empty name", self.path_repr()?),
             ));
         }
         Ok(new_path(join(parent(self.component_text()), replacement)))
@@ -50,13 +54,9 @@ pub unsafe extern "C" fn imre_path_is_relative_to(
 ) -> u32 {
     // SAFETY: no callback, mutation or borrowed component escapes the comparison.
     let result = unsafe {
-        object(path).0.with(|s| {
-            s.parsed(|p| {
-                object(other)
-                    .0
-                    .with(|o| o.parsed(|o| Ok(p.is_relative_to(o))))
-            })
-        })
+        object(path)
+            .0
+            .with(|s| s.parsed(|p| object(other).0.with(|o| o.parsed(|o| p.is_relative_to(o)))))
     };
     finish(result.map(u32::from), 0)
 }
@@ -108,7 +108,7 @@ pub unsafe extern "C" fn imre_path_change_extension(
                 let Some(value) = value.filter(|v| !v.is_empty()) else {
                     return Err(Error::new(
                         Kind::ValueError,
-                        format!("{} has a non-empty suffix", s.path_repr()),
+                        format!("{} has a non-empty suffix", s.path_repr()?),
                     ));
                 };
                 let mut name = value.clone();
@@ -118,7 +118,7 @@ pub unsafe extern "C" fn imre_path_change_extension(
                 if old_stem.is_empty() {
                     return Err(Error::new(
                         Kind::ValueError,
-                        format!("{} has an empty name", s.path_repr()),
+                        format!("{} has an empty name", s.path_repr()?),
                     ));
                 }
                 let value = value.ok_or_else(|| {
@@ -158,7 +158,9 @@ pub unsafe extern "C" fn imre_path_suffixes(path: *const Object) -> *const Objec
             for part in name.split('.').skip(1) {
                 let mut suffix = Str::from(".");
                 suffix.push_str(part);
-                suffixes.values.push(Rc::into_raw(Rc::new(suffix)) as usize);
+                suffixes
+                    .values
+                    .push(StrOwner::into_raw(StrOwner::new(suffix)) as usize);
             }
             Ok(Rc::into_raw(suffixes.into_object()))
         })

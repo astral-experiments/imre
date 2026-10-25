@@ -174,7 +174,7 @@ impl Checker<'_> {
         &mut self,
         stmts: &[ast::Stmt],
     ) -> Result<(Vec<Statement>, bool), String> {
-        self.collect_local_functions(stmts)?;
+        self.collect_local_definitions(stmts)?;
         if self.returns != Type::Bool {
             return self.block(stmts);
         }
