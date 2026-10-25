@@ -12,6 +12,7 @@ mod asyncio;
 mod builtins;
 mod bytes;
 mod contexts;
+mod copying;
 mod csv;
 mod deferred_diff;
 mod difflib;

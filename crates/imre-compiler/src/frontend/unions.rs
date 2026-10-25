@@ -65,11 +65,13 @@ impl Checker<'_> {
         }
         let source = self.types.payload(value.ty).unwrap_or(value.ty);
         let target = self.types.payload(ty).unwrap_or(ty);
-        let kind = if self
-            .types
-            .members(source)
-            .is_some_and(|members| members.contains(&target))
-        {
+        let kind = if self.types.members(source).is_some_and(|members| {
+            members.contains(&target)
+                || self
+                    .types
+                    .members(target)
+                    .is_some_and(|subset| subset.iter().all(|member| members.contains(member)))
+        }) {
             ExprKind::Builtin(Builtin::UnionProject, vec![value])
         } else {
             debug_assert_eq!(self.types.payload(value.ty), Some(ty));

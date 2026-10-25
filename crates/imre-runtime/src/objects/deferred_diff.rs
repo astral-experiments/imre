@@ -356,25 +356,28 @@ pub unsafe extern "C" fn imre_str_list_sorted_suffix(
             let source = match (skip, words.plan()) {
                 (2, Some(Deferred(View::Signed(source)))) => Some(source),
                 (2, Some(plan @ Deferred(View::Sorted { .. }))) => {
-                    return Words::deferred(plan.clone());
+                    return Ok(Words::deferred(plan.clone()));
                 }
                 _ => None,
             };
             let input = source.map_or_else(|| words.resolved(), |source| source.projected());
-            let mut sorted = input.copy_strings();
+            let mut sorted = snapshot(input, std::iter::empty())?;
             let key = |word: usize| suffix(&*(word as *const Str), skip as usize);
             sorted.values.sort_by(|&a, &b| key(a).cmp(key(b)));
-            if let Some(source) = source {
+            Ok(if let Some(source) = source {
                 Words::deferred(Deferred(View::Sorted {
                     rows: Rc::new(sorted),
                     origin: Rc::downgrade(source),
                 }))
             } else {
                 sorted
-            }
+            })
         })
     };
-    Rc::into_raw(result.into_object())
+    crate::finish(
+        result.map(|words| Rc::into_raw(words.into_object())),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety
