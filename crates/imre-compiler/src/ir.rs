@@ -299,6 +299,8 @@ pub(crate) struct ClassMetadata {
 
 pub(crate) struct ClassFieldMetadata {
     pub name: String,
+    /// A trusted bundled field containing the complete, unquoted record representation.
+    pub repr_text: bool,
     pub compare: bool,
     pub repr: bool,
 }

@@ -70,11 +70,14 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             };
             let flags = u32::from(metadata.dataclass_eq)
                 | (u32::from(metadata.dataclass_repr) << 1)
-                | (u32::from(metadata.toml_hash) << 2);
+                | (u32::from(metadata.toml_hash) << 2)
+                | (u32::from(metadata.fields.iter().any(|field| field.repr_text)) << 3);
             let layout = metadata.fields.iter().map(|field| {
                 (
                     field.name.as_str(),
-                    u32::from(field.compare) | (u32::from(field.repr) << 1),
+                    u32::from(field.compare)
+                        | (u32::from(field.repr) << 1)
+                        | (u32::from(field.repr_text) << 2),
                 )
             });
             (

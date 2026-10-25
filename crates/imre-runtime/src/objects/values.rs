@@ -14,6 +14,8 @@ use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
 
 const GENERATED_EQ: u32 = 1;
 const GENERATED_REPR: u32 = 2;
+const HAS_REPR_TEXT: u32 = 8;
+const REPR_TEXT_FIELD: u32 = 4;
 const TUPLE: u32 = 1;
 
 /// Compares an exact immutable tuple lexicographically. The checker excludes
@@ -423,8 +425,14 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                                 None
                             }
                         }
-                        Storage::Sequence(values) => {
-                            let values = values.resolved();
+                        Storage::Sequence(sequence) => {
+                            let values = sequence.resolved();
+                            if position == 0
+                                && sequence.mock_call_list.get()
+                                && write_mock_history(output, &values.values, values.kind).is_some()
+                            {
+                                return None;
+                            }
                             if position == 0 {
                                 output.push('[');
                             }
@@ -579,6 +587,59 @@ unsafe fn text<'a>(pointer: *const u8, length: usize) -> &'a str {
     unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(pointer, length)) }
 }
 
+/// Borrows the immutable display text from a rooted, initialized native record.
+unsafe fn record_repr_text<'a>(payload: *const usize) -> Option<&'a str> {
+    if payload.is_null() {
+        return None;
+    }
+    // SAFETY: the caller roots this record and its static descriptor. Check
+    // the metadata and the field kind before treating a word as a string.
+    unsafe {
+        let layout = descriptor(payload);
+        let semantics = layout.semantics.as_ref()?;
+        if semantics.flags & HAS_REPR_TEXT == 0 {
+            return None;
+        }
+        for index in 0..layout.length {
+            if (*semantics.fields.add(index)).flags & REPR_TEXT_FIELD != 0 {
+                let kind = WordKind::new(*layout.kinds.add(index));
+                if kind.raw() != 3 {
+                    return None;
+                }
+                let word = kind.read_record_field(payload.add(index));
+                return (word as *const Str).as_ref().map(Str::as_str);
+            }
+        }
+        None
+    }
+}
+
+/// CPython formats a call history independently of the container around it.
+unsafe fn write_mock_history(output: &mut String, words: &[usize], kind: WordKind) -> Option<()> {
+    if kind.raw() != 6 {
+        return None;
+    }
+    // SAFETY: the sequence is rooted and the checked kind identifies record
+    // words. No mutation or user callback occurs between these two passes.
+    let calls = words
+        .iter()
+        .map(|&word| unsafe { record_repr_text(word as *const usize) });
+    let punctuation = 2usize.saturating_add(words.len().saturating_sub(1).saturating_mul(2));
+    let width = calls.clone().try_fold(punctuation, |width, text| {
+        Some(width.saturating_add(text?.chars().take(81usize.saturating_sub(width)).count()))
+    })?;
+    let separator = if width > 80 { ",\n " } else { ", " };
+    output.push('[');
+    for (index, call) in calls.enumerate() {
+        if index != 0 {
+            output.push_str(separator);
+        }
+        output.push_str(call.expect("validated immutable call text"));
+    }
+    output.push(']');
+    Some(())
+}
+
 unsafe fn record_field_repr(
     output: &mut String,
     payload: *const usize,
@@ -593,6 +654,12 @@ unsafe fn record_field_repr(
         .unwrap_or_else(|| fail("SystemError", "internal records have no representation"));
     // SAFETY: checked descriptors contain valid names, flags, and field arrays.
     unsafe {
+        if semantics.flags & HAS_REPR_TEXT != 0
+            && let Some(text) = record_repr_text(payload)
+        {
+            output.push_str(text);
+            return None;
+        }
         if semantics.kind != TUPLE && semantics.flags & GENERATED_REPR == 0 {
             write!(
                 output,
