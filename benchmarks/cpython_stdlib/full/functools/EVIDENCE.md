@@ -3,17 +3,19 @@
 Both reports use the [shared per-occurrence contract](../../SUITE_RUNNER.md).
 Each has a row for every upstream ID at each optimization level.
 
-The [tested compiler and drivers](https://github.com/astral-sh/imre/commit/cf9401d5ef4a3e49656080a9251fa6910f51381a)
-come from [the cache annotation PR](https://github.com/astral-sh/imre/pull/706).
+The [tested compiler and drivers](https://github.com/astral-sh/imre/commit/4735cacfa95c66d17b8942d4882b291f7088861d)
+come from [the cache parameter comparison PR](https://github.com/astral-sh/imre/pull/811).
+The reports describe that compiler revision, which includes the local cache
+decorator and cache annotation changes. They do not describe a build of main.
 The same compiler ran the complete-method, cache, reduce and free-threaded checks
 at both levels, including the [corrected reduce fixture](https://github.com/astral-sh/imre/pull/713).
-Of the 325 primary methods, 178 stopped while compiling fixture code, 122 while
-compiling the method, and 21 at an upstream method decorator. Four bodies and
+Of the 325 primary methods, 174 stopped while compiling fixture code, 124 while
+compiling the method, and 21 at an upstream method decorator. Six bodies and
 their assertions completed in Imre with the original host fixtures.
 
 | Pinned Linux suite | Reference | Native bodies with host fixtures | Host-driven native operations | Mixed | Failed | Blocked |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| [test.test_functools](evidence-linux.json) | 325 | 4 | 13 | 13 | 0 | 295 |
+| [test.test_functools](evidence-linux.json) | 325 | 6 | 13 | 13 | 0 | 293 |
 | [test.test_free_threading.test_functools](evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
 
 Counts are identical at -O0 and -O3. There are no fully native fixtures or
@@ -22,11 +24,21 @@ now runs two native folds with two host bindings and two host warnings. The
 earlier positional-only fixture rejected its first call before reaching Imre.
 The C and Python variants of test_with_bound_and_unbound_methods
 construct and call both partials and compare the resulting strings in Imre.
+The C and Python variants of test_lru_cache_parameters each decorate two local
+functions, call cache_parameters on each wrapper, and compare the returned
+dictionaries in Imre. The original module and unittest fixture run in CPython.
 The C and Python variants of test_get_annotations construct the cache wrapper,
 read the original and wrapper annotations, and compare both dictionaries in
 Imre. CPython supplies the original module/class/instance hooks; the child
 constructs its native instance. The two deferred-reference methods stop while
 compiling the original test.support.EqualToForwardRef.__eq__.
+
+The [previous published report](https://github.com/astral-sh/imre/pull/716)
+observed four native bodies. On the [intermediate compiler](https://github.com/astral-sh/imre/commit/2a28a2259587692d74d12ddb2974e9af32433673),
+CPython ran the two parameter test bodies and drove two native dictionary
+reads per body. Comparing the current run with that intermediate run, only
+those two primary classifications changed. The 64 cache and seven reduce
+operation probe results, including the host observations, are byte-identical.
 
 **Primary evidence.** run_bodies.py verifies the pinned file, then attempts
 all 325 complete methods at both levels with the shared runner. It keeps
