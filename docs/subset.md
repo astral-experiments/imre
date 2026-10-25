@@ -208,7 +208,10 @@ Select a value into a concrete scalar or
 with literal-key `.get()`, scalar or empty-list defaults, and nested iteration.
 Original array roots keep their mutable list identity. Malformed JSON raises
 `json.JSONDecodeError`, with the original decoded `doc`, short `msg`, character
-offset `pos`, and one-based `lineno` and `colno`. Nesting is limited to 128 containers. Strings use
+offset `pos`, and one-based `lineno` and `colno`. The standard decoder uses a heap stack for
+deep input and raises `RecursionError` above 50,000 open containers. CPython's accelerator
+and pure decoder reach different limits depending on the platform and recursion context.
+The explicit typed schema decoder and the encoder retain their 128-container limit. Strings use
 Unicode scalar values. Integers retain their exact precision. The standard
 reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
@@ -777,12 +780,18 @@ The result exposes read-only `args: list[str]`, `returncode: int`, and the two s
 
 `check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int`, `cmd: list[str]`, and the captured or absent `stdout`, `output`, and `stderr` fields. `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
 
-On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes, or a native `Path`. It and `os.dup` and `os.pipe` return non-inheritable descriptors. `os.dup2` accepts an optional `inheritable` flag (true by default). Use `os.close`, `os.isatty`, `os.get_inheritable` / `os.set_inheritable`, and `os.get_blocking` / `os.set_blocking` directly on integer descriptors. Open flags use the runtime target's values.
+On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes, or a native `Path`. It and `os.dup` and `os.pipe` return non-inheritable descriptors. `os.dup2` accepts an optional `inheritable` flag (true by default). Use `os.close`, `os.isatty`, `os.get_inheritable` / `os.set_inheritable`, and `os.get_blocking` / `os.set_blocking` directly on integer descriptors. `os.lseek(fd, position, whence)` reads or moves the shared offset. The runtime supplies the platform's open flags and `SEEK_SET`, `SEEK_CUR`, `SEEK_END`, `SEEK_DATA`, and `SEEK_HOLE` constants.
 
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
-`shlex.split(text)` returns POSIX shell words with Python’s default quoting,
-escaping, and comment handling. A discarded `subprocess.run(argv, check=True,
+`shlex.split(s, comments=False, posix=True)` accepts a string or `None`
+and boolean mode flags. `shlex.quote(s)` quotes a POSIX shell word;
+`shlex.join(split_command)` quotes each item from a supported iterable before
+requesting the next. Both handle false scalar values and concrete containers
+before checking their type, as CPython does. The stateful `shlex.shlex` lexer
+is unsupported.
+
+A discarded `subprocess.run(argv, check=True,
 stdout=sys.stderr)` forwards both child streams to the parent’s stderr while
 the child is running. Failure raises `CalledProcessError` with uncaptured
 streams set to `None`. A handler around direct calls with the same stream mode,
@@ -953,6 +962,11 @@ A function returning `Sequence[T]` can return an exact `list[T]`.
 `collections.Counter[K]` uses exact string or integer keys and arbitrary-precision integer counts. `Counter(iterable)` counts each key, and `Counter(mapping)` copies integer counts. A bare `Counter` annotation or unconstrained empty `Counter()` uses string keys. `Counter[int]()` and an annotated `Counter[int]` destination select integer keys. String-key counters also accept keyword counts. `update` adds its positional iterable or mapping and then the keyword counts, retaining negative and zero entries. A missing subscription returns zero without inserting. Membership, `get`, key iteration and `items()` inspect the stored entries. Deleting an absent key is a no-op. `total()` and `sum(c.values())` sum all counts. Frozen dataclasses can hold independently created counters with `field(default_factory=Counter)`. `subtract(iterable, **counts)` decrements instead of replacing counts and retains nonpositive values. Typed mappings contribute their counts; other iterables contribute one per occurrence. Bound and unbound update/subtract calls support native argument errors.
 
 Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the counts for every key of either counter. An absent key contributes zero.
+
+`mapping.clear()` removes every entry in place and returns `None`. Aliases see
+the empty dictionary; a `Counter` still returns zero for a missing key, and a
+`defaultdict` keeps its factory. `dict.clear(mapping)` and the inherited class
+methods `Counter.clear(mapping)` and `defaultdict.clear(mapping)` do the same.
 
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
 

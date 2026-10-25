@@ -31,6 +31,7 @@ impl Checker<'_> {
             vec![param("fd")]
         };
         match op {
+            Seek => params.extend([param("position"), param("whence")]),
             SetBlocking => params.push(param("blocking")),
             SetInheritable => params.push(param("inheritable")),
             Dup2 => {
@@ -60,7 +61,7 @@ impl Checker<'_> {
         })?;
         let returns = match op {
             Close | SetBlocking | SetInheritable => Type::None,
-            Open | Dup | Dup2 => Type::Int,
+            Open | Seek | Dup | Dup2 => Type::Int,
             Pipe => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,
         };
