@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events, adapter-tools, codec-writer, plain-file, standalone]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events, adapter-tools, codec-writer, plain-file, standalone, hierarchy]
         required: true
 permissions:
   contents: read
@@ -55,6 +55,9 @@ jobs:
           if ! test -x /usr/bin/clang-18; then
             sudo apt-get update && sudo apt-get install -y clang-18
           fi
+      - name: Build with default compiler features for prospective compiler checks
+        if: inputs.audit == 'properties' || inputs.audit == 'handler-locks'
+        run: cargo build --locked -p imre-compiler -p imre-runtime -j 2
       - name: Build this source with IR verification
         run: cargo build --locked -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir -j 2
       - name: Execute unchanged routines and their differential checks
@@ -67,6 +70,21 @@ jobs:
           ordinary=(--compiler "$imre" --runtime "$runtime" --clang /usr/bin/clang-18 --opt-levels 0 3)
           tools=(--imre "$imre" --runtime "$runtime" --clang /usr/bin/clang-18)
           ref="$PWD/.cpython-stdlib-reference"
+          if [[ "$AUDIT" == properties || "$AUDIT" == handler-locks ]]; then
+            for sample in tests/fixtures/iterator_pipelines/source_generator.py tests/fixtures/dataclasses/value_struct.py; do
+              if [[ ! -f "$sample" ]]; then continue; fi
+              PYTHONPATH="$PWD/stdlib" python3 -B "$sample" > "$results/overlap-reference"
+              for mode in whole reachable; do
+                flags=()
+                if [[ "$mode" == reachable ]]; then flags=(--reachable-only); fi
+                for opt in 0 3; do
+                  "$imre" build "$sample" --no-cache --opt-level "$opt" "${flags[@]}" --runtime "$runtime" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/overlap"
+                  "$RUNNER_TEMP/overlap" > "$results/overlap-actual"
+                  cmp "$results/overlap-reference" "$results/overlap-actual"
+                done
+              done
+            done
+          fi
           case "$AUDIT" in
             logging|file-handler)
               if [[ "$AUDIT" == file-handler ]]; then
@@ -155,6 +173,11 @@ jobs:
               fi
               PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/null_handler.py "${tools[@]}" --result "$results/null-handler.json"
               ;;
+            hierarchy)
+              for opt in 0 3; do
+                python3 -B benchmarks/cpython_stdlib/full/logging/native_hierarchy.py "${tools[@]}" --cpython-source "$ref" --opt-level "$opt" --result "$results/hierarchy-O$opt.json"
+              done
+              ;;
             standalone)
               fixture=benchmarks/cpython_stdlib/full/logging/standalone_values.py
               python3 -I -B "$fixture" > "$results/standalone-reference.stdout" 2> "$results/standalone-reference.stderr"
@@ -164,6 +187,10 @@ jobs:
                 cmp "$results/standalone-reference.stdout" "$results/standalone-O$opt.stdout"
                 cmp "$results/standalone-reference.stderr" "$results/standalone-O$opt.stderr"
               done
+              if [[ -f benchmarks/cpython_stdlib/full/logging/standalone_handlers.py ]]; then
+                python3 -I -B benchmarks/cpython_stdlib/full/logging/native_standalone.py "${tools[@]}" --cpython-source "$ref" --result "$results/standalone-handlers-linux.json"
+                cmp benchmarks/cpython_stdlib/full/logging/standalone-handlers-linux.json "$results/standalone-handlers-linux.json"
+              fi
               ;;
             plain-file)
               python3 -I -B benchmarks/cpython_stdlib/full/logging/native_plain_encoding.py "${tools[@]}" --cpython-source "$ref" --result "$results/plain-file-encoding.json"
