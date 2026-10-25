@@ -20,3 +20,5 @@ fails the replay.
 `cache_values.py` separately compares dictionary identity and saved references,
 explicit cache edits, manager suppression at its boundary, registered level
 names, invalid levels, and large integers. It adds no suite occurrences.
+
+The [full suite replay](https://github.com/astral-sh/imre/actions/runs/40185453005) verifies all 272 occurrences at both optimization levels. The LoggerTest.test_caching body and assertions run on CPython; the [per-occurrence report](evidence-linux.json) lists its native operations.
