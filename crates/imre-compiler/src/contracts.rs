@@ -781,6 +781,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_formatter_time"
                 | "imre_formatter_message"
                 | "imre_logrecord_message"
+                | "imre_logrecord_repr"
                 | "imre_log_config"
                 | "imre_log_dict_config"
                 | "imre_log_typed_dict_config"
