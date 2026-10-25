@@ -18,6 +18,7 @@ use super::records::{RecordBatch, RecordDescriptor, imre_record_new};
 use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
+mod binary;
 mod encode;
 pub(super) mod readonly;
 mod syntax;
