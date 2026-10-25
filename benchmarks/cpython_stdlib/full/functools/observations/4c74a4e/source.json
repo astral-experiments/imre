@@ -1,0 +1,13 @@
+{
+  "compiler_commit": "4c74a4e4ad4e943863840293259bc2418c875a95",
+  "tree": "e48b6479f2cde8246e1f66f5842b7dddd6775841",
+  "parents": [
+    "10763742b92f433ded1f9f8b617f641a9cabbb18",
+    "ade58f58246dcbcf74bf5fa7b476b4aeed5ba348"
+  ],
+  "binary_sha256": {
+    "imre": "786ba73077f776a6cf199c047ea57c47f64ac6ff7eb899e566e604805a4cd35e",
+    "libimre_runtime.a": "53cc3235fd03a0e16a81ae5143138d92b3c6dd9080d4a9adb99b0a5c87f56dbe"
+  },
+  "description": "Deferred annotations with the runtime iterator-effects repair"
+}
