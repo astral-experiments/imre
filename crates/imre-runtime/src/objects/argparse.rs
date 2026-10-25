@@ -12,14 +12,31 @@ use super::records::{RecordDescriptor, imre_record_new};
 use super::{Object, Str, Words, fail};
 use crate::objects::paths::imre_path_new;
 
+mod binding;
 mod help;
 mod nargs;
 
+use binding::{Bound, IntegerRange};
 use nargs::{Nargs, positional_counts};
+
+/// Large decimal conversions obey the interpreter's configured digit limit,
+/// including leading zeroes. Underscores and signs do not count.
+fn decimal_digits_allowed(count: usize) -> bool {
+    if count <= 640 {
+        return true;
+    }
+    let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(4300);
+    limit == 0 || count <= limit
+}
 
 #[derive(Deserialize, Copy, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
 enum Kind {
+    Int,
+    Float,
     Str,
     Path,
     Bool,
@@ -37,6 +54,12 @@ struct OptionSpec {
     list_default: bool,
     required: bool,
     choices: Vec<String>,
+    range: Option<IntegerRange>,
+    has_choices: bool,
+    int_default: bool,
+    int_constant: bool,
+    float_default: bool,
+    float_constant: bool,
     converter: Option<String>,
     default: Option<String>,
     path_default: bool,
@@ -87,7 +110,7 @@ enum Token<'a> {
 }
 
 enum Word<'a> {
-    Option(&'a OptionSpec, Option<Vec<&'a str>>),
+    Option(&'a OptionSpec, Bound<'a>),
     Command(&'a str),
 }
 
@@ -103,6 +126,61 @@ enum Stop<'a> {
 }
 
 impl Parser {
+    fn normalize_numbers(&mut self) {
+        for option in &mut self.options {
+            let integer = |text: &mut String| {
+                if !text
+                    .strip_prefix('-')
+                    .unwrap_or(text)
+                    .bytes()
+                    .all(|ch| ch.is_ascii_digit())
+                {
+                    *text = crate::parse_integer_literal(text)
+                        .expect("integer literal from schema")
+                        .to_string();
+                }
+            };
+            if option.kind == Kind::Int {
+                option.choices.iter_mut().for_each(integer);
+            }
+            if option.int_default
+                && let Some(default) = &mut option.default
+            {
+                integer(default);
+            }
+            if option.int_constant
+                && let Some(constant) = &mut option.constant
+            {
+                integer(constant);
+            }
+            if option.kind != Kind::Float {
+                continue;
+            }
+            let format = |text: &mut String| {
+                *text = crate::floats::render(crate::floats::parse(text).expect("literal float"))
+                    .to_string();
+            };
+            for choice in &mut option.choices {
+                format(choice);
+            }
+            if option.float_default
+                && let Some(default) = &mut option.default
+            {
+                format(default);
+            }
+            if option.float_constant
+                && let Some(constant) = &mut option.constant
+            {
+                format(constant);
+            }
+        }
+        if let Some(commands) = &mut self.subcommands {
+            for child in &mut commands.choices {
+                child.parser.normalize_numbers();
+            }
+        }
+    }
+
     fn token<'a>(&'a self, arg: &'a str) -> Token<'a> {
         if arg == "--" {
             return Token::End;
@@ -178,32 +256,8 @@ impl Parser {
         }
     }
 
-    fn check_choices<'a>(&'a self, option: &OptionSpec, taken: &[&str]) -> Result<(), Stop<'a>> {
-        if !option.choices.is_empty()
-            && let Some(value) = taken
-                .iter()
-                .find(|&&value| !option.choices.iter().any(|choice| choice == value))
-        {
-            let choices = option
-                .choices
-                .iter()
-                .map(|choice| string_repr(choice))
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(Stop::Error(
-                self,
-                format!(
-                    "argument {}: invalid choice: {} (choose from {choices})",
-                    option.error_name(),
-                    string_repr(value)
-                ),
-            ));
-        }
-        Ok(())
-    }
-
     fn parse<'a>(&'a self, args: &[&'a str]) -> Result<Parsed<'a>, Stop<'a>> {
-        let mut values = vec![None; self.options.len()];
+        let mut values = self.options.iter().map(|_| None).collect::<Vec<_>>();
         let mut extras = Vec::new();
         let mut index = 0;
         let mut selected = None;
@@ -279,8 +333,11 @@ impl Parser {
                     if marker == Some(index) {
                         index += 1;
                     }
-                    self.check_choices(&self.options[slot], &taken)?;
-                    values[slot] = Some(taken);
+                    values[slot] = Some(
+                        self.options[slot]
+                            .bind(Some(&taken))
+                            .map_err(|e| Stop::Error(self, e))?,
+                    );
                 }
                 extras.extend(args[index..end].iter().copied().map(Cow::Borrowed));
                 index = end;
@@ -354,7 +411,7 @@ impl Parser {
                             ));
                         }
                         if let Some((slot, _)) = option {
-                            values[slot] = Some(Vec::new());
+                            values[slot] = Some(Bound::Bool(true));
                         } else {
                             clustered_help = true;
                         }
@@ -421,16 +478,25 @@ impl Parser {
             if clustered_help {
                 return Err(Stop::Help(self));
             }
-            self.check_choices(option, &taken)?;
-            values[slot] = Some(taken);
+            values[slot] = Some(
+                option
+                    .bind(Some(&taken))
+                    .map_err(|e| Stop::Error(self, e))?,
+            );
         }
-        let mut missing = self
-            .options
-            .iter()
-            .zip(&values)
-            .filter(|(option, value)| option.required && value.is_none())
-            .map(|(option, _)| option.error_name())
-            .collect::<Vec<_>>();
+        let mut missing = Vec::new();
+        let mut words = Vec::with_capacity(values.len());
+        for (option, value) in self.options.iter().zip(values) {
+            let bound = match value {
+                Some(value) => value,
+                None if option.required => {
+                    missing.push(option.error_name());
+                    continue;
+                }
+                None => option.bind(None).map_err(|e| Stop::Error(self, e))?,
+            };
+            words.push(Word::Option(option, bound));
+        }
         if let Some(commands) = &self.subcommands
             && selected.is_none()
         {
@@ -445,12 +511,6 @@ impl Parser {
                 ),
             ));
         }
-        let mut words: Vec<_> = self
-            .options
-            .iter()
-            .zip(values)
-            .map(|(option, value)| Word::Option(option, value))
-            .collect();
         let child = selected.map(|(child, name, mut rest)| {
             words.push(Word::Command(name));
             words.append(&mut rest);
@@ -461,16 +521,6 @@ impl Parser {
             extras,
             child,
         })
-    }
-}
-
-fn scalar(kind: Kind, text: &str) -> usize {
-    let text = Rc::new(Str::new(text));
-    match kind {
-        Kind::Str => Rc::into_raw(text) as usize,
-        // SAFETY: the source remains live until Path takes an owner or normalizes it.
-        Kind::Path => unsafe { imre_path_new(Rc::as_ptr(&text)) as usize },
-        Kind::Bool => unreachable!(),
     }
 }
 
@@ -485,42 +535,6 @@ impl OptionSpec {
 
     fn error_name(&self) -> String {
         self.flags().collect::<Vec<_>>().join("/")
-    }
-
-    fn word(&self, args: Option<Vec<&str>>) -> usize {
-        let missing =
-            args.is_none() || self.positional() && args.as_ref().is_some_and(Vec::is_empty);
-        if missing && let Some(member) = self.enum_default {
-            return (member << 3) | 5;
-        }
-        if self.kind == Kind::Bool {
-            let value = args
-                .is_some()
-                .then_some(true)
-                .or_else(|| self.default.as_deref().map(|value| value == "True"));
-            return value.map_or(0, |value| usize::from(value) + usize::from(self.optional));
-        }
-        if self.nargs.list() {
-            if missing && self.list_default {
-                return scalar(Kind::Str, self.default.as_deref().unwrap());
-            }
-            let Some(args) = args else { return 0 };
-            let mut values = Words::new(if self.kind == Kind::Path { 5 } else { 3 });
-            values
-                .values
-                .extend(args.into_iter().map(|value| scalar(self.kind, value)));
-            let word = Rc::into_raw(values.into_object()) as usize;
-            // The closed str | list[str] union reserves tag 2 for the list.
-            return if self.list_default { word | 2 } else { word };
-        }
-        let value = if missing {
-            self.default.as_deref()
-        } else {
-            args.as_ref()
-                .and_then(|args| args.first().copied())
-                .or(self.constant.as_deref())
-        };
-        value.map_or(0, |value| scalar(self.kind, value))
     }
 }
 
@@ -543,6 +557,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
     let mut parser: Parser = serde_json::from_str(schema)
         .unwrap_or_else(|_| fail("SystemError", "invalid argparse schema"));
+    parser.normalize_numbers();
     parser.set_child_programs();
     // SAFETY: argv is a rooted list[str]; take independent string owners before
     // reading the argument values or constructing the output namespace.
@@ -619,11 +634,11 @@ pub unsafe extern "C" fn imre_argparse_parse(
         for (index, field) in parsed.words.into_iter().enumerate() {
             let word = match field {
                 Word::Option(option, values) => option.word(values),
-                Word::Command(value) => scalar(Kind::Str, value),
+                Word::Command(value) => Rc::into_raw(Rc::new(Str::new(value))) as usize,
             };
             let dest = result.add(index);
             match *layout_ref.kinds.add(index) {
-                3 | 5 => dest.cast::<*const ()>().write(word as *const ()),
+                3..=5 => dest.cast::<*const ()>().write(word as *const ()),
                 _ => dest.write(word),
             }
         }

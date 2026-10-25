@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::PosixPathOperation;
+use crate::ir::{CopyOperation, PosixPathOperation};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -87,6 +87,7 @@ pub(crate) enum IntrinsicModule {
     UrllibParse,
     Collections,
     CollectionsAbc,
+    Copy,
     Itertools,
     Operator,
     Textwrap,
@@ -95,6 +96,7 @@ pub(crate) enum IntrinsicModule {
     Hashlib,
     Base64,
     Zipfile,
+    Csv,
     Re,
     Enum,
     Zlib,
@@ -112,6 +114,7 @@ pub(crate) enum Intrinsic {
     ArgparseNamespace,
     RawDescriptionHelpFormatter,
     FutureAnnotations,
+    ShallowCopy,
     TypeChecking,
     GetLogger,
     GetLevelName,
@@ -120,6 +123,8 @@ pub(crate) enum Intrinsic {
     LevelMap { names: bool },
     LogRecord,
     MakeLogRecord,
+    LogFormatter,
+    ClockConverter(bool),
     LogRecordFlag(u8),
     BasicConfig,
     LogLevel(i64),
@@ -139,6 +144,8 @@ pub(crate) enum Intrinsic {
     LruCache,
     CachedProperty,
     NewType,
+    Partial,
+    Placeholder,
     Reduce,
     TomlDumps,
     TomliLoads,
@@ -152,6 +159,7 @@ pub(crate) enum Intrinsic {
     NullContext,
     SignalNumber(i64),
     WallTime,
+    TimeSleep,
     PatchSet,
     Awaitable,
     TypeVar,
@@ -197,6 +205,8 @@ pub(crate) enum Intrinsic {
     BytesIo,
     BadZipFile,
     BadGzipFile,
+    CsvReader,
+    CsvError,
     RegexCompile,
     RegexSearch,
     RegexSub,
@@ -240,7 +250,7 @@ pub(crate) enum Intrinsic {
     Path,
     PurePath(crate::ir::PathFlavor),
     Which,
-    CopyFile,
+    Copy(CopyOperation),
     ShutilError,
     SameFileError,
     SpecialFileError,
@@ -298,6 +308,7 @@ impl IntrinsicModule {
             "urllib.parse" => Some(Self::UrllibParse),
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
+            "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
             "operator" => Some(Self::Operator),
             "textwrap" => Some(Self::Textwrap),
@@ -306,6 +317,7 @@ impl IntrinsicModule {
             "hashlib" => Some(Self::Hashlib),
             "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
+            "csv" => Some(Self::Csv),
             "re" => Some(Self::Re),
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
@@ -344,6 +356,9 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
+            (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
+            (Self::Time, "localtime") => Intrinsic::ClockConverter(false),
             (Self::Logging, "LogRecord") => Intrinsic::LogRecord,
             (Self::Logging, "logThreads") => Intrinsic::LogRecordFlag(1),
             (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
@@ -372,6 +387,7 @@ impl IntrinsicModule {
             (Self::Asyncio, "Semaphore") => Intrinsic::Semaphore,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
+            (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal, "SIGINT") => Intrinsic::SignalNumber(2),
             (Self::Signal, "SIGTERM") => Intrinsic::SignalNumber(15),
@@ -382,6 +398,8 @@ impl IntrinsicModule {
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
+            (Self::Functools, "partial") => Intrinsic::Partial,
+            (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
             (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
@@ -452,6 +470,8 @@ impl IntrinsicModule {
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
             (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
+            (Self::Csv, "reader") => Intrinsic::CsvReader,
+            (Self::Csv, "Error") => Intrinsic::CsvError,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
@@ -465,6 +485,7 @@ impl IntrinsicModule {
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
@@ -496,7 +517,12 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Shutil, "which") => Intrinsic::Which,
-            (Self::Shutil, "copyfile") => Intrinsic::CopyFile,
+            (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
+            (Self::Shutil, "copymode") => Intrinsic::Copy(CopyOperation::Mode),
+            (Self::Shutil, "copystat") => Intrinsic::Copy(CopyOperation::Stat),
+            (Self::Shutil, "_copyxattr") => Intrinsic::Copy(CopyOperation::Xattr),
+            (Self::Shutil, "copy") => Intrinsic::Copy(CopyOperation::Copy),
+            (Self::Shutil, "copy2") => Intrinsic::Copy(CopyOperation::Copy2),
             (Self::Shutil, "Error") => Intrinsic::ShutilError,
             (Self::Shutil, "SameFileError") => Intrinsic::SameFileError,
             (Self::Shutil, "SpecialFileError") => Intrinsic::SpecialFileError,
@@ -678,6 +704,12 @@ impl SourceGraph {
         self.reachable
             .as_ref()
             .is_none_or(|r| r.inherited_class_method(class, name))
+    }
+
+    pub(crate) fn unused_literal_global(&self, definition: DefinitionId) -> bool {
+        self.reachable
+            .as_ref()
+            .is_some_and(|r| r.unused_literals.contains(&definition))
     }
 
     pub(crate) fn includes_method(&self, module: ModuleId, method: &ast::StmtFunctionDef) -> bool {

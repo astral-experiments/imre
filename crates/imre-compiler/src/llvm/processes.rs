@@ -272,22 +272,23 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
                 let env =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
+                let arg_kind = representation_kind(args[0].value.ty, &self.module.types);
                 let spawn = format!(
-                    "ptr {}, ptr {cwd}, ptr {env}, i32 {streams}, i64 {}, i1 {}",
+                    "ptr {}, i32 {arg_kind}, ptr {cwd}, ptr {env}, i32 {streams}, i64 {}, i1 {}",
                     args[0].value.operand, args[1].value.operand, args[9].value.operand
                 );
                 if let ProcessOperation::Call { check, .. } = operation {
                     let timeout = &args[10].value;
                     let kind = if timeout.ty == Type::Int { 2 } else { 7 };
                     let word = self.checked_instruction(format!(
-                        "call i64 @imre_subprocess_call({spawn}, i32 {kind}, i64 {}, i1 {})",
+                        "call i64 @imre_call_command({spawn}, i32 {kind}, i64 {}, i1 {})",
                         timeout.operand,
                         u8::from(check)
                     ));
                     return self.unpack_word(word, returns);
                 }
                 let operand =
-                    self.checked_instruction(format!("call ptr @imre_popen_pipes({spawn})"));
+                    self.checked_instruction(format!("call ptr @imre_popen_command({spawn})"));
                 self.owned(Value {
                     ty: returns,
                     operand,
@@ -459,7 +460,7 @@ impl Emitter<'_, '_> {
             ProcessOperation::OpenFlag(name) => self.os_open_flag(name),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
-            ProcessOperation::CopyFile => {
+            ProcessOperation::Copy(op) => {
                 let tag = |ty| match ty {
                     Type::Str => 0,
                     Type::Bytes => 1,
@@ -471,17 +472,14 @@ impl Emitter<'_, '_> {
                 };
                 let follow = self.instruction(format!("zext i1 {} to i32", follow.value.operand));
                 let operand = self.checked_instruction(format!(
-                    "call ptr @imre_shutil_copyfile(ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
+                    "call i64 @imre_shutil_copy(i32 {}, ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
+                    op as u32,
                     src.value.operand,
                     tag(src.value.ty),
                     dst.value.operand,
                     tag(dst.value.ty)
                 ));
-                self.owned(Value {
-                    ty: returns,
-                    operand,
-                    small_integer: false,
-                })
+                self.unpack_word(operand, returns)
             }
             ProcessOperation::Which => {
                 let path =

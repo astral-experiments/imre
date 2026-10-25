@@ -2,9 +2,10 @@
 use std::rc::Rc;
 use std::sync::LazyLock;
 
+use compact_str::ReserveError;
 use regex_syntax::hir::{Class, ClassUnicode, HirKind};
 
-use super::{Error, Result, Str, finish};
+use super::{Error, Str, finish};
 
 /// Read a binary property from the runtime's pinned Unicode 16 regex tables.
 fn property(pattern: &str) -> ClassUnicode {
@@ -37,9 +38,9 @@ fn is_final_sigma(before: &str, after: &str) -> bool {
 
 /// CPython titlecases just the first code point for capitalize, then lowercases
 /// the rest in the context of the original string (not of the suffix alone).
-fn convert(source: &str, capitalize: bool) -> Result<Str> {
+fn convert(source: &str, capitalize: bool) -> Result<Str, ReserveError> {
     if source.is_ascii() {
-        let mut result = Str::try_new(source).map_err(|_| Error::allocation())?;
+        let mut result = Str::try_new(source)?;
         let ascii = result.as_mut_str();
         ascii.make_ascii_lowercase();
         if capitalize && let Some(first) = ascii.get_mut(..1) {
@@ -47,7 +48,7 @@ fn convert(source: &str, capitalize: bool) -> Result<Str> {
         }
         return Ok(result);
     }
-    let mut result = Str::try_with_capacity(source.len()).map_err(|_| Error::allocation())?;
+    let mut result = Str::try_with_capacity(source.len())?;
     for (i, ch) in source.char_indices() {
         let mapping = if capitalize && i == 0 {
             unicode_case_mapping::to_titlecase(ch)
@@ -58,21 +59,22 @@ fn convert(source: &str, capitalize: bool) -> Result<Str> {
             [a, b, 0]
         };
         if mapping[0] == 0 {
-            result
-                .try_reserve(ch.len_utf8())
-                .map_err(|_| Error::allocation())?;
+            result.try_reserve(ch.len_utf8())?;
             result.push(ch);
         } else {
             for value in mapping.into_iter().take_while(|v| *v != 0) {
                 let mapped = char::from_u32(value).unwrap();
-                result
-                    .try_reserve(mapped.len_utf8())
-                    .map_err(|_| Error::allocation())?;
+                result.try_reserve(mapped.len_utf8())?;
                 result.push(mapped);
             }
         }
     }
     Ok(result)
+}
+
+/// Lowercase a full string with the runtime's pinned Unicode data.
+pub(in crate::objects) fn lowercase(source: &str) -> Result<Str, ReserveError> {
+    convert(source, false)
 }
 
 /// Lowercase an exact native string, setting a pending MemoryError on allocation failure.
@@ -84,7 +86,9 @@ pub unsafe extern "C" fn imre_str_lower(value: *const Str) -> *const Str {
     // SAFETY: the caller roots the string.
     let source = unsafe { &*value };
     finish(
-        convert(source, false).map(|s| Rc::into_raw(Rc::new(s))),
+        lowercase(source)
+            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map_err(|_| Error::allocation()),
         std::ptr::null(),
     )
 }
@@ -98,7 +102,9 @@ pub unsafe extern "C" fn imre_str_capitalize(value: *const Str) -> *const Str {
     // SAFETY: the caller roots the string.
     let source = unsafe { &*value };
     finish(
-        convert(source, true).map(|s| Rc::into_raw(Rc::new(s))),
+        convert(source, true)
+            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map_err(|_| Error::allocation()),
         std::ptr::null(),
     )
 }

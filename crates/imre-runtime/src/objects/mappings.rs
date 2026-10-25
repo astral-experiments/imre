@@ -7,6 +7,7 @@
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
+mod counters;
 mod record_hash;
 mod sorted_rows;
 
@@ -509,6 +510,13 @@ macro_rules! table {
 }
 
 impl<V: Copy> Tables<V> {
+    fn try_for_each(
+        &self,
+        mut visit: impl FnMut(usize, V) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        table!(self, table => table.entries.iter().flatten().try_for_each(|entry| visit(entry.key.word(), entry.value)))
+    }
+
     /// Visits borrowed key/value words in insertion order without acquiring keys.
     /// The predicate may inspect other immutable acyclic containers, not mutate
     /// this table or retain a storage reference after the visit.
@@ -770,13 +778,17 @@ impl Mapping {
         keys
     }
 
-    /// Borrowed document values stay rooted by the unmodified mapping.
-    pub(super) fn document_values(&self) -> impl Iterator<Item = usize> + '_ {
+    /// Borrowed document entries stay rooted by the unmodified mapping.
+    pub(super) fn document_entries(&self) -> impl Iterator<Item = (&Str, usize)> + '_ {
         assert_eq!(self.value_kind.raw(), 5);
         let Tables::Str(table) = &self.tables else {
             unreachable!("expected a string-keyed document");
         };
-        table.entries.iter().flatten().map(|entry| entry.value)
+        table
+            .entries
+            .iter()
+            .flatten()
+            .map(|entry| (entry.key.as_ref(), entry.value))
     }
 
     pub(super) fn document_pairs(&self) -> Vec<(Rc<Str>, Rc<Object>)> {
@@ -1083,6 +1095,28 @@ impl MappingIterator {
 }
 
 impl Storage {
+    /// Borrow at most two keys in normal iteration order. The words stay rooted
+    /// by this storage borrow. This avoids creating an iterator to unpack a pair.
+    pub(super) fn first_two_keys(&self) -> (usize, u32, [usize; 2]) {
+        fn keys<V: Copy>(table: &Tables<V>) -> (usize, u32, [usize; 2]) {
+            let mut words = [0; 2];
+            let size = table.len();
+            if size == 2 {
+                let mut dest = words.iter_mut();
+                table.all(|key, _| {
+                    *dest.next().unwrap() = key;
+                    true
+                });
+            }
+            (size, table.key_kind(), words)
+        }
+        match self {
+            Self::Dictionary(dict) => keys(&dict.tables),
+            Self::Set(set) => keys(&set.tables),
+            _ => unreachable!("checked mapping or set"),
+        }
+    }
+
     pub(super) fn dictionary(&self) -> &Mapping {
         match self {
             Self::Dictionary(value) => value,
@@ -1300,6 +1334,38 @@ pub extern "C" fn imre_dict_new(key_kind: u32, value_kind: u32) -> *const Object
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
         Box::new(Mapping::new(key_kind, value_kind)),
     )))))
+}
+
+/// Copies the mapping in insertion order, preserving its subscription policy.
+/// The fresh mapping acquires its keys and values without duplicating them.
+///
+/// # Safety
+/// The input is a rooted dictionary, Counter or closed default-list dictionary.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_copy(value: *const Object) -> *const Object {
+    // SAFETY: the source owns every copied word; insertion in the fresh table
+    // hashes only closed immutable keys and cannot reenter the source.
+    let result = unsafe {
+        object(value).0.with(|storage| {
+            let source = storage.dictionary();
+            let mut copy = Mapping::new(source.tables.key_kind(), source.value_kind.raw());
+            copy.missing = source.missing;
+            let mut position = 0;
+            while let Some((next, key, value)) = source.tables.next(position) {
+                copy.insert(key, source.value_kind.acquire(value))?;
+                position = next;
+            }
+            Ok(copy)
+        })
+    };
+    super::exceptions::finish(
+        result.map(|copy| {
+            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
+                Box::new(copy),
+            )))))
+        }),
+        std::ptr::null(),
+    )
 }
 
 /// Constructs an integer-valued Counter with non-inserting zero subscriptions.

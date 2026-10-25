@@ -36,11 +36,13 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::Semaphore
         | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
         | Type::TimedFileHandler
         | Type::ClockTime
         | Type::Sha256
+        | Type::CsvReader
         | Type::RegexPattern
         | Type::RegexMatch
         | Type::ObjectValue
@@ -133,11 +135,13 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
         Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Sha256
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::StringKeys
+            | Type::CsvReader
     ) || types
         .children(ty)
         .into_iter()

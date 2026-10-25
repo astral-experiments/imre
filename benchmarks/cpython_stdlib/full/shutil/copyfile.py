@@ -88,14 +88,14 @@ def build(args, directory, stem, source, level):
     return Toolchain(args.imre, args.runtime, args.clang, level).build(source, folder)
 
 
-def cases(args, suite, directory, level):
+def executors(args, suite, directory, level, *, with_roles=False):
     tools = Toolchain(args.imre, args.runtime, args.clang, level)
     test_id = suite.TestCopy(NATIVE_CASE).id()
     def native(case, original):
         folder = directory / "routine"
         folder.mkdir()
-        execute = native_method(tools, folder, Path(suite.__file__), "TestCopy",
-                                test_id, copy_fixture(case))
+        execute = native_method(tools, folder, Path(suite.__file__), "TestCopy", test_id,
+                                copy_fixture(case), operation=("imre", "shutil.copyfile") if with_roles else None)
         return {"status": "native_body_host_fixture", **execute(case, original)}
 
     exe = build(args, directory, "copy", driver().encode(), level)
@@ -119,13 +119,25 @@ def cases(args, suite, directory, level):
         with patch.object(suite.shutil, "copyfile", invoke):
             original()
         assert calls == HOST_CASES[case._testMethodName], (case.id(), calls)
-        if case._testMethodName.startswith("test_dont_copy_file_onto_"):
+        host_cleanup = case._testMethodName.startswith("test_dont_copy_file_onto_")
+        if with_roles:
+            from suite_evidence import roles
+            operation = "shutil.copyfile in Imre; shutil.rmtree in the original finally block in CPython" if host_cleanup else "shutil.copyfile"
+            return {"roles": roles(body="cpython", assertions="cpython", operation="mixed" if host_cleanup else "imre", fixture="cpython"),
+                    "evidence": {"operation": operation, "native_calls": calls, "opt_level": level,
+                                 "fixture": "original CPython TestCopy fixture and assertions; native copyfile receives both real paths"}}
+        if host_cleanup:
             return {"status": "mixed", "native_calls": calls, "native": "copyfile",
                     "host": "unittest assertions and shutil.rmtree in the method's finally block"}
         return {"status": "host_driven_native", "native_calls": calls}
 
     executions = {suite.TestCopy(name).id(): host for name in HOST_CASES}
     executions[test_id] = native
+    return executions
+
+
+def cases(args, suite, directory, level):
+    executions = executors(args, suite, directory, level)
     evidence, failures, skips = run_in_fixtures(load_suite("test.test_shutil"), executions)
     rows = {name: values[0] for name, values in evidence.items() if values}
     rows.update({name: {"status": "failed", "diagnostics": reason} for name, reason in failures})
@@ -134,7 +146,7 @@ def cases(args, suite, directory, level):
     return rows
 
 
-def main():
+def main(run_cases=cases):
     parser = argparse.ArgumentParser(description=__doc__)
     for option in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + option, required=True, type=lambda p: Path(p).resolve())
@@ -158,7 +170,7 @@ def main():
             directory = Path(tmp) / str(level)
             directory.mkdir()
             with chdir(directory):
-                report["optimization_levels"][level] = cases(args, suite, directory, level)
+                report["optimization_levels"][level] = run_cases(args, suite, directory, level)
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     return int(any(v["status"] == "failed" for rows in report["optimization_levels"].values()
                    for v in rows.values()))

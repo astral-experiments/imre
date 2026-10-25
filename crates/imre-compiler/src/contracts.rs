@@ -171,6 +171,8 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::TimeSleep | Self::PercentInteger => Contract::new(true, PreservesLists),
+            Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
                 matches!(
@@ -237,7 +239,7 @@ impl Builtin {
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
                 | ProcessOperation::Which
-                | ProcessOperation::CopyFile
+                | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -261,6 +263,9 @@ impl Builtin {
             ),
             Self::BytesGet
             | Self::Chr
+            | Self::IntegerPower
+            | Self::ModularPower
+            | Self::NegativeIntegerPower
             | Self::Decode
             | Self::DecodeAscii
             | Self::UrlsafeB64encode
@@ -276,7 +281,10 @@ impl Builtin {
             | Self::RegexGroupDict
             | Self::RegexFindIter
             | Self::DictGet
+            | Self::DictCopy
             | Self::JsonDecode(_)
+            | Self::CsvReader { .. }
+            | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
             | Self::JsonErrorField(_)
@@ -314,6 +322,7 @@ impl Builtin {
             | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
+            | Self::CsvLineNumber
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::HashAvailable
@@ -444,7 +453,8 @@ impl Builtin {
             | Self::StringIter
             | Self::StringReverseIter
             | Self::TextClosed => Contract::new(false, Unknown),
-            Self::SortedRecordRows { .. }
+            Self::CounterMath { .. }
+            | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::TupleCacheNew
             | Self::TupleCacheResult => Contract::new(true, Unknown),
@@ -650,6 +660,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "imre_chr"
+                | "imre_int_pow"
+                | "imre_int_modpow"
+                | "imre_int_negative_pow"
                 | "imre_json_index"
                 | "imre_exception_message"
                 | "imre_exception_repr"
@@ -682,6 +695,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_deletions"
                 | "imre_log_file_should_roll"
                 | "imre_log_file_roll"
+                | "imre_time_sleep"
+                | "imre_str_percent_int"
+                | "imre_formatter_format"
+                | "imre_formatter_time"
+                | "imre_formatter_message"
                 | "imre_logrecord_message"
                 | "imre_log_config"
                 | "imre_log_config_named"
@@ -795,6 +813,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_repeat"
                 | "imre_str_repeat"
                 | "imre_seq_slice"
+                | "imre_dict_copy"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
