@@ -133,6 +133,14 @@ pub(super) fn repr_view(owner: *const Object, storage: &Storage) -> ReprView {
     }
 }
 impl ReprView {
+    /// A callback can remove a pending object's last container reference.
+    pub(super) fn owner(&self) -> Option<*const Object> {
+        match self {
+            Self::Context(owner) | Self::Var(owner, _) | Self::Tok(owner, _) => Some(*owner),
+            Self::Missing => None,
+        }
+    }
+
     pub(super) fn write(self, out: &mut String) {
         match self {
             Self::Context(owner) => {

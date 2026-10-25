@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::analysis::{CheckedDiagnostic, Session};
 use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation, WrapperAttributes};
@@ -59,6 +59,8 @@ pub(crate) enum Binding {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
     ContextVars,
+    Importlib,
+    ImportlibMachinery,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -106,6 +108,7 @@ pub(crate) enum IntrinsicModule {
     CollectionsAbc,
     Copy,
     Itertools,
+    Math,
     Operator,
     Textwrap,
     Io,
@@ -134,6 +137,7 @@ pub(crate) enum Intrinsic {
     ContextVar,
     ContextToken,
     CopyContext,
+    ModuleSpec,
     GetAnnotations,
     ForwardRef,
     AnnotationTypeRepr,
@@ -154,6 +158,7 @@ pub(crate) enum Intrinsic {
     AddLevelName,
     LevelNamesMapping,
     HandlerRename,
+    HandlerLock,
     HandlerLookup,
     PrintActiveException,
     HandlerLevelType,
@@ -185,6 +190,7 @@ pub(crate) enum Intrinsic {
     InspectSentinel,
     WrapperAttributes(WrapperAttributes),
     FunctionCache,
+    CacheInfo,
     LruCache,
     CachedProperty,
     NewType,
@@ -206,6 +212,7 @@ pub(crate) enum Intrinsic {
     TimeSleep,
     WarningFilter { simple: bool },
     WarningReset,
+    WarningDisplay { show: bool },
     PatchSet,
     Awaitable,
     TypeVar,
@@ -219,6 +226,7 @@ pub(crate) enum Intrinsic {
     SysVersion,
     SysHexversion,
     SysEncoding(&'static str),
+    SysIntern { query: bool },
     SysException,
     SysJitPredicate(&'static str),
     Stdin,
@@ -290,6 +298,7 @@ pub(crate) enum Intrinsic {
     Deque,
     Repeat,
     LengthHint,
+    MathProd,
     Count,
     Islice,
     Tee,
@@ -333,9 +342,12 @@ pub(crate) enum Intrinsic {
     SpecialFileError,
     TemporaryDirectory,
     Popen,
+    PopenActive,
+    PopenCleanup,
     SubprocessRun,
     SubprocessCall,
     SubprocessCheckCall,
+    SubprocessList2Cmdline,
     SubprocessStdout,
     CompletedProcess,
     SubprocessError,
@@ -414,10 +426,13 @@ impl IntrinsicModule {
             "os.path" | "posixpath" => Some(Self::PosixPath),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
+            "importlib" => Some(Self::Importlib),
+            "importlib.machinery" => Some(Self::ImportlibMachinery),
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
             "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
+            "math" => Some(Self::Math),
             "operator" => Some(Self::Operator),
             "textwrap" => Some(Self::Textwrap),
             "io" => Some(Self::Io),
@@ -491,6 +506,7 @@ impl IntrinsicModule {
             (Self::AnnotationFormat, "VALUE_WITH_FAKE_GLOBALS") => Intrinsic::AnnotationFormat(2),
             (Self::AnnotationFormat, "FORWARDREF") => Intrinsic::AnnotationFormat(3),
             (Self::AnnotationFormat, "STRING") => Intrinsic::AnnotationFormat(4),
+            (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
@@ -546,6 +562,8 @@ impl IntrinsicModule {
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
             (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
             (Self::Warnings, "resetwarnings") => Intrinsic::WarningReset,
+            (Self::Warnings, "formatwarning") => Intrinsic::WarningDisplay { show: false },
+            (Self::Warnings, "showwarning") => Intrinsic::WarningDisplay { show: true },
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
@@ -559,6 +577,7 @@ impl IntrinsicModule {
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
+            (Self::Functools, "_CacheInfo") => Intrinsic::CacheInfo,
             (Self::Functools, "WRAPPER_ASSIGNMENTS") => {
                 Intrinsic::WrapperAttributes(WrapperAttributes::Assigned)
             }
@@ -601,6 +620,8 @@ impl IntrinsicModule {
             (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
+            (Self::Sys, "intern") => Intrinsic::SysIntern { query: false },
+            (Self::Sys, "_is_interned") => Intrinsic::SysIntern { query: true },
             (Self::Sys, "flags") => Intrinsic::SysFlags,
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
             (Self::Sys, "version_info") => Intrinsic::SysVersionInfo,
@@ -699,6 +720,7 @@ impl IntrinsicModule {
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Copy, "deepcopy") => Intrinsic::DeepCopy,
             (Self::Itertools, "count") => Intrinsic::Count,
@@ -751,9 +773,12 @@ impl IntrinsicModule {
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
             (Self::Subprocess, "Popen") => Intrinsic::Popen,
+            (Self::Subprocess, "_active") => Intrinsic::PopenActive,
+            (Self::Subprocess, "_cleanup") => Intrinsic::PopenCleanup,
             (Self::Subprocess, "run") => Intrinsic::SubprocessRun,
             (Self::Subprocess, "call") => Intrinsic::SubprocessCall,
             (Self::Subprocess, "check_call") => Intrinsic::SubprocessCheckCall,
+            (Self::Subprocess, "list2cmdline") => Intrinsic::SubprocessList2Cmdline,
             (Self::Subprocess, "CompletedProcess") => Intrinsic::CompletedProcess,
             (Self::Subprocess, "SubprocessError") => Intrinsic::SubprocessError,
             (Self::Subprocess, "CalledProcessError") => Intrinsic::CalledProcessError,
@@ -797,6 +822,8 @@ pub(crate) struct SourceModule {
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
+    /// Only an executed explicit submodule import populates the bare importlib namespace.
+    machinery_import: Option<TextSize>,
     pub(crate) aliases: Vec<TypeAlias>,
     pub(crate) type_guards: Vec<usize>,
     /// Fixed pattern declarations in the entry module precede ordinary executable statements.
@@ -976,7 +1003,7 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
-    /// Mark the precise call where lowering raises Python's missing-argument TypeError.
+    /// Mark the precise call whose behavior for missing arguments is handled by native lowering.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::MissingArgument(call));
@@ -1000,6 +1027,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::RepeatedKeyword(keyword));
     }
 
+    /// An optional handler lock either enters the captured lock or raises TypeError on None.
+    pub(crate) fn checked_optional_lock_context(&self, module: ModuleId, expr: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::OptionalLockContext(expr));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,
@@ -1014,13 +1047,11 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::BuiltinImport(alias));
     }
 
-    /// Record the exact list read proved by lowering a fixed-width tuple spread.
+    /// Record an integer access with a proved native indexing implementation.
     /// Other diagnostics at this index or inside the receiver remain visible.
-    pub(crate) fn checked_tuple_list_read(&self, module: ModuleId, read: TextRange) {
-        if self.session.has_tuple_spreads(module) {
-            self.checked_diagnostics.borrow_mut()[module]
-                .push(CheckedDiagnostic::TupleListRead(read));
-        }
+    pub(crate) fn checked_index_read(&self, module: ModuleId, read: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::CheckedIndexRead(read));
     }
 
     /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
@@ -1281,13 +1312,32 @@ impl SourceGraph {
             ast::Expr::Attribute(attribute) => match self.resolve_type(module, &attribute.value)? {
                 Binding::Module(target) => self.modules[target].export(attribute.attr.as_str()),
                 Binding::IntrinsicModule(target) => {
-                    stdlib_symbol(&self.modules, target, attribute.attr.as_str())
+                    stdlib_attribute(&self.modules, module, target, attribute)
                 }
                 _ => None,
             },
             _ => None,
         }
     }
+}
+
+fn stdlib_attribute(
+    modules: &[SourceModule],
+    owner: ModuleId,
+    target: IntrinsicModule,
+    attr: &ast::ExprAttribute,
+) -> Option<Binding> {
+    if target == IntrinsicModule::Importlib
+        && attr.attr.as_str() == "machinery"
+        && modules[owner]
+            .machinery_import
+            .is_some_and(|at| at <= attr.start())
+    {
+        return Some(Binding::IntrinsicModule(
+            IntrinsicModule::ImportlibMachinery,
+        ));
+    }
+    stdlib_symbol(modules, target, attr.attr.as_str())
 }
 
 fn resolve_binding(
@@ -1300,8 +1350,8 @@ fn resolve_binding(
         ast::Expr::Attribute(attribute) => {
             match resolve_binding(modules, module, &attribute.value)? {
                 Binding::Module(module) => modules[module].export(attribute.attr.as_str()),
-                Binding::IntrinsicModule(module) => {
-                    stdlib_symbol(modules, module, attribute.attr.as_str())
+                Binding::IntrinsicModule(target) => {
+                    stdlib_attribute(modules, module, target, attribute)
                 }
                 Binding::Definition(_)
                 | Binding::Value(_)
@@ -1461,6 +1511,7 @@ impl<'a> Loader<'a> {
             archive: None,
             bindings: HashMap::new(),
             type_bindings: HashMap::new(),
+            machinery_import: None,
             aliases: Vec::new(),
             type_guards: Vec::new(),
             entry_globals: Vec::new(),
@@ -1584,6 +1635,7 @@ impl<'a> Loader<'a> {
         });
         let mut executable = false;
         let mut segment = 0;
+        let mut class_data_prefix = false;
         let mut field_separators = Vec::new();
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
             if self.modules[id].archive.is_some() && !native_declaration(statement) {
@@ -1628,6 +1680,10 @@ impl<'a> Loader<'a> {
                     )?;
                 }
                 ast::Stmt::ClassDef(class) => {
+                    class_data_prefix |= class
+                        .body
+                        .iter()
+                        .any(|stmt| matches!(stmt, ast::Stmt::Assign(_)));
                     if executable && id == 0 {
                         return Err(self.modules[id].error(
                             statement,
@@ -1670,7 +1726,12 @@ impl<'a> Loader<'a> {
                         self.initialization.push((id, segment..index));
                         segment = index;
                         executable = false;
+                    } else if class_data_prefix {
+                        // A class body can call arbitrary helpers before the imported module starts.
+                        self.initialization.push((id, segment..index));
+                        segment = index;
                     }
+                    class_data_prefix = false;
                     self.import(id, statement)
                         .map_err(|error| self.modules[id].error(statement, &error))?;
                     if errno_import(statement).is_some() {
@@ -1800,6 +1861,11 @@ impl<'a> Loader<'a> {
                 for alias in &import.names {
                     let name = alias.name.as_str();
                     if let Some(module) = self.intrinsic_module(name, None)? {
+                        if module == IntrinsicModule::ImportlibMachinery {
+                            self.modules[id]
+                                .machinery_import
+                                .get_or_insert(statement.end());
+                        }
                         if alias.asname.is_none()
                             && let Some((local, _)) = name.split_once('.')
                             && let Some(namespace) = IntrinsicModule::named(local)
@@ -1839,6 +1905,7 @@ impl<'a> Loader<'a> {
                     for alias in &import.names {
                         let method = match alias.name.as_str() {
                             "_rename_handler" => Intrinsic::HandlerRename,
+                            "_Lock" => Intrinsic::HandlerLock,
                             "_lookup_handler" => Intrinsic::HandlerLookup,
                             "_print_active_exception" => Intrinsic::PrintActiveException,
                             "_Level" => Intrinsic::HandlerLevelType,
@@ -1857,27 +1924,45 @@ impl<'a> Loader<'a> {
                 if import.level == 0
                     && let Some(module) = self.intrinsic_module(&name, Some(&import.names))?
                 {
+                    if module == IntrinsicModule::ImportlibMachinery
+                        || module == IntrinsicModule::Importlib
+                            && import
+                                .names
+                                .iter()
+                                .any(|alias| alias.name.as_str() == "machinery")
+                    {
+                        self.modules[id]
+                            .machinery_import
+                            .get_or_insert(statement.end());
+                    }
                     for alias in &import.names {
                         if module == IntrinsicModule::Logging && alias.name.as_str() == "handlers" {
                             self.intrinsic_module("logging.handlers", None)?;
                         }
-                        let binding = stdlib_symbol(&self.modules, module, alias.name.as_str())
-                            .filter(|binding| {
-                                self.reachable_only
-                                    || !matches!(
-                                        binding,
-                                        Binding::Intrinsic(Intrinsic::Declaration(_))
-                                            | Binding::IntrinsicModule(
-                                                IntrinsicModule::Declaration(_)
-                                            )
-                                    )
-                            })
-                            .ok_or_else(|| {
-                                format!(
-                                    "unsupported sealed standard-library export {name}.{}",
-                                    alias.name
+                        // A from-import loads the child before reading the package attribute.
+                        let binding = if module == IntrinsicModule::Importlib
+                            && alias.name.as_str() == "machinery"
+                        {
+                            Some(Binding::IntrinsicModule(
+                                IntrinsicModule::ImportlibMachinery,
+                            ))
+                        } else {
+                            stdlib_symbol(&self.modules, module, alias.name.as_str())
+                        }
+                        .filter(|binding| {
+                            self.reachable_only
+                                || !matches!(
+                                    binding,
+                                    Binding::Intrinsic(Intrinsic::Declaration(_))
+                                        | Binding::IntrinsicModule(IntrinsicModule::Declaration(_))
                                 )
-                            })?;
+                        })
+                        .ok_or_else(|| {
+                            format!(
+                                "unsupported sealed standard-library export {name}.{}",
+                                alias.name
+                            )
+                        })?;
                         if binding == Binding::Intrinsic(Intrinsic::BuiltinsLast) {
                             return Err("from builtins import _ needs an import-time snapshot; use a qualified lookup".into());
                         }
