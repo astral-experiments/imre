@@ -99,3 +99,13 @@ check modes `import test.support` advances from line 6 to line 9,
 (2849), `_get_dunder_dict_of_class` (2851), and `_sentinel` (2860/2864).
 The direct import and runner for `test.test_functools` still stop at
 `import builtins` (line 3) in each mode. These checks execute no test body.
+
+[#586](https://github.com/astral-sh/imre/pull/586) landed at
+`fccfcc7c974fb7d9248ff44f06f8fbd04f508cef`. On that commit the native
+annotation fixtures and unchanged `TestFormat.test_enum` reproduced their
+O0 and O3 results. The [coordinator's paired startup checks](annotation-shared-startup-linux.json)
+compare that commit with the same source plus native `inspect`. For
+`unittest`, `pathlib`, and `inspect`, both the package and a child module
+move from `test/support/__init__.py:9` (`inspect`) to line 11 (`_opcode`).
+All 24 import/runner checks per revision stopped before executing a test.
+The four `test_functools` startup checks still stop at `builtins` on line 3.

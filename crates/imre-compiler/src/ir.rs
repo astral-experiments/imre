@@ -485,6 +485,15 @@ pub(crate) enum ZipField {
     IsDir,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub(crate) enum ArgparseOutput {
+    Return,
+    Stdout,
+    Stderr,
+    File,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     Repeat,
@@ -735,6 +744,11 @@ pub(crate) enum Builtin {
         children: Vec<usize>,
         process_argv: bool,
     },
+    /// Format parser text or print it to the requested stream.
+    ArgparseText {
+        usage: bool,
+        output: ArgparseOutput,
+    },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
     ExactRecord(usize),
@@ -787,6 +801,7 @@ pub(crate) enum Builtin {
     JsonDump(Type),
     Path(PathOperation),
     PosixPath(PosixPathOperation),
+    Fnmatch(FnmatchOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -816,10 +831,13 @@ pub(crate) enum Builtin {
     FileFileno,
     DictGet,
     DictCopy,
+    DeepCopy,
+    RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
     CounterNew,
     CounterTotal,
+    CounterMostCommon,
     CounterUpdate,
     CounterMath {
         op: CounterOp,
@@ -940,6 +958,7 @@ pub(crate) enum RegexCapture {
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
     Lower,
+    Capitalize,
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -971,6 +990,11 @@ pub(crate) enum PathOperation {
         full: bool,
     },
     WithName,
+    WithStem,
+    WithSuffix,
+    Suffixes,
+    IsRelativeTo,
+    RelativeTo,
     Text,
     Name,
     Stem,
@@ -1009,8 +1033,17 @@ pub(crate) enum PathOperation {
     },
 }
 
-/// POSIX lexical operations preserve raw str or bytes spellings.
+/// Shell filename operations do not interpret path separators.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FnmatchOperation {
+    Match { normcase: bool },
+    Filter { inverse: bool },
+    Translate,
+    Parts,
+}
+
+/// POSIX lexical operations preserve raw str or bytes spellings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PosixPathOperation {
     Join,
     MixedJoin { path_in_tail: bool },
@@ -1092,6 +1125,11 @@ pub(crate) enum LogOperation {
     NamesCopy,
     Configure,
     ConfigureName,
+    DictConfig,
+    DictConfigTyped,
+    FileConfig,
+    Disabled,
+    Propagate,
     Name,
     Level,
     Root,
@@ -1135,7 +1173,12 @@ pub(crate) enum CopyOperation {
 pub(crate) enum ProcessOperation {
     Executable,
     RunToStderr,
-    CheckOutput,
+    CheckOutput {
+        streams: u32,
+        validation: u32,
+        errors: u8,
+        capture: ProcessCapture,
+    },
     Run {
         streams: u32,
     },
@@ -1212,6 +1255,8 @@ pub(crate) enum ProcessOperation {
     EnvironGet,
     GetCwd,
     Fd(FdOperation),
+    OsErrorField(u32),
+    Strerror,
     OpenFlag(&'static str),
     Which,
     Copy(CopyOperation),

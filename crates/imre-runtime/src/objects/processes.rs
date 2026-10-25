@@ -23,6 +23,7 @@ use super::{Bytes, Int, Object, Storage, Str, fail, object};
 
 mod argv;
 mod asynchronous;
+mod launch_error;
 mod popen;
 pub(super) use asynchronous::AsyncProcess;
 pub(super) use popen::Popen;
@@ -424,6 +425,7 @@ struct Launch {
 
 impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
+    #[cfg(test)]
     fn new(argv: Vec<CString>, env: Option<StringPairs>) -> Result<Self> {
         Self::with_executable(argv, env, None)
     }
@@ -511,12 +513,18 @@ impl Launch {
         } else {
             attempt(program.as_ptr());
         }
-        Err(io::Error::from_raw_os_error(
+        Err(launch_error::child_errno(
+            launch_error::Site::Executable,
             saved_error.unwrap_or(last_error),
         ))
     }
 
-    fn spawn(mut self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
+    fn spawn(self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
+        self.spawn_tagged(cwd, streams)
+            .map_err(|err| launch_error::decode(err).1)
+    }
+
+    fn spawn_tagged(mut self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
         // Duplicate the parent's explicit descriptors before setting up either
         // child stream. stderr=STDOUT instead follows the child's chosen stdout.
         fn output(mode: u32) -> io::Result<Stdio> {
@@ -539,14 +547,23 @@ impl Launch {
             .stdin(output((streams >> 12) & 15)?)
             .stdout(output(streams & 15)?)
             .stderr(output(stderr)?);
-        if let Some(cwd) = cwd {
-            command.current_dir(OsStr::from_bytes(cwd.as_bytes()));
-        }
+        let cwd = cwd.cloned();
         // SAFETY: this private closure contains only owned immutable native data;
         // exec_child performs no allocation, locking, callback, or language drop.
         // It never returns Ok, so Command cannot fall through to libc execvp.
         unsafe {
             command.pre_exec(move || {
+                if let Some(directory) = &cwd
+                    && libc::chdir(directory.as_ptr()) < 0
+                {
+                    let errno = io::Error::last_os_error()
+                        .raw_os_error()
+                        .unwrap_or(libc::EIO);
+                    return Err(launch_error::child_errno(
+                        launch_error::Site::Directory,
+                        errno,
+                    ));
+                }
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
@@ -1096,18 +1113,18 @@ fn copy_argv(words: &[usize], copy: impl Fn(usize) -> Result<CString>) -> Result
 }
 
 /// # Safety
-/// The caller roots an exact argv list whose elements are all strings.
-unsafe fn native_argv(args: *const Object) -> Result<Vec<CString>> {
-    // SAFETY: only independent native strings escape the immutable list borrow.
-    unsafe {
-        object(args).0.with(|storage| {
-            let values = storage.sequence();
-            values.check_kind(3);
-            copy_argv(&values.values, |word| {
-                cstring((&*(word as *const Str)).as_bytes())
-            })
-        })
-    }
+/// The caller roots the legacy ABI's exact list and optional directory/environment.
+unsafe fn spawn_list(
+    args: *const Object,
+    cwd: *const Str,
+    env: *const Object,
+    streams: u32,
+) -> Result<Child> {
+    // SAFETY: the compiler passes a rooted exact list, never a tuple or a scalar.
+    let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
+    let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
+    // SAFETY: the original configuration remains rooted while spawn reports any error.
+    unsafe { launch_error::spawn(&cmd, &config, streams) }
 }
 
 /// # Safety
@@ -1115,16 +1132,11 @@ unsafe fn native_argv(args: *const Object) -> Result<Vec<CString>> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *const Str {
     // SAFETY: the caller roots the exact list for the duration of this operation.
-    let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
-    let argv = argv::copy(&cmd);
-    let run = argv.and_then(|argv| {
-        if argv.is_empty() {
-            return Err(Error::new(Kind::IndexError, "list index out of range"));
-        }
-        let child = Launch::new(argv, None)?.spawn(None, 1).map_err(os_error)?;
-        let (status, stdout, _) = capture(child).map_err(capture_error)?;
-        Ok((status, Rc::new(decode_utf8_text(stdout)?)))
-    });
+    let run =
+        unsafe { spawn_list(args, std::ptr::null(), std::ptr::null(), 1) }.and_then(|child| {
+            let (status, stdout, _) = capture(child).map_err(capture_error)?;
+            Ok((status, Rc::new(decode_utf8_text(stdout)?)))
+        });
     match run {
         Ok((status, stdout)) if status.success() => Rc::into_raw(stdout),
         Ok((status, stdout)) => {
@@ -1157,12 +1169,7 @@ pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *c
 pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u32) {
     let run = || -> Result<ExitStatus> {
         // SAFETY: all argv owners are rooted by the caller.
-        let argv = unsafe { native_argv(args)? };
-        if argv.is_empty() {
-            return Err(Error::new(Kind::IndexError, "list index out of range"));
-        }
-        let launch = Launch::new(argv, None)?;
-        let child = launch.spawn(None, 4).map_err(os_error)?;
+        let child = unsafe { spawn_list(args, std::ptr::null(), std::ptr::null(), 4)? };
         ChildGuard {
             child,
             reaped: false,
@@ -1321,24 +1328,16 @@ unsafe fn run_process(
     timeout: Option<Deadline>,
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
-    // SAFETY: only independent native strings escape the exact input storage.
-    let prepared = unsafe { prepare_process(args, cwd, env) };
-    let (launch, cwd) = match prepared {
-        Ok(prepared) => prepared,
-        Err(error) => return error.returning(std::ptr::null_mut()),
-    };
-    let captured = launch
-        .spawn(cwd.as_ref(), streams)
-        .map_err(os_error)
-        .and_then(|child| {
-            if let Some(timeout) = &timeout {
-                capture_timeout(child, timeout)
-            } else {
-                capture(child)
-                    .map(|(status, stdout, stderr)| Captured::Completed(status, stdout, stderr))
-                    .map_err(capture_error)
-            }
-        });
+    // SAFETY: the caller roots the exact argv, directory and environment.
+    let captured = unsafe { spawn_list(args, cwd, env, streams) }.and_then(|child| {
+        if let Some(timeout) = &timeout {
+            capture_timeout(child, timeout)
+        } else {
+            capture(child)
+                .map(|(status, stdout, stderr)| Captured::Completed(status, stdout, stderr))
+                .map_err(capture_error)
+        }
+    });
     let (status, stdout, stderr) = match captured {
         Ok(Captured::Completed(status, stdout, stderr)) => (status, stdout, stderr),
         Ok(Captured::TimedOut(stdout, stderr)) => {

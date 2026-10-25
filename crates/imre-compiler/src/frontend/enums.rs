@@ -148,6 +148,21 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        // Python's empty built-in tuple is a singleton. Each operand still
+        // executes exactly once, even when it raises before returning the tuple.
+        if [left.ty, right.ty] == [self.types.tuple(Vec::new()); 2] {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(left), Statement::Expr(right)],
+                    value: Box::new(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(op == ast::CmpOp::Is),
+                    }),
+                    clear: Vec::new(),
+                },
+            });
+        }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
         if let Some(&ty) = types.iter().find(|t| matches!(t, Type::AnnotationValue(_)))
             && types.iter().all(|t| {
@@ -221,11 +236,13 @@ impl Checker<'_> {
             || types.iter().all(|ty| {
                 matches!(
                     ty,
-                    Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_)
+                    Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) | Type::Class(_)
                 )
             })
+            || types == [Type::Str; 2]
             || types == [Type::LogRecord; 2]
             || types.iter().all(|ty| matches!(ty, Type::Cursor(_)))
+            || types == [Type::Path; 2]
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]

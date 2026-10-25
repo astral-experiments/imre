@@ -33,7 +33,7 @@ impl WordKind {
         u32::from(self.0)
     }
 
-    fn base(self) -> u32 {
+    pub(super) fn base(self) -> u32 {
         self.raw() & !NULLABLE
     }
 
@@ -145,6 +145,23 @@ pub(super) struct OwnedWord {
 }
 
 impl OwnedWord {
+    /// Transfers this owner into a fresh record field using the LLVM slot type.
+    ///
+    /// # Safety
+    /// The destination is an uninitialized slot of this exact descriptor.
+    pub(super) unsafe fn initialize_record_field(self, field: *mut usize) {
+        let kind = self.kind.raw();
+        let word = self.into_word();
+        // SAFETY: this is the inverse of WordKind::read_record_field.
+        unsafe {
+            match kind {
+                3..=6 | 8 => field.cast::<*const ()>().write(word as *const ()),
+                7 => field.cast::<f64>().write(f64::from_bits(word as u64)),
+                _ => field.write(word),
+            }
+        }
+    }
+
     pub(super) fn into_word(self) -> usize {
         ManuallyDrop::new(self).word
     }

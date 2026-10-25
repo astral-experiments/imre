@@ -13,6 +13,7 @@ use num_traits::ToPrimitive;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
+mod components;
 mod matching;
 mod pure;
 mod traversal;
@@ -492,35 +493,17 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
 }
 
 /// # Safety
-/// Root the path and replacement component until the owned new path or error is returned.
+/// Root the path and any non-null replacement component. Null represents Python None.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_with_name(
     path: *const Object,
     replacement: *const Str,
 ) -> *const Object {
-    use super::exceptions::string_repr;
     // SAFETY: both inputs are rooted and lexical operations cannot invoke callbacks.
     let result = unsafe {
-        object(path).0.with(|storage| {
-            if let Storage::PurePath(p) = storage {
-                return p.with_name(&*replacement);
-            }
-            let path = storage.path();
-            let replacement = &*replacement;
-            if replacement.is_empty() || replacement.as_str() == "." || replacement.contains('/') {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    format!("Invalid name {}", string_repr(replacement)),
-                ));
-            }
-            if name(path).is_empty() {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    format!("PosixPath({}) has an empty name", string_repr(path)),
-                ));
-            }
-            Ok(new_path(join(parent(path), replacement)))
-        })
+        object(path)
+            .0
+            .with(|storage| storage.replace_name(replacement.as_ref()))
     };
     finish(result, std::ptr::null())
 }
@@ -1065,12 +1048,12 @@ unsafe fn pull_path(iterator: *const Object) -> Result<*const Object> {
     }
 }
 
-enum Pattern {
+pub(super) enum Pattern {
     Literal(Str),
     Wildcard(Vec<Token>),
 }
 
-enum Token {
+pub(super) enum Token {
     Literal(char),
     Any,
     Star,
@@ -1098,7 +1081,7 @@ impl Pattern {
         Ok(Self::component(pattern))
     }
 
-    fn component(pattern: &str) -> Self {
+    pub(super) fn component(pattern: &str) -> Self {
         if !pattern.contains(['*', '?', '[']) {
             return Self::Literal(Str::from(pattern));
         }
@@ -1114,10 +1097,7 @@ impl Pattern {
                 '?' => tokens.push(Token::Any),
                 '[' => {
                     let start = index;
-                    let negated = chars.get(index) == Some(&'!');
-                    let content = index + usize::from(negated);
-                    let search = content + usize::from(chars.get(content) == Some(&']'));
-                    let Some(end) = (search..chars.len()).find(|&at| chars[at] == ']') else {
+                    let Some(end) = class_end(&chars, index) else {
                         tokens.push(Token::Literal('['));
                         continue;
                     };
@@ -1133,7 +1113,7 @@ impl Pattern {
 
     /// Greedy star matching remembers the most recent star and advances its
     /// Unicode-scalar boundary on mismatch, avoiding recursive backtracking.
-    fn matches(&self, name: &str) -> bool {
+    pub(super) fn matches(&self, name: &str) -> bool {
         let tokens = match self {
             Self::Literal(text) => return text == name,
             Self::Wildcard(tokens) => tokens,
@@ -1171,10 +1151,16 @@ impl Pattern {
     }
 }
 
+pub(super) fn class_end(chars: &[char], start: usize) -> Option<usize> {
+    let content = start + usize::from(chars.get(start) == Some(&'!'));
+    let search = content + usize::from(chars.get(content) == Some(&']'));
+    (search..chars.len()).find(|&at| chars[at] == ']')
+}
+
 /// Python's fnmatch removes descending ranges before interpreting negation.
 /// Preserve literal hyphens separately from range separators: `[b-a!]`, for
 /// example, becomes a negated empty class and therefore matches any character.
-fn character_class(chars: &[char]) -> Token {
+pub(super) fn class_characters(chars: &[char]) -> Vec<(char, bool)> {
     let mut chunks = Vec::<Vec<char>>::new();
     let mut start = 0;
     let mut search = 1 + usize::from(chars.first() == Some(&'!'));
@@ -1202,6 +1188,11 @@ fn character_class(chars: &[char]) -> Token {
         }
         characters.extend(chunk.into_iter().map(|character| (character, false)));
     }
+    characters
+}
+
+fn character_class(chars: &[char]) -> Token {
+    let characters = class_characters(chars);
     let negated = characters
         .first()
         .is_some_and(|&(character, _)| character == '!');
