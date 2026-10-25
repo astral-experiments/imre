@@ -28,3 +28,31 @@ Stock [`TextWrapper` in CPython 3.14.5](https://github.com/python/cpython/blob/5
 uses `dict.fromkeys(map(ord, _whitespace), ord(' '))`. The distinct keys are
 9, 10, 11, 12, 13 and 32, each with value 32. The combined integration must
 run the original class initializer to test both dependencies together.
+
+## Linux receipts
+
+The [complete original method](runs/a99beb43679f/fromkeys-original.json) is
+[blocked once at each level](evidence-linux.json). Its first dictionary assertion
+is tracked with the [unittest comparison owner](https://github.com/astral-sh/imre/pull/710#issuecomment-6396217239).
+
+The [combined run](https://github.com/astral-sh/imre/actions/runs/40182742723)
+used [these immutable compiler and runtime inputs](runs/a99beb43679f/source.json):
+public ord/map `501d59a` and mapping `49a44de`. Its
+[stock TextWrapper receipts](runs/a99beb43679f/textwrapper.json) distinguish
+three scopes. The exact expression returned the six ordered pairs in all four
+modes. Both the original class assignment and the full stock module stopped at
+the computed class attribute, before the expression was evaluated. Reproduce
+the reference with CPython 3.14.5 using `textwrapper.py --result reference.json`;
+pass `--imre`, `--runtime`, and `--clang` for O0 and O3 with ordinary and
+reachable-only compilation.
+
+The [14 independent mapping controls](runs/a99beb43679f/controls.json) include
+the seven local class and iterator definitions from the original method. All
+seven stop at the declaration; none demonstrated native subclass or custom
+iterator dispatch. Five other controls matched at all four settings: exact dict
+inputs, a shared mutable value, a non-iterable, and the bound Counter and
+defaultdict operations. On this tree the event fixture stopped at `list.clear`
+and the nested set control at `set(range(6))`. Later PR changes give the two
+event checks separate lists; [#910](https://github.com/astral-sh/imre/pull/910)
+supplies the set producer. These controls are outside both the single selected
+`test_dict` occurrence and the 659 occurrences in collections.
