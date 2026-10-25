@@ -978,8 +978,14 @@ impl Checker<'_> {
             if index >= child_options {
                 let name = params[index].name.as_str();
                 if name == "pipesize" {
-                    // Popen validates the original value, including None and bool.
-                    return checker.expr(arg);
+                    let value = checker.expr(arg)?;
+                    // Typeshed requires int, but Popen accepts None and raises
+                    // TypeError itself for other values. Only this bound call
+                    // has native validation; nested calls retain their diagnostics.
+                    if api == LaunchApi::Popen && !matches!(value.ty, Type::Int | Type::Bool) {
+                        checker.graph.checked_overload(checker.module, call.range());
+                    }
+                    return Ok(value);
                 }
                 if name == "pass_fds" {
                     let value = checker.expr(arg)?;
