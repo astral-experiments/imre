@@ -27,12 +27,6 @@ pub(super) fn cleanup() {
     });
 }
 
-fn returncode(status: ExitStatus) -> i32 {
-    status
-        .code()
-        .unwrap_or_else(|| -status.signal().unwrap_or(0))
-}
-
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
     control: Arc<ChildControl>,
