@@ -38,7 +38,8 @@
       "fixture_execution": "CPython module/class/instance hooks",
       "calls": [
         "filesystem",
-        "platform"
+        "platform",
+        "lookup"
       ]
     },
     "test.test_sys.SysModuleTest.test_ioencoding_nonascii": {
