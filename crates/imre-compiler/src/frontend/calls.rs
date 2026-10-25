@@ -254,21 +254,6 @@ pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(),
     Ok(())
 }
 
-/// Evaluate operands before raising a catchable native TypeError.
-pub(super) fn type_error(ty: Type, mut values: Vec<Expr>, message: String) -> Expr {
-    values.push(Expr {
-        ty: Type::Exception,
-        kind: ExprKind::Exception {
-            kind: exception_kind("TypeError").unwrap(),
-            message: Some(Box::new(unpacking::string(message))),
-        },
-    });
-    Expr {
-        ty,
-        kind: ExprKind::Builtin(Builtin::RaiseException, values),
-    }
-}
-
 impl Checker<'_> {
     /// Evaluate the supplied arguments before raising a positional arity or
     /// keyword error. Only the spans belonging to this exact call are proved.
