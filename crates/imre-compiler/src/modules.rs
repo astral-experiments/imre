@@ -962,11 +962,6 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
-    /// The native import at this exact alias performs its own missing-name lookup.
-    pub(crate) fn checked_builtin_import(&self, module: ModuleId, alias: TextRange) {
-        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::BuiltinImport(alias));
-    }
-
     /// Mark the precise call whose behavior for missing arguments is handled by native lowering.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
@@ -1006,7 +1001,7 @@ impl SourceGraph {
             .extend(keywords.map(CheckedDiagnostic::Keyword));
     }
 
-    /// Target headers decide whether an errno from-import succeeds or raises ImportError.
+    /// Native import checks whether this target-dependent or mutable name exists.
     pub(crate) fn checked_builtin_import(&self, module: ModuleId, alias: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::BuiltinImport(alias));
     }

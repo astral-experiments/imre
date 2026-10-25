@@ -60,7 +60,7 @@ impl Checker<'_> {
                 "_",
                 Builtin::BuiltinsHasLast,
                 Expr {
-                    ty: Type::ValueView,
+                    ty: Type::ObjectValue,
                     kind: ExprKind::Builtin(Builtin::BuiltinsLast, vec![]),
                 },
             ),
