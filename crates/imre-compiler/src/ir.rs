@@ -637,6 +637,9 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysVersionInfo {
+        implementation: bool,
+    },
     OsName,
     DocCaptureStart,
     DocCaptureTake,
@@ -664,6 +667,7 @@ pub(crate) enum Builtin {
     Formatter(FormatterOperation),
     Input,
     Chr,
+    Ord,
     IntegerPower,
     ModularPower,
     NegativeIntegerPower,
