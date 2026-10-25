@@ -168,8 +168,8 @@ def exercise(args, tc, work, cls, method_name):
             return trace.wrap(tc.build(source, directory))
 
     class TracedHarness(Harness):
-        def actor(self, keywords):
-            return trace.wrap(super().actor(keywords))
+        def actor(self, keywords, layout):
+            return trace.wrap(super().actor(keywords, layout))
 
     harness = TracedHarness(args, work)
     diagnostic = None
