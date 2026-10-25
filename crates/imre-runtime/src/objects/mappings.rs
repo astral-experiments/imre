@@ -407,6 +407,30 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
             .map(|position| self.entries[position].as_ref().unwrap())
     }
 
+    /// Promote a cache hit without dropping or reacquiring its key and value.
+    /// Reserve before moving the entry so allocation failure preserves its order.
+    unsafe fn promote(&mut self, word: usize) -> Result<bool, Error> {
+        // SAFETY: the caller roots a word of this table's key kind.
+        let key = unsafe { K::borrow(word) };
+        let hash = HASHER.hash_one(&*key);
+        let Some(slot) = self.index.find_mut(hash, |&i| {
+            let entry = self.entries[i].as_ref().unwrap();
+            entry.hash == hash && entry.key == *key
+        }) else {
+            return Ok(false);
+        };
+        if *slot + 1 != self.entries.len() {
+            self.entries
+                .try_reserve(1)
+                .map_err(|_| Error::allocation())?;
+            let entry = self.entries[*slot].take();
+            *slot = self.entries.len();
+            self.entries.push(entry);
+            self.compact();
+        }
+        Ok(true)
+    }
+
     fn next(&self, position: usize) -> Option<(usize, OwnedWord, V)> {
         self.entries
             .iter()
@@ -641,6 +665,29 @@ impl Mapping {
             .map(|entry| (&*entry.key, entry.value))
     }
 
+    /// Keeps exact field owners alive after a string-key dictionary borrow ends.
+    pub(super) fn owned_string_entries(&self) -> Vec<(String, OwnedWord)> {
+        self.string_entries()
+            .map(|(key, word)| {
+                // SAFETY: the dictionary owns this value under its homogeneous descriptor.
+                (key.to_string(), unsafe { self.value_kind.acquire(word) })
+            })
+            .collect()
+    }
+
+    /// A numeric-key dictionary cannot match a string placeholder.
+    pub(super) fn logging_key(&self, key: &Str) -> Option<OwnedWord> {
+        let Tables::Str(table) = &self.tables else {
+            return None;
+        };
+        // SAFETY: the table and the lookup key are both exact strings under live borrows.
+        unsafe {
+            table
+                .lookup(std::ptr::from_ref(key) as usize)
+                .map(|e| self.value_kind.acquire(e.value))
+        }
+    }
+
     pub(super) fn integer_entries(&self) -> impl Iterator<Item = (&Int, usize)> {
         let Tables::Int(table) = &self.tables else {
             fail("SystemError", "expected an integer-key dictionary");
@@ -723,6 +770,15 @@ impl Mapping {
         keys
     }
 
+    /// Borrowed document values stay rooted by the unmodified mapping.
+    pub(super) fn document_values(&self) -> impl Iterator<Item = usize> + '_ {
+        assert_eq!(self.value_kind.raw(), 5);
+        let Tables::Str(table) = &self.tables else {
+            unreachable!("expected a string-keyed document");
+        };
+        table.entries.iter().flatten().map(|entry| entry.value)
+    }
+
     pub(super) fn document_pairs(&self) -> Vec<(Rc<Str>, Rc<Object>)> {
         assert_eq!((self.tables.key_kind(), self.value_kind.raw()), (3, 5));
         let mut pairs = Vec::with_capacity(self.tables.len());
@@ -732,6 +788,31 @@ impl Mapping {
             true
         });
         pairs
+    }
+
+    /// Compares the counts at every key in the union, including keys stored with
+    /// negative counts on only one side. Missing counts are zero.
+    ///
+    /// # Safety
+    /// Both mappings are rooted Counters with exact integer values.
+    unsafe fn counter_counts_all(&self, other: &Self, mut check: impl FnMut(i32) -> bool) -> bool {
+        let shared_kind = self.tables.key_kind() == other.tables.key_kind();
+        let zero = Int::small(0).unwrap().0;
+        // SAFETY: equal table kinds share a key representation, and both tables
+        // root their borrowed keys and counts throughout these immutable visits.
+        unsafe {
+            self.tables.all(|key, left| {
+                let right = if shared_kind {
+                    other.tables.lookup(key)
+                } else {
+                    None
+                };
+                check(crate::imre_int_compare(left, right.unwrap_or(zero)))
+            }) && other.tables.all(|key, right| {
+                (shared_kind && self.tables.lookup(key).is_some())
+                    || check(crate::imre_int_compare(zero, right))
+            })
+        }
     }
 
     /// # Safety
@@ -745,20 +826,8 @@ impl Mapping {
         if self.missing == Missing::Zero && other.missing == Missing::Zero {
             // Counts of absent keys are zero in either direction, including
             // for another Counter nested in a record or in a sequence.
-            let agrees = |left: &Self, right: &Self| {
-                left.tables.all(|key, value| {
-                    let count = if left.tables.key_kind() == right.tables.key_kind() {
-                        // SAFETY: immutable source tables root equal key kinds.
-                        unsafe { right.tables.lookup(key) }
-                    } else {
-                        None
-                    };
-                    let count = count.unwrap_or(Int::small(0).unwrap().0);
-                    // SAFETY: both Counter values are rooted canonical integers.
-                    unsafe { crate::imre_int_compare(value, count) == 0 }
-                })
-            };
-            return Comparison::Done(agrees(self, other) && agrees(other, self));
+            // SAFETY: the missing-value policy identifies two exact Counters.
+            return Comparison::Done(unsafe { self.counter_counts_all(other, |order| order == 0) });
         }
         if self.tables.key_kind() != other.tables.key_kind()
             || self.value_kind != other.value_kind
@@ -1062,22 +1131,145 @@ impl Storage {
     }
 }
 
-/// Each statically decorated module function owns one typed cache for the
-/// lifetime of the program. A failed call never reaches the wrapper's insert.
+struct FunctionCache {
+    table: Rc<Object>,
+    oldest: Option<Rc<Cell<usize>>>,
+    hits: usize,
+    misses: usize,
+}
+
+thread_local! {
+    static FUNCTION_CACHES: std::cell::RefCell<std::collections::HashMap<usize, FunctionCache>> =
+        std::cell::RefCell::default();
+}
+
+/// Each statically decorated function has one typed dictionary. The wrapper
+/// inserts only after a successful call and reacquires the table after user code.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_function_cache(id: usize, key: u32, value: u32) -> *const Object {
-    thread_local! { static CACHES: std::cell::RefCell<std::collections::HashMap<usize, Rc<Object>>> = std::cell::RefCell::default(); }
-    CACHES.with_borrow_mut(|caches| {
+    FUNCTION_CACHES.with_borrow_mut(|caches| {
         Rc::into_raw(
             caches
                 .entry(id)
-                .or_insert_with(|| {
+                .or_insert_with(|| FunctionCache {
                     // SAFETY: imre_dict_new returns an independent strong owner.
-                    unsafe { Rc::from_raw(imre_dict_new(key, value)) }
+                    table: unsafe { Rc::from_raw(imre_dict_new(key, value)) },
+                    oldest: None,
+                    hits: 0,
+                    misses: 0,
                 })
+                .table
                 .clone(),
         )
     })
+}
+
+/// Count every lookup before entering user code. A bounded hit moves its entry
+/// to the back of the private dictionary; keys cannot execute Python code here.
+///
+/// # Safety
+/// The wrapper roots a key of this cache's exact immutable key kind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_function_cache_probe(id: usize, key: usize, capacity: i64) -> bool {
+    let result = FUNCTION_CACHES.with_borrow_mut(|caches| {
+        let cache = caches.get_mut(&id).expect("cache initialized for lookup");
+        let hit = match capacity {
+            0 => false,
+            // SAFETY: the wrapper preserves this key's owner and layout.
+            -1 => unsafe {
+                cache
+                    .table
+                    .0
+                    .with(|s| s.dictionary().tables.lookup(key).is_some())
+            },
+            // SAFETY: only the private insertion order changes; no user code can run.
+            _ => unsafe {
+                cache.table.0.with_mut(
+                    |s| table!(&mut s.dictionary_mut().tables, table => table.promote(key)),
+                )?
+            },
+        };
+        if hit {
+            cache.hits += 1
+        } else {
+            cache.misses += 1
+        }
+        Ok(hit)
+    });
+    crate::finish(result, false)
+}
+
+/// Keep the most recently used entries. A reentrant call may already have
+/// inserted this key. Evicted owners drop after both registry and table borrows.
+///
+/// # Safety
+/// The caller roots an exact key and result matching the initialized cache.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_function_cache_insert(
+    id: usize,
+    key: usize,
+    word: usize,
+    capacity: usize,
+) {
+    let evicted = FUNCTION_CACHES.with_borrow_mut(|caches| {
+        let cache = caches
+            .get_mut(&id)
+            .expect("cache initialized for insertion");
+        // SAFETY: the caller roots both exact operands; displaced owners escape the borrow.
+        unsafe {
+            cache.table.0.with_mut(|s| {
+                let mapping = s.dictionary_mut();
+                if mapping.tables.lookup(key).is_some() {
+                    return Ok(None);
+                }
+                let key = WordKind::new(mapping.tables.key_kind()).acquire(key);
+                let value = mapping.value_kind.acquire(word);
+                let old = mapping.insert(key, value)?;
+                debug_assert!(old.is_none());
+                if mapping.tables.len() <= capacity {
+                    return Ok(None);
+                }
+
+                // Reserve and insert first: an allocation error must not evict the oldest entry.
+                let table = &mut mapping.tables;
+                let cursor = cache
+                    .oldest
+                    .get_or_insert_with(|| table.iterator_position());
+                let (next, oldest, _) = table.next(cursor.get()).expect("nonempty bounded cache");
+                cursor.set(next);
+                let (key, word) = table.remove(oldest.word).unwrap();
+                mapping.update_ascii_int(key.word, 0);
+                Ok(Some((key, OwnedWord::from_owned(word, mapping.value_kind))))
+            })
+        }
+    });
+    drop(crate::finish(evicted, None));
+}
+
+/// Return hits, misses, or the current number of entries. An unused cache is empty.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_function_cache_stat(id: usize, field: u32) -> usize {
+    let value = FUNCTION_CACHES.with_borrow(|caches| {
+        caches.get(&id).map_or(0, |cache| match field {
+            0 => cache.hits,
+            1 => cache.misses,
+            // SAFETY: the registry roots this private table and no callbacks occur.
+            3 => unsafe {
+                cache
+                    .table
+                    .0
+                    .with(|storage| storage.dictionary().tables.len())
+            },
+            _ => unreachable!("invalid cache statistic"),
+        })
+    });
+    Int::from_usize(value).into_raw()
+}
+
+/// Reset counters and release cached results outside the registry borrow.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_function_cache_clear(id: usize) {
+    drop(FUNCTION_CACHES.with_borrow_mut(|caches| caches.remove(&id)));
 }
 
 /// Creates a dictionary with concrete scalar keys and one shared value descriptor.
@@ -1148,6 +1340,33 @@ pub unsafe extern "C" fn imre_dict_sum_values(mapping: *const Object, start: usi
 pub unsafe extern "C" fn imre_counter_total(value: *const Object) -> usize {
     // SAFETY: the caller roots this integer mapping and the zero start is immediate.
     unsafe { imre_dict_sum_values(value, Int::small(0).unwrap().0) }
+}
+
+/// Tests multiset inclusion, optionally requiring at least one smaller count.
+///
+/// # Safety
+/// Both arguments root exact integer-valued Counters; they may alias.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_counter_subset(
+    left: *const Object,
+    right: *const Object,
+    strict: u32,
+) -> u32 {
+    if left == right {
+        return u32::from(strict == 0);
+    }
+    // SAFETY: immutable visits borrow only rooted keys and integer counts.
+    u32::from(unsafe {
+        object(left).0.with(|a| {
+            object(right).0.with(|b| {
+                let mut smaller = false;
+                a.dictionary().counter_counts_all(b.dictionary(), |order| {
+                    smaller |= order < 0;
+                    order <= 0
+                }) && (strict == 0 || smaller)
+            })
+        })
+    })
 }
 
 /// Attaches the exact element descriptor to a native `defaultdict(list)`.
@@ -1414,13 +1633,16 @@ pub(super) unsafe fn dict_set(value: *const Object, key: usize, word: usize) -> 
     };
     old.map(drop)
 }
+/// Removes one entry and keeps its returned owners out of the storage borrow.
+///
 /// # Safety
-/// Root the dictionary and its exact key. Missing raises KeyError in ordinary
-/// dictionaries and is a no-op for a Counter. Drop removed owners after mutation.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_dict_delete(value: *const Object, key: usize) {
+/// The exact dictionary and key must remain rooted for the call.
+unsafe fn take_entry(
+    value: *const Object,
+    key: usize,
+) -> (Option<(OwnedWord, OwnedWord)>, Missing) {
     // SAFETY: lookup/removal cannot reenter; returned values own their references.
-    let (old, missing) = unsafe {
+    unsafe {
         object(value).0.with_mut(|s| {
             let mapping = s.dictionary_mut();
             mapping.update_ascii_int(key, 0);
@@ -1430,7 +1652,58 @@ pub unsafe extern "C" fn imre_dict_delete(value: *const Object, key: usize) {
                 .map(|(key, word)| (key, OwnedWord::from_owned(word, mapping.value_kind)));
             (old, mapping.missing)
         })
+    }
+}
+/// # Safety
+/// The exact dictionary and key must be rooted; write an owned word to the
+/// independent output slot only when a stored entry was removed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_try_pop(
+    value: *const Object,
+    key: usize,
+    out: *mut usize,
+) -> u32 {
+    // SAFETY: roots and output satisfy the caller contract.
+    let Some((_key, value)) = (unsafe { take_entry(value, key) }).0 else {
+        return 0;
     };
+    // SAFETY: only success writes one owned word to the independent output slot.
+    unsafe { out.write(value.into_word()) };
+    1
+}
+/// # Safety
+/// The exact dictionary, key, and (unless required) value-typed default must
+/// remain rooted. An absent required key sets KeyError; otherwise return one owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_pop(
+    value: *const Object,
+    key: usize,
+    default: usize,
+    required: u32,
+) -> usize {
+    // SAFETY: all inputs remain rooted across the removal.
+    if let Some((_key, value)) = (unsafe { take_entry(value, key) }).0 {
+        return value.into_word();
+    }
+    if required != 0 {
+        // SAFETY: a failed removal leaves the key and its dictionary rooted.
+        return unsafe { missing_key(value, key) }.returning(0);
+    }
+    // SAFETY: the eager fallback has the declared value kind.
+    unsafe {
+        object(value)
+            .0
+            .with(|s| s.dictionary().value_kind.acquire(default))
+    }
+    .into_word()
+}
+/// # Safety
+/// Root the dictionary and its exact key. Missing raises KeyError in ordinary
+/// dictionaries and is a no-op for a Counter. Drop removed owners after mutation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_delete(value: *const Object, key: usize) {
+    // SAFETY: inputs remain rooted until after the operation.
+    let (old, missing) = unsafe { take_entry(value, key) };
     if old.is_none() && missing != Missing::Zero {
         // SAFETY: the missing input remains rooted after the failed lookup.
         unsafe { missing_key(value, key) }.raise();
@@ -1709,6 +1982,32 @@ pub unsafe extern "C" fn imre_set_iter(value: *const Object) -> *const Object {
     // SAFETY: the caller supplies the exact set shape.
     unsafe { new_iterator(value, IteratorKind::Set) }
 }
+/// Pull one owned item (two owned words in dictionary-items mode). Release
+/// the Object storage borrow before a composed iterator can pull another cursor.
+pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, Error> {
+    let mut adapter = None;
+    // SAFETY: leaf cursor pulls cannot reenter. Only owners escape the borrow.
+    let next = unsafe {
+        cursor.0.with_mut(|storage| match storage {
+            Storage::IteratorAdapter(state) => {
+                adapter = Some(Rc::clone(state));
+                Ok(None)
+            }
+            Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
+            Storage::StringIterator(iterator) => Ok(iterator.next()),
+            Storage::LineIterator(iterator) => Ok(iterator.next()),
+            Storage::BytesIterator(iterator) => Ok(iterator.next()),
+            Storage::DequeIterator(iterator) => iterator.next(),
+            _ => storage.mapping_iterator_mut().next(),
+        })
+    }
+    .map_err(|error| Error::new(Kind::RuntimeError, error.message()))?;
+    match adapter {
+        Some(adapter) => adapter.next().map(|item| item.map(|item| (item, None))),
+        None => Ok(next),
+    }
+}
+
 /// # Safety
 /// Root the cursor; output words are aligned, independent, outside runtime storage,
 /// and contain no unconsumed owner. Only success writes them; keys/set/string mode
@@ -1719,20 +2018,10 @@ pub unsafe extern "C" fn imre_mapping_iter_next(
     key_out: *mut usize,
     value_out: *mut usize,
 ) -> u32 {
-    // SAFETY: the rooted iterator snapshots independent owners before returning.
-    let next = unsafe {
-        object(value).0.with_mut(|storage| match storage {
-            Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
-            Storage::StringIterator(iterator) => Ok(iterator.next()),
-            Storage::LineIterator(iterator) => Ok(iterator.next()),
-            Storage::BytesIterator(iterator) => Ok(iterator.next()),
-            Storage::DequeIterator(iterator) => iterator.next(),
-            _ => storage.mapping_iterator_mut().next(),
-        })
-    };
-    let next = match next {
+    // SAFETY: the caller roots an exact cursor.
+    let next = match pull(unsafe { object(value) }) {
         Ok(next) => next,
-        Err(error) => return Error::new(Kind::RuntimeError, error.message()).returning(0),
+        Err(error) => return error.returning(0),
     };
     let Some((key, item)) = next else {
         return 0;

@@ -1,0 +1,89 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "optimization_levels": {
+    "0": {
+      "test.test_shutil.TestCopy.test_copyfile_copy_dir": {
+        "status": "host_driven_native",
+        "native_calls": 3
+      },
+      "test.test_shutil.TestCopy.test_copyfile_named_pipe": {
+        "status": "host_driven_native",
+        "native_calls": 2
+      },
+      "test.test_shutil.TestCopy.test_copyfile_nonexistent_dir": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestCopy.test_copyfile_return_value": {
+        "status": "native_body_host_fixture",
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "5c545f087d4996a8d0132e51b3cb6ee5a33f78a628fbc12aa8446cdaac0ce705"
+      },
+      "test.test_shutil.TestCopy.test_copyfile_same_file": {
+        "status": "host_driven_native",
+        "native_calls": 2
+      },
+      "test.test_shutil.TestCopy.test_copyfile_symlinks": {
+        "status": "host_driven_native",
+        "native_calls": 2
+      },
+      "test.test_shutil.TestCopy.test_dont_copy_file_onto_link_to_itself": {
+        "status": "mixed",
+        "native_calls": 1,
+        "native": "copyfile",
+        "host": "unittest assertions and shutil.rmtree in the method's finally block"
+      },
+      "test.test_shutil.TestCopy.test_dont_copy_file_onto_symlink_to_itself": {
+        "status": "mixed",
+        "native_calls": 1,
+        "native": "copyfile",
+        "host": "unittest assertions and shutil.rmtree in the method's finally block"
+      }
+    },
+    "3": {
+      "test.test_shutil.TestCopy.test_copyfile_copy_dir": {
+        "status": "host_driven_native",
+        "native_calls": 3
+      },
+      "test.test_shutil.TestCopy.test_copyfile_named_pipe": {
+        "status": "host_driven_native",
+        "native_calls": 2
+      },
+      "test.test_shutil.TestCopy.test_copyfile_nonexistent_dir": {
+        "status": "host_driven_native",
+        "native_calls": 1
+      },
+      "test.test_shutil.TestCopy.test_copyfile_return_value": {
+        "status": "native_body_host_fixture",
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "5c545f087d4996a8d0132e51b3cb6ee5a33f78a628fbc12aa8446cdaac0ce705"
+      },
+      "test.test_shutil.TestCopy.test_copyfile_same_file": {
+        "status": "host_driven_native",
+        "native_calls": 2
+      },
+      "test.test_shutil.TestCopy.test_copyfile_symlinks": {
+        "status": "host_driven_native",
+        "native_calls": 2
+      },
+      "test.test_shutil.TestCopy.test_dont_copy_file_onto_link_to_itself": {
+        "status": "mixed",
+        "native_calls": 1,
+        "native": "copyfile",
+        "host": "unittest assertions and shutil.rmtree in the method's finally block"
+      },
+      "test.test_shutil.TestCopy.test_dont_copy_file_onto_symlink_to_itself": {
+        "status": "mixed",
+        "native_calls": 1,
+        "native": "copyfile",
+        "host": "unittest assertions and shutil.rmtree in the method's finally block"
+      }
+    }
+  }
+}

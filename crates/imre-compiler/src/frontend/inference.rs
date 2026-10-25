@@ -291,6 +291,7 @@ impl Inference {
                 checker.returns = signature.returns;
                 checker.asynchronous = signature.asynchronous;
                 checker.method_context(signature.method);
+                checker.generator_item = classes.producer_items.get(&signature.id).copied();
                 checker.inferred_returns = infer_return.then(Vec::new);
                 let result = (|| {
                     for (parameter, signature) in function
@@ -415,7 +416,7 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         skip: usize,
     ) -> Result<Expr, String> {
-        if self.classes.cached.contains(&signature.id) && !call.arguments.keywords.is_empty() {
+        if self.classes.cached.contains_key(&signature.id) && !call.arguments.keywords.is_empty() {
             return Err(error(
                 self.source,
                 call,

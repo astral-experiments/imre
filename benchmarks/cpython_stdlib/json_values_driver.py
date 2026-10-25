@@ -66,6 +66,8 @@ try:
 except json.JSONDecodeError as error:
     print("JSONDecodeError")
     print(str(error))
+    if len(sys.argv) > 6 and sys.argv[6] == "fields":
+        print(repr((error.msg, error.doc, error.pos, error.lineno, error.colno)))
 except TypeError as error:
     print("TypeError")
     print(str(error))

@@ -84,6 +84,23 @@ impl Checker<'_> {
         &mut self,
         assignment: &ast::StmtAssign,
     ) -> Result<Vec<Statement>, String> {
+        if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
+            && attribute.attr.as_str() == "converter"
+            && let Some(Binding::Intrinsic(Intrinsic::ClockConverter(utc))) =
+                self.resolve(&assignment.value)
+        {
+            let receiver = self.expr(&attribute.value)?;
+            if receiver.ty == Type::LogFormatter {
+                return Ok(vec![self.formatter_set(
+                    receiver,
+                    attribute,
+                    Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(utc),
+                    },
+                )?]);
+            }
+        }
         // A literal tuple assigned to plain locals can stage its elements in native
         // slots. This also permits unpacking a typed callable without storing it
         // in a heap object. All RHS expressions still precede all target writes.
@@ -220,7 +237,29 @@ impl Checker<'_> {
                 Ok(Statement::SetItem(receiver, index, value))
             }
             ast::Expr::Attribute(attribute) => {
+                if let Some(Binding::Intrinsic(Intrinsic::LogRecordFlag(mask))) =
+                    self.resolve(target)
+                {
+                    let value = self.coerce(value, Type::Bool, target)?;
+                    return Ok(Statement::Expr(logging_records::op(
+                        ir::LogRecordOperation::SetFlag,
+                        Type::None,
+                        vec![logging::number(mask), value],
+                    )));
+                }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::LogFormatter {
+                    return self.formatter_set(receiver, attribute, value);
+                }
+                if receiver.ty == Type::LogRecord {
+                    let value = self.check_record_value(value, target)?;
+                    return Ok(Statement::Expr(logging_records::op(
+                        ir::LogRecordOperation::Put,
+                        Type::None,
+                        vec![receiver, string(attribute.attr.as_str()), value],
+                    )));
+                }
+
                 if attribute.attr.as_str() == "MIN_READ_SIZE" && receiver.ty == Type::BinaryIO {
                     let value = self.coerce(value, Type::Int, target)?;
                     // Assignment evaluates the RHS before the receiver.

@@ -291,7 +291,10 @@ impl Verifier<'_> {
                 self.block(finalbody)
             }
             Statement::Raise(Some(value)) => require(
-                matches!(value.ty, Type::Exception | Type::TimeoutExpired),
+                matches!(
+                    value.ty,
+                    Type::Exception | Type::ImportException | Type::TimeoutExpired
+                ),
                 "raise needs an exception",
             ),
             Statement::Raise(None)
@@ -316,7 +319,8 @@ impl Verifier<'_> {
                 | Builtin::JsonDumps(ty)
                 | Builtin::JsonDump(ty)
                 | Builtin::TomlDecode(ty)
-                | Builtin::DictTryGet(ty),
+                | Builtin::DictTryGet(ty)
+                | Builtin::DictTryPop(ty),
                 _,
             ) => self.ty(*ty),
             ExprKind::Builtin(Builtin::IsInstance(kinds), _) => {
