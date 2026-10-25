@@ -15,6 +15,7 @@ use super::{
 mod buffered;
 mod gzip;
 mod path_text;
+pub(super) use path_text::Codec;
 mod seekable;
 mod text_memory;
 use seekable::Memory;

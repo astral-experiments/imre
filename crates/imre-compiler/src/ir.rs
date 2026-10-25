@@ -1691,6 +1691,9 @@ pub(crate) enum ProcessOperation {
     SetSelector,
     Executable,
     RunToStderr,
+    ShellOutput {
+        status: bool,
+    },
     CheckOutput {
         streams: u32,
         validation: u32,

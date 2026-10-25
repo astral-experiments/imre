@@ -864,6 +864,12 @@ An unshadowed builtin class such as `object` or `int` can be a `store_const` val
 
 ## Synchronous subprocesses
 
+`subprocess.getstatusoutput(cmd, *, encoding=None, errors=None)` runs the command
+in the native shell and returns its signed exit status and combined stdout and
+stderr. `getoutput` returns the same text alone. Both normalize CRLF and CR to
+LF and remove one final newline. The default decoder is UTF-8; UTF-8 with BOM,
+ASCII, and Latin-1 use the same codecs as native path text reads.
+
 On POSIX, `shutil.which(cmd, mode=os.F_OK | os.X_OK, path=None)` searches for a non-directory accessible with the requested mode. It returns an owned string, bytes, or `None`. String and native `Path` commands produce string paths, and bytes commands preserve arbitrary filename bytes. The search path accepts strings, bytes, native paths, or `None`. A command containing a directory component is checked directly. A missing `PATH` uses the platform default, an empty search path finds nothing, and empty entries in a nonempty colon-separated path search the current directory. Native string results must be representable as UTF-8. `os.F_OK`, `os.R_OK`, `os.W_OK` and `os.X_OK` are available for mode expressions.
 
 The runtime supports a sealed `subprocess.run` boundary with exact `list[str]` arguments. Output defaults to the inherited descriptors. `capture_output=True` captures both streams. Each `stdout` or `stderr` may also select `subprocess.PIPE`, `subprocess.DEVNULL`, `sys.stdout`, or `sys.stderr`. `stderr=subprocess.STDOUT` follows the child's stdout, including when it is a pipe. Captures return bytes by default. Literal `text=True` or UTF-8 `encoding` decodes captured bytes strictly and normalizes newlines. Inherited, discarded, and redirected fields are `None`. `check` is a boolean expression, defaulting to false. `cwd` accepts a string, native `Path`, or a nullable form of either, and `env` accepts `dict[str, str]` or `None`. Arguments may be positional or named `args`; the other parameters are keyword-only. All supplied expressions evaluate once in source order before launching the child, even when keyword order differs from parameter order.
