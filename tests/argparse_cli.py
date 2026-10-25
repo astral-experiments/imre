@@ -29,6 +29,7 @@ CASES = {
         ["--items", "red", "green"],
         ["--items=red", "green"],
         ["--items", "-0.125", "-.９", "--verbose"],
+        ["--items", "-\U00011de0"],
         ["--item-kind=blue", "--items", "red"],
         ["--items", "red", "--", "tail"],
         ["--help=none"],
