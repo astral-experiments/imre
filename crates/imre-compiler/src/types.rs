@@ -19,6 +19,7 @@ enum Shape {
     DefaultListDict(Type, Type),
     Counter(Type),
     Set(Type),
+    Deque(Type),
     Tuple(Vec<Type>),
     NamedTuple(DefinitionId, Vec<Type>),
     PartialFrame(Vec<Type>),
@@ -93,6 +94,7 @@ impl Types {
                 Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
             ),
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
+            Type::Deque(id) => matches!(storage.shapes.get(id), Some(Shape::Deque(_))),
             Type::Tuple(id) => matches!(
                 storage.shapes.get(id),
                 Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
@@ -174,6 +176,7 @@ impl Types {
                 Shape::StringLiterals(_) => Vec::new(),
                 Shape::Cursor(ty)
                 | Shape::List(ty)
+                | Shape::Deque(ty)
                 | Shape::Set(ty)
                 | Shape::Counter(ty)
                 | Shape::Awaitable(ty)
@@ -197,6 +200,7 @@ impl Types {
                 | Type::List(child_id)
                 | Type::CacheState(child_id)
                 | Type::Dict(child_id)
+                | Type::Deque(child_id)
                 | Type::Set(child_id)
                 | Type::Tuple(child_id)
                 | Type::Callable(child_id)
@@ -715,6 +719,20 @@ impl Types {
         matches!(ty, Type::Dict(id) if matches!(self.0.borrow().shapes[id], Shape::DefaultListDict(..)))
     }
 
+    pub(crate) fn deque(&self, element: Type) -> Type {
+        Type::Deque(self.intern(Shape::Deque(element)))
+    }
+
+    pub(crate) fn deque_element(&self, ty: Type) -> Option<Type> {
+        let Type::Deque(id) = ty else {
+            return None;
+        };
+        let Shape::Deque(element) = self.0.borrow().shapes[id] else {
+            unreachable!("deque identity has a deque shape")
+        };
+        Some(element)
+    }
+
     pub(crate) fn set(&self, element: Type) -> Type {
         Type::Set(self.intern(Shape::Set(element)))
     }
@@ -847,6 +865,7 @@ impl Types {
             .element(ty)
             .or_else(|| self.payload(ty))
             .or_else(|| self.set_element(ty))
+            .or_else(|| self.deque_element(ty))
             .or_else(|| self.cursor_element(ty))
         {
             vec![element]
@@ -914,6 +933,7 @@ impl TypeDescription<'_> {
             | Type::Tuple(id)
             | Type::Callable(id)
             | Type::Dict(id)
+            | Type::Deque(id)
             | Type::Set(id)
             | Type::Optional(id)
             | Type::Union(id) => id,
@@ -955,6 +975,10 @@ impl TypeDescription<'_> {
             Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
                 self.write_str("tuple[")?;
                 self.write_types(fields, ", ")?;
+            }
+            Shape::Deque(element) => {
+                self.write_str("deque[")?;
+                self.write_type(*element)?;
             }
             Shape::Counter(key) => {
                 self.write_str("Counter[")?;

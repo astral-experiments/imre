@@ -410,6 +410,9 @@ impl Builtin {
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
+            | Self::DequeNew
+            | Self::DequeCopy
+            | Self::DequeExtendSource
             | Self::NamespaceDelete
             | Self::DictDelete
             | Self::DictPop
@@ -436,6 +439,8 @@ impl Builtin {
             | Self::Input
             | Self::ParseArgs { .. }
             | Self::ArgparseText { .. }
+            | Self::DequeAppend { .. }
+            | Self::DequePop { .. }
             | Self::Pop
             | Self::Print
             | Self::SortRestore
@@ -466,6 +471,8 @@ impl Builtin {
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::DequeMaxlen
+            | Self::DequeIter { .. }
             | Self::CounterNew
             | Self::CounterTotal
             | Self::DictAsBase
@@ -478,6 +485,7 @@ impl Builtin {
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
+            | Self::DequeClear
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
@@ -877,6 +885,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_set"
                 | "imre_seq_get_index"
                 | "imre_seq_set_index"
+                | "imre_deque_new"
+                | "imre_deque_append"
+                | "imre_deque_copy"
+                | "imre_deque_extend_source"
+                | "imre_deque_pop"
                 | "imre_seq_pop"
                 | "imre_seq_repeat"
                 | "imre_str_repeat"

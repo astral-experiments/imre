@@ -14,6 +14,7 @@ mod contexts;
 mod copying;
 mod csv;
 mod deferred_diff;
+mod deque;
 mod difflib;
 pub(crate) mod exceptions;
 mod files;
@@ -58,6 +59,8 @@ enum Storage {
     Plain,
     StrDescriptor(u32),
     Sequence(Words),
+    Deque(Box<deque::Deque>),
+    DequeIterator(deque::DequeIterator),
     Dictionary(mappings::TableOwner<mappings::Mapping>),
     FunctionCache(Box<mappings::FunctionCache>),
     Set(mappings::TableOwner<mappings::Set>),
