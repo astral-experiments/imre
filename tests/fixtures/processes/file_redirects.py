@@ -90,3 +90,19 @@ with open("redirect-output", "wb") as higher:
         subprocess.Popen([missing], stdout=higher)
     except FileNotFoundError as failure:
         print(same_filename(failure, missing))
+
+large_buffer = 2**65
+print(subprocess.Popen(["/bin/true"], bufsize=large_buffer).wait())
+print(subprocess.Popen(["/bin/true"], stdout=subprocess.DEVNULL, bufsize=-large_buffer).wait())
+try:
+    subprocess.Popen([missing], stdout=subprocess.PIPE, bufsize=large_buffer)
+except OverflowError as overflow:
+    print(str(overflow))
+try:
+    subprocess.Popen(["/bin/true"], stdout=destination, stderr=subprocess.PIPE, bufsize=large_buffer)
+except ValueError as closed:
+    print(str(closed))
+try:
+    subprocess.Popen(["/bin/bad\x00command"], stdin=subprocess.STDOUT)
+except ValueError:
+    print("embedded NUL in the command")
