@@ -11,6 +11,7 @@ const MAX_DESCRIPTION_BYTES: usize = 1024;
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Shape {
     StringLiterals(Vec<String>),
+    Cursor(Type),
     List(Type),
     Dict(Type, Type),
     DefaultListDict(Type, Type),
@@ -59,6 +60,7 @@ impl Types {
             Type::StrLiteral(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
             }
+            Type::Cursor(id) => matches!(storage.shapes.get(id), Some(Shape::Cursor(_))),
             Type::List(id) => matches!(storage.shapes.get(id), Some(Shape::List(_))),
             Type::Dict(id) => matches!(
                 storage.shapes.get(id),
@@ -86,6 +88,7 @@ impl Types {
             | Type::Str
             | Type::Bytes
             | Type::ListInt
+            | Type::StringIterable
             | Type::StringKeys
             | Type::Iterator
             | Type::ByteOutput
@@ -96,6 +99,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
+            | Type::Popen(_)
             | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::TaskGroup
@@ -103,6 +107,8 @@ impl Types {
             | Type::Semaphore
             | Type::Document(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -126,7 +132,8 @@ impl Types {
         for (id, shape) in storage.shapes.iter().enumerate() {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
-                Shape::List(ty)
+                Shape::Cursor(ty)
+                | Shape::List(ty)
                 | Shape::Deque(ty)
                 | Shape::Set(ty)
                 | Shape::Counter(ty)
@@ -142,6 +149,7 @@ impl Types {
             for child in children {
                 self.verify_type(child, classes)?;
                 if let Type::StrLiteral(child_id)
+                | Type::Cursor(child_id)
                 | Type::List(child_id)
                 | Type::Dict(child_id)
                 | Type::Deque(child_id)
@@ -404,6 +412,7 @@ impl Types {
             | Type::Callable(_)
             | Type::Enum(_)
             | Type::Iterator
+            | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::TimeoutExpired
@@ -419,8 +428,11 @@ impl Types {
             | Type::GeneratorContext
             | Type::DirectoryContext(_)
             | Type::Semaphore
+            | Type::Popen(_)
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -459,6 +471,18 @@ impl Types {
         storage.shapes.push(shape.clone());
         storage.ids.insert(shape, id);
         id
+    }
+
+    pub(crate) fn cursor(&self, element: Type) -> Type {
+        Type::Cursor(self.intern(Shape::Cursor(element)))
+    }
+
+    pub(crate) fn cursor_element(&self, ty: Type) -> Option<Type> {
+        let Type::Cursor(id) = ty else { return None };
+        let Shape::Cursor(element) = self.0.borrow().shapes[id] else {
+            unreachable!()
+        };
+        Some(element)
     }
 
     pub(crate) fn list(&self, element: Type) -> Type {
@@ -645,9 +669,11 @@ impl Types {
                 continue;
             }
             match ty {
-                Type::TextIO
+                Type::Cursor(_)
+                | Type::TextIO
                 | Type::BinaryIO
                 | Type::ZipFile
+                | Type::Popen(_)
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
                 | Type::GeneratorContext
@@ -676,6 +702,7 @@ impl Types {
             .or_else(|| self.payload(ty))
             .or_else(|| self.set_element(ty))
             .or_else(|| self.deque_element(ty))
+            .or_else(|| self.cursor_element(ty))
         {
             vec![element]
         } else if let Some((key, value)) = self.mapping(ty) {
@@ -738,6 +765,7 @@ impl TypeDescription<'_> {
         let id = match ty {
             Type::StrLiteral(id)
             | Type::List(id)
+            | Type::Cursor(id)
             | Type::Tuple(id)
             | Type::Callable(id)
             | Type::Dict(id)
@@ -766,6 +794,10 @@ impl TypeDescription<'_> {
                 self.write_types(params, ", ")?;
                 self.write_str("], ")?;
                 self.write_type(*returns)?;
+            }
+            Shape::Cursor(element) => {
+                self.write_str("Iterator[")?;
+                self.write_type(*element)?;
             }
             Shape::List(element) | Shape::Set(element) => {
                 self.write_str(if matches!(shape, Shape::List(_)) {

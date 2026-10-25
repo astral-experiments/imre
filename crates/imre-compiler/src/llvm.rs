@@ -42,9 +42,12 @@ pub(crate) use units::emit_units;
 impl Type {
     fn llvm(self) -> &'static str {
         match self {
-            Self::Int | Self::StrEnum(_) | Self::Enum(_) | Self::Optional(_) | Self::Union(_) => {
-                "i64"
-            }
+            Self::Int
+            | Self::StrEnum(_)
+            | Self::Enum(_)
+            | Self::Optional(_)
+            | Self::Union(_)
+            | Self::StringIterable => "i64",
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
@@ -59,6 +62,7 @@ impl Type {
             | Self::Deque(_)
             | Self::StringKeys
             | Self::Iterator
+            | Self::Cursor(_)
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
@@ -75,9 +79,12 @@ impl Type {
             | Self::GeneratorContext
             | Self::DirectoryContext(_)
             | Self::Semaphore
+            | Self::Popen(_)
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::Logger
+            | Self::TimedFileHandler
+            | Self::ClockTime
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -108,6 +115,7 @@ impl Type {
             | Self::Deque(_)
             | Self::StringKeys
             | Self::Iterator
+            | Self::Cursor(_)
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
@@ -124,9 +132,12 @@ impl Type {
             | Self::GeneratorContext
             | Self::DirectoryContext(_)
             | Self::Semaphore
+            | Self::Popen(_)
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::Logger
+            | Self::TimedFileHandler
+            | Self::ClockTime
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -142,7 +153,8 @@ impl Type {
             | Self::StrEnum(_)
             | Self::Enum(_)
             | Self::Optional(_)
-            | Self::Union(_) => "0",
+            | Self::Union(_)
+            | Self::StringIterable => "0",
         }
     }
 }
@@ -672,7 +684,7 @@ impl Emitter<'_, '_> {
         }
         let family = match ty {
             Type::Int => "int",
-            Type::Union(_) => "union",
+            Type::Union(_) | Type::StringIterable => "union",
             Type::Str | Type::StrLiteral(_) => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
@@ -685,6 +697,7 @@ impl Emitter<'_, '_> {
             | Type::Deque(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
@@ -701,8 +714,11 @@ impl Emitter<'_, '_> {
             | Type::GeneratorContext
             | Type::DirectoryContext(_)
             | Type::Semaphore
+            | Type::Popen(_)
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -3218,6 +3234,13 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp {predicate} i32 {order}, 0"))
                 }
+                Type::ClockTime => {
+                    let order = self.instruction(format!(
+                        "call i32 @imre_log_clock_compare(ptr {}, ptr {})",
+                        left.operand, right.operand
+                    ));
+                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                }
                 Type::Class(class)
                     if self
                         .module
@@ -3259,6 +3282,7 @@ impl Emitter<'_, '_> {
                 Type::Bool
                 | Type::None
                 | Type::Class(_)
+                | Type::TimedFileHandler
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
@@ -3277,6 +3301,7 @@ impl Emitter<'_, '_> {
                 Type::ListInt
                 | Type::StringKeys
                 | Type::Iterator
+                | Type::Cursor(_)
                 | Type::ByteOutput
                 | Type::Callable(_)
                 | Type::EventLoop
@@ -3287,6 +3312,7 @@ impl Emitter<'_, '_> {
                 | Type::GeneratorContext
                 | Type::DirectoryContext(_)
                 | Type::Semaphore
+                | Type::Popen(_)
                 | Type::AsyncProcess(_)
                 | Type::Logger
                 | Type::RegexPattern
@@ -3294,7 +3320,8 @@ impl Emitter<'_, '_> {
                 | Type::JsonValue
                 | Type::JsonObject
                 | Type::RegexMatch
-                | Type::Union(_) => {
+                | Type::Union(_)
+                | Type::StringIterable => {
                     unreachable!("container comparison is rejected by the frontend")
                 }
             }
@@ -3619,6 +3646,44 @@ impl Emitter<'_, '_> {
             }
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
             Builtin::RegexCompile(pattern) => self.pooled_literal(pattern.as_bytes(), returns),
+            Builtin::Timed(operation) => {
+                use crate::ir::TimedOperation::*;
+                let name = match operation {
+                    New => "imre_log_file_new",
+                    Clock => "imre_log_clock_new",
+                    ClockPart => "imre_log_clock_part",
+                    Close => "imre_log_file_close",
+                    Flush => "imre_log_file_flush",
+                    Stream => "imre_log_file_stream",
+                    Filename => "imre_log_file_filename",
+                    Interval => "imre_log_file_interval",
+                    RolloverAt => "imre_log_file_rollover_at",
+                    When => "imre_log_file_when",
+                    Suffix => "imre_log_file_suffix",
+                    BackupCount => "imre_log_file_count",
+                    Utc => "imre_log_file_utc",
+                    Delay => "imre_log_file_delay",
+                    AtTime => "imre_log_file_at_time",
+                    ComputeInt => "imre_log_file_compute_int",
+                    ComputeFloat => "imre_log_file_compute_float",
+                    FilesToDelete => "imre_log_file_deletions",
+                    ShouldRollover => "imre_log_file_should_roll",
+                    DoRollover => "imre_log_file_roll",
+                };
+                // A timed handler evaluates the record argument but decides solely from the clock.
+                let args = if matches!(operation, ShouldRollover) {
+                    &args[..1]
+                } else {
+                    &args[..]
+                };
+                let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
+                if returns == Type::None {
+                    self.void_call(name, &values);
+                    none()
+                } else {
+                    self.call(name, returns, &values)
+                }
+            }
             Builtin::Logging(operation) => {
                 use crate::ir::LogOperation::*;
                 let name = match operation {
@@ -3860,6 +3925,7 @@ impl Emitter<'_, '_> {
             | Builtin::StringFormat
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
+            | Builtin::HexFormat { .. }
             | Builtin::Abs => self.stdlib_builtin(builtin, &args),
             Builtin::TupleCacheNew => return self.record(returns),
             Builtin::TupleCacheResult => Value {
@@ -3885,6 +3951,9 @@ impl Emitter<'_, '_> {
                     value.operand
                 ));
                 none()
+            }
+            Builtin::StringIterationList => {
+                self.call("imre_string_iterable_list", returns, &[&args[0].value])
             }
             Builtin::UnionInject => {
                 let value = self.own_operand(args.into_iter().next().unwrap());
@@ -3913,8 +3982,10 @@ impl Emitter<'_, '_> {
             },
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
+            Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
+            Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::SysStreamWrite { stderr } => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -4263,14 +4334,18 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::ExceptionCause => {
-                let cause = self.instruction(format!(
-                    "call ptr @imre_exception_cause(ptr {})",
-                    args[0].value.operand
-                ));
+            Builtin::ExceptionCause | Builtin::ActiveException => {
+                let pointer = if matches!(builtin, Builtin::ActiveException) {
+                    self.instruction("call ptr @imre_exception_current()")
+                } else {
+                    self.instruction(format!(
+                        "call ptr @imre_exception_cause(ptr {})",
+                        args[0].value.operand
+                    ))
+                };
                 Value {
                     ty: returns,
-                    operand: self.instruction(format!("ptrtoint ptr {cause} to i64")),
+                    operand: self.instruction(format!("ptrtoint ptr {pointer} to i64")),
                     small_integer: false,
                 }
             }
@@ -4360,6 +4435,9 @@ impl Emitter<'_, '_> {
                 },
                 _ => unreachable!("float conversion was checked"),
             },
+            Builtin::Len if args[0].value.ty == Type::StringIterable => {
+                self.call("imre_string_iterable_len", Type::Int, &[&args[0].value])
+            }
             Builtin::Len if matches!(args[0].value.ty, Type::Tuple(_)) => {
                 small(self.module.types.fields(args[0].value.ty).unwrap().len() as i64)
             }
@@ -4548,6 +4626,24 @@ impl Emitter<'_, '_> {
                     ty: Type::Int,
                     operand,
                     small_integer: true,
+                }
+            }
+            Builtin::CursorLengthHint => self.call(
+                "imre_cursor_length_hint",
+                Type::Int,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::Repeat => {
+                let value = &args[0].value;
+                let word = self.word(value);
+                let kind = representation_kind(value.ty, &self.module.types);
+                let times = args.get(1).map_or("0", |arg| arg.value.operand.as_str());
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_repeat(i32 {kind}, i64 {word}, i64 {times})"
+                    )),
+                    small_integer: false,
                 }
             }
             Builtin::BytesIter => self.call("imre_bytes_iter", Type::Iterator, &[&args[0].value]),
@@ -4913,6 +5009,7 @@ impl Emitter<'_, '_> {
                     | Type::Deque(_)
                     | Type::StringKeys
                     | Type::Iterator
+                    | Type::Cursor(_)
                     | Type::ByteOutput
                     | Type::Exception
                     | Type::NamedException(_)
@@ -4929,8 +5026,11 @@ impl Emitter<'_, '_> {
                     | Type::GeneratorContext
                     | Type::DirectoryContext(_)
                     | Type::Semaphore
+                    | Type::Popen(_)
                     | Type::AsyncProcess(_)
                     | Type::Logger
+                    | Type::TimedFileHandler
+                    | Type::ClockTime
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -4944,7 +5044,8 @@ impl Emitter<'_, '_> {
                     | Type::Tuple(_)
                     | Type::Optional(_)
                     | Type::Callable(_)
-                    | Type::Union(_) => {
+                    | Type::Union(_)
+                    | Type::StringIterable => {
                         unreachable!("container printing is rejected")
                     }
                 }
@@ -5063,7 +5164,10 @@ impl Emitter<'_, '_> {
     /// or replaces an output owner; nested loops can safely reuse both scratch
     /// words after this synchronous conversion.
     fn iter_next(&mut self, iterator: usize, key: usize, value: Option<usize>, ready: usize) {
-        debug_assert_eq!(self.locals[iterator], Type::Iterator);
+        debug_assert!(matches!(
+            self.locals[iterator],
+            Type::Iterator | Type::Cursor(_)
+        ));
         debug_assert_eq!(self.locals[ready], Type::Bool);
         debug_assert_ne!(iterator, key);
         debug_assert_ne!(iterator, ready);
@@ -5118,9 +5222,12 @@ impl Emitter<'_, '_> {
 
     fn word(&mut self, value: &Value) -> String {
         match value.ty {
-            Type::Int | Type::StrEnum(_) | Type::Enum(_) | Type::Optional(_) | Type::Union(_) => {
-                value.operand.clone()
-            }
+            Type::Int
+            | Type::StrEnum(_)
+            | Type::Enum(_)
+            | Type::Optional(_)
+            | Type::Union(_)
+            | Type::StringIterable => value.operand.clone(),
             Type::Float => self.instruction(format!("bitcast double {} to i64", value.operand)),
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
@@ -5136,6 +5243,7 @@ impl Emitter<'_, '_> {
             | Type::Deque(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
@@ -5153,8 +5261,11 @@ impl Emitter<'_, '_> {
             | Type::GeneratorContext
             | Type::DirectoryContext(_)
             | Type::Semaphore
+            | Type::Popen(_)
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -5178,9 +5289,12 @@ impl Emitter<'_, '_> {
     /// Changes only the compiler view of a word, leaving its ownership unchanged.
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
         let operand = match ty {
-            Type::Int | Type::StrEnum(_) | Type::Enum(_) | Type::Optional(_) | Type::Union(_) => {
-                word
-            }
+            Type::Int
+            | Type::StrEnum(_)
+            | Type::Enum(_)
+            | Type::Optional(_)
+            | Type::Union(_)
+            | Type::StringIterable => word,
             Type::Float => self.instruction(format!("bitcast i64 {word} to double")),
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
@@ -5196,6 +5310,7 @@ impl Emitter<'_, '_> {
             | Type::Deque(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
@@ -5213,8 +5328,11 @@ impl Emitter<'_, '_> {
             | Type::GeneratorContext
             | Type::DirectoryContext(_)
             | Type::Semaphore
+            | Type::Popen(_)
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -5413,6 +5531,9 @@ impl Emitter<'_, '_> {
             "call void @imre_set_{operation}(ptr {}, i64 {word})",
             set.operand
         ));
+        if insert {
+            self.check_error();
+        }
     }
 
     fn nonnegative_index(&self, expression: &Expr) -> bool {
@@ -5482,11 +5603,9 @@ impl Emitter<'_, '_> {
         if matches!(list.ty, Type::Dict(_)) {
             let key = self.key_word(index);
             let lookup = format!("call i64 @imre_dict_get(ptr {}, i64 {key})", list.operand);
-            // Default-list and Counter subscriptions both produce a missing
-            // value. Receiver and key evaluation has already checked for errors.
-            let word = if self.module.types.is_default_list_dict(list.ty)
-                || self.module.types.is_counter(list.ty)
-            {
+            // A missing Counter key returns immediate zero. Default-list
+            // factories insert a new entry and can fail to reserve it.
+            let word = if self.module.types.is_counter(list.ty) {
                 self.instruction(lookup)
             } else {
                 self.checked_instruction(lookup)
@@ -5519,6 +5638,7 @@ impl Emitter<'_, '_> {
                 "call void @imre_dict_set(ptr {}, i64 {key}, i64 {word})",
                 list.operand
             ));
+            self.check_error();
             return;
         }
         if list.ty == Type::ListInt {
@@ -5747,7 +5867,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Str | Type::StrLiteral(_) => 3,
         Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
-        Type::Union(_) => 9,
+        Type::Union(_) | Type::StringIterable => 9,
         Type::ListInt => 4,
         Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => 6,
         Type::List(_)
@@ -5756,6 +5876,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Deque(_)
         | Type::StringKeys
         | Type::Iterator
+        | Type::Cursor(_)
         | Type::ByteOutput
         | Type::Exception
         | Type::NamedException(_)
@@ -5772,8 +5893,11 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::GeneratorContext
         | Type::DirectoryContext(_)
         | Type::Semaphore
+        | Type::Popen(_)
         | Type::AsyncProcess(_)
         | Type::Logger
+        | Type::TimedFileHandler
+        | Type::ClockTime
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -5937,6 +6061,13 @@ declare i64 @imre_document(i32, i64, i64, i64)
 declare i64 @imre_string_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
 declare i64 @imre_projected_hash(ptr)
+declare ptr @imre_popen(ptr, ptr, ptr, i32)
+declare i64 @imre_popen_pid(ptr)
+declare ptr @imre_popen_args(ptr)
+declare i64 @imre_popen_status(ptr, i1 zeroext)
+declare i64 @imre_popen_wait(ptr, i32, i64)
+declare void @imre_popen_exit(ptr)
+declare void @imre_popen_signal(ptr, i64)
 declare ptr @imre_async_process_spawn(ptr, ptr, ptr, i32, i32)
 declare i64 @imre_async_process_status(ptr, i1 zeroext)
 declare ptr @imre_async_process_communicate(ptr, ptr)
@@ -6074,6 +6205,8 @@ declare i32 @imre_record_has_type(ptr, ptr) nounwind memory(read)
 declare ptr @imre_named_exception_new(ptr, ptr)
 declare ptr @imre_exception_new(i32, ptr)
 declare i32 @imre_exception_matches(ptr, i32)
+declare i64 @imre_string_iterable_len(i64)
+declare ptr @imre_string_iterable_list(i64)
 declare void @imre_union_retain(i64)
 declare void @imre_union_release(i64)
 declare i32 @imre_union_truthy(i64)
@@ -6256,6 +6389,7 @@ declare ptr @imre_shlex_split(ptr)
 declare ptr @imre_sys_executable()
 declare void @imre_subprocess_to_stderr(ptr, i32)
 declare ptr @imre_float_format(double, i32, i32)
+declare ptr @imre_int_hex_format(i64, i32, i32)
 declare double @llvm.fabs.f64(double)
 declare ptr @imre_int_str(i64)
 declare ptr @imre_bool_str(i32)
@@ -6274,6 +6408,7 @@ declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_platform()
+declare ptr @imre_os_name()
 declare i64 @imre_sys_stream_write(i32, ptr)
 declare void @imre_sys_stream_flush(i32)
 declare ptr @imre_system_exit_new(i32, i64)
@@ -6296,6 +6431,27 @@ declare ptr @imre_regex_compile(ptr, i64)
 declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
+declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)
+declare ptr @imre_log_clock_new(i64, i64, i64, i64, i8, i64)
+declare i32 @imre_log_clock_compare(ptr, ptr)
+declare i64 @imre_log_clock_part(ptr, i64)
+declare void @imre_log_file_close(ptr)
+declare void @imre_log_file_flush(ptr)
+declare i64 @imre_log_file_stream(ptr)
+declare ptr @imre_log_file_filename(ptr)
+declare i64 @imre_log_file_interval(ptr)
+declare i64 @imre_log_file_rollover_at(ptr)
+declare ptr @imre_log_file_when(ptr)
+declare ptr @imre_log_file_suffix(ptr)
+declare i64 @imre_log_file_count(ptr)
+declare i1 @imre_log_file_utc(ptr)
+declare i1 @imre_log_file_delay(ptr)
+declare i64 @imre_log_file_at_time(ptr)
+declare i64 @imre_log_file_compute_int(ptr, i64)
+declare double @imre_log_file_compute_float(ptr, double)
+declare ptr @imre_log_file_deletions(ptr)
+declare i1 @imre_log_file_should_roll(ptr)
+declare void @imre_log_file_roll(ptr)
 declare ptr @imre_log_get(i64)
 declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)
@@ -6322,6 +6478,8 @@ declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)
 declare ptr @imre_str_slice(ptr, i64, i64, i64)
+declare i64 @imre_cursor_length_hint(ptr, i64)
+declare ptr @imre_repeat(i32, i64, i64)
 declare ptr @imre_str_iter(ptr)
 declare ptr @imre_str_reverse_iter(ptr)
 declare ptr @imre_str_int_list(ptr)
@@ -6342,6 +6500,7 @@ declare i32 @imre_optional_int_equal(i64, i64)
 declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)
 declare ptr @imre_input()
+declare ptr @imre_chr(i64)
 declare ptr @imre_list_new()
 declare i64 @imre_list_sum(ptr, i64)
 declare i64 @imre_list_slice_sum(ptr, i64, i64, i64)
@@ -7014,6 +7173,27 @@ mod tests {
     }
 
     #[test]
+    fn mapping_insertions_propagate_errors_through_user_functions() {
+        let llvm = compile(
+            "from collections import Counter\ndef put(d: dict[int, int]) -> None:\n    d[1] = 3\ndef add(s: set[int]) -> None:\n    s.add(1)\ndef update(a: Counter[int], b: Counter[int]) -> None:\n    a.update(b)\ndef run(d: dict[int, int], s: set[int], c: Counter[int]) -> None:\n    try:\n        put(d)\n        add(s)\n        update(c, c)\n    except MemoryError:\n        pass\n",
+            &CompileOptions::default(),
+        ).unwrap();
+        for symbol in ["imre_dict_set", "imre_set_add", "imre_counter_update"] {
+            let mut lines = llvm
+                .lines()
+                .skip_while(|line| !line.contains(&format!("call void @{symbol}(")));
+            assert!(lines.next().is_some(), "{symbol}");
+            assert!(
+                lines
+                    .next()
+                    .unwrap()
+                    .contains("call i32 @imre_error_pending()"),
+                "{symbol}"
+            );
+        }
+    }
+
+    #[test]
     fn sorted_key_union_fuses_only_local_dictionary_reads() {
         let llvm = compile(
             "def add(d: dict[str, int]) -> dict[str, int]:\n    d['late'] = 1\n    return {}\ndef keys(a: dict[str, int], b: dict[str, int]) -> list[str]:\n    first = sorted(a.keys() | b.keys())\n    later = sorted(a.keys() | b.keys() | add(a).keys())\n    return first if first else later\n",
@@ -7086,7 +7266,7 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
     }
 
     #[test]
-    fn only_a_sealed_list_factory_eliminates_subscription_errors() {
+    fn default_list_subscriptions_check_allocation_and_counter_misses_return_zero() {
         let factory = function_body(
             "from collections import defaultdict\ndef get(d: defaultdict[str, list[int]], key: str) -> list[int]:\n    return d[key]\n",
         );
@@ -7096,8 +7276,12 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
         for body in [&factory, &ordinary] {
             assert!(body.contains("call i64 @imre_dict_get("));
         }
-        assert!(!factory.contains("call i32 @imre_error_pending()"));
+        assert!(factory.contains("call i32 @imre_error_pending()"));
         assert!(ordinary.contains("call i32 @imre_error_pending()"));
+        let counter = function_body(
+            "from collections import Counter\ndef get(d: Counter[str], key: str) -> int:\n    return d[key]\n",
+        );
+        assert!(!counter.contains("call i32 @imre_error_pending()"));
     }
 
     #[test]

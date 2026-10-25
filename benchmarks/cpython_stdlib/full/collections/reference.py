@@ -10,7 +10,7 @@ import unittest
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
-from suite_inventory import cases, load_suite, reference_results, unique_ids, verify_files
+from suite_inventory import cases, id_counts, load_suite, reference_results, verify_files
 
 
 def main():
@@ -39,16 +39,18 @@ def main():
         else:
             discovered.extend(case.id() for case in cases(suite))
             modules.append(module.removeprefix("test."))
-    expected = unique_ids(discovered)
+    expected = id_counts(discovered)
     with tempfile.TemporaryDirectory() as work:
         xml = Path(work) / "reference.xml"
         subprocess.run([sys.executable, "-B", "-m", "test", "--single-process",
                         "--tempdir", work, "--randseed", "1", "-u", "cpu",
                         "--junit-xml", xml, *modules], cwd=work, check=True)
         results = reference_results(xml, expected)
-    ids = unique_ids([*results, *skipped])
+    if results.keys() & skipped.keys():
+        raise ValueError("import-skipped collections IDs also ran")
     report = {"cpython_commit": manifest["commit"], "platform": sys.platform,
-              "denominator": len(ids), "reference": dict(sorted((results | skipped).items()))}
+              "denominator": sum(expected.values()) + len(skipped),
+              "reference": dict(sorted((results | skipped).items()))}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
 
 

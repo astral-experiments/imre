@@ -59,6 +59,8 @@ pub(crate) enum IntrinsicModule {
     Dataclasses,
     Difflib,
     Logging,
+    LoggingHandlers,
+    Datetime,
     Abc,
     Asyncio,
     Contextlib,
@@ -81,6 +83,7 @@ pub(crate) enum IntrinsicModule {
     Collections,
     CollectionsAbc,
     Itertools,
+    Operator,
     Textwrap,
     Io,
     Gzip,
@@ -123,6 +126,7 @@ pub(crate) enum Intrinsic {
     Semaphore,
     ContextManager,
     FunctionCache,
+    Reduce,
     TomlDumps,
     TomliLoads,
     TomliLoad,
@@ -143,7 +147,9 @@ pub(crate) enum Intrinsic {
     SysExecutable,
     SysPlatform,
     SysEncoding(&'static str),
+    SysException,
     Stdin,
+    OsName,
     GetSysconfigPath,
     OsPathExists,
     OsDevnull,
@@ -155,6 +161,8 @@ pub(crate) enum Intrinsic {
     Logger,
     LogRoot,
     LogEmit(Option<u8>),
+    TimedFileHandler,
+    ClockTime,
     TextIO,
     BinaryIO,
     Union,
@@ -185,6 +193,8 @@ pub(crate) enum Intrinsic {
     DefaultDict,
     Counter,
     Deque,
+    Repeat,
+    LengthHint,
     GroupBy,
     Chain,
     AbstractSet,
@@ -212,6 +222,7 @@ pub(crate) enum Intrinsic {
     PurePath(crate::ir::PathFlavor),
     Which,
     TemporaryDirectory,
+    Popen,
     SubprocessRun,
     SubprocessStdout,
     CompletedProcess,
@@ -232,6 +243,8 @@ impl IntrinsicModule {
         match name {
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
+            "logging.handlers" => Some(Self::LoggingHandlers),
+            "datetime" => Some(Self::Datetime),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
             "contextlib" => Some(Self::Contextlib),
@@ -259,6 +272,7 @@ impl IntrinsicModule {
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
             "itertools" => Some(Self::Itertools),
+            "operator" => Some(Self::Operator),
             "textwrap" => Some(Self::Textwrap),
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
@@ -277,6 +291,9 @@ impl IntrinsicModule {
     }
 
     fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Logging && name == "handlers" {
+            return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
+        }
         if self == Self::Os && name == "path" {
             return Some(Binding::IntrinsicModule(Self::PosixPath));
         }
@@ -323,6 +340,7 @@ impl IntrinsicModule {
             (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
+            (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
             (Self::Tomli, "load") => Intrinsic::TomliLoad,
@@ -336,9 +354,11 @@ impl IntrinsicModule {
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
+            (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
+            (Self::Os, "name") => Intrinsic::OsName,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
@@ -348,6 +368,8 @@ impl IntrinsicModule {
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
             (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
             (Self::Sys, "exit") => Intrinsic::SysExit,
+            (Self::LoggingHandlers, "TimedRotatingFileHandler") => Intrinsic::TimedFileHandler,
+            (Self::Datetime, "time") => Intrinsic::ClockTime,
             (Self::Logging, "Logger") => Intrinsic::Logger,
             (Self::Logging, "root") => Intrinsic::LogRoot,
             (Self::Logging, "log") => Intrinsic::LogEmit(None),
@@ -398,6 +420,8 @@ impl IntrinsicModule {
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Collections, "deque") => Intrinsic::Deque,
             (Self::Collections, "Counter") => Intrinsic::Counter,
+            (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Itertools, "repeat") => Intrinsic::Repeat,
             (Self::Itertools, "groupby") => Intrinsic::GroupBy,
             (Self::Itertools, "chain") => Intrinsic::Chain,
             (Self::CollectionsAbc, "Set") => Intrinsic::AbstractSet,
@@ -426,6 +450,7 @@ impl IntrinsicModule {
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
+            (Self::Subprocess, "Popen") => Intrinsic::Popen,
             (Self::Subprocess, "run") => Intrinsic::SubprocessRun,
             (Self::Subprocess, "CompletedProcess") => Intrinsic::CompletedProcess,
             (Self::Subprocess, "SubprocessError") => Intrinsic::SubprocessError,
