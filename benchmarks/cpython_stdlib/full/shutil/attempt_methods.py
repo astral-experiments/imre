@@ -144,6 +144,15 @@ def fixture(case, suite, node):
     return "\n".join([*dict.fromkeys(additions), *declarations, cls, *attrs, *helpers.values(), ""])
 
 
+def native_operation_method(tools, folder, case, suite, operation):
+    """Rerun a reviewed complete method and assign its verified operation role."""
+    method = case._testMethodName
+    owner = owner_of(case, method)
+    node = CLASSES[owner][method]
+    return native_method(tools, folder, SOURCE, owner, case.id(), fixture(case, suite, node),
+                         operation=("imre", operation))
+
+
 def attempt(tools, case, suite, work, support):
     method = case._testMethodName
     owner = owner_of(case, method)
