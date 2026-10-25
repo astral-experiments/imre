@@ -599,6 +599,14 @@ impl Checker<'_> {
         if self.is_class_receiver(expression) {
             return self.class;
         }
+        if let ast::Expr::Attribute(a) = expression
+            && let Some(class) = self.class_reference(&a.value)
+            && let Some(def) = self.classes.declarations.definitions[class]
+                .exception_aliases
+                .get(a.attr.as_str())
+        {
+            return self.classes.declarations.ids.get(def).copied();
+        }
         match self.resolve(expression) {
             Some(Binding::Definition(definition)) => {
                 self.classes.declarations.ids.get(&definition).copied()
@@ -911,16 +919,78 @@ impl Checker<'_> {
             self.arguments(call, &signature.params[1..], None)?
         };
         self.calls.insert(signature.id);
-        Ok(Expr {
+        let record = Expr {
             ty: Type::Class(class),
             kind: ExprKind::Construct {
                 initializer: signature.id,
                 args,
             },
-        })
+        };
+        let decl = &self.classes.declarations.definitions[class];
+        if let Some(&kind) = self.classes.declarations.exceptions.get(&decl.definition) {
+            let text = self.classes.methods[class].get("__str__").map(|m| m.id);
+            let repr = self.classes.methods[class].get("__repr__").map(|m| m.id);
+            self.calls.extend(text);
+            self.calls.extend(repr);
+            return Ok(Expr {
+                ty: Type::NamedException(class),
+                kind: ExprKind::Builtin(
+                    Builtin::NamedException {
+                        kind,
+                        message_field: decl.fields.len() - 1,
+                        text,
+                        repr,
+                        dataclass_repr: decl.dataclass.is_some_and(|d| d.repr),
+                    },
+                    vec![record],
+                ),
+            });
+        }
+        Ok(record)
     }
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(class) = self.class
+            && self
+                .classes
+                .declarations
+                .exceptions
+                .contains_key(&self.classes.declarations.definitions[class].definition)
+            && !self.names.contains_key("super")
+            && !self.graph.modules[self.module]
+                .bindings
+                .contains_key("super")
+        {
+            let [message] = call.arguments.args.as_ref() else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "fixed exception payloads require one string argument to super().__init__",
+                ));
+            };
+            if !call.arguments.keywords.is_empty() {
+                return Err(error(
+                    self.source,
+                    call,
+                    "exception messages do not accept keyword arguments",
+                ));
+            }
+            let ty = self.types.optional(Type::Str);
+            let message_value = self.expr_expected(message, Type::Str)?;
+            let value = self.coerce(message_value, ty, message)?;
+            let field = self.classes.fields[class].len() - 1;
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::SetField(self.local(0), field, value)],
+                    value: Box::new(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    }),
+                    clear: Vec::new(),
+                },
+            });
+        }
         let base = self
             .super_initializer
             .filter(|_| {

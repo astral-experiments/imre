@@ -215,9 +215,18 @@ pub(super) struct Exception {
 struct ExceptionDetails {
     cause: Option<Rc<Object>>,
     named: Option<&'static NamedDescriptor>,
+    layout: Option<Rc<NamedPayload>>,
     directories: Option<Rc<DirectoryFrame>>,
 }
 
+type Formatter = unsafe extern "C" fn(*const usize) -> *const Str;
+struct NamedPayload {
+    record: OwnedWord,
+    text: Option<Formatter>,
+    repr: Option<Formatter>,
+    dataclass_repr: bool,
+    takes_record_owner: bool,
+}
 struct DirectoryFrame {
     managers: Vec<Rc<Object>>,
     outer: Option<Rc<DirectoryFrame>>,
@@ -234,6 +243,7 @@ impl Drop for DirectoryFrame {
 
 #[derive(Clone)]
 enum Payload {
+    Empty,
     Message(Rc<Str>),
     Key(OwnedWord),
     Exit(Option<OwnedWord>),
@@ -287,6 +297,7 @@ impl Exception {
             let fresh = Rc::get_mut(&mut details).unwrap();
             fresh.cause.clone_from(&previous.cause);
             fresh.named = previous.named;
+            fresh.layout.clone_from(&previous.layout);
             Rc::get_mut(fresh.directories.as_mut().unwrap())
                 .unwrap()
                 .outer = previous.directories.clone();
@@ -771,6 +782,7 @@ impl Storage {
     fn exception_message(&self) -> Rc<Str> {
         match &self.exception().payload {
             Payload::Exit(code) => exit_text(code.as_ref(), ""),
+            Payload::Empty => Rc::new(Str::new("")),
             Payload::Message(message) => Rc::clone(message),
             Payload::Process(process) => Rc::new(process.message()),
             Payload::Timeout(timeout) => Rc::new(timeout.message()),
@@ -1031,6 +1043,129 @@ pub unsafe extern "C" fn imre_named_exception_new(
     }
 }
 
+/// Attach the completed Python field layout to the canonical exception object.
+///
+/// # Safety
+/// The descriptor and method addresses are static. The compiler supplies a rooted
+/// complete record, its string argument (or null), and unary record-to-str methods.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_named_exception_record_new(
+    descriptor: *const NamedDescriptor,
+    record: *const usize,
+    message: *const Str,
+    text: Option<Formatter>,
+    repr: Option<Formatter>,
+    display_flags: u32,
+) -> *const Object {
+    // SAFETY: the fresh exception cannot yet alias user code and its payload
+    // acquires the exact native record before the caller releases that owner.
+    unsafe {
+        let value = imre_named_exception_new(descriptor, message);
+        let payload = NamedPayload {
+            record: WordKind::new(6).acquire(record as usize),
+            text,
+            repr,
+            dataclass_repr: display_flags & 1 != 0,
+            takes_record_owner: display_flags & 2 != 0,
+        };
+        object(value).0.with_mut(|s| {
+            let Storage::Exception(e) = s else {
+                unreachable!()
+            };
+            e.details_mut().layout = Some(Rc::new(payload));
+        });
+        value
+    }
+}
+
+/// Project the fixed record only after a static or dynamically matched nominal type.
+///
+/// # Safety
+/// The compiler proves the rooted error owns the payload's exact fixed layout.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_named_exception_record(value: *const Object) -> *const usize {
+    // SAFETY: retaining the record does not reenter Python or mutate the exception.
+    unsafe {
+        object(value).0.with(|s| {
+            s.exception()
+                .details
+                .as_ref()
+                .unwrap()
+                .layout
+                .as_ref()
+                .unwrap()
+                .record
+                .clone()
+                .into_word() as *const usize
+        })
+    }
+}
+
+/// Format after the storage borrow ends: a Python display method may read aliases,
+/// mutate its fields, or raise. The payload stays live through the callback.
+unsafe fn display(value: *const Object, repr: bool) -> *const Str {
+    // SAFETY: acquire the payload owner before invoking native Python methods.
+    let layout = unsafe {
+        object(value).0.with(|s| {
+            s.exception()
+                .details
+                .as_ref()
+                .and_then(|d| d.layout.clone())
+        })
+    };
+    if let Some(layout) = layout {
+        if let Some(method) = if repr { layout.repr } else { layout.text } {
+            // SAFETY: the compiler checked the descriptor's unary record-to-str ABI.
+            if layout.takes_record_owner {
+                // The generated function consumes resource-bearing arguments on
+                // all exits; other record parameters borrow for the call.
+                let _ = layout.record.clone().into_word();
+            }
+            // SAFETY: our layout or the transferred reference roots the record.
+            return unsafe { method(layout.record.word as *const usize) };
+        }
+        if repr && layout.dataclass_repr {
+            // SAFETY: the record is owned and its descriptor contains the dataclass repr schema.
+            return unsafe { super::values::imre_value_repr(layout.record.word, 6) };
+        }
+    }
+    // SAFETY: base message formatting uses only sealed immutable builtin payloads.
+    unsafe {
+        object(value).0.with(|s| {
+            if !repr {
+                return Rc::into_raw(s.exception_message());
+            }
+            let e = s.exception();
+            let arg = match &e.payload {
+                Payload::Empty => Str::new(""),
+                Payload::Key(k) => {
+                    let mut s = String::new();
+                    super::values::write_repr(&mut s, k.word, k.kind);
+                    s.into()
+                }
+                Payload::Exit(None) => Str::new(""),
+                Payload::Exit(Some(k)) => {
+                    let mut s = String::new();
+                    super::values::write_repr(&mut s, k.word, k.kind);
+                    s.into()
+                }
+                _ => string_repr(&s.exception_message()),
+            };
+            Rc::into_raw(Rc::new(format!("{}({})", e.name(), arg).into()))
+        })
+    }
+}
+
+/// Return the current repr of a nominal exception's fields or builtin arguments.
+///
+/// # Safety
+/// The caller roots an exception and checks pending state if its method raises.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_repr(value: *const Object) -> *const Str {
+    // SAFETY: the caller roots the exception until its method returns.
+    unsafe { display(value, true) }
+}
+
 /// Constructs an owned builtin exception from zero or one string argument.
 /// A null message means zero arguments; KeyError's one-string form uses repr.
 ///
@@ -1040,7 +1175,7 @@ pub unsafe extern "C" fn imre_named_exception_new(
 pub unsafe extern "C" fn imre_exception_new(kind: u32, message: *const Str) -> *const Object {
     let kind = Kind::from_raw(kind);
     let payload = if message.is_null() {
-        Payload::Message(Rc::new(Str::new("")))
+        Payload::Empty
     } else if kind == Kind::KeyError {
         // SAFETY: the caller roots the immutable string argument.
         Payload::Key(unsafe { WordKind::new(3).acquire(message as usize) })
@@ -1071,23 +1206,18 @@ pub unsafe extern "C" fn imre_exception_release(value: *const Object) {
 /// `value` is a rooted exception and `expected_kind` is a supported builtin kind.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_exception_matches(value: *const Object, expected_kind: u32) -> u32 {
-    if expected_kind >= 256 {
-        // SAFETY: every named class descriptor and its ancestor slice have static compiler-owned storage.
-        return u32::from(unsafe {
-            object(value).0.with(|s| {
-                s.exception().named().is_some_and(|d| {
-                    std::slice::from_raw_parts(d.kinds, d.count).contains(&expected_kind)
-                })
-            })
-        });
+    // SAFETY: descriptors have static storage; the compiler validates their MRO.
+    unsafe {
+        object(value).0.with(|storage| {
+            let e = storage.exception();
+            if let Some(d) = e.named()
+                && std::slice::from_raw_parts(d.kinds, d.count).contains(&expected_kind)
+            {
+                return 1;
+            }
+            u32::from(expected_kind < 256 && e.kind.matches(Kind::from_raw(expected_kind)))
+        })
     }
-    let expected = Kind::from_raw(expected_kind);
-    // SAFETY: the rooted exception is read without reentry or escaped references.
-    u32::from(unsafe {
-        object(value)
-            .0
-            .with(|storage| storage.exception_kind().matches(expected))
-    })
 }
 
 /// Returns an owned string containing Python's str(exception) representation.
@@ -1097,7 +1227,7 @@ pub unsafe extern "C" fn imre_exception_matches(value: *const Object, expected_k
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_exception_message(value: *const Object) -> *const Str {
     // SAFETY: the clone owns its immutable message independently of the exception.
-    Rc::into_raw(unsafe { object(value).0.with(Storage::exception_message) })
+    unsafe { display(value, false) }
 }
 
 /// Attaches an explicit cause before publishing a fresh exception and returns
@@ -1245,15 +1375,20 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
     let mut current = Some(pending.clone());
     while let Some(exception) = current {
         // SAFETY: the current owner roots the exception; only owned data escapes.
-        let (name, message, cause) = unsafe {
+        let (name, cause) = unsafe {
             exception.0.with(|storage| {
-                let exception = storage.exception();
-                (
-                    exception.name().to_owned(),
-                    storage.exception_message(),
-                    exception.cause().cloned(),
-                )
+                let e = storage.exception();
+                (e.name().to_owned(), e.cause().cloned())
             })
+        };
+        // SAFETY: the local owner outlives custom formatting and any resulting error.
+        let message = unsafe { display(Rc::as_ptr(&exception), false) };
+        let message = if message.is_null() {
+            drop(take_pending());
+            Rc::new(Str::new("<exception str() failed>"))
+        } else {
+            // SAFETY: display transfers one owned string.
+            unsafe { Rc::from_raw(message) }
         };
         chain.push((name, message));
         current = cause;

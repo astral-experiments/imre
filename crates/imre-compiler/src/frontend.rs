@@ -528,7 +528,9 @@ pub(crate) fn lower_with_owners(
                 }
             } else if method.name.as_str() == "__post_init__" && signature.returns != Type::None {
                 return Err(module.error(&method, "__post_init__ must return None"));
-            } else if method.name.as_str() == "__str__" && signature.returns != Type::Str {
+            } else if matches!(method.name.as_str(), "__str__" | "__repr__")
+                && signature.returns != Type::Str
+            {
                 return Err(module.error(&method, "__str__ must return str"));
             }
             if keyword_copy {
@@ -1117,7 +1119,7 @@ fn signature(
         .transpose()?
         .or_else(|| match (receiver, function.name.as_str()) {
             (Some(_), "__init__" | "__post_init__") => Some(Type::None),
-            (Some(_), "__str__") => Some(Type::Str),
+            (Some(_), "__str__" | "__repr__") => Some(Type::Str),
             _ => None,
         });
     let id = inference.register(parameter_types, returns);
@@ -1231,7 +1233,11 @@ fn annotation_at(
     match graph.resolve_type(module, expression) {
         Some(Binding::Definition(definition)) => {
             if classes.exceptions.contains_key(&definition) {
-                return Ok(Type::Exception);
+                return Ok(classes
+                    .ids
+                    .get(&definition)
+                    .copied()
+                    .map_or(Type::Exception, Type::NamedException));
             }
             if let Some(&id) = classes.ids.get(&definition) {
                 return Ok(classes.instance(id));
@@ -1745,6 +1751,19 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// Field accesses and Python methods use the existing fixed record machinery;
+    /// every other reference retains the canonical exception object.
+    fn exception_record(value: Expr) -> Expr {
+        if let Type::NamedException(class) = value.ty {
+            Expr {
+                ty: Type::Class(class),
+                kind: ExprKind::Builtin(Builtin::ExceptionRecord, vec![value]),
+            }
+        } else {
+            value
+        }
+    }
+
     /// Resolves a fixed field without evaluating its receiver more than once.
     fn field(&mut self, attribute: &ast::ExprAttribute) -> Result<(Expr, usize, Type), String> {
         let receiver = self.expr(&attribute.value)?;
@@ -1756,6 +1775,7 @@ impl<'a> Checker<'a> {
         attribute: &ast::ExprAttribute,
         receiver: Expr,
     ) -> Result<(Expr, usize, Type), String> {
+        let receiver = Self::exception_record(receiver);
         if let Type::Class(class) = receiver.ty {
             let declaration = &self.classes.declarations.definitions[class];
             if self.classes.parsers.namespace(class) {
@@ -1886,7 +1906,9 @@ impl<'a> Checker<'a> {
             };
             return self.coerce(literals::view(value, string), expected, node);
         }
-        if value.ty == Type::TimeoutExpired && expected == Type::Exception {
+        if matches!(value.ty, Type::TimeoutExpired | Type::NamedException(_))
+            && expected == Type::Exception
+        {
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(
@@ -3483,7 +3505,12 @@ impl<'a> Checker<'a> {
                         };
                         return Ok((vec![Statement::Raise(Some(member))], false));
                     }
-                    if !matches!(raised.kind, ExprKind::Exception { .. }) {
+                    if !matches!(
+                        raised.kind,
+                        ExprKind::Exception { .. }
+                            | ExprKind::Builtin(Builtin::NamedException { .. }, _)
+                    ) && !matches!(&raised.kind,ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionView),args) if matches!(args[0].kind,ExprKind::Builtin(Builtin::NamedException{..},_)))
+                    {
                         return Err(error(
                             self.source,
                             raise,
@@ -3619,6 +3646,13 @@ impl<'a> Checker<'a> {
     /// Class-form raises construct a new instance, just like an explicit call.
     fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
         if let Some(kind) = self.exception_category(value) {
+            if self.class_reference(value).is_some() {
+                return Err(error(
+                    self.source,
+                    value,
+                    "raise a constructed exception payload with its required arguments",
+                ));
+            }
             if kind == 32 {
                 return Ok(Expr {
                     ty: Type::Exception,
@@ -3750,6 +3784,17 @@ impl<'a> Checker<'a> {
                     let slot = self.declare(name.as_str(), Type::Exception, handler)?;
                     self.assigned.insert(slot);
                     self.narrowed.remove_mut(&slot);
+                    if let [kind] = kinds.as_slice()
+                        && let Some((&def, _)) = self
+                            .classes
+                            .declarations
+                            .exceptions
+                            .iter()
+                            .find(|(_, id)| *id == kind)
+                        && let Some(&class) = self.classes.declarations.ids.get(&def)
+                    {
+                        self.narrowed.insert_mut(slot, Type::NamedException(class));
+                    }
                     if !kinds.is_empty() && kinds.iter().all(|kind| *kind == 27) {
                         self.narrowed.insert_mut(slot, Type::TimeoutExpired);
                     }
@@ -4796,6 +4841,33 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Type::NamedException(class) = receiver.ty
+                    && attribute.attr.as_str() == "args"
+                {
+                    let message = Expr {
+                        ty: self.types.optional(Type::Str),
+                        kind: ExprKind::Field(
+                            Box::new(Self::exception_record(receiver)),
+                            self.classes.fields[class].len() - 1,
+                        ),
+                    };
+                    return Ok(Expr {
+                        ty: self.types.tuple(vec![Type::Str]),
+                        kind: ExprKind::Tuple(vec![Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Unwrap(Box::new(message)),
+                        }]),
+                    });
+                }
+                let receiver = if matches!(
+                    attribute.attr.as_str(),
+                    "__cause__" | "__suppress_context__"
+                ) && matches!(receiver.ty, Type::NamedException(_))
+                {
+                    self.coerce(receiver, Type::Exception, attribute)?
+                } else {
+                    Self::exception_record(receiver)
+                };
                 if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
                     match attribute.attr.as_str() {
                         "name" => {
@@ -5378,7 +5450,33 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if matches!(receiver.ty, Type::NamedException(_))
+                && matches!(attribute.attr.as_str(), "__init__" | "__post_init__")
+            {
+                return Err(error(
+                    self.source,
+                    call,
+                    "reinitializing an existing exception payload is unsupported",
+                ));
+            }
+            let receiver = Self::exception_record(receiver);
             if let Type::Class(class) = receiver.ty {
+                if let Some(target) = self.classes.declarations.definitions[class]
+                    .exception_aliases
+                    .get(attribute.attr.as_str())
+                    .and_then(|def| self.classes.declarations.ids.get(def))
+                    .copied()
+                {
+                    let made = self.construct(call, target)?;
+                    return Ok(Expr {
+                        ty: made.ty,
+                        kind: ExprKind::Scope {
+                            body: vec![Statement::Expr(receiver)],
+                            value: Box::new(made),
+                            clear: Vec::new(),
+                        },
+                    });
+                }
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
             if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty
@@ -5937,7 +6035,10 @@ impl<'a> Checker<'a> {
         }
         if name.id == "print"
             && args.len() == 1
-            && matches!(args[0].ty, Type::Exception | Type::TimeoutExpired)
+            && matches!(
+                args[0].ty,
+                Type::Exception | Type::NamedException(_) | Type::TimeoutExpired
+            )
         {
             return Ok(Expr {
                 ty: Type::None,
@@ -5948,6 +6049,15 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::ExceptionMessage, args),
                     }],
                 ),
+            });
+        }
+        if name.id == "repr"
+            && args.len() == 1
+            && matches!(args[0].ty, Type::Exception | Type::NamedException(_))
+        {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::ExceptionRepr, args),
             });
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
@@ -6004,6 +6114,7 @@ impl<'a> Checker<'a> {
                             | Type::Bytes
                             | Type::None
                             | Type::Exception
+                            | Type::NamedException(_)
                             | Type::TimeoutExpired
                     ) =>
             {

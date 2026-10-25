@@ -34,6 +34,8 @@ pub(crate) enum Type {
     Iterator,
     /// A sealed builtin exception with an immutable category and owned payload.
     Exception,
+    /// An exception object known to own the given fixed payload layout.
+    NamedException(usize),
     /// An owned view of the immutable None, bool, int or str in SystemExit.code.
     ExitCode,
     /// A proved catch-only timeout with readonly float and nullable bytes fields.
@@ -132,7 +134,7 @@ impl std::fmt::Display for Type {
             Self::ByteOutput => "private byte output",
             Self::None => "None",
             Self::Iterator => "iterator",
-            Self::Exception => "Exception",
+            Self::Exception | Self::NamedException(_) => "Exception",
             Self::ExitCode => "SystemExit.code",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::TextIO => "typing.TextIO",
@@ -476,6 +478,17 @@ pub(crate) enum Builtin {
     IntSignAsFloat,
     Bool,
     Str,
+    /// Wrap a fixed record after constructor/post-init, preserving exception identity.
+    NamedException {
+        kind: u32,
+        message_field: usize,
+        text: Option<usize>,
+        repr: Option<usize>,
+        dataclass_repr: bool,
+    },
+    /// Borrowing a payload from its exception returns one owned record reference.
+    ExceptionRecord,
+    ExceptionRepr,
     /// Python representation of a value with a fully known storage shape.
     Repr,
     Len,
@@ -957,7 +970,10 @@ impl InstanceType {
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
             Self::Tuple => matches!(ty, Type::Tuple(_)),
-            Self::Exception(_) => matches!(ty, Type::Exception | Type::TimeoutExpired),
+            Self::Exception(_) => matches!(
+                ty,
+                Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+            ),
         }
     }
 }

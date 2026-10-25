@@ -381,6 +381,7 @@ fn namespace_class(
     let class = classes.definitions.len();
     layouts.push(fields.iter().map(|field| field.ty).collect());
     classes.definitions.push(Class {
+        exception_aliases: Default::default(),
         name: "Namespace".into(),
         definition,
         node: ast::StmtClassDef {

@@ -47,6 +47,7 @@ pub(crate) struct Class {
     pub(crate) toml_hash: bool,
     pub(crate) dataclass: Option<DataclassOptions>,
     pub(crate) enum_members: Option<enums::Members>,
+    pub(crate) exception_aliases: HashMap<String, DefinitionId>,
     pub(crate) generated_initializer: bool,
     /// Index into `methods`, including the initializer itself.
     pub(crate) initializer: Option<usize>,
@@ -78,8 +79,8 @@ impl Classes {
 
     /// Assigns nominal identities in module and source order, independently of imports' aliases.
     pub(crate) fn collect(graph: &SourceGraph) -> Result<Self, String> {
-        let (exceptions, exception_declarations) = exceptions::collect(graph)?;
-        let mut nodes = Vec::new();
+        let resolved = exceptions::collect(graph)?;
+        let mut source_nodes = Vec::new();
         let mut ids = HashMap::new();
         for (module_id, module) in graph.modules.iter().enumerate() {
             for (statement, node) in module.parsed.syntax().body.iter().enumerate() {
@@ -88,20 +89,51 @@ impl Classes {
                         module: module_id,
                         statement,
                     };
-                    if !graph.includes(definition) || exceptions.contains_key(&definition) {
+                    if !graph.includes(definition)
+                        || (resolved.ids.contains_key(&definition)
+                            && !resolved.layouts.contains(&definition))
+                    {
                         continue;
                     }
-                    ids.insert(definition, nodes.len());
-                    nodes.push((definition, node));
+                    ids.insert(definition, source_nodes.len());
+                    let mut record = std::borrow::Cow::Borrowed(node);
+                    if resolved.layouts.contains(&definition) {
+                        // Exception inheritance is resolved above; only the additional fixed
+                        // fields and methods take part in record layout and initialization.
+                        record.to_mut().arguments = None;
+                    }
+                    source_nodes.push((definition, record));
                 }
             }
         }
-        let definitions = inheritance::resolve(graph, &nodes, &ids)?;
+        let nodes = source_nodes
+            .iter()
+            .map(|(def, node)| (*def, node.as_ref()))
+            .collect::<Vec<_>>();
+        let mut definitions = inheritance::resolve(graph, &nodes, &ids, &resolved)?;
+        for def in &resolved.layouts {
+            let c = &mut definitions[ids[def]];
+            // This ABI slot is not a Python identifier, constructor parameter,
+            // dataclass comparison field, or repr field. Zero means no argument.
+            let annotation = ruff_python_parser::parse_expression("str | None")
+                .expect("static annotation")
+                .expr()
+                .clone();
+            c.fields.push(Field {
+                module: def.module,
+                name: "<exception message>".into(),
+                annotation,
+                default: None,
+                kw_only: false,
+                repr: false,
+                compare: false,
+            });
+        }
         Ok(Self {
             definitions,
             ids,
-            exceptions,
-            exception_declarations,
+            exceptions: resolved.ids,
+            exception_declarations: resolved.named,
         })
     }
 }
@@ -112,6 +144,8 @@ fn collect_class(
     definition: DefinitionId,
     node: &ast::StmtClassDef,
     base: Option<(usize, &Class)>,
+    exception_layout: bool,
+    exceptions: &HashMap<DefinitionId, u32>,
 ) -> Result<Class, String> {
     let is_enum = node.arguments.as_ref().is_some_and(|arguments| {
         matches!(arguments.args.as_ref(), [base] if matches!(graph.resolve(definition.module, base), Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))))
@@ -151,6 +185,8 @@ fn collect_class(
     let mut abstract_methods = base
         .map(|(_, parent)| parent.abstract_methods.clone())
         .unwrap_or_default();
+    let mut exception_aliases =
+        base.map_or_else(HashMap::new, |(_, b)| b.exception_aliases.clone());
     let mut hash = None;
     let mut fields = base
         .map(|(_, base)| base.fields.clone())
@@ -270,6 +306,7 @@ fn collect_class(
                 if name.starts_with("__")
                     && !matches!(name, "__init__" | "__str__" | "__bool__" | "__iter__")
                     && !(name == "__post_init__" && dataclass.is_some())
+                    && !(name == "__repr__" && exception_layout)
                 {
                     return Err(
                         module.error(method, "unsupported special method on a fixed-layout class")
@@ -304,10 +341,12 @@ fn collect_class(
                 {
                     return Err(module.error(method, "a property getter must take only self"));
                 }
-                if matches!(name, "__str__" | "__post_init__" | "__bool__" | "__iter__")
-                    && (kind != MethodKind::Instance
-                        || method.parameters.len() != 1
-                        || first.is_none_or(|parameter| parameter.default.is_some()))
+                if matches!(
+                    name,
+                    "__str__" | "__repr__" | "__post_init__" | "__bool__" | "__iter__"
+                ) && (kind != MethodKind::Instance
+                    || method.parameters.len() != 1
+                    || first.is_none_or(|parameter| parameter.default.is_some()))
                 {
                     return Err(module.error(
                         method,
@@ -323,6 +362,18 @@ fn collect_class(
                 methods.push(method.clone());
                 method_kinds.push(kind);
                 class_bindings.insert(name.to_owned());
+            }
+            ast::Stmt::Assign(assign)
+                if let [ast::Expr::Name(name)] = assign.targets.as_slice()
+                    && let Some(Binding::Definition(target)) =
+                        graph.resolve(definition.module, &assign.value)
+                    && exceptions.contains_key(&target) =>
+            {
+                if !names.insert(name.id.to_string()) {
+                    return Err(module.error(name, "duplicate class binding"));
+                }
+                class_bindings.insert(name.id.to_string());
+                exception_aliases.insert(name.id.to_string(), target);
             }
             ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {}
             ast::Stmt::Pass(_) => {}
@@ -437,6 +488,7 @@ fn collect_class(
         abc,
         dataclass,
         enum_members,
+        exception_aliases,
         generated_initializer,
         initializer,
     })

@@ -6,12 +6,14 @@ pub(super) fn resolve(
     graph: &SourceGraph,
     nodes: &[(DefinitionId, &ast::StmtClassDef)],
     ids: &HashMap<DefinitionId, usize>,
+    exceptions: &exceptions::Declarations,
 ) -> Result<Vec<Class>, String> {
     fn build(
         id: usize,
         graph: &SourceGraph,
         nodes: &[(DefinitionId, &ast::StmtClassDef)],
         ids: &HashMap<DefinitionId, usize>,
+        exceptions: &exceptions::Declarations,
         classes: &mut [Option<Class>],
         path: &mut Vec<usize>,
     ) -> Result<(), String> {
@@ -46,7 +48,7 @@ pub(super) fn resolve(
                             );
                         }
                         let next = ids[&source];
-                        build(next, graph, nodes, ids, classes, path)?;
+                        build(next, graph, nodes, ids, exceptions, classes, path)?;
                         if let Some(first) = base {
                             let parent: &Class = classes[first].as_ref().unwrap();
                             if !parent.bases.contains(&next) {
@@ -73,6 +75,8 @@ pub(super) fn resolve(
             definition,
             node,
             base.map(|i| (i, classes[i].as_ref().unwrap())),
+            exceptions.layouts.contains(&definition),
+            &exceptions.ids,
         )?);
         path.pop();
         Ok(())
@@ -80,7 +84,7 @@ pub(super) fn resolve(
     let mut classes = (0..nodes.len()).map(|_| None).collect::<Vec<_>>();
     let mut path = Vec::new();
     for id in 0..nodes.len() {
-        build(id, graph, nodes, ids, &mut classes, &mut path)?;
+        build(id, graph, nodes, ids, exceptions, &mut classes, &mut path)?;
     }
     Ok(classes.into_iter().map(Option::unwrap).collect())
 }
