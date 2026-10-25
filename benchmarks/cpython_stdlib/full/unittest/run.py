@@ -49,6 +49,7 @@ ASSERTIONS = {
     "testAssertGreater": "assertGreater", "testAssertGreaterEqual": "assertGreaterEqual",
     "testNotEqual": "assertNotEqual", "test_baseAssertEqual": "_baseAssertEqual",
     "testAssertRaises": "assertRaises", "testAssertDictEqual": "assertDictEqual",
+    "testAssertIsNone": "assertIsNone", "testAssertIsNotNone": "assertIsNotNone",
 }
 # These CPython passes still fail at native compilation. Keep their first
 # precise source diagnostic in the report; a different failure stops the gate.
@@ -115,6 +116,11 @@ def check_assertion(binary, operation, level):
                     invoke([*(len(d) for d in operands),
                             *(s for d in operands for pair in d.items() for s in pair)], msg)
                     return
+                if operation in {"assertIsNone", "assertIsNotNone"}:
+                    if len(operands) != 1 or (operands[0] is not None and type(operands[0]) is not str):
+                        raise TypeError("unexpected native None assertion operand")
+                    invoke(("none",) if operands[0] is None else ("str", operands[0]), msg)
+                    return
                 unary = operation in {"assertTrue", "assertFalse"}
                 if len(operands) != (1 if unary else 2) or not all(
                     type(value) is (bool if unary else int) for value in operands
@@ -143,7 +149,7 @@ def run(args, level, root):
     verify_source_modules(lang, root)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
     for name in ["truth_protocol", "equality_protocol", "membership", "mapping_protocol", "boolean_equality", "mock_protocol", "mock_reset", "mock_globals", "callable_protocol", "bound_assertions",
-                 "callable_binding", "context_regex", "loader_names", *("context_" + family for family in families)]:
+                 "callable_binding", "context_regex", "loader_names", "none_assertions", *("context_" + family for family in families)]:
         control = root / name
         if (HERE / name).is_dir():
             shutil.copytree(HERE / name, control)
@@ -176,6 +182,7 @@ def run(args, level, root):
         ("test_result", "Test_TestResult", "test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun"),
         ("test_case", "Test_TestCase", "testAssertRaisesNoExceptionType", "unittest.TestCase.assertRaises"),
         ("test_case", "Test_TestCase", "testAssertRaisesCallable", "unittest.TestCase.assertRaises"),
+        ("test_case", "Test_TestCase", "testAssertIsNone", "unittest.TestCase.assertIsNone and assertIsNotNone"),
         ("test_assertions", "Test_Assertions", "test_assertRaises", "unittest.TestCase.assertRaises"),
         *(("test_case", "Test_TestCase", method, "unittest.TestCase string equality and failure messages")
           for method in ("testAssertEqualSingleLine", "testAssertEqualwithEmptyString",
