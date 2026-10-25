@@ -1,0 +1,266 @@
+name: Verify starred tuples on the resolved main batch
+permissions:
+  contents: read
+jobs:
+  iterator-audit:
+    runs-on: github-ubuntu-24.04-x86_64-4
+    timeout-minutes: 50
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        fetch-depth: 3
+        persist-credentials: false
+    - name: Verify tested source matches the intended feature tree
+      run: |
+        git rev-parse HEAD^ HEAD
+        git diff --exit-code HEAD^ HEAD -- crates Cargo.lock Cargo.toml
+        git checkout --detach 37e8af7f5f3f751fc1c5e041356f003af00e7139
+    - id: gil
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      with:
+        python-version: 3.14.5
+    - name: Install Clang 18
+      run: |
+        if ! command -v clang-18 >/dev/null; then sudo apt-get update && sudo apt-get install -y clang-18; fi
+    - name: Build the combined compiler and runtime
+      id: build
+      run: |
+        cargo fmt --all -- --check
+        cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        repository: python/cpython
+        ref: 5607950ef232dad16d75c0cf53101d9649d89115
+        path: .cpython-stdlib-reference
+        sparse-checkout: |
+          Lib
+          Modules/itertoolsmodule.c
+        persist-credentials: false
+    - name: Compare four native tuple executions and the untouched original entry points
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: |
+        dir=benchmarks/cpython_stdlib/full/itertools
+        python3 -B "$dir/tuple_spread_audit.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/tuple-spreads.json"
+        python3 -c 'import base64,gzip,pathlib,sys; print("ITERTOOLS_TUPLE_RECEIPT="+base64.b64encode(gzip.compress(pathlib.Path(sys.argv[1]).read_bytes(),mtime=0)).decode())' "$RUNNER_TEMP/tuple-spreads.json"
+    - name: Compare native tuple ownership under ASan and LSan
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: |
+        src=benchmarks/cpython_stdlib/full/itertools/tuple_spreads.py
+        python3 -B "$src" > "$RUNNER_TEMP/starred-ref"
+        for opt in 0 3; do
+          target/debug/imre build "$src" --quiet --no-cache --sanitize --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" -o "$RUNNER_TEMP/starred"
+          ASAN_OPTIONS=detect_leaks=1 "$RUNNER_TEMP/starred" > "$RUNNER_TEMP/starred-out"
+          diff -u "$RUNNER_TEMP/starred-ref" "$RUNNER_TEMP/starred-out"
+        done
+    - name: Build both unchanged itertools files in all four modes
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: |
+        dir=benchmarks/cpython_stdlib/full/itertools
+        python3 -B "$dir/whole_files.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/whole-files.json"
+        python3 -c 'import json,sys; a,b=(json.load(open(p)) for p in sys.argv[1:]); assert a["suites"] == b["suites"]; print("ITERTOOLS_WHOLE_FILES="+json.dumps(b,separators=(",",":")))' "$dir/whole-files-linux.json" "$RUNNER_TEMP/whole-files.json"
+    - name: Test the runtime lane's packed iterator effects repair
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: |
+        cargo test --locked -j 2 -p imre-compiler --lib effects::tests::local_and_final_analysis_agree_on_packed_list_allocations -- --exact
+    - name: Retain packed struct values across a starred islice and list clear
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      env:
+        GIL_PYTHON: ${{ steps.gil.outputs.python-path }}
+      run: |
+        src="$RUNNER_TEMP/starred-packed.py"
+        cat > "$src" <<'STARRED_PACKED_PY'
+        """Combine packed list reads, a shared islice, and fixed and runtime-sized tuple indexing."""
+        from imre import struct
+        from itertools import islice
+
+
+        @struct
+        class Point:
+            x: float
+            active: bool
+
+
+        def exercise(index: int) -> None:
+            rows = [Point(-0.0, False)] * 128
+            rows[63] = Point(63.0, True)
+            rows[65] = Point(65.0, True)
+            source = islice(rows, 63, 67)
+            first = next(source)
+            rows[64] = Point(64.5, True)
+            gathered = (first, *source, Point(-1.0, True))
+            rows[65] = Point(999.0, False)
+            rows.clear()
+            print(len(gathered))
+            for point in gathered:
+                print(point.x)
+                print(point.active)
+            print(gathered[index].x)
+            fixed = (gathered[0], gathered[-1])
+            print(fixed[index].x)
+            print(len((*source,)))
+            try:
+                print(gathered[100].x)
+            except IndexError as exc:
+                print(str(exc))
+
+
+        exercise(1)
+        exercise(-1)
+        STARRED_PACKED_PY
+        PYTHONPATH="$PWD/stdlib" "$GIL_PYTHON" -B "$src" > "$RUNNER_TEMP/packed-ref"
+        test "$(wc -l < "$RUNNER_TEMP/packed-ref")" -eq 30
+        for opt in 0 3; do
+          for mode in ordinary reachable; do
+            flags=(); if [[ "$mode" == reachable ]]; then flags=(--reachable-only); fi
+            target/debug/imre build "$src" --quiet --no-cache --opt-level "$opt" --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 "${flags[@]}" -o "$RUNNER_TEMP/packed-native"
+            "$RUNNER_TEMP/packed-native" > "$RUNNER_TEMP/packed-out" 2> "$RUNNER_TEMP/packed-err"
+            diff -u "$RUNNER_TEMP/packed-ref" "$RUNNER_TEMP/packed-out"
+            test ! -s "$RUNNER_TEMP/packed-err"
+          done
+        done
+    - name: Verify the resolved tuple and rmtree CI steps
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      env:
+        GIL_PYTHON: ${{ steps.gil.outputs.python-path }}
+      run: |
+        for script in tuple_spread_audit.py rmtree_identity_controls.py whole_files.py; do
+          grep -F "$script" .github/workflows/ci.yml
+        done
+        "$GIL_PYTHON" -B benchmarks/cpython_stdlib/full/shutil/rmtree_identity_controls.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/rmtree-identity.json"
+    - name: Compare pass_fds warning timing on the resolved runtime
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      env:
+        GIL_PYTHON: ${{ steps.gil.outputs.python-path }}
+      run: |
+        src="$PWD/tests/fixtures/processes/pass_fds_warning.py"
+        tmp="$RUNNER_TEMP/itertools-pass-fds"
+        mkdir -p "$tmp/reference"
+        (cd "$tmp/reference" && "$GIL_PYTHON" -I -B "$src" "$GIL_PYTHON") > "$tmp/reference.out" 2> "$tmp/reference.err"
+        test -s "$tmp/reference.out"
+        for opt in 0 3; do
+          for mode in ordinary reachable; do
+            flags=(); if [[ "$mode" == reachable ]]; then flags=(--reachable-only); fi
+            target/debug/imre build "$src" --quiet --no-cache --opt-level "$opt" --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 "${flags[@]}" -o "$tmp/program"
+            mkdir "$tmp/$mode-$opt"
+            (cd "$tmp/$mode-$opt" && "$tmp/program" "$GIL_PYTHON") > "$tmp/out" 2> "$tmp/err"
+            diff -u "$tmp/reference.out" "$tmp/out"
+            diff -u "$tmp/reference.err" "$tmp/err"
+            echo "$mode O$opt: warning, descriptor and child side effects matched"
+          done
+        done
+    - name: Compare class, exception, iterator and index behavior at O0 and O3
+      run: |
+        mkdir -p "$RUNNER_TEMP/drain-results"
+        cat > "$RUNNER_TEMP/batch.py" <<'CROSS_FIXTURE'
+        from dataclasses import dataclass, field
+        from itertools import islice
+
+        @dataclass(slots=True)
+        class Ticket:
+            value: int
+            hidden: int = field(repr=False, compare=False)
+
+        class Envelope(Exception):
+            def __init__(self, first, *rest):
+                self.first = first
+                super().__init__(first, *rest)
+
+        class Passenger(Envelope):
+            pass
+
+        def carry(value: object) -> object:
+            return value
+
+        def examine(error: BaseException, ticket: Ticket) -> None:
+            args = error.args
+            print(args is error.args)
+            item = args[0]
+            print(item is ticket)
+            print(isinstance(item, Ticket))
+            print(repr(item))
+            print(repr(args))
+
+        def run(tickets: list[Ticket]) -> None:
+            packed = (*islice(tickets, len(tickets)),)
+            error = Passenger(carry(packed[0]), carry(packed[-1]))
+            tickets.clear()
+            packed[0].value = 17
+            try:
+                raise error
+            except Envelope as exc:
+                print(exc is error)
+                print(exc.first is packed[0])
+                examine(exc, packed[0])
+            print(packed[0] == Ticket(17, 999))
+            print(repr(packed))
+
+        run([Ticket(1, 10), Ticket(2, 20)])
+        CROSS_FIXTURE
+        python3 -B - <<'CROSS_CHECK'
+        from pathlib import Path
+        import hashlib, json, os, subprocess, sys
+        tmp=Path(os.environ["RUNNER_TEMP"])
+        sources=[tmp/"batch.py",Path("benchmarks/cpython_stdlib/full/importlib/controls.py"),*(Path("tests/fixtures")/s for s in ("exceptions/inherited_payload.py","exceptions/boxed_payload.py","exceptions/generic_args_records.py","dataclasses/boxed_records.py","dataclasses/value_struct.py","paths/fnmatch_py314.py","tuple_keys/sorting.py"))]
+        rows=[]
+        for src in sources:
+            oracle=[sys.executable,"-I","-B",src]
+            if src.name=="value_struct.py":
+                oracle=[sys.executable,"-I","-B","-c","import runpy,sys;sys.path.insert(0,sys.argv[1]);runpy.run_path(sys.argv[2],run_name='__main__')",Path("stdlib").resolve(),src]
+            want=subprocess.run(oracle,capture_output=True,check=True)
+            for opt in ("0","3"):
+                for reach in (False,True):
+                    cmd=["target/debug/imre","build",str(src),"--quiet","--no-cache","--opt-level",opt,"--runtime","target/debug/libimre_runtime.a","--clang","/usr/bin/clang-18","-o",tmp/"control"]
+                    if reach: cmd.append("--reachable-only")
+                    built=subprocess.run(cmd,capture_output=True)
+                    got=subprocess.run([tmp/"control"],capture_output=True) if not built.returncode else built
+                    same=(got.returncode,got.stdout,got.stderr)==(want.returncode,want.stdout,want.stderr)
+                    row=dict(source=src.name,level=opt,reachable=reach,matched=same,lines=len(want.stdout.splitlines()),stdout_sha256=hashlib.sha256(want.stdout).hexdigest())
+                    if not same: row.update(native_exit=got.returncode,native_stdout=got.stdout.decode(errors="replace"),native_stderr=got.stderr.decode(errors="replace"),reference_stderr=want.stderr.decode(errors="replace"))
+                    rows.append(row); print(row,flush=True)
+        (tmp/"drain-results/controls.json").write_text(json.dumps(rows,indent=2)+"\n")
+        assert all(row["matched"] for row in rows)
+        CROSS_CHECK
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+    - name: Check refused allocations and regenerate the owned support table row
+      run: |
+        mkdir -p "$RUNNER_TEMP/drain-results"
+        git log -1 --format='%H %T %P' > "$RUNNER_TEMP/drain-results/source.txt"
+        sha256sum target/debug/imre target/debug/libimre_runtime.a >> "$RUNNER_TEMP/drain-results/source.txt"
+        for f in tuple-spreads.json whole-files.json rmtree-identity.json; do if [[ -f "$RUNNER_TEMP/$f" ]]; then cp "$RUNNER_TEMP/$f" "$RUNNER_TEMP/drain-results"; fi; done
+        cp docs/stdlib.md "$RUNNER_TEMP/drain-results/stored.md"
+        python3 -B benchmarks/cpython_stdlib/full/support_table.py --imre target/debug/imre
+        cp docs/stdlib.md "$RUNNER_TEMP/drain-results/regenerated.md"
+        python3 -B - <<'PY'
+        import difflib,os,sys
+        from pathlib import Path
+        from types import SimpleNamespace
+        p=Path(os.environ['RUNNER_TEMP'])/'drain-results'
+        a,b=((p/n).read_text().splitlines(True) for n in ('stored.md','regenerated.md'))
+        diff=''.join(difflib.unified_diff(a,b)); (p/'support-table.diff').write_text(diff)
+        def row(lines): return next(l for l in lines if l.startswith('| '+chr(96)+'itertools'+chr(96)+' |'))
+        print(row(b),diff)
+        assert row(a)==row(b) and '0 / 138' in row(b) and row(b).rstrip().endswith('| 11 | 0 |')
+        sys.path.insert(0,'tests')
+        import comparison_allocation
+        directory=p.parent/'refused-allocation'; directory.mkdir()
+        args=SimpleNamespace(compiler=Path('target/debug/imre'),runtime=Path('target/debug/libimre_runtime.a'),clang='/usr/bin/clang-18',lto_linker=None,python=sys.executable,opt_levels=('0','3'))
+        cases=comparison_allocation.check(args,directory)
+        print('refusal controls:',cases)
+        (p/'allocation.txt').write_text(str(cases)+'\n')
+        PY
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+    - name: Save integrated results
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: itertools-958-drain-integration
+        path: ${{ runner.temp }}/drain-results
+        if-no-files-found: error
+        retention-days: 30
+'on':
+  push:
+    branches:
+    - codex/itertools-starred-merge-check
