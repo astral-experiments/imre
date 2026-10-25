@@ -1,0 +1,321 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "cases": {
+    "test.test_os.BlockingTests.test_blocking": {
+      "method_sha256": "4fc376b9f80a23d284c6e1a510869f76c13516ad2a6ea9cea0b29cd96f57808d",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "assertions": 3,
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FDInheritanceTests.test_dup": {
+      "method_sha256": "d168a9630a5de4d78ccccc45f803a293c2e0578a97ffa0a2c74adfdb0228ace5",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "assertions": 1,
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FDInheritanceTests.test_dup2": {
+      "method_sha256": "802fa90f6d33321cf1e4d43d78d8472eace378cfe7a4557d08446047488d1caf",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "assertions": 4,
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FDInheritanceTests.test_dup_standard_stream": {
+      "method_sha256": "398f1b4663aa408684cc8ba34f2481fa3546942fceee33a7e52520bebdaa0b78",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "assertions": 1,
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FDInheritanceTests.test_get_inheritable_cloexec": {
+      "status": "host_driven_native",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "native_calls": [
+        "open",
+        "get_inheritable",
+        "get_inheritable",
+        "close"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FDInheritanceTests.test_get_set_inheritable": {
+      "method_sha256": "26ab5dee97173f896997144e7c1e0c1c963e75f02e39fa3ed4eb8a7ae52c71ac",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "assertions": 2,
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FDInheritanceTests.test_get_set_inheritable_badf": {
+      "status": "host_driven_native",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "native_calls": [
+        "get_inheritable",
+        "set_inheritable",
+        "set_inheritable"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FDInheritanceTests.test_get_set_inheritable_o_path": {
+      "status": "host_driven_native",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "native_calls": [
+        "open",
+        "get_inheritable",
+        "set_inheritable",
+        "get_inheritable",
+        "set_inheritable",
+        "get_inheritable",
+        "close"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FDInheritanceTests.test_open": {
+      "method_sha256": "6729ab052a7edec7e3f83c5be1095fed75cc20bc62d6d9413f7f2238a2b8be24",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "assertions": 1,
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FDInheritanceTests.test_pipe": {
+      "method_sha256": "687ce5851a375bc10fb4c3a772060a842c4a675268429dd4e4ff6fbd40c9181d",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "assertions": 2,
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FDInheritanceTests.test_set_inheritable_cloexec": {
+      "status": "host_driven_native",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "native_calls": [
+        "open",
+        "set_inheritable",
+        "close"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FileTests.test_open_keywords": {
+      "method_sha256": "2feeb7c2109cf8b74c991c7226b142c52df40b8b63e0f27161daf98581b3b71a",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "FileTests.setUp and tearDown",
+        "test_os.tearDownModule"
+      ],
+      "assertions": 0,
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.TestInvalidFD.test_blocking": {
+      "status": "host_driven_native",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "native_calls": [
+        "get_blocking",
+        "set_blocking"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.TestInvalidFD.test_dup": {
+      "status": "host_driven_native",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "native_calls": [
+        "dup"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.TestInvalidFD.test_dup2": {
+      "status": "host_driven_native",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "native_calls": [
+        "dup2"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.TestInvalidFD.test_dup2_negative_fd": {
+      "status": "host_driven_native",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "native_calls": [
+        "open",
+        "dup2",
+        "dup2",
+        "dup2",
+        "dup2",
+        "dup2",
+        "dup2",
+        "close"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.TestInvalidFD.test_inheritable": {
+      "status": "host_driven_native",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "native_calls": [
+        "get_inheritable",
+        "set_inheritable"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.TestInvalidFD.test_isatty": {
+      "method_sha256": "40d9e695767e0cd65fbb3d1a1d9c6778f2f8279b0a2ac11838c9f3dea8f1936b",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "assertions": 1,
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_posix.PosixTester.test_dup": {
+      "status": "host_driven_native",
+      "host_fixtures": [
+        "PosixTester.setUp and cleanups",
+        "test_posix.tearDownModule"
+      ],
+      "native_calls": [
+        "dup",
+        "close"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_posix.PosixTester.test_dup2": {
+      "status": "host_driven_native",
+      "host_fixtures": [
+        "PosixTester.setUp and cleanups",
+        "test_posix.tearDownModule"
+      ],
+      "native_calls": [
+        "dup2"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_posix.PosixTester.test_oscloexec": {
+      "method_sha256": "3917cd026ee12f6afc1de8580ef2525c961de93bd0445b4b7aa1fa7a8882eb4c",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "PosixTester.setUp and cleanups",
+        "test_posix.tearDownModule"
+      ],
+      "assertions": 1,
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_posix.PosixTester.test_pipe": {
+      "method_sha256": "54440f29d569d51bf72d526343246e4d2abf24c79f7ede6778c596153687c594",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "PosixTester.setUp and cleanups",
+        "test_posix.tearDownModule"
+      ],
+      "assertions": 0,
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_posix.PosixTester.test_strerror": {
+      "method_sha256": "02b2fde6b447782d383f74a04d7571a628c0e71e4e99d164a9530de61218bc94",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "PosixTester.setUp and cleanups",
+        "test_posix.tearDownModule"
+      ],
+      "assertions": 1,
+      "opt_levels": [
+        0,
+        3
+      ]
+    }
+  }
+}

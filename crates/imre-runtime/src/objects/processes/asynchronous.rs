@@ -6,6 +6,7 @@ use std::thread;
 
 use super::*;
 use crate::StorageCell;
+use crate::objects::acquire_rc;
 
 type Captured = (ExitStatus, Vec<u8>, Vec<u8>);
 
@@ -83,6 +84,7 @@ impl AsyncProcess {
         }
         match self.output.as_mut().expect("worker output was received") {
             Ok(output) => Ok(Some(output)),
+            Err(error) if capture_allocation_failed(error) => Err(Error::allocation()),
             Err(error) => Err(os_error(match error.raw_os_error() {
                 Some(code) => io::Error::from_raw_os_error(code),
                 None => io::Error::new(error.kind(), error.to_string()),

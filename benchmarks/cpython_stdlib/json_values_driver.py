@@ -9,6 +9,12 @@ def run() -> None:
     ascii_only = sys.argv[3] == "1"
     allow_nan = sys.argv[4] == "1"
     indent: int | None = None if sys.argv[5] == "None" else int(sys.argv[5])
+    if method == "load" and shape == "binary":
+        with open("input.bin", "rb") as stream:
+            loaded = json.load(stream)
+        print("OK")
+        print(repr(loaded))
+        return
     if method == "load":
         with open("input.bin") as source:
             loaded = json.load(source)
@@ -18,7 +24,7 @@ def run() -> None:
     with open("input.bin", "rb") as binary:
         data = binary.read()
     if method == "loads":
-        loaded = json.loads(data.decode())
+        loaded = json.loads(data) if shape == "bytes" else json.loads(data.decode())
         print("OK")
         print(repr(loaded))
         return
@@ -60,8 +66,13 @@ try:
 except json.JSONDecodeError as error:
     print("JSONDecodeError")
     print(str(error))
+    if len(sys.argv) > 6 and sys.argv[6] == "fields":
+        print(repr((error.msg, error.doc, error.pos, error.lineno, error.colno)))
 except TypeError as error:
     print("TypeError")
+    print(str(error))
+except UnicodeDecodeError as error:
+    print("UnicodeDecodeError")
     print(str(error))
 except ValueError as error:
     print("ValueError")

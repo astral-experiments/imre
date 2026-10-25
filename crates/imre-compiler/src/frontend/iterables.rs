@@ -166,12 +166,8 @@ impl Checker<'_> {
                     "sum of values requires an integer-valued mapping or method returning an integer iterable",
                 ));
             };
-            let iterable = self.class_method_call(view, method, class, Some(receiver))?;
-            method_input = Some(Iteration::Container {
-                iterable,
-                items: false,
-                start: None,
-            });
+            let iterable = self.iteration_method_call(view, method, class, receiver)?;
+            method_input = Some(self.iteration_value(iterable, false, view)?);
         }
         if matches!(source, ast::Expr::ListComp(_)) {
             let subtotal = self.sum_comprehension(source)?;

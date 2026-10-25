@@ -99,7 +99,7 @@ impl RuntimeReturn for StatusOrError {
     }
 
     fn emit(&self, emitter: &mut Emitter<'_, '_>, instruction: String) {
-        emitter.checked_int_list_status(instruction);
+        emitter.checked_status(instruction);
     }
 }
 
