@@ -35,7 +35,7 @@ Indentation must use spaces; tabs and form feeds remain valid inside string data
 
 The compiler bounds syntax complexity before parsing each module. Deeply nested blocks, delimiters, or long chains of operators can exceed the limit. Splitting a long expression into intermediate assignments reduces its depth.
 
-Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, async generators, slice assignment/deletion, tuple display expansion, call argument expansion, variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, async generators, slice assignment/deletion, tuple display expansion, dynamic call argument expansion, variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
 
 ## Inferred function signatures and iterable consumers
 
@@ -377,7 +377,7 @@ keys = {*{"one": 1, "two": 2}}
 merged = {**{"one": 1}, "one": 2, "three": 3}
 ```
 
-Destination annotations can type empty source literals and promote copied values into optional storage. Existing source containers keep their own exact layout and aliases. Tuple result displays, argument expansion in calls, variadic parameters, and user-defined iteration protocols remain outside this milestone.
+Destination annotations can type empty source literals and promote copied values into optional storage. Existing source containers keep their own exact layout and aliases. A direct call to a source function, ordinary method, classmethod, or staticmethod can expand an exact fixed tuple at any positional argument. Receivers, each starred tuple (including an empty tuple), and keywords evaluate once in Python order. Dynamic iterables and keyword mapping expansion in calls, tuple result display expansion, variadic parameters, and user-defined iteration protocols remain outside this subset.
 
 ## Assignment expressions
 
@@ -507,7 +507,7 @@ A string template can substitute named `str` and `int` arguments, as in `url.for
 
 ## Immutable bytes
 
-`hashlib.sha256(data=b"", *, usedforsecurity=True)` constructs a mutable SHA-256 hash from exact bytes. `update(data)` adds bytes and returns `None`. `digest()` returns 32 bytes and `hexdigest()` returns 64 lowercase hexadecimal digits; neither prevents further updates. An assignment shares the same hash, while `copy()` creates an independent state. The read-only attributes are `name`, `digest_size`, and `block_size`. Both values of the boolean `usedforsecurity` select the same SHA-256 implementation. The immediate `sha256(data).hexdigest()` spelling can hash the bytes directly without allocating a mutable object.
+`hashlib.sha256(data=b"", *, usedforsecurity=True)` constructs a mutable SHA-256 hash from exact bytes. `update(data)` adds bytes and returns `None`. `digest()` returns 32 bytes and `hexdigest()` returns 64 lowercase hexadecimal digits; neither prevents further updates. An assignment shares the same hash, while `copy()` creates an independent state. The read-only attributes are `name`, `digest_size`, and `block_size`. Both values of the boolean `usedforsecurity` select the same SHA-256 implementation. The named constructor `hashlib.new(name, data=b"", *, usedforsecurity=True)` resolves SHA-256 aliases at runtime. `hashlib.algorithms_available` is a shared mutable set of the provider’s supported canonical names (currently `sha256`); adding a name to the set does not install a new algorithm. Unknown names raise `ValueError`. The immediate `sha256(data).hexdigest()` spelling can hash the bytes directly without allocating a mutable object.
 
 `bytes` is an exact immutable type distinct from `str`. Ordinary, raw, escaped, and adjacent byte literals use Python's literal rules. Every byte from 0 through 255 is valid, including NUL and invalid UTF-8. Bytes can appear in classes, tuples, lists, dictionary keys/values, sets, and optionals. Literal bytes are also accepted as immutable parameter defaults.
 
@@ -528,6 +528,8 @@ On POSIX, `os.path.join(a, *parts)`, `basename(p)`, `dirname(p)`, and `splitext(
 `os.path.normpath(path)` removes redundant separators and dot components and collapses `..` lexically. Exactly two leading slashes survive. `os.path.abspath(path)` applies the same rules after prepending the current directory to a relative input; it does not resolve symlinks or require the path to exist. Both accept `str`, `bytes`, and native `Path`. Byte inputs produce bytes even when a path or working directory contains invalid UTF-8. Text results must be representable as Imre strings.
 
 `from pathlib import Path` exposes a sealed native POSIX path type on both supported hosts. `Path()` represents the current directory; fixed positional string or `Path` arguments join left to right. The `/` operator accepts a path and a string or path, including a string on the left. An absolute segment replaces the preceding path. Empty segments, repeated separators, and `.` components normalize lexically; `..` components and exactly two leading slashes remain intact. Construction and joining do not access the filesystem or resolve symlinks. `path.joinpath()` returns a fresh equal path. It accepts zero or more positional string or path segments, joined in order.
+
+`PurePath` and `PurePosixPath` select POSIX lexical rules. `PureWindowsPath` handles Windows drive-relative paths, rooted paths, UNC share names and device prefixes on either host. Its equality and dictionary keys ignore case; paths of different flavors compare unequal. Nested paths of the same flavor preserve their original segments. Crossing flavors uses the other path's forward-slash spelling. Pure paths do not access the filesystem. All path types expose `drive`, `root`, and `anchor`.
 
 `name`, `stem`, `suffix`, and `parent` are read-only properties. Parent traversal stops at the anchor or current directory. Components follow [Python 3.14 semantics](https://docs.python.org/3.14/library/pathlib.html), including `Path("report.").suffix == "."`. On these POSIX hosts, `path.as_posix()` returns the same text as `str(path)`. Paths compare by normalized value with `==` and `!=`; `str`, `print`, and ordinary f-strings produce the path text, while `repr` and `!r` produce `PosixPath(...)`. Paths are always true, including `Path("")`. They can appear in exact fields, lists, dictionary keys and values, sets, tuples, callables, and nullable storage. Dictionary and set lookups hash the normalized path spelling without accessing the filesystem. Dataclass equality and repr traverse their native values. Path ordering, subclasses, and arbitrary `os.PathLike` implementations are outside this contract.
 
@@ -630,6 +632,8 @@ if args.output:
 
 Each positional declaration consumes one `str` or `Path`. A final positional with `nargs="+"` consumes one or more values and stores them in a list. Named options accept one or more ASCII spellings, such as `-v` and `--verbose`, with `required`, `nargs="+"` or `action="store_true"`. A list, tuple or `[member.value for member in Mode]` over a sealed enum supplies constant string choices. Omitted options with a nominal enum member as the default keep that member. Explicit values are strings. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2.
 
+Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser.
+
 A parser can require a subcommand with `add_subparsers(dest="command", required=True)`. Each literal `add_parser("name", help="...")` introduces a child parser with its own options. The namespace carries the selected command and that child's fields. A `match args.command` case or `if args.command == "name"` branch selects its concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
 Keep each builder local. Declare parent options first, followed by each subparser and its options, then assign or return `parse_args()`. Dynamic declarations, a variadic positional before a subcommand, and nested or optional subcommands are outside this grammar.
@@ -640,7 +644,7 @@ Keep each builder local. Declare parent options first, followed by each subparse
 
 `debug`, `info`, `warning`, `error`, `critical`, `fatal`, and `log(level, message, ...)` write to standard error. Scalar message arguments support literal `%s`, `%r`, `%d`, and `%%`. Arguments execute in source order and conversion waits until the event is enabled. The fallback handler emits warning and higher levels before configuration. The module-level convenience functions configure the root handler on first use.
 
-`logging.basicConfig` accepts `level`, `format`, `datefmt`, and `force`. A configured handler keeps its settings unless forced. Both configuration and `setLevel` accept the standard level-name literals. The percent-style format accepts `name`, `levelname`, `levelno`, `message`, and local-time `asctime`. Custom handlers and filters are outside this surface.
+`logging.basicConfig` accepts `level`, `format`, `datefmt`, and `force`. A configured handler keeps its settings unless forced. Both configuration and `setLevel` resolve string levels in the native registry. `addLevelName` updates the integer label and the reverse name lookup; `getLevelNamesMapping()` returns a fresh dictionary. `getLevelName(number)` returns a string. For a string argument, use `isinstance(result, int)` to distinguish a registered name from the fallback text. The percent-style format accepts `name`, `levelname`, `levelno`, `message`, and local-time `asctime`. Custom handlers and filters are outside this surface.
 
 ## Synchronous subprocesses
 
@@ -924,7 +928,17 @@ Exceptions contain an immutable category, message, optional explicit cause, and 
 
 ## Exceptions and cleanup
 
-The constructible builtin categories are `Exception`, `ArithmeticError`, `ZeroDivisionError`, `OverflowError`, `LookupError`, `IndexError`, `KeyError`, `ValueError`, `AssertionError`, `RuntimeError`, `StopIteration`, `EOFError`, `OSError`, `TypeError`, `AttributeError`, `MemoryError`, `SystemError`, `UnicodeError`, `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`, plus the imported `io.UnsupportedOperation`. A constructor takes zero arguments or one string message. `raise Category` constructs the zero-argument form; `raise value` requires an exception instance. The annotation `Exception` admits this sealed family and can be used in parameters, returns, fields, containers, and optional values. Specific subclass annotations are currently rejected rather than erasing their narrower contracts. `BaseException` and `UnicodeDecodeError` are supported as handler categories, but not as constructors or storage annotations.
+User exception classes keep their nominal identity in both builtin and user
+handlers. A marker class may inherit several exception bases with a consistent
+Python method resolution order. A class that carries fields can use an ordinary
+typed initializer or a dataclass initializer with `__post_init__`. Its constructor
+must call `super().__init__(message)` once with a string. Keyword arguments,
+typed fields, `.args` on the concrete exception, and custom `__str__` and
+`__repr__` methods use the same object after a raise. A class attribute can name
+such a constructor. Inheriting a user payload layout, dynamic constructors, and
+reinitializing an exception are outside this subset.
+
+The constructible builtin categories are `Exception`, `ArithmeticError`, `ZeroDivisionError`, `OverflowError`, `LookupError`, `IndexError`, `KeyError`, `ValueError`, `AssertionError`, `RuntimeError`, `StopIteration`, `EOFError`, `OSError`, `TypeError`, `AttributeError`, `MemoryError`, `SystemError`, `UnicodeError`, `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`, plus the imported `io.UnsupportedOperation`. A constructor takes zero arguments or one supported argument (a string, number, bytes, container, or `None`). Mutable arguments remain live through `.args` and formatting. `raise Category` constructs the zero-argument form; `raise value` requires an exception instance. The annotation `Exception` admits this sealed family and can be used in parameters, returns, fields, containers, and optional values. Specific subclass annotations are currently rejected rather than erasing their narrower contracts. `BaseException` and `UnicodeDecodeError` are supported as handler categories, but not as constructors or storage annotations.
 
 Handlers select the first matching fixed builtin category or nonempty tuple of categories, using the builtin hierarchy. A bare handler catches any supported exception. `except Category as name` binds an owned exception and deletes that name on every handler exit, even if it previously existed or was rebound inside the handler. Save it under another name to retain it. Bare `raise` uses the dynamically active exception, including from a called function or a `finally` block unwinding an exception; without an active exception it raises `RuntimeError`.
 
@@ -1142,3 +1156,18 @@ A profile can select a named arm of a simple `match`, or exclude the true arm of
 ### Native asyncio subprocesses
 
 Typed coroutines support `await`, `asyncio.TaskGroup`, `asyncio.gather` and `asyncio.Semaphore` for subprocess-backed work. A coroutine starts when it is awaited or scheduled. A callback with an `Awaitable[T]` return type must be an `async def` function. A synchronous function that creates a coroutine can be called directly. A task retains its result across awaits. Exceptions returned by `gather(..., return_exceptions=True)` retain their positions among the results. Standard output and standard error are drained concurrently. Ruff’s live ecosystem checker also exercises loop signal handlers, `functools.cache`, suspended generator context managers, and `TemporaryDirectory` cleanup on exception paths.
+
+## Native unittest cases and results
+
+`from unittest import TestCase, TestResult, SkipTest` loads a small library
+compiled into the program. A fixed-layout subclass can use `fail`, `skipTest`,
+`countTestCases` and the default setup/teardown hooks. The boolean truth
+assertions and integer equality and ordering assertions accept an optional
+string message and honor the instance's `longMessage` setting. A result can
+count started cases, record skips and unexpected successes, stop a run, and
+receive run and test boundary notifications.
+
+The [shared suite runner](../benchmarks/cpython_stdlib/SUITE_RUNNER.md) shows
+which parts of a complete pinned test run natively. The full CPython unittest
+API, dynamic method discovery in a native process, traceback reports, and
+arbitrary assertion operand types are not supported by this implementation.
