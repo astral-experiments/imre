@@ -148,6 +148,41 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        let identity = match (left.ty, right.ty) {
+            (Type::ObjectValue, Type::ListInt | Type::List(_)) => {
+                Some(Builtin::ExceptionFieldIdentity { reversed: false })
+            }
+            (Type::ListInt | Type::List(_), Type::ObjectValue) => {
+                Some(Builtin::ExceptionFieldIdentity { reversed: true })
+            }
+            (Type::ObjectValue, Type::Class(class)) if self.boxed_dataclass(class) => {
+                Some(Builtin::ObjectRecordIdentity {
+                    class,
+                    reversed: false,
+                })
+            }
+            (Type::Class(class), Type::ObjectValue) if self.boxed_dataclass(class) => {
+                Some(Builtin::ObjectRecordIdentity {
+                    class,
+                    reversed: true,
+                })
+            }
+            _ => None,
+        };
+        if let Some(identity) = identity {
+            let same = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(identity, vec![left, right]),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(same)),
+                }
+            } else {
+                same
+            });
+        }
         // A comparison with a bool singleton only observes whether the other
         // operand is that same singleton; integer object identity is irrelevant.
         if let Some(union) = [left.ty, right.ty]
@@ -187,6 +222,13 @@ impl Checker<'_> {
             ));
         }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if types.iter().any(|&ty| self.types.is_value_struct(ty)) {
+            return Err(error(
+                self.source,
+                node,
+                "imre.struct values have no observable identity; compare them with ==",
+            ));
+        }
         let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
             && [&left, &right].iter().any(|value| {
                 matches!(

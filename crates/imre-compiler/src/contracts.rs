@@ -74,9 +74,16 @@ impl Builtin {
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
-            | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
+            | Self::ExceptionFieldIndex
+            | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
             Self::MappingObjectGet => Contract::new(true, PreservesOwners),
-            Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
+            Self::BoxValue
+            | Self::ExceptionTupleView
+            | Self::ObjectRecordProject(_)
+            | Self::ObjectRecordIdentity { .. } => Contract::new(false, PreservesOwners),
+            Self::ExceptionKeywordSuggestion | Self::ExceptionRecordFields => {
+                Contract::new(false, PreservesOwners)
+            }
             Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
             Self::ExceptionRepr
             | Self::ExceptionMessage
@@ -100,8 +107,7 @@ impl Builtin {
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit
                     | TextOperation::ShlexQuote => true,
-                    TextOperation::IsSpace
-                    | TextOperation::IsUpper
+                    TextOperation::Predicate(_)
                     | TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -357,6 +363,7 @@ impl Builtin {
             | Self::JsonIter
             | Self::JsonLen
             | Self::JsonSelect(_)
+            | Self::TupleGet
             | Self::ListGet
             | Self::ListGetBounded { .. }
             | Self::CacheProbe(_)
@@ -442,6 +449,7 @@ impl Builtin {
             | Self::StrEnumValue
             | Self::EnumString
             | Self::StringListContains
+            | Self::StructListContains
             | Self::StringContains
             | Self::BytesContains
             | Self::UnionInject
@@ -505,6 +513,7 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::ExceptionFieldIdentity { .. }
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName
@@ -586,6 +595,9 @@ impl Builtin {
         };
         let valid = match self {
             Self::RecordCopy => matches!(result, Type::Class(_)) && signature(&[result], result),
+            Self::TupleGet => {
+                matches!(args, [tuple, index] if index.ty == Type::Int && types.homogeneous_tuple_element(tuple.ty) == Some(result))
+            }
             Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
@@ -877,6 +889,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_system_exit_code_equal"
                 | "imre_system_exit_code_text"
                 | "imre_exception_field_index"
+                | "imre_exception_formatter_result"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"

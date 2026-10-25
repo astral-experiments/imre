@@ -790,6 +790,7 @@ fn namespace_class(
     let class = classes.definitions.len();
     layouts.push(fields.iter().map(|field| field.ty).collect());
     classes.definitions.push(Class {
+        forwarder: None,
         init_hooks: Default::default(),
         exception_aliases: Default::default(),
         static_bindings: Default::default(),
@@ -825,6 +826,7 @@ fn namespace_class(
         abc: false,
         mapping: false,
         dataclass: Some(DataclassOptions {
+            value_struct: false,
             slots: false,
             init: false,
             eq: true,

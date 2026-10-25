@@ -7,13 +7,14 @@ fn plain() -> Rc<Object> {
 // The native object runtime and its module registry are thread-confined.
 // Keep one owner in the registry; every returned handle owns a separate reference.
 thread_local! { static SENTINEL: Rc<Object> = plain(); }
+const STR_METHOD_NAMES: [&str; 5] = ["lower", "strip", "lstrip", "rstrip", "isalnum"];
 thread_local! {
-    static STR_METHODS: [Rc<Object>; 4] = std::array::from_fn(|index|
+    static STR_METHODS: [Rc<Object>; STR_METHOD_NAMES.len()] = std::array::from_fn(|index|
         Rc::new(Object(StorageCell::new(Storage::StrDescriptor(index as u32)))));
 }
 
 pub(super) fn descriptor_name(index: u32) -> &'static str {
-    ["lower", "strip", "lstrip", "rstrip"][index as usize]
+    STR_METHOD_NAMES[index as usize]
 }
 
 #[unsafe(no_mangle)]

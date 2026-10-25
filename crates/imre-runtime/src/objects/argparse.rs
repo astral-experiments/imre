@@ -2,7 +2,7 @@
 //! input before constructing the compiler-described, owned namespace record.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashSet, TryReserveError};
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -182,6 +182,12 @@ enum Stop<'a> {
     Help(&'a Parser),
     Error(&'a Parser, String),
     Exception(Error),
+}
+
+impl From<TryReserveError> for Stop<'_> {
+    fn from(_: TryReserveError) -> Self {
+        Self::Exception(Error::allocation())
+    }
 }
 
 impl Parser {
@@ -423,6 +429,7 @@ impl Parser {
                             ));
                         };
                         let mut parsed = definition.parser.parse(&args[index + 1..])?;
+                        extras.try_reserve(parsed.extras.len())?;
                         extras.append(&mut parsed.extras);
                         selected = Some((child, name, parsed.words));
                         break 'parse;
@@ -447,6 +454,7 @@ impl Parser {
                         self.select_group(&mut seen, slot)?;
                     }
                 }
+                extras.try_reserve(end - index)?;
                 extras.extend(args[index..end].iter().copied().map(Cow::Borrowed));
                 index = end;
                 if index == args.len() {
@@ -476,6 +484,7 @@ impl Parser {
                 }
                 Token::End | Token::Value => unreachable!("positional run already consumed"),
                 Token::Unknown => {
+                    extras.try_reserve(1)?;
                     extras.push(Cow::Borrowed(arg));
                     continue;
                 }
@@ -488,6 +497,7 @@ impl Parser {
                         let Some((matched, slot)) =
                             self.flags().find(|(name, _)| *name == spelling)
                         else {
+                            extras.try_reserve(1)?;
                             extras.push(Cow::Owned(format!("{prefix}{suffix}")));
                             break;
                         };
@@ -832,6 +842,15 @@ pub unsafe extern "C" fn imre_argparse_parse(
             return Error::exit_status(2).returning(std::ptr::null_mut());
         }
     };
+    let mut extras = Words::new(3);
+    if !pair_layout.is_null()
+        && extras
+            .values
+            .try_reserve_exact(parsed.extras.len())
+            .is_err()
+    {
+        return Error::allocation().returning(std::ptr::null_mut());
+    }
     // SAFETY: every slot receives exactly one owner of its declared kind. All
     // input validation is complete, and option conversion invokes no user code.
     unsafe {
@@ -857,7 +876,6 @@ pub unsafe extern "C" fn imre_argparse_parse(
         if pair_layout.is_null() {
             return result;
         }
-        let mut extras = Words::new(3);
         extras.values.extend(
             parsed
                 .extras

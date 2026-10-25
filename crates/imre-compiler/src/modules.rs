@@ -307,6 +307,7 @@ pub(crate) enum Intrinsic {
     Any,
     TomlDecode,
     Dataclass,
+    Struct,
     DataclassField,
     AsDict,
     SelfType,
@@ -711,6 +712,7 @@ impl IntrinsicModule {
             (Self::Json, "JSONDecodeError") => Intrinsic::JsonDecodeError,
             (Self::ImreJson, "encode") => Intrinsic::JsonEncode,
             (Self::ImreToml, "decode") => Intrinsic::TomlDecode,
+            (Self::Imre, "struct") => Intrinsic::Struct,
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
@@ -982,7 +984,7 @@ impl SourceGraph {
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
     }
 
-    /// The native binder raises for this keyword because the receiver was already bound.
+    /// The native binder raises because this keyword's parameter was already bound.
     pub(crate) fn checked_repeated_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::RepeatedKeyword(keyword));
@@ -1002,13 +1004,11 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::BuiltinImport(alias));
     }
 
-    /// Record the exact list read proved by lowering a fixed-width tuple spread.
+    /// Record an integer access with a proved native indexing implementation.
     /// Other diagnostics at this index or inside the receiver remain visible.
-    pub(crate) fn checked_tuple_list_read(&self, module: ModuleId, read: TextRange) {
-        if self.session.has_tuple_spreads(module) {
-            self.checked_diagnostics.borrow_mut()[module]
-                .push(CheckedDiagnostic::TupleListRead(read));
-        }
+    pub(crate) fn checked_index_read(&self, module: ModuleId, read: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::CheckedIndexRead(read));
     }
 
     /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
@@ -1302,6 +1302,7 @@ fn resolve_binding(
 }
 
 pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
+const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
 const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
 
@@ -1318,6 +1319,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
     module.symbol(name).or_else(|| {
         let implementation = match module {
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
+            IntrinsicModule::LoggingHandlers if !name.starts_with('_') => LOGGING_HANDLER_CLASSES,
             IntrinsicModule::Textwrap => textwrap_implementation(name)?,
             _ => return None,
         };
@@ -1329,6 +1331,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
                     (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
+                    | (IntrinsicModule::LoggingHandlers, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))))
         })
     })
@@ -1843,6 +1846,9 @@ impl<'a> Loader<'a> {
                     && let Some(module) = self.intrinsic_module(&name, Some(&import.names))?
                 {
                     for alias in &import.names {
+                        if module == IntrinsicModule::Logging && alias.name.as_str() == "handlers" {
+                            self.intrinsic_module("logging.handlers", None)?;
+                        }
                         let binding = stdlib_symbol(&self.modules, module, alias.name.as_str())
                             .filter(|binding| {
                                 self.reachable_only
@@ -1949,6 +1955,10 @@ impl<'a> Loader<'a> {
                 LOGGING_CLASSES,
                 include_str!("../stdlib/logging/classes.py"),
             )),
+            (module == Some(IntrinsicModule::LoggingHandlers)).then_some((
+                LOGGING_HANDLER_CLASSES,
+                include_str!("../stdlib/logging/handlers.py"),
+            )),
             needs_textwrap(TEXTWRAP_FUNCTIONS).then_some((
                 TEXTWRAP_FUNCTIONS,
                 include_str!("../stdlib/textwrap/functions.py"),
@@ -2021,7 +2031,7 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
-        if name == LOGGING_CLASSES {
+        if matches!(name, LOGGING_CLASSES | LOGGING_HANDLER_CLASSES) {
             return Err("the private logging implementation is not an importable module".into());
         }
         if matches!(name, TEXTWRAP_FUNCTIONS | TEXTWRAP_WRAPPER) {
