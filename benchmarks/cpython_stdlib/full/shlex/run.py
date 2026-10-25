@@ -16,9 +16,9 @@ from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
-from suite_evidence import build_report, roles, write_reports
-from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain
+from suite_evidence import roles, write_reports
+from suite_inventory import load_suite, verify_files, verify_interpreter_tests
+from suite_native import Toolchain, native_method, run_evidence
 
 
 def arguments(name, params):
@@ -37,9 +37,9 @@ def arguments(name, params):
     return ("quote-" + kind, str(value))
 
 
-def run(level, binary, reference, module):
+def run(tools, work, binary, reference, module):
+    level = tools.level
     suite = load_suite(module)
-    discovered = [(c.id(), c.id().rsplit(".", 1)[0]) for c in cases(suite)]
     counts = defaultdict(Counter)
 
     class Results(unittest.TestResult):
@@ -109,7 +109,24 @@ def run(level, binary, reference, module):
     }
     print(f"O{level}: {len(observed)}/{results.testsRun} methods exercised native shlex calls; "
           f"{sum(sum(c.values()) for c in counts.values())} calls, {native.cache_info().misses} distinct")
-    return build_report(reference, level, discovered, observed)
+    # These bodies don't read instance data; their real upstream setUp still runs.
+    executions = {}
+    source = HERE / "upstream/Lib/test/test_shlex.py"
+    fixture = "import shlex\nimport string\nimport unittest\nclass NativeCase(unittest.TestCase):\n"
+    for method, operation in (("testSplitNone", "shlex.split"), ("testQuote", "shlex.quote")):
+        case_id = f"{module}.ShlexTest.{method}"
+        directory = work / method
+        directory.mkdir()
+        executions[case_id] = native_method(tools, directory, source, "ShlexTest", case_id, fixture,
+                                            operation=("imre", operation))
+    report = run_evidence(load_suite(module), executions, reference, level,
+                          preflight={key: value for key, value in observed.items() if key[0] not in executions})
+    for row in report["records"]:
+        if row["id"] in executions:
+            if row["classification"] != "native-body-host-fixture":
+                raise AssertionError(f"{row['id']}: {row['outcome']}: {row.get('reason')}")
+            row["evidence"]["host_replay_calls_by_name"] = dict(counts[row["id"]])
+    return report
 
 
 def main():
@@ -134,7 +151,7 @@ def main():
         with tempfile.TemporaryDirectory() as tmp:
             tools = Toolchain(args.imre, args.runtime, args.clang, level)
             binary = tools.build((HERE / "native_calls.py").read_bytes(), Path(tmp))
-            reports.append(run(level, binary, reference, manifest["module"]))
+            reports.append(run(tools, Path(tmp), binary, reference, manifest["module"]))
             binary = tools.build(edges.read_bytes(), Path(tmp))
             actual = subprocess.run([binary], check=True, capture_output=True, timeout=60)
             if actual.stderr or actual.stdout != expected_edges:

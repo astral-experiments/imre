@@ -113,6 +113,7 @@ pub(crate) enum IntrinsicModule {
     Base64,
     Zipfile,
     Csv,
+    StringFormatting,
     Re,
     Enum,
     Zlib,
@@ -148,6 +149,7 @@ pub(crate) enum Intrinsic {
     LevelNamesMapping,
     HandlerRename,
     HandlerLookup,
+    PrintActiveException,
     HandlerLevelType,
     LevelMap { names: bool },
     LogRecord,
@@ -267,6 +269,8 @@ pub(crate) enum Intrinsic {
     BadZipFile,
     BadGzipFile,
     CsvReader,
+    FormatterParser,
+    FormatterFieldNameSplit,
     CsvError,
     RegexCompile,
     RegexSearch,
@@ -278,6 +282,7 @@ pub(crate) enum Intrinsic {
     StrEnum,
     EnumAuto,
     DefaultDict,
+    ChainMap,
     NamedTuple,
     Counter,
     Deque,
@@ -357,6 +362,12 @@ impl Intrinsic {
 }
 
 impl IntrinsicModule {
+    /// Ty resolves these builtin names solely against its bundled stdlib. Only
+    /// the exact import proved by the closed checker needs an import diagnostic.
+    pub(crate) fn lacks_builtin_stub(self) -> bool {
+        matches!(self, Self::Opcode | Self::StringFormatting)
+    }
+
     fn named(name: &str) -> Option<Self> {
         match name {
             "annotationlib" => Some(Self::AnnotationLib),
@@ -411,6 +422,7 @@ impl IntrinsicModule {
             "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
             "csv" => Some(Self::Csv),
+            "_string" => Some(Self::StringFormatting),
             "re" => Some(Self::Re),
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
@@ -483,6 +495,7 @@ impl IntrinsicModule {
             (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
             (Self::Logging, "logMultiprocessing") => Intrinsic::LogRecordFlag(4),
             (Self::Logging, "logAsyncioTasks") => Intrinsic::LogRecordFlag(8),
+            (Self::Logging, "raiseExceptions") => Intrinsic::LogRecordFlag(16),
             (Self::Logging, "makeLogRecord") => Intrinsic::MakeLogRecord,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
             (Self::Logging, "getLevelName") => Intrinsic::GetLevelName,
@@ -664,6 +677,10 @@ impl IntrinsicModule {
             (Self::Io, "StringIO") => Intrinsic::StringIo,
             (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
             (Self::Csv, "reader") => Intrinsic::CsvReader,
+            (Self::StringFormatting, "formatter_parser") => Intrinsic::FormatterParser,
+            (Self::StringFormatting, "formatter_field_name_split") => {
+                Intrinsic::FormatterFieldNameSplit
+            }
             (Self::Csv, "Error") => Intrinsic::CsvError,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
             (Self::Re, "compile") => Intrinsic::RegexCompile,
@@ -676,6 +693,7 @@ impl IntrinsicModule {
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections, "ChainMap") => Intrinsic::ChainMap,
             (Self::Collections, "deque") => Intrinsic::Deque,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
@@ -1785,7 +1803,7 @@ impl<'a> Loader<'a> {
                         }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
-                        if module == IntrinsicModule::Opcode {
+                        if module.lacks_builtin_stub() {
                             self.checked_builtin_imports.push((id, alias.range()));
                         }
                         continue;
@@ -1816,6 +1834,7 @@ impl<'a> Loader<'a> {
                         let method = match alias.name.as_str() {
                             "_rename_handler" => Intrinsic::HandlerRename,
                             "_lookup_handler" => Intrinsic::HandlerLookup,
+                            "_print_active_exception" => Intrinsic::PrintActiveException,
                             "_Level" => Intrinsic::HandlerLevelType,
                             _ => {
                                 return Err(format!(
@@ -1857,7 +1876,7 @@ impl<'a> Loader<'a> {
                         let binding = self.named_import(binding, alias.name.as_str());
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
-                    if module == IntrinsicModule::Opcode
+                    if module.lacks_builtin_stub()
                         && let Some(name) = &import.module
                     {
                         self.checked_builtin_imports.push((id, name.range()));
