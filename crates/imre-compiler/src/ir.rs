@@ -456,6 +456,11 @@ pub(crate) enum ZipField {
 pub(crate) enum Builtin {
     Repeat,
     CursorLengthHint,
+    Progression {
+        bounded: bool,
+    },
+    Islice,
+    Cycle,
     DirectoryContextView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
@@ -757,6 +762,10 @@ pub(crate) enum Builtin {
     /// The stored value type determines optional promotion on successful lookup.
     /// A third argument, when present, already has the flattened result type.
     DictTryGet(Type),
+    /// Removes a key or raises KeyError; an optional third operand is an exact default.
+    DictPop,
+    /// Transfers the removed value into an optional result, or returns the supplied default.
+    DictTryPop(Type),
     /// Arguments are key then dictionary, matching membership evaluation order.
     DictContains,
     DictDelete,
@@ -1003,6 +1012,9 @@ pub(crate) enum ProcessOperation {
     },
     ContextEnter,
     ContextYield,
+    GeneratorNext,
+    GeneratorTake,
+    GeneratorYield,
     ContextExit,
     ContextThrow,
     IndirectCoroutine {
