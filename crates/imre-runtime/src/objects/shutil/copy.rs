@@ -1,75 +1,17 @@
 //! Copy file contents without copying permissions or truncating an alias of the source.
 
-use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, symlink};
-use std::path::Path;
 use std::rc::Rc;
 
 use super::super::exceptions::{Error, Kind, finish, push_string_repr};
+use super::super::files::names::Name;
 use super::super::files::{close_file, errno_error, errno_with_paths};
-use super::super::{Bytes, Object, Str, bytes, paths};
+use super::super::{Bytes, Object, Str, bytes};
 
 type Result<T> = std::result::Result<T, Error>;
-
-enum Name<'a> {
-    Text(&'a str),
-    Bytes(&'a [u8]),
-    Path(Rc<Str>),
-}
-
-impl<'a> Name<'a> {
-    /// The call retains all three possible handle kinds until the operation finishes.
-    unsafe fn from_handle(value: *const (), tag: u32) -> Self {
-        // SAFETY: the compiler supplies the tag for the exact live allocation.
-        unsafe {
-            match tag {
-                0 => Self::Text(&*value.cast::<Str>()),
-                1 => Self::Bytes(&*value.cast::<Bytes>()),
-                2 => Self::Path(Rc::from_raw(paths::imre_path_text(value.cast()))),
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    fn path(&self) -> &Path {
-        match self {
-            Self::Text(text) => Path::new(text),
-            Self::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
-            Self::Path(text) => Path::new(text.as_str()),
-        }
-    }
-
-    fn repr(&self, original: bool) -> String {
-        let mut result = String::new();
-        match self {
-            Self::Bytes(value) => bytes::write_repr(&mut result, value),
-            Self::Path(text) if original => {
-                result.push_str("PosixPath(");
-                push_string_repr(text, &mut result);
-                result.push(')');
-            }
-            _ => push_string_repr(self.path().to_str().unwrap(), &mut result),
-        }
-        result
-    }
-
-    fn display(&self) -> String {
-        match self {
-            Self::Bytes(_) => self.repr(false),
-            _ => self.path().display().to_string(),
-        }
-    }
-
-    fn error(&self, error: io::Error) -> Error {
-        errno_with_paths(error, |out| {
-            out.push_str(": ");
-            out.push_str(&self.repr(false));
-        })
-    }
-}
 
 /// Match nested Python file context managers: open the source first, close the
 /// destination first, and let an explicit close error supersede the copy error.

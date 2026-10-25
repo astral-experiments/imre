@@ -234,6 +234,7 @@ impl Builtin {
                 | ProcessOperation::Fd(_)
                 | ProcessOperation::Which
                 | ProcessOperation::CopyFile
+                | ProcessOperation::Unlink { .. }
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)

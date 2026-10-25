@@ -1157,6 +1157,9 @@ pub(crate) enum ProcessOperation {
     OpenFlag(&'static str),
     Which,
     CopyFile,
+    Unlink {
+        remove: bool,
+    },
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

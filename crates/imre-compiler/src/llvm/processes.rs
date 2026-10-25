@@ -460,6 +460,17 @@ impl Emitter<'_, '_> {
             ProcessOperation::OpenFlag(name) => self.os_open_flag(name),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
+            ProcessOperation::Unlink { remove } => {
+                let [path, fd] = args else { unreachable!() };
+                let bytes = u32::from(path.value.ty == Type::Bytes);
+                self.checked_line(format!(
+                    "call void @imre_os_unlink(ptr {}, i32 {bytes}, i64 {}, i32 {})",
+                    path.value.operand,
+                    fd.value.operand,
+                    u32::from(remove)
+                ));
+                none()
+            }
             ProcessOperation::CopyFile => {
                 let tag = |ty| match ty {
                     Type::Str => 0,

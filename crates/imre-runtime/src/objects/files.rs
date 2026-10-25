@@ -13,6 +13,7 @@ use super::{
 };
 mod buffered;
 mod gzip;
+pub(super) mod names;
 mod path_text;
 mod seekable;
 use seekable::Memory;
@@ -757,6 +758,28 @@ mod tests {
     use super::super::{imre_object_release, imre_seq_append, imre_seq_new};
 
     struct Directory(PathBuf);
+
+    #[test]
+    fn unlink_uses_a_directory_descriptor_and_removes_only_the_named_link() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let directory = Directory::new();
+        let handle = File::open(&directory.0).unwrap();
+        let target = directory.0.join("preserved");
+        let name = b"raw-\xff-link".to_vec();
+        let link = directory.0.join(OsStr::from_bytes(&name));
+        std::fs::write(&target, b"untouched").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let fd = Int::small(i64::from(handle.as_raw_fd())).unwrap();
+        // SAFETY: the bytes and descriptor stay rooted across unlinkat.
+        unsafe { names::imre_os_unlink(std::ptr::from_ref(&name).cast(), 1, fd.0, 0) };
+        assert_eq!(imre_error_pending(), 0);
+        assert_eq!(
+            link.symlink_metadata().unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(std::fs::read(target).unwrap(), b"untouched");
+    }
 
     impl Directory {
         fn new() -> Self {
