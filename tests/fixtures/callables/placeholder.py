@@ -80,6 +80,15 @@ def exercise() -> None:
         print(str(error))
         print(events)
 
+    classes = [constructor]
+    print(isinstance(ph, constructor))
+    print(isinstance(constructor, constructor))
+    print(isinstance(constructor, type))
+    print(isinstance(ph, type))
+    events = []
+    print(isinstance(values[mark(events, 1)], classes[mark(events, 0)]))
+    print(events)
+
     @singledispatch
     def ignores(argument):
         return "default"

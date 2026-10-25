@@ -2016,6 +2016,10 @@ impl InstanceType {
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
+            Self::Exact(Type::BuiltinClass) => matches!(
+                ty,
+                Type::BuiltinClass | Type::Placeholder(PlaceholderKind::Class)
+            ),
             Self::Exact(expected) => expected == ty,
             Self::ForwardRef => matches!(ty, Type::ForwardRef(_)),
             Self::StrEnum => matches!(ty, Type::StrEnum(_)),
