@@ -35,6 +35,9 @@ pub(super) fn resolve(
                 ));
             }
             for argument in &args.args {
+                if mapping_base(graph, definition.module, argument) {
+                    continue;
+                }
                 match graph.resolve(definition.module, argument) {
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
                         if args.args.len() == 1 => {}
@@ -69,7 +72,7 @@ pub(super) fn resolve(
                 }
             }
         }
-        classes[id] = Some(collect_class(
+        let mut class = collect_class(
             graph,
             module,
             definition,
@@ -77,7 +80,28 @@ pub(super) fn resolve(
             base.map(|i| (i, classes[i].as_ref().unwrap())),
             exceptions.layouts.contains(&definition),
             &exceptions.ids,
-        )?);
+        )?;
+        if exceptions.layouts.contains(&definition) {
+            let index = (exceptions.ids[&definition] - exceptions::FIRST_USER_EXCEPTION) as usize;
+            let mro = &exceptions.named[index].ancestors;
+            if let Some(field) = class
+                .fields
+                .iter()
+                .find(|field| exceptions::inherited_descriptor(&field.name, mro))
+            {
+                return Err(module.error(
+                    node,
+                    &format!(
+                        "a record field cannot store the inherited exception descriptor '{}'",
+                        field.name
+                    ),
+                ));
+            }
+            if base.is_none() {
+                exceptions::install_argument_slot(&mut class, module);
+            }
+        }
+        classes[id] = Some(class);
         path.pop();
         Ok(())
     }

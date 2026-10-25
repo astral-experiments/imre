@@ -20,6 +20,22 @@ def operand() -> str:
     return "retained"
 
 
+# Literal patterns must follow the same conversions and runtime errors as
+# formats read from variables.
+def literal_formats(value: str) -> None:
+    print("Log file %r does not exist" % value)
+    print("errno %s / %% done" % value)
+    print("%8.2a" % value)
+    try:
+        print("invalid %" % value)
+    except ValueError as error:
+        print(str(error))
+    try:
+        print("missing %s %s" % value)
+    except TypeError as error:
+        print(str(error))
+
+
 for fmt in ["file %r is missing", "%%%-7.2s/%%", "%#05s", "%a", "%.2r", "%c",
             "%ld", "%i", "%#o", "%X", "%g", "%(name)s", "%(name", "%*s", "%.*s",
             "%3*s", "%.2*s", "%s %s", "%s %.", "π%界", "%hhs", "%3%", "%s %%", "plain",
@@ -46,3 +62,6 @@ for msg in ["%(())s", "%(()", "%(missing(x))s", "%(())s/%s", "%s/%(())s"]:
         print(repr(error).split("(", 1)[0])
 formatter = logging.Formatter("%(message)s%(())s")
 print(formatter.format(logging.makeLogRecord({"()": "yes"})))
+
+literal_formats("a'π")
+literal_formats(operand())

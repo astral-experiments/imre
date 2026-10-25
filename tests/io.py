@@ -28,6 +28,26 @@ print(1000000000000000000000000000000000000000000000000000000000001)
     # Exceed the 128 KiB binary buffer CPython 3.14 uses for a pipe.
     "large": "print(" + repr("prefix\0" + "éλ🙂" * 32768 + "\0suffix") + ")\n"
     'for index in range(160):\n    print(index)\nprint("large output finished")\n',
+    "blocked_write": (Path(__file__).parent / "fixtures/sys/blocked_write.py").read_text(encoding="utf-8"),
+    "print_errno": """import os
+import sys
+for fd in [1, 2]:
+    saved = os.dup(fd)
+    os.dup2(int(sys.argv[1]), fd)
+    try:
+        if fd == 1:
+            print("x" * 131072)
+        else:
+            print("x", file=sys.stderr)
+    except OSError as error:
+        code = repr(error.errno)
+    else:
+        code = "missing error"
+    finally:
+        os.dup2(saved, fd)
+        os.close(saved)
+    print(code)
+""",
     "division_error": '''print("before division error")
 print(1000000000000000000000000000000000000000000000000000000000001)
 zero = int("0")
@@ -81,7 +101,25 @@ def same_output(actual: bytes, expected: bytes, label: str) -> None:
         )
 
 
-def visible_output(fd: int, expected: bytes, timeout: float) -> bytes:
+def blocked_write(command: list[str], free: int, mode: str) -> subprocess.CompletedProcess[bytes]:
+    reader, writer = os.pipe()
+    try:
+        os.set_blocking(writer, False)
+        for chunk in (b"x" * 4096, b"x"):
+            try:
+                while True:
+                    os.write(writer, chunk)
+            except BlockingIOError:
+                pass
+        if free:
+            os.read(reader, free)
+        return run([*command, str(writer), mode], pass_fds=(writer,))
+    finally:
+        os.close(reader)
+        os.close(writer)
+
+
+def visible_output(fd: int, expected: bytes, timeout: float, label: str = "interactive output") -> bytes:
     """Wait for a protocol message, without assuming a buffer size or write count."""
     output = bytearray()
     deadline = time.monotonic() + timeout
@@ -90,7 +128,7 @@ def visible_output(fd: int, expected: bytes, timeout: float) -> bytes:
         while len(output) < len(expected):
             remaining = deadline - time.monotonic()
             assert remaining > 0 and selector.select(remaining), (
-                "output was not visible before the next program action",
+                f"{label} was not visible within {timeout:g} seconds",
                 bytes(output),
                 expected,
             )
@@ -100,9 +138,9 @@ def visible_output(fd: int, expected: bytes, timeout: float) -> bytes:
                 if error.errno != errno.EIO:
                     raise
                 part = b""  # Linux PTYs report EIO when their last slave closes.
-            assert part, ("child closed its output before the message", bytes(output))
+            assert part, (f"child closed its output before {label}", bytes(output))
             output.extend(part)
-    same_output(bytes(output), expected, "interactive message")
+    same_output(bytes(output), expected, label)
     return bytes(output)
 
 
@@ -211,15 +249,17 @@ def check_link_options(directory: Path, compiler: str, runtime: str) -> int:
     return 7
 
 
-def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
+def check_run_command(directory: Path, compiler: str, flags: list[str], timeout: float) -> int:
     help_text = run([compiler, "run", "--help"], cwd=directory, input=b"")
     require_success(help_text, "imre run --help")
     assert b"imre run SOURCE.py" in help_text.stdout
     script_dir = directory / "scripts"
     script_dir.mkdir()
     source = script_dir / "show args.py"
+    started = "imre run entered the script\n"
     source.write_text(
-        "import os\nfrom pathlib import Path\nfrom sys import argv\n"
+        "import os\nfrom pathlib import Path\nfrom sys import argv, stderr\n"
+        f"stderr.write({started!r})\nstderr.flush()\n"
         "for arg in argv:\n    print(arg)\n"
         "print(Path('message').read_text(encoding='utf-8'))\n"
         "print(os.environ.copy()['IMRE_RUN_TEST'])\nprint(input())\n",
@@ -239,11 +279,14 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
         ) as process:
             try:
-                visible_output(process.stdout.fileno(), ready, 60)
+                # imre run compiles and links before any Python statement executes.
+                visible_output(process.stderr.fileno(), started.encode(), 180, "native script startup")
+                visible_output(process.stdout.fileno(), ready, timeout, "stdout before stdin")
+                assert process.poll() is None, "child exited before receiving input"
                 assert not list(scratch.iterdir()), "run left temporary files while the child waited for input"
                 if interrupt:
                     os.killpg(process.pid, signal.SIGKILL)
-                out, error = process.communicate(None if interrupt else b"from stdin\n", timeout=60)
+                out, error = process.communicate(None if interrupt else b"from stdin\n", timeout=timeout)
             finally:
                 if process.returncode is None:
                     with suppress(ProcessLookupError):
@@ -277,6 +320,16 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
     return 5 + len(rejected)
 
 
+def broken_pipe(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    reader, writer = os.pipe()
+    os.close(reader)
+    with os.fdopen(writer, "wb", buffering=0) as sink:
+        return subprocess.run(
+            command, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.PIPE,
+            timeout=60, check=False, env=environment(),
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -303,7 +356,7 @@ def main() -> None:
         if args.sanitize:
             flags.append("--sanitize")
         passed += check_link_options(temporary, compiler, runtime)
-        passed += check_run_command(temporary, compiler, flags)
+        passed += check_run_command(temporary, compiler, flags, args.timeout)
         sources = {}
         for name, source in PROGRAMS.items():
             path = temporary / f"{name}.py"
@@ -327,6 +380,10 @@ def main() -> None:
         reference["terminal_loop"] = terminal_message(
             [args.python, "-I", str(sources["terminal_loop"])], args.timeout
         )
+        large_pipe = broken_pipe([args.python, "-I", str(sources["large"])])
+        assert large_pipe.returncode == 1, (large_pipe.returncode, large_pipe.stderr[-2000:])
+        immediate = large_pipe.stderr.splitlines(keepends=True)[-1]
+        assert immediate.startswith(f"BrokenPipeError: [Errno {errno.EPIPE}] ".encode()), immediate
 
         for level in args.opt_levels:
             binaries = {}
@@ -377,21 +434,36 @@ def main() -> None:
             )
             passed += 1
 
+            for mode, free in [("write", 0), ("write", 4096), ("flush", 0)]:
+                reference_run = blocked_write([args.python, "-I", str(sources["blocked_write"])], free, mode)
+                native_run = blocked_write([binaries["blocked_write"]], free, mode)
+                assert reference_run.returncode == native_run.returncode == 0
+                assert b"BlockingIOError(" in reference_run.stderr
+                same_output(native_run.stderr, reference_run.stderr, f"blocked {mode} with {free} free")
+                same_output(native_run.stdout, reference_run.stdout, "buffer retained after blocked write")
+                passed += 1
+
+            # A caught print failure on either stream retains the pipe errno.
+            reader, writer = os.pipe()
+            os.close(reader)
+            with os.fdopen(writer, "wb", buffering=0):
+                commands = ([args.python, "-I", str(sources["print_errno"])], [binaries["print_errno"]])
+                reference_run, native_run = [run([*cmd, str(writer)], pass_fds=(writer,)) for cmd in commands]
+                assert reference_run.returncode == native_run.returncode == 0
+                same_output(reference_run.stdout, (str(errno.EPIPE) + "\n").encode() * 2, "reference errno")
+                same_output(native_run.stdout, reference_run.stdout, "print errno")
+                same_output(native_run.stderr, reference_run.stderr, "retained stderr")
+            passed += 1
+
             # The large print writes immediately. The smaller buffered writes fail
             # during shutdown, including after an unhandled division error.
             shutdown = b"Exception ignored while flushing sys.stdout:\nBrokenPipeError:"
             for name, status, prefix, lines in [
                 ("small", 120, shutdown, 2),
-                ("large", 1, b"OSError:", 1),
+                ("large", 1, immediate, 1),
                 ("division_error", 120, b"ZeroDivisionError:", 3),
             ]:
-                reader, writer = os.pipe()
-                os.close(reader)
-                with os.fdopen(writer, "wb", buffering=0) as sink:
-                    result = subprocess.run(
-                        [binaries[name]], stdin=subprocess.DEVNULL, stdout=sink,
-                        stderr=subprocess.PIPE, timeout=60, check=False, env=environment(),
-                    )
+                result = broken_pipe([binaries[name]])
                 assert result.returncode == status and result.stderr.startswith(prefix), (
                     "broken pipe", name, level, result.returncode, result.stderr[:2000],
                 )

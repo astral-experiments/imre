@@ -1,19 +1,18 @@
 //! Public decoder instances own their visible memo; each scan owns its key namespace.
-use std::rc::Rc;
 
 use super::readonly;
 use crate::finish;
 use crate::objects::mappings::imre_dict_new;
-use crate::objects::{Object, Storage, StorageCell, Str, acquire_rc, object};
+use crate::objects::{Object, Storage, StorageCell, Str, object};
 
 /// Construct a default decoder with a fresh Python-visible memo dictionary.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_json_decoder_new() -> *const Object {
     // SAFETY: a fresh string/string dictionary transfers its sole owner to this instance.
-    let memo = unsafe { Rc::from_raw(imre_dict_new(3, 3)) };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::JsonDecoder(
-        memo,
-    )))))
+    let memo = unsafe { crate::ObjectOwner::from_raw(imre_dict_new(3, 3)) };
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::JsonDecoder(memo),
+    ))))
 }
 
 /// # Safety
@@ -26,7 +25,7 @@ pub unsafe extern "C" fn imre_json_decoder_memo(decoder: *const Object) -> *cons
             let Storage::JsonDecoder(memo) = storage else {
                 unreachable!("expected JSONDecoder")
             };
-            Rc::into_raw(memo.clone())
+            crate::ObjectOwner::into_raw(memo.clone())
         })
     }
 }
@@ -43,6 +42,10 @@ pub unsafe extern "C" fn imre_json_decoder_decode(
     // JSONDecoder.decode treats U+FEFF as an ordinary invalid token. Only the
     // module-level loads entry checks for it before scanning a Unicode input.
     // SAFETY: the caller roots the text; only an exception needs another owner.
-    let result = unsafe { readonly::loads(&*text, || Some(acquire_rc(text as usize))) };
+    let result = unsafe {
+        readonly::loads(&*text, || {
+            Some(crate::StrOwner::acquire_word(text as usize))
+        })
+    };
     finish(result, std::ptr::null())
 }

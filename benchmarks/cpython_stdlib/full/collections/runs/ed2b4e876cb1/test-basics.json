@@ -1,0 +1,21 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_revision": "ed2b4e876cb15c374f5eff2e8d9dc354e4ed7c8f",
+  "imre_sha256": "a96d065043782219056e276895743994052fc6377ff650990395d139f715b6d1",
+  "runtime_sha256": "1fbdd9c7a60691c2a79af475a3255b7a568395668cf96163e1c68d78cfc86fc8",
+  "case": "test.test_deque.TestBasic.test_basics",
+  "results": [
+    {
+      "opt_level": 0,
+      "result": "compile-blocked",
+      "location": "upstream:47:9",
+      "reason": "Imre: supported list methods are append(value), extend(iterable), pop(), and clear()"
+    },
+    {
+      "opt_level": 3,
+      "result": "compile-blocked",
+      "location": "upstream:47:9",
+      "reason": "Imre: supported list methods are append(value), extend(iterable), pop(), and clear()"
+    }
+  ]
+}

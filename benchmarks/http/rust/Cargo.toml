@@ -1,0 +1,13 @@
+[package]
+name = "imre-http-hyper-control"
+version = "0.1.0"
+edition = "2024"
+publish = false
+[dependencies]
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tokio = { version = "1", features = ["net", "rt"] }
+
+
+[workspace]

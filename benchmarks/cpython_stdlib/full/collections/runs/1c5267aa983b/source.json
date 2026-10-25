@@ -1,0 +1,16 @@
+{
+  "compiler_revision": "1c5267aa983b6cc2617faf2dfec9d2dce9e7f6b7",
+  "tree": "a0f5ca7f35986610520bd35ffcca62a070252bbb",
+  "base": "44a5e9bd1e931c053fcc7278ef3155bdb082fb3c",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "verification": "local Linux x86-64",
+  "method_sha256": "7efa943383249c7719d6745454c7c420465d6cee55758a2cbac2c72896ac16d9",
+  "report_driver": {
+    "path": "benchmarks/cpython_stdlib/full/collections/native_report.py",
+    "revision": "1c00133495bd4923533732e172cb224622583944",
+    "blob": "2cd4f5e00cc82fd6a0b5231317c224c87fbee688"
+  },
+  "imre_sha256": "fa3d4704f106a7842de08d96afb05611f927b787f0b03f2d5ca441c521fc3762",
+  "runtime_sha256": "aa33ddbe2b45fabcedce70f1f42aeadf44470bd17ecef15e114fc26dcd3482e1",
+  "fixture_sha256": "eaa2995c3e519460338fb8fe875212080f6ded1cb15ef09761037771f1264a3f"
+}

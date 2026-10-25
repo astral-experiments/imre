@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_datetime",
+  "regrtest_discovery": true,
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/datetime.py": "14f30556584e32b98bec77922f9fa69af39a87e4",
+    "Lib/test/test_datetime.py": "137c8d2686c224ba5e2b98417aa9660852a9c5fd",
+    "Lib/test/datetimetester.py": "c6534adb1fcf83d3ba7c320e2345dbfeaae91670"
+  }
+}

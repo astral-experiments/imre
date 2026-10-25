@@ -10,12 +10,14 @@ pub(super) fn adapters(
     module: &Module,
     sanitize: bool,
     resource_types: &HashSet<Type>,
+    function_links: bool,
     output: &mut Output,
 ) {
     let mut targets = BTreeSet::new();
     let mut invoked = false;
     let mut enum_receiver = false;
     let mut object_receiver = false;
+    let mut int_list_receiver = false;
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Callable { function, receiver } = &value.kind {
@@ -30,15 +32,32 @@ pub(super) fn adapters(
                     .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
                 object_receiver |= receiver
                     .as_ref()
-                    .is_some_and(|r| matches!(r.ty, Type::Deque(_)));
+                    .is_some_and(|r| matches!(r.ty, Type::Deque(_) | Type::List(_)));
+                int_list_receiver |= receiver.as_ref().is_some_and(|r| r.ty == Type::ListInt);
             }
-            invoked |= matches!(value.kind, ExprKind::Invoke { .. });
+            invoked |= matches!(
+                value.kind,
+                ExprKind::Invoke { .. } | ExprKind::Builtin(Builtin::BuiltinsLen, _)
+            );
         });
     }
     if targets.is_empty() && !invoked {
         return;
     }
     output.common().push_str("%callable = type { ptr, ptr }\n");
+    if function_links {
+        // Keep the ordinary adapter/context ABI. The optional third field owns
+        // __wrapped__; kind 2 identifies this link when reclaiming a cycle.
+        output.entry_buffer().push_str("@semantics_python_function = private constant { i32, i32, ptr, i64, ptr, i64, ptr } { i32 2, i32 0, ptr null, i64 0, ptr null, i64 0, ptr null }\n@kinds_python_function = private constant [3 x i32] [i32 0, i32 6, i32 6]\n");
+        output
+            .global(
+                output.entry,
+                "layout_python_function",
+                "constant",
+                "{ i64, ptr, ptr }",
+            )
+            .push_str("{ i64 3, ptr @kinds_python_function, ptr @semantics_python_function }\n");
+    }
     let cached = targets
         .iter()
         .any(|(id, _, _)| module.types.cache_adapter(*id).is_some());
@@ -46,6 +65,7 @@ pub(super) fn adapters(
         .into_iter()
         .chain(enum_receiver.then_some(("callable_enum", "i32 0, i32 10", 2)))
         .chain(object_receiver.then_some(("callable_object", "i32 0, i32 5", 2)))
+        .chain(int_list_receiver.then_some(("callable_list", "i32 0, i32 4", 2)))
         .chain(cached.then_some(("cache_callable", "i32 0, i32 6, i32 0, i32 0", 4)))
     {
         writeln!(
@@ -147,6 +167,20 @@ impl Emitter<'_, '_> {
         function: usize,
         receiver: Option<&Expr>,
     ) -> Value {
+        if let Some(slot) = self.module.types.constructor_slot(function, ty) {
+            let slot = self.output.global_ref(format!("module_value_{slot}"));
+            let layout = self.output.global_ref("layout_callable".to_owned());
+            let target = self.output.adapter_ref(function, false);
+            let operand = self.checked_pointer(format!(
+                "call ptr @imre_record_class_factory(ptr @{slot}, ptr @{layout}, ptr @{target})"
+            ));
+            return self.owned(Value {
+                ty,
+                operand,
+                small_integer: false,
+            });
+        }
+        let bound = receiver.is_some();
         let receiver = receiver.map(|receiver| self.expr(receiver));
         // The hidden context is one pointer-sized ABI word. A StrEnum stores its
         // nonowning tag in that word; only its adapter converts the bits back.
@@ -156,13 +190,17 @@ impl Emitter<'_, '_> {
         let policy = self.module.types.cache_adapter(function);
         let layout = if policy.is_some() {
             "cache_callable"
+        } else if receiver.is_none() && self.function_link_types.contains(&ty) {
+            "python_function"
         } else if scalar {
             "callable_enum"
         } else if receiver
             .as_ref()
-            .is_some_and(|r| matches!(r.ty, Type::Deque(_)))
+            .is_some_and(|r| matches!(r.ty, Type::Deque(_) | Type::List(_)))
         {
             "callable_object"
+        } else if receiver.as_ref().is_some_and(|r| r.ty == Type::ListInt) {
+            "callable_list"
         } else {
             "callable"
         };
@@ -196,6 +234,23 @@ impl Emitter<'_, '_> {
             self.forget(&receiver);
         } else {
             self.line(format!("store ptr null, ptr {context}"));
+        }
+        if !bound
+            && policy.is_none()
+            && self.module.types.is_plain_callback(ty)
+            && let Some(site) = self.module.types.function_site(function)
+        {
+            let module = self.pooled_literal(site.module.as_bytes(), Type::Str);
+            let name = self.pooled_literal(site.qualname.as_bytes(), Type::Str);
+            let short_name = self.pooled_literal(
+                site.qualname.rsplit('.').next().unwrap().as_bytes(),
+                Type::Str,
+            );
+            self.line(format!("call void @imre_typing_declare(ptr {}, i32 {function}, ptr {}, ptr {}, ptr {}, i32 {})",
+                result.operand,module.operand,name.operand,short_name.operand,site.line));
+            self.release(&short_name);
+            self.release(&name);
+            self.release(&module);
         }
         result
     }

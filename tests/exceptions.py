@@ -1,6 +1,7 @@
 """Compare exception propagation and cleanup with CPython, including sanitizer runs."""
 
 import argparse
+import ast
 import os
 import subprocess
 import sys
@@ -8,9 +9,133 @@ import tempfile
 from pathlib import Path
 from textwrap import dedent
 
+
+def upstream_support_payloads() -> str:
+    """Run the original CPython exception classes, including their constructors and methods."""
+    tests = Path(__file__).resolve().parent
+    support = tests.parent / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/support/__init__.py"
+    source = support.read_text()
+    names = ["Error", "TestFailed", "TestFailedWithDetails", "TestDidNotRun"]
+    classes = [node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name in names]
+    assert [node.name for node in classes] == names
+    fragments = [ast.get_source_segment(source, node) for node in classes]
+    calls = (tests / "fixtures/exceptions/support_payload_calls.py").read_text()
+    return "\n\n".join([*fragments, calls])
+
+
 ACCEPTED = {
+    "private_forwarded_exception_fields": """
+class Root(Exception):
+    def __init__(self, value, *rest):
+        self.__value = value
+        super().__init__(value, *rest)
+
+    def __str__(self):
+        return self.__value
+
+class _Leaf(Root):
+    def __init__(self, first, second):
+        super().__init__(first)
+        self.__value = second
+
+error = _Leaf("root", "leaf")
+print(str(error))
+print(repr(error._Root__value))
+print(repr(error._Leaf__value))
+""",
+    "upstream_support_payloads": upstream_support_payloads(),
+    "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
+    "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
+    "warning_hierarchy": (Path(__file__).parent / "fixtures/exceptions/warning_hierarchy.py").read_text(),
+    **{
+        name: (Path(__file__).parent / f"fixtures/exceptions/{name}.py").read_text()
+        for name in ("generic_args", "generic_args_processes", "generic_args_groups", "generic_args_records")
+    },
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
+    "private_forwarding_parameter_names": """
+class Problem(Exception):
+    def __init__(__self, __message, *args, __detail="detail"):
+        __self.value = __message
+        super().__init__(__message, __detail, *args)
+
+class Child(Problem):
+    def __init__(self, value, detail):
+        super().__init__(value, _Problem__detail=detail)
+
+try:
+    print(repr(Problem(_Problem__message="yes", _Problem__detail="extra").args))
+except TypeError as e:
+    print(str(e))
+try:
+    print(repr(Problem(__message="wrong").args))
+except TypeError as e:
+    print(str(e))
+try:
+    Problem("positional", _Problem__self="duplicate")
+except TypeError as e:
+    print(str(e))
+try:
+    Problem()
+except TypeError as e:
+    print(str(e))
+
+print(repr(Child("nested", "forwarded").args))
+""",
+    "ordinary_forwarding_fields": """
+class Ordinary(Exception):
+    def __init__(self, value, *rest):
+        self.value = value
+        self.name = value
+        self.obj = value
+        self.errno = value
+        self.strerror = value
+        self.filename = value
+        self.filename2 = value
+        self.characters_written = value
+        super().__init__(value, *rest)
+
+error = Ordinary("ordinary")
+print(repr(error.value))
+print(repr(error.name))
+print(repr(error.obj))
+print(repr(error.errno))
+print(repr(error.strerror))
+print(repr(error.filename))
+print(repr(error.filename2))
+print(repr(error.characters_written))
+""",
+    "builtin_exception_forwarding_formats": """
+class Item(KeyError):
+    def __init__(self, tag, *args):
+        self.tag = tag
+        super().__init__(*args)
+
+class Root(ValueError):
+    def __init__(self, value, *rest):
+        self.tag = value
+        super().__init__(value, *rest)
+
+class Mixed(Root, KeyError):
+    pass
+
+class One(OSError):
+    def __init__(self, value, *rest):
+        self.tag = value
+        super().__init__(value, *rest)
+
+class OrdinaryOS(One, KeyError):
+    pass
+
+print(str(Item("marker")))
+print(str(Item("marker", "missing")))
+print(str(Item("marker", 17)))
+print(str(Item("marker", "x", "y")))
+print(repr(Item("marker", "missing").args))
+print(str(Mixed("through the MRO")))
+print(str(One("ordinary message")))
+print(str(OrdinaryOS("OSError takes precedence")))
+""",
     "classvar_exception_constructor": """
 from typing import ClassVar
 
@@ -887,6 +1012,152 @@ except KeyError:
 }
 
 REJECTED = {
+    "exception_descriptor_annotated_field": """
+class Problem(StopIteration):
+    value: str
+    def __init__(self, before: str, after: str):
+        self.value = before
+        super().__init__(after)
+Problem("before", "after")
+""",
+    **{
+        f"exception_descriptor_inherited_field_{base}": f"""
+class Ordinary(Exception):
+    def __init__(self, before, after, *rest):
+        self.{field} = before
+        super().__init__(after, *rest)
+class Mixed(Ordinary, {base}):
+    pass
+Mixed({arguments})
+"""
+        for base, field, arguments in [
+            ("StopIteration", "value", '"before", "after"'),
+            ("ImportError", "msg", '"before", "after"'),
+            ("UnicodeEncodeError", "reason", '"before", "ascii", "x", 0, 1, "after"'),
+        ]
+    },
+    **{
+        f"forwarding_exception_{base}_{name}": f"""
+class Parent({base}):
+    pass
+class Problem(Parent):
+    def __init__(self, before, after, *rest):
+        self.{name} = before
+        super().__init__(after, *rest)
+Problem("before", "after")
+"""
+        for base, fields in {
+            "StopIteration": ("value",),
+            "NameError": ("name",),
+            "UnboundLocalError": ("name",),
+            "AttributeError": ("name", "obj"),
+            "OSError": ("errno", "strerror", "filename", "filename2", "characters_written"),
+            "FileNotFoundError": ("filename",),
+        }.items()
+        for name in fields
+    },
+
+    "unsupported_forwarding_OSError": """
+class Problem(OSError):
+    def __init__(self, leading, *rest):
+        self.tag = leading
+        super().__init__(leading, *rest)
+e = Problem(2, "missing", "path")
+print(repr(e.args))
+print(str(e))
+""",
+    "unsupported_forwarding_UnicodeEncodeError": """
+class Problem(UnicodeEncodeError):
+    def __init__(self, leading, *rest):
+        self.tag = leading
+        super().__init__(leading, *rest)
+e = Problem("ascii", "ø", 0, 1, "invalid")
+print(repr(e.args))
+print(str(e))
+""",
+    **{
+        f"forwarding_exception_descriptor_{name}": f"""
+class Problem(Exception):
+    def __init__(self, value, *rest):
+        super().__init__(value, *rest)
+        self.{name} = value
+Problem("ab")
+"""
+        for name in (
+            "args", "__cause__", "__context__", "__traceback__",
+            "__suppress_context__", "__dict__", "__class__", "__weakref__",
+        )
+    },
+    "separate_payload_layouts": """
+class Left(ValueError):
+    def __init__(self, x: int) -> None:
+        self.x = x
+        super().__init__(x)
+class Right(ValueError):
+    def __init__(self, y: str) -> None:
+        self.y = y
+        super().__init__(y)
+class Both(Left, Right):
+    pass
+""",
+    "exception_binder_adjacent_error": """
+class Basic(Exception):
+    def __init__(self, item, *tail):
+        self.item = item
+        super().__init__(item, *tail)
+def annotated(value: str) -> str:
+    return value
+Basic("original", item=annotated(37))
+""",
+    "exception_recursive_dynamic_list": """
+class E(Exception):
+    def __init__(self, value, *args):
+        self.value = value
+        super().__init__(value, *args)
+
+
+def exercise() -> None:
+    values: list[object] = []
+    error = E(values)
+    values.append(error.value)
+    print(repr(error.value))
+
+
+exercise()
+""",
+    "exception_forwarding_object": """
+class Box:
+    def __init__(self, item: int) -> None:
+        self.item = item
+class Report(Exception):
+    def __init__(self, msg, *args):
+        self.msg = msg
+        super().__init__(msg, *args)
+print(Report(Box(1)))
+""",
+    "exception_mutable_default": """
+class Shared(Exception):
+    def __init__(self, item=[], *tail):
+        self.item = item
+        super().__init__(item, *tail)
+print(Shared())
+""",
+    "exception_shadowed_super": """
+class Report(Exception):
+    def __init__(self, super, *tail):
+        self.value = super
+        super().__init__(super, *tail)
+print(Report("argument"))
+""",
+    "exception_intercepted_field": """
+class Report(Exception):
+    def __setattr__(self, key: str, value: str) -> None:
+        raise TypeError(key)
+    def __init__(self, message, *tail):
+        self.message = message
+        super().__init__(message, *tail)
+print(Report("message"))
+""",
     "explicit_base_missing_inherited_field": """
         class Parent(Exception):
             def __init__(self, text: str):
@@ -1109,6 +1380,12 @@ def main() -> None:
             assert result.returncode > 0 and result.stderr, (name, result)
             if name == "exception_subclass_method":
                 assert "exception payload needs an explicit initializer" in result.stderr, result
+            if name == "separate_payload_layouts":
+                assert "multiple independent exception payload layouts" in result.stderr, result
+            if name == "exception_binder_adjacent_error":
+                assert "str" in result.stderr and "int" in result.stderr, result
+            if name in {"exception_forwarding_object", "exception_recursive_dynamic_list"}:
+                assert "forwarding exception fields require" in result.stderr, result
             passed += 1
         cases = [(name, source, None) for name, source in ACCEPTED.items()]
         cases += [

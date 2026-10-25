@@ -1,0 +1,246 @@
+[
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_select",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 0,
+    "denominator": 6,
+    "distinct_ids": 6,
+    "counts": {
+      "host-driven-native-operation": 1,
+      "native-body-host-fixture": 2,
+      "reference-only": 3
+    },
+    "records": [
+      {
+        "id": "test.test_select.SelectTestCase.test_disallow_instantiation",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_select.SelectTestCase.test_errno",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "original method body calls the native integer-fd readiness API",
+          "fixture": "host extracts the unchanged body and checks the applicable platform guard; native TestCase with a typed assertion for the original operands",
+          "method_sha256": "a308bf0d46cfe090b531116cdbfb44d2e91aa154fb1ed09450b2c4c1e7fefb4b",
+          "negative_control": "exception not raised"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_select.SelectTestCase.test_error_conditions",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_select.SelectTestCase.test_returned_list_identity",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "original method body calls the native integer-fd readiness API",
+          "fixture": "host extracts the unchanged body and checks the applicable platform guard; native TestCase with a typed assertion for the original operands",
+          "method_sha256": "da23bf13af2210b72841a5bba786a643e890c62d9494286824f9c48e23ca737d",
+          "negative_control": "unexpectedly identical"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_select.SelectTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native select returns integer read fds for the subprocess pipe",
+          "fixture": "CPython makes the subprocess, converts file objects, reads and asserts; adding a spurious writer fails the original test"
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_select.SelectTestCase.test_select_mutated",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      }
+    ]
+  },
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_select",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 3,
+    "denominator": 6,
+    "distinct_ids": 6,
+    "counts": {
+      "host-driven-native-operation": 1,
+      "native-body-host-fixture": 2,
+      "reference-only": 3
+    },
+    "records": [
+      {
+        "id": "test.test_select.SelectTestCase.test_disallow_instantiation",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_select.SelectTestCase.test_errno",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "original method body calls the native integer-fd readiness API",
+          "fixture": "host extracts the unchanged body and checks the applicable platform guard; native TestCase with a typed assertion for the original operands",
+          "method_sha256": "a308bf0d46cfe090b531116cdbfb44d2e91aa154fb1ed09450b2c4c1e7fefb4b",
+          "negative_control": "exception not raised"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_select.SelectTestCase.test_error_conditions",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_select.SelectTestCase.test_returned_list_identity",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "original method body calls the native integer-fd readiness API",
+          "fixture": "host extracts the unchanged body and checks the applicable platform guard; native TestCase with a typed assertion for the original operands",
+          "method_sha256": "da23bf13af2210b72841a5bba786a643e890c62d9494286824f9c48e23ca737d",
+          "negative_control": "unexpectedly identical"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_select.SelectTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native select returns integer read fds for the subprocess pipe",
+          "fixture": "CPython makes the subprocess, converts file objects, reads and asserts; adding a spurious writer fails the original test"
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_select.SelectTestCase.test_select_mutated",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      }
+    ]
+  }
+]

@@ -17,6 +17,14 @@ def exercise() -> None:
     print(first is stream.write.return_value)
     print(write.call_count)
     write.assert_called_once_with(b"data", status=None, check=1)
+    same = Mock()
+    same(b"data", status=None, check=1)
+    original = write.call_args_list[0]
+    equal = same.call_args_list[0]
+    print(original == equal)
+    print(original is equal)
+    same(b"data", status=None, check=2)
+    print(original != same.call_args_list[1])
     first.close()
     stream.write.assert_called_with(b"data", check=True, status=None)
     print(stream.call_count)

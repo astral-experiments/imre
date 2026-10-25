@@ -1,11 +1,12 @@
 //! Apply public dictionary and INI configuration to live native logger objects.
 
-use super::super::exceptions::{Result, push_string_repr, string_repr};
+use super::super::exceptions::{Result, push_string_repr, string_repr, write_string_repr};
 use super::super::json::readonly::document::Value;
 use super::{Error, Int, Kind, LOGGERS, Object, Str, finish, levels, name, object};
+use crate::StrOwner;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::fmt::{self, Write};
 
 #[derive(Clone, Copy)]
 struct Control {
@@ -114,7 +115,7 @@ pub unsafe extern "C" fn imre_log_routed_emit(
     }
 }
 
-type Pairs = Vec<(Rc<Str>, Value)>;
+type Pairs = Vec<(StrOwner, Value)>;
 
 fn pairs(mapping: &Value) -> Result<Pairs> {
     match mapping {
@@ -152,7 +153,7 @@ fn display(value: Value) -> String {
     enum Part {
         Value(Value),
         Text(&'static str),
-        Key(Rc<Str>),
+        Key(StrOwner),
     }
     let mut pending = vec![Part::Value(value)];
     let mut out = String::new();
@@ -209,10 +210,11 @@ fn level(value: &Value) -> Result<Int> {
 fn logger_level(name: &str, level: Option<Int>) {
     let key = Str::from(name);
     // SAFETY: the string is live through lookup and each result transfers an owner.
-    let logger = unsafe { Rc::from_raw(super::imre_log_get(&key as *const Str as usize)) };
+    let logger =
+        unsafe { crate::ObjectOwner::from_raw(super::imre_log_get(&key as *const Str as usize)) };
     if let Some(level) = level {
         // SAFETY: both owners remain in this scope until after the level write.
-        unsafe { super::imre_log_set_level(Rc::as_ptr(&logger), level.0) };
+        unsafe { super::imre_log_set_level(crate::ObjectOwner::as_ptr(&logger), level.0) };
     }
 }
 
@@ -366,11 +368,11 @@ pub unsafe extern "C" fn imre_log_typed_dict_config(map: *const Object, kind: us
                         0 => Value::Null,
                         1 => Value::Bool(word != 0),
                         2 => Value::Integer((*Int::borrow(word)).clone()),
-                        3 => Value::String(super::super::acquire_rc(word)),
+                        3 => Value::String(crate::StrOwner::acquire_word(word)),
                         7 => Value::Float(f64::from_bits(word as u64)),
                         _ => unreachable!("compiler checked the configuration value kind"),
                     };
-                    (Rc::new(k.clone()), value)
+                    (StrOwner::new(k.clone()), value)
                 })
                 .collect()
         })
@@ -378,92 +380,131 @@ pub unsafe extern "C" fn imre_log_typed_dict_config(map: *const Object, kind: us
     finish(configure(pairs), ());
 }
 
-type Sections = HashMap<String, HashMap<String, String>>;
+struct Quoted<'a>(&'a str);
 
-fn ini(source: &str, filename: &str) -> Result<Sections> {
+impl fmt::Display for Quoted<'_> {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_string_repr(self.0, out)
+    }
+}
+
+#[derive(Default)]
+struct IniDiagnostic(String);
+
+impl Write for IniDiagnostic {
+    fn write_str(&mut self, value: &str) -> fmt::Result {
+        self.0.try_reserve(value.len()).map_err(|_| fmt::Error)?;
+        self.0.push_str(value);
+        Ok(())
+    }
+}
+
+fn ini_error(args: fmt::Arguments<'_>) -> Error {
+    let mut message = IniDiagnostic::default();
+    match message.write_fmt(args) {
+        Ok(()) => Error::new(Kind::RuntimeError, message.0),
+        Err(_) => Error::allocation(),
+    }
+}
+
+type Sections<'a> = HashMap<&'a str, HashMap<Str, Str>>;
+
+fn ini<'a>(source: &'a str, filename: &str) -> Result<Sections<'a>> {
     let mut sections = Sections::new();
-    let mut section = String::new();
-    let mut last = None::<(String, usize)>;
-    let mut errors = Vec::new();
+    let mut section = "";
+    let mut last = None::<(Str, usize)>;
+    let mut blank_lines = 0;
+    let mut errors = IniDiagnostic::default();
     for (i, raw) in source.split_inclusive('\n').enumerate() {
         let text = raw.trim();
-        if text.is_empty() || text.starts_with(['#', ';']) {
+        if text.is_empty() {
+            blank_lines += 1;
+            continue;
+        }
+        if text.starts_with(['#', ';']) {
             continue;
         }
         let indent = raw.len() - raw.trim_start().len();
         if let Some((key, previous_indent)) = &last
             && indent > *previous_indent
         {
-            let option = sections.get_mut(&section).unwrap().get_mut(key).unwrap();
-            option.push('\n');
+            let option = sections.get_mut(section).unwrap().get_mut(key).unwrap();
+            option
+                .try_reserve(text.len() + blank_lines + 1)
+                .map_err(|_| Error::allocation())?;
+            option.extend(std::iter::repeat_n('\n', blank_lines + 1));
+            blank_lines = 0;
             option.push_str(text);
             continue;
         }
+        blank_lines = 0;
         if let Some(header) = text
             .strip_prefix('[')
             .and_then(|s| s.rsplit_once(']'))
             .map(|(h, _)| h)
         {
             if sections.contains_key(header) {
-                return Err(Error::new(
-                    Kind::RuntimeError,
-                    format!(
+                if header != "DEFAULT" {
+                    return Err(ini_error(format_args!(
                         "{filename} is invalid: While reading from {} [line {:2}]: section {} already exists",
-                        string_repr(filename),
+                        Quoted(filename),
                         i + 1,
-                        string_repr(header)
-                    ),
-                ));
+                        Quoted(header)
+                    )));
+                }
+            } else {
+                sections.try_reserve(1).map_err(|_| Error::allocation())?;
+                sections.insert(header, HashMap::new());
             }
-            section = header.to_owned();
-            sections.insert(section.clone(), HashMap::new());
+            section = header;
             last = None;
             continue;
         }
         if section.is_empty() {
-            return Err(Error::new(
-                Kind::RuntimeError,
-                format!(
-                    "{filename} is invalid: File contains no section headers.\nfile: {}, line: {}\n{}",
-                    string_repr(filename),
-                    i + 1,
-                    string_repr(raw)
-                ),
-            ));
+            return Err(ini_error(format_args!(
+                "{filename} is invalid: File contains no section headers.\nfile: {}, line: {}\n{}",
+                Quoted(filename),
+                i + 1,
+                Quoted(raw)
+            )));
         }
         if let Some(pos) = text.find(['=', ':'])
             && pos != 0
         {
-            let key = text[..pos].trim_end().to_lowercase();
-            let options = sections.get_mut(&section).unwrap();
+            let key = super::super::text::lowercase(text[..pos].trim_end())
+                .map_err(|_| Error::allocation())?;
+            let options = sections.get_mut(section).unwrap();
             if options.contains_key(&key) {
-                return Err(Error::new(
-                    Kind::RuntimeError,
-                    format!(
-                        "{filename} is invalid: While reading from {} [line {:2}]: option {} in section {} already exists",
-                        string_repr(filename),
-                        i + 1,
-                        string_repr(&key),
-                        string_repr(&section)
-                    ),
-                ));
+                return Err(ini_error(format_args!(
+                    "{filename} is invalid: While reading from {} [line {:2}]: option {} in section {} already exists",
+                    Quoted(filename),
+                    i + 1,
+                    Quoted(&key),
+                    Quoted(section)
+                )));
             }
-            options.insert(key.clone(), text[pos + 1..].trim_start().to_owned());
-            last = Some((key, indent));
+            options.try_reserve(1).map_err(|_| Error::allocation())?;
+            let retained = Str::try_new(key.as_str()).map_err(|_| Error::allocation())?;
+            let value =
+                Str::try_new(text[pos + 1..].trim_start()).map_err(|_| Error::allocation())?;
+            options.insert(key, value);
+            last = Some((retained, indent));
         } else {
-            errors.push(format!("\t[line {:2}]: {}", i + 1, string_repr(raw)));
+            if errors.0.is_empty() {
+                write!(
+                    errors,
+                    "{filename} is invalid: Source contains parsing errors: {}",
+                    Quoted(filename)
+                )
+                .map_err(|_| Error::allocation())?;
+            }
+            write!(errors, "\n\t[line {:2}]: {}", i + 1, Quoted(raw))
+                .map_err(|_| Error::allocation())?;
             last = None;
         }
     }
-    if !errors.is_empty() {
-        return Err(Error::new(
-            Kind::RuntimeError,
-            format!(
-                "{filename} is invalid: Source contains parsing errors: {}\n{}",
-                string_repr(filename),
-                errors.join("\n")
-            ),
-        ));
+    if !errors.0.is_empty() {
+        return Err(Error::new(Kind::RuntimeError, errors.0));
     }
     Ok(sections)
 }
@@ -477,20 +518,46 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             format!("{path} is an empty file"),
         ));
     }
-    let bytes = std::fs::read(path).map_err(|_| Error::string_key(Str::from("formatters")))?;
+    let bytes = std::fs::read(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() {
+            Error::allocation()
+        } else {
+            Error::string_key(Str::from("formatters"))
+        }
+    })?;
     let encoding = encoding
         .map(|s| s.to_ascii_lowercase())
         .unwrap_or_else(|| "utf-8".into());
     let source = match encoding.as_str() {
         "utf-8" | "utf8" | "utf_8" => String::from_utf8(bytes).map_err(|err| {
             let reason = err.utf8_error();
-            super::super::bytes::decode_owned_error(Rc::new(err.into_bytes()), reason)
+            super::super::bytes::decode_owned_error(
+                crate::BytesOwner::new(err.into_bytes()),
+                reason,
+            )
         })?,
-        "latin-1" | "latin1" | "iso-8859-1" => bytes.iter().map(|&b| char::from(b)).collect(),
+        "latin-1" | "latin1" | "iso-8859-1" => {
+            let capacity = bytes.len() + bytes.iter().filter(|b| !b.is_ascii()).count();
+            let mut text = String::new();
+            text.try_reserve_exact(capacity)
+                .map_err(|_| Error::allocation())?;
+            text.extend(bytes.into_iter().map(char::from));
+            text
+        }
         _ => return Err(unsupported(&format!("file encoding {encoding}"))),
     };
     let source = if source.contains('\r') {
-        source.replace("\r\n", "\n").replace('\r', "\n")
+        let mut bytes = source.into_bytes();
+        let mut previous_cr = false;
+        bytes.retain_mut(|byte| {
+            let skip = previous_cr && *byte == b'\n';
+            previous_cr = *byte == b'\r';
+            if previous_cr {
+                *byte = b'\n';
+            }
+            !skip
+        });
+        String::from_utf8(bytes).expect("normalizing ASCII line endings preserves UTF-8")
     } else {
         source
     };
@@ -504,7 +571,7 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
         section(name)?
             .get(key)
             .or_else(|| sections.get("DEFAULT").and_then(|d| d.get(key)))
-            .map(String::as_str)
+            .map(Str::as_str)
             .ok_or_else(|| Error::string_key(Str::from(key)))
     };
     for group in ["formatters", "handlers"] {
@@ -594,4 +661,24 @@ pub unsafe extern "C" fn imre_log_file_config(
     // SAFETY: nonzero encoding is the exact string payload of the optional word.
     let (path, encoding) = unsafe { (&*path, (encoding as *const Str).as_ref()) };
     finish(file_config(path, disable, encoding), ());
+}
+
+#[test]
+fn ini_preserves_empty_lines_inside_multiline_values() {
+    let sections = ini(
+        "[logger]\nname=alpha\n\n# comment\n   \n    beta\n\nafter=next\n",
+        "test.ini",
+    )
+    .unwrap_or_else(|_| panic!("valid INI fixture should parse"));
+    assert_eq!(sections["logger"]["name"].as_str(), "alpha\n\n\nbeta");
+}
+
+#[test]
+fn ini_allows_repeated_default_sections_with_distinct_options() {
+    let sections = ini("[DEFAULT]\nfirst=1\n[DEFAULT]\nsecond=2\n", "test.ini")
+        .unwrap_or_else(|_| panic!("valid INI fixture should parse"));
+    assert_eq!(sections["DEFAULT"]["first"].as_str(), "1");
+    assert_eq!(sections["DEFAULT"]["second"].as_str(), "2");
+    assert!(ini("[DEFAULT]\nkey=1\n[DEFAULT]\nkey=2\n", "test.ini").is_err());
+    assert!(ini("[logger]\n[logger]\n", "test.ini").is_err());
 }

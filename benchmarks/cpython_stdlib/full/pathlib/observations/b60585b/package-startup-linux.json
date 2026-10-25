@@ -1,0 +1,39 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "8a98a7a869af9a1cda83154222b4fb4b83ca97ec7d7c1ffe7fc00984a0bed712",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_pathlib",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+    },
+    {
+      "suite": "test.test_pathlib",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    },
+    {
+      "suite": "test.test_pathlib",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+    },
+    {
+      "suite": "test.test_pathlib",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    }
+  ],
+  "imre_commit": "b60585b750b8ba4deafe7f2fd25de930041862a8"
+}

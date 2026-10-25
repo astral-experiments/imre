@@ -1,38 +1,63 @@
 //! The default tomli_w text format for the JSON subset of TOML values.
 
-use std::fmt::Write;
-
 use super::{Error, Kind, Node, Str, View};
 
-fn quoted(value: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in value.chars() {
-        match ch {
-            '\x08' => out.push_str("\\b"),
-            '\n' => out.push_str("\\n"),
-            '\x0c' => out.push_str("\\f"),
-            '\r' => out.push_str("\\r"),
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\t' => out.push(ch),
-            '\0'..='\x1f' | '\x7f' => write!(out, "\\u{:04x}", u32::from(ch)).unwrap(),
-            _ => out.push(ch),
-        }
+fn append(out: &mut String, parts: &[&str]) -> Result<(), Error> {
+    let extra = parts
+        .iter()
+        .try_fold(0usize, |size, part| size.checked_add(part.len()))
+        .ok_or_else(Error::allocation)?;
+    out.try_reserve(extra).map_err(|_| Error::allocation())?;
+    for part in parts {
+        out.push_str(part);
     }
-    out.push('"');
-    out
+    Ok(())
 }
 
-pub(in crate::objects) fn key(value: &str) -> String {
+fn quoted(value: &str, out: &mut String) -> Result<(), Error> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    append(out, &["\""])?;
+    let mut start = 0;
+    let mut unicode = *b"\\u0000";
+    for (i, byte) in value.bytes().enumerate() {
+        let escape = match byte {
+            8 => "\\b",
+            b'\n' => "\\n",
+            12 => "\\f",
+            b'\r' => "\\r",
+            b'"' => "\\\"",
+            b'\\' => "\\\\",
+            b'\t' => continue,
+            0..=31 | 127 => {
+                unicode[4] = HEX[usize::from(byte >> 4)];
+                unicode[5] = HEX[usize::from(byte & 15)];
+                std::str::from_utf8(&unicode).unwrap()
+            }
+            _ => continue,
+        };
+        // Every replacement starts and ends on an ASCII byte.
+        append(out, &[&value[start..i], escape])?;
+        start = i + 1;
+    }
+    append(out, &[&value[start..], "\""])
+}
+
+fn key(value: &str, out: &mut String) -> Result<(), Error> {
     if !value.is_empty()
         && value
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
     {
-        value.to_owned()
+        append(out, &[value])
     } else {
-        quoted(value)
+        quoted(value, out)
     }
+}
+
+fn push<T>(items: &mut Vec<T>, item: T) -> Result<(), Error> {
+    items.try_reserve(1).map_err(|_| Error::allocation())?;
+    items.push(item);
+    Ok(())
 }
 
 /// JSON parsers keep duplicate keys in their source positions. A Python dict
@@ -57,7 +82,9 @@ impl View {
         if self.nodes.deep() {
             super::deep_values::check_toml_depth(self)?;
         }
-        self.table(self.index, &key(name), false, output)
+        let mut path = String::new();
+        key(name, &mut path)?;
+        self.table(self.index, &path, false, output)
     }
 
     pub(super) fn table(
@@ -70,9 +97,9 @@ impl View {
         let mut values = Vec::new();
         let mut tables = Vec::new();
         for (name, child) in entries(&self.nodes[index]) {
-            let (view, child) = self.resolved(child);
+            let (view, child) = self.try_resolved(child)?;
             match &view.nodes[child] {
-                Node::Object(_) => tables.push((name, view, child, false)),
+                Node::Object(_) => push(&mut tables, (name, view, child, false))?,
                 Node::Array(items)
                     if !items.is_empty()
                         && items
@@ -89,97 +116,113 @@ impl View {
                         }
                     }
                     if inline {
-                        values.push((name, view, child));
+                        push(&mut values, (name, view, child))?;
                     } else {
+                        tables
+                            .try_reserve(items.len())
+                            .map_err(|_| Error::allocation())?;
                         tables.extend(items.iter().map(|&item| (name, view, item, true)));
                     }
                 }
-                _ => values.push((name, view, child)),
+                _ => push(&mut values, (name, view, child))?,
             }
         }
         let mut written = array || !name.is_empty() && (!values.is_empty() || tables.is_empty());
         if array {
-            writeln!(out, "[[{name}]]").unwrap();
+            append(out, &["[[", name, "]]\n"])?;
         } else if written {
-            writeln!(out, "[{name}]").unwrap();
+            append(out, &["[", name, "]\n"])?;
         }
         for (key_name, view, child) in values {
-            let mut literal = String::new();
-            view.literal(child, 0, &mut literal)?;
-            writeln!(out, "{} = {literal}", key(key_name)).unwrap();
+            let start = out.len();
+            // dump() writes completed lines even when a later value fails.
+            if let Err(error) = view.assignment(key_name, child, out) {
+                out.truncate(start);
+                return Err(error);
+            }
             written = true;
         }
         for (part, view, child, array) in tables {
             if written {
-                out.push('\n');
+                append(out, &["\n"])?;
             }
-            let part = key(part);
-            let path = if name.is_empty() {
-                part
-            } else {
-                format!("{name}.{part}")
-            };
+            let mut path = String::new();
+            if !name.is_empty() {
+                append(&mut path, &[name, "."])?;
+            }
+            key(part, &mut path)?;
             view.table(child, &path, array, out)?;
             written = true;
         }
         Ok(())
     }
 
+    fn assignment(&self, name: &str, index: usize, out: &mut String) -> Result<(), Error> {
+        key(name, out)?;
+        append(out, &[" = "])?;
+        self.literal(index, 0, out)?;
+        append(out, &["\n"])
+    }
+
     fn literal(&self, index: usize, depth: usize, out: &mut String) -> Result<(), Error> {
         match &self.nodes[index] {
-            Node::Deferred(array) => return array.view().literal(array.view().index, depth, out),
+            Node::Deferred(array) => {
+                let view = array.try_view()?;
+                return view.literal(view.index, depth, out);
+            }
             Node::Null => {
                 return Err(Error::new(
                     Kind::TypeError,
                     "Object of type 'NoneType' is not TOML serializable",
                 ));
             }
-            Node::Bool(v) => out.push_str(if *v { "true" } else { "false" }),
+            Node::Bool(v) => append(out, &[if *v { "true" } else { "false" }])?,
             Node::Integer(i) => {
                 if let Some(value) = i.as_small() {
-                    write!(out, "{value}").unwrap();
+                    append(out, &[itoa::Buffer::new().format(value)])?;
                 } else {
-                    write!(out, "{}", i.big()).unwrap();
+                    append(out, &[&i.big().to_str_radix(10)])?;
                 }
             }
-            Node::Float(f) => out.push_str(&crate::floats::render(*f)),
-            Node::ConstantNan => out.push_str("nan"),
-            Node::String(s) => out.push_str(&quoted(s)),
-            Node::Datetime(date) => out.push_str(date),
+            Node::Float(f) => append(out, &[&crate::floats::render(*f)])?,
+            Node::ConstantNan => append(out, &["nan"])?,
+            Node::String(s) => quoted(s, out)?,
+            Node::Datetime(date) => append(out, &[date])?,
             Node::Array(items) => {
-                out.push('[');
+                append(out, &["["])?;
                 if !items.is_empty() {
-                    out.push('\n');
+                    append(out, &["\n"])?;
                     for &item in items {
                         for _ in 0..=depth {
-                            out.push_str("    ");
+                            append(out, &["    "])?;
                         }
                         self.literal(item, depth + 1, out)?;
-                        out.push_str(",\n");
+                        append(out, &[",\n"])?;
                     }
                     for _ in 0..depth {
-                        out.push_str("    ");
+                        append(out, &["    "])?;
                     }
                 }
-                out.push(']');
+                append(out, &["]"])?;
             }
             object @ Node::Object(_) => {
-                out.push('{');
+                append(out, &["{"])?;
                 let mut empty = true;
                 for (k, child) in entries(object) {
                     if empty {
-                        out.push(' ');
+                        append(out, &[" "])?;
                     } else {
-                        out.push_str(", ");
+                        append(out, &[", "])?;
                     }
-                    write!(out, "{} = ", key(k)).unwrap();
+                    key(k, out)?;
+                    append(out, &[" = "])?;
                     self.literal(child, 0, out)?;
                     empty = false;
                 }
                 if !empty {
-                    out.push(' ');
+                    append(out, &[" "])?;
                 }
-                out.push('}');
+                append(out, &["}"])?;
             }
         }
         Ok(())
@@ -192,7 +235,7 @@ mod tests {
     use super::*;
     use std::rc::Rc;
 
-    fn render(json: &str) -> Result<String, Error> {
+    fn view(json: &str) -> View {
         let mut nodes = Vec::new();
         let raw: &serde_json::value::RawValue = serde_json::from_str(json).unwrap();
         let index = push_node(
@@ -207,13 +250,24 @@ mod tests {
             },
         )
         .unwrap();
-        let value = View {
+        View {
             nodes: Nodes::Document(Rc::new(nodes)),
             index,
-        };
+        }
+    }
+
+    fn render(json: &str) -> Result<String, Error> {
         let mut output = String::new();
-        value.toml_table("outer", &mut output)?;
+        view(json).toml_table("outer", &mut output)?;
         Ok(output)
+    }
+
+    #[test]
+    fn failed_assignment_preserves_completed_lines() {
+        let mut output = String::new();
+        let doc = view(r#"{"ok":1,"broken":[1,null]}"#);
+        assert!(doc.toml_table("outer", &mut output).is_err());
+        assert_eq!(output, "[outer]\nok = 1\n");
     }
 
     #[test]

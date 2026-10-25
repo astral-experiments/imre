@@ -5,9 +5,11 @@
 use super::difflib::{Output, materialize_words};
 use super::exceptions::Error;
 use super::{Object, Str, Words, object};
+use crate::StrOwner;
 use std::cell::{OnceCell, Ref, RefCell};
 use std::rc::{Rc, Weak};
 
+mod lines;
 mod packed;
 
 #[cfg(test)]
@@ -93,6 +95,7 @@ pub(super) struct Deferred(View);
 
 #[derive(Clone)]
 enum View {
+    Lines(Rc<lines::TextLines>),
     Full(Rc<Snapshots>),
     Signed(Rc<Snapshots>),
     /// Owns the sorted rows. An independent result must not pin input strings
@@ -106,14 +109,31 @@ enum View {
 impl Deferred {
     pub(super) fn ordered(&self) -> &Words {
         match &self.0 {
+            View::Lines(lines) => lines.ordered(),
             View::Full(source) => source.full(),
             View::Signed(source) => source.signed(),
             View::Sorted { rows, .. } => rows,
         }
     }
 
+    pub(super) fn len(&self) -> usize {
+        match &self.0 {
+            View::Lines(lines) => lines.len(),
+            _ => self.ordered().values.len(),
+        }
+    }
+
+    pub(super) fn join_ranges(&self, separator: &str) -> Option<*const Str> {
+        if let View::Lines(lines) = &self.0 {
+            Some(lines.joined(separator))
+        } else {
+            None
+        }
+    }
+
     fn nonempty(&self) -> bool {
         match &self.0 {
+            View::Lines(lines) => lines.len() != 0,
             View::Full(source) => source.nonempty,
             View::Signed(source) => !source.projected().values.is_empty(),
             View::Sorted { rows, .. } => !rows.values.is_empty(),
@@ -124,6 +144,7 @@ impl Deferred {
         match &self.0 {
             View::Full(source) => Self(View::Signed(Rc::clone(source))),
             View::Signed(_) | View::Sorted { .. } => self.clone(),
+            View::Lines(_) => unreachable!("text ranges filter without ndiff projection"),
         }
     }
 }
@@ -173,7 +194,7 @@ fn filter(
             // SAFETY: retain the source string before adding it to the independent list.
             unsafe { values.kind.acquire(word) }.into_word()
         } else {
-            Rc::into_raw(Rc::new(Str::new(selected))) as usize
+            StrOwner::into_raw(StrOwner::new(Str::new(selected))) as usize
         };
         result.values.push(element);
     }
@@ -237,7 +258,7 @@ pub unsafe extern "C" fn imre_ndiff_deferred(
             signed: OnceCell::new(),
             projected: OnceCell::new(),
         });
-        Ok(Rc::into_raw(
+        Ok(crate::ObjectOwner::into_raw(
             Words::deferred(Deferred(View::Full(source))).into_object(),
         ))
     })();
@@ -255,7 +276,7 @@ pub unsafe extern "C" fn imre_str_list_copy(list: *const Object) -> *const Objec
             .with(|storage| storage.sequence_storage().plan().cloned())
     };
     match plan {
-        Some(plan) => Rc::into_raw(Words::deferred(plan).into_object()),
+        Some(plan) => crate::ObjectOwner::into_raw(Words::deferred(plan).into_object()),
         // SAFETY: omitted bounds copy the entire rooted sequence.
         None => unsafe { super::sequences::imre_seq_slice(list, 0, 0, 0) },
     }
@@ -296,12 +317,16 @@ pub unsafe extern "C" fn imre_str_list_filter(
         object(list).0.with(|storage| {
             let words = storage.sequence_storage();
             if let Some(plan) = words.plan() {
+                if let View::Lines(lines) = &plan.0 {
+                    return lines.filter(first, second, exclude, strip as usize);
+                }
                 if strip == 0 && exclude.is_none() && both_signs(first, second) {
-                    return Words::deferred(plan.signed());
+                    return Ok(Words::deferred(plan.signed()));
                 }
                 if same_sign(first, second) {
                     let origin;
                     let (rows, originals) = match &plan.0 {
+                        View::Lines(_) => unreachable!("text ranges handled above"),
                         View::Full(source) | View::Signed(source) => (
                             source.projected(),
                             (strip == 2).then(|| source.side(first)).flatten(),
@@ -317,27 +342,30 @@ pub unsafe extern "C" fn imre_str_list_filter(
                             (&**rows, originals)
                         }
                     };
-                    return filter(
+                    return Ok(filter(
                         rows,
                         first,
                         second,
                         exclude,
                         strip as usize,
                         originals.as_deref(),
-                    );
+                    ));
                 }
             }
-            filter(
+            Ok(filter(
                 words.resolved(),
                 first,
                 second,
                 exclude,
                 strip as usize,
                 None,
-            )
+            ))
         })
     };
-    Rc::into_raw(result.into_object())
+    super::finish(
+        result.map(|words| crate::ObjectOwner::into_raw(words.into_object())),
+        std::ptr::null(),
+    )
 }
 
 /// Stable ordering by the suffix starting at a fixed nonnegative scalar index.
@@ -363,7 +391,21 @@ pub unsafe extern "C" fn imre_str_list_sorted_suffix(
             let input = source.map_or_else(|| words.resolved(), |source| source.projected());
             let mut sorted = snapshot(input, std::iter::empty())?;
             let key = |word: usize| suffix(&*(word as *const Str), skip as usize);
-            sorted.values.sort_by(|&a, &b| key(a).cmp(key(b)));
+            // The standard stable slice sort allocates scratch and aborts when
+            // that allocation fails. Keep a stack fallback, as direct string
+            // sorting does, so the already-owned result remains sortable.
+            let mut local = [std::mem::MaybeUninit::uninit(); 64];
+            let mut heap = Vec::<usize>::new();
+            let scratch = if sorted.values.len() <= 128
+                || heap.try_reserve_exact(sorted.values.len()).is_err()
+            {
+                local.as_mut_slice()
+            } else {
+                heap.spare_capacity_mut()
+            };
+            glidesort::sort_with_buffer_by(&mut sorted.values, scratch, |&a, &b| {
+                key(a).cmp(key(b))
+            });
             Ok(if let Some(source) = source {
                 Words::deferred(Deferred(View::Sorted {
                     rows: Rc::new(sorted),
@@ -375,7 +417,7 @@ pub unsafe extern "C" fn imre_str_list_sorted_suffix(
         })
     };
     crate::finish(
-        result.map(|words| Rc::into_raw(words.into_object())),
+        result.map(|words| crate::ObjectOwner::into_raw(words.into_object())),
         std::ptr::null(),
     )
 }

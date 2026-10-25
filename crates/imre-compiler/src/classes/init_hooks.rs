@@ -2,7 +2,13 @@
 
 use super::*;
 
-pub(super) type Hooks = HashMap<String, Vec<String>>;
+#[derive(Clone)]
+pub(crate) struct Hook {
+    pub(super) initialized: HashSet<String>,
+    pub(super) writes: Vec<String>,
+}
+
+pub(crate) type Hooks = HashMap<String, Hook>;
 
 /// Recognize an ordinary, argument-free call on the initializer's receiver.
 pub(super) fn called_method<'a>(statement: &'a ast::Stmt, receiver: &str) -> Option<&'a str> {
@@ -19,12 +25,12 @@ pub(super) fn called_method<'a>(statement: &'a ast::Stmt, receiver: &str) -> Opt
         .then(|| attr.attr.as_str())
 }
 
-/// A factory may raise or call arbitrary code on the right, but may never pass or read self.
-/// The only effects on the incomplete instance are direct writes to declared storage.
+/// Check the fields an initializer hook writes on a normal return.
 fn writes(
     module: &SourceModule,
     method: &ast::StmtFunctionDef,
     kind: MethodKind,
+    inherited: Option<&Hook>,
 ) -> Result<Vec<String>, String> {
     let Some(parameter) = method.parameters.iter_non_variadic_params().next() else {
         return Err(module.error(method, "an initializer hook requires a receiver"));
@@ -40,7 +46,11 @@ fn writes(
         ));
     }
     let receiver = parameter.name().as_str();
-    let no_fields = HashSet::new();
+    let builtin_super = receiver != "super" && !module.bindings.contains_key("super");
+    let mut initialized: HashSet<_> = inherited
+        .into_iter()
+        .flat_map(|hook| hook.initialized.iter().map(String::as_str))
+        .collect();
     let mut fields = Vec::new();
     for stmt in &method.body {
         if matches!(stmt, ast::Stmt::Pass(_))
@@ -48,11 +58,33 @@ fn writes(
         {
             continue;
         }
+        if builtin_super {
+            if let Some(parent) = inherited
+                && let ast::Stmt::Expr(expr) = stmt
+                && let ast::Expr::Call(call) = &*expr.value
+                && call.arguments.is_empty()
+                && super_method(call)
+                    .is_some_and(|(attr, _)| attr.attr.as_str() == method.name.as_str())
+            {
+                fields.extend(parent.writes.iter().cloned());
+                initialized.extend(parent.writes.iter().map(String::as_str));
+                continue;
+            }
+            if ast::helpers::any_over_body(
+                std::slice::from_ref(stmt),
+                |expr| matches!(expr, ast::Expr::Call(call) if super_method(call).is_some()),
+            ) {
+                return Err(module.error(
+                    stmt,
+                    "a field initializer cannot read or expose the incomplete instance",
+                ));
+            }
+        }
         if let ast::Stmt::Assign(assign) = stmt
             && let [ast::Expr::Attribute(attr)] = assign.targets.as_slice()
             && matches!(&*attr.value, ast::Expr::Name(n) if n.id == receiver)
         {
-            let mut reads = SelfUse(receiver, None, &no_fields);
+            let mut reads = SelfUse(receiver, None, &initialized);
             reads.visit_expr(&assign.value);
             if let Some(expr) = reads.1 {
                 return Err(module.error(
@@ -61,7 +93,29 @@ fn writes(
                 ));
             }
             fields.push(attr.attr.to_string());
+            initialized.insert(attr.attr.as_str());
             continue;
+        }
+        if let Some(parent) = inherited {
+            // Side effects and failures can observe fields initialized before this
+            // call. On an exceptional exit no partially built instance is returned.
+            let guarded_raise = matches!(stmt, ast::Stmt::If(branch)
+                if branch.elif_else_clauses.is_empty()
+                    && matches!(branch.body.as_slice(), [ast::Stmt::Raise(_)]));
+            if guarded_raise || matches!(stmt, ast::Stmt::Expr(_) | ast::Stmt::Raise(_)) {
+                let mut reads = SelfUse(receiver, None, &initialized);
+                reads.visit_stmt(stmt);
+                if let Some(expr) = reads.1 {
+                    return Err(module.error(
+                        expr,
+                        "a field initializer cannot expose the incomplete instance",
+                    ));
+                }
+                if matches!(stmt, ast::Stmt::Raise(_)) {
+                    return Ok(parent.writes.clone());
+                }
+                continue;
+            }
         }
         return Err(module.error(stmt, "a field initializer must write fields directly"));
     }
@@ -82,11 +136,13 @@ pub(super) fn method_writes(
     kinds: &[MethodKind],
     origins: &[DefinitionId],
     name: &str,
+    inherited: Option<&Hook>,
 ) -> Option<Result<Vec<String>, String>> {
     let i = methods.iter().position(|m| m.name.as_str() == name)?;
     Some(writes(
         &graph.modules[origins[i].module],
         &methods[i],
         kinds[i],
+        inherited,
     ))
 }

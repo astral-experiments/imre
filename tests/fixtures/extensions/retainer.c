@@ -1,5 +1,6 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include <stdint.h>
 
 static PyObject *retained_list;
 static PyObject *retained_callback;
@@ -85,6 +86,24 @@ static PyObject *release(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+/* Exercise a copied C buffer, a slice without a terminator and size errors. */
+static PyObject *buffer_bytes(PyObject *self, PyObject *args) {
+    const char *data;
+    Py_ssize_t length;
+    unsigned long mode;
+    if (!PyArg_ParseTuple(args, "y#k:buffer_bytes", &data, &length, &mode)) return NULL;
+    if (mode == 1) return PyBytes_FromStringAndSize(NULL, length);
+    if (mode == 2) return PyBytes_FromStringAndSize(NULL, -1);
+    if (mode == 3) return PyBytes_FromStringAndSize(NULL, INTPTR_MAX);
+    if (mode == 4) {
+        char local[] = {'x', 0, (char)0xff};
+        PyObject *owned = PyBytes_FromStringAndSize(local + 1, 2);
+        ((volatile char *)local)[1] = 'y';
+        return owned;
+    }
+    return PyBytes_FromStringAndSize(data, length);
+}
+
 /* A false declaration in the installed stub must fail at the native boundary. */
 static PyObject *wrong_return(PyObject *self, PyObject *args) {
     PyObject *value;
@@ -115,6 +134,7 @@ static PyMethodDef methods[] = {
     {"first", first, METH_VARARGS, NULL},
     {"replace_and_call", replace_and_call, METH_VARARGS, NULL},
     {"store_bytes", store_bytes, METH_VARARGS, NULL},
+    {"buffer_bytes", buffer_bytes, METH_VARARGS, NULL},
     {"wrong_return", wrong_return, METH_VARARGS, NULL},
     {"pin_args", pin_args, METH_VARARGS, NULL},
     {"pinned_value", pinned_value, METH_VARARGS, NULL},

@@ -1,0 +1,116 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "files": {
+    "Lib/test/test_os.py": "555c85f4857c2d7e69dda2f390847c7f02123cb5",
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044"
+  },
+  "case_id": "test.test_os.DeviceEncodingTests.test_device_encoding",
+  "occurrence": 1,
+  "native_driver_sha256": "8920b2bf9ebdd8161ce2a6a35e8ccff15687259e1ecd19f4189e671631df979a",
+  "roles_for_pty_mixed_run": {
+    "body": "cpython",
+    "assertions": "cpython",
+    "fixture": "cpython",
+    "os.device_encoding": "cpython",
+    "codecs.lookup and truth": "imre"
+  },
+  "sys_ids_added": 0,
+  "levels": {
+    "0": {
+      "redirected": {
+        "stock": {
+          "isatty": false,
+          "calls": [],
+          "observed": {},
+          "skips": {
+            "test.test_os.DeviceEncodingTests.test_device_encoding": "test requires a tty and either Windows or nl_langinfo(CODESET)"
+          }
+        },
+        "mixed": {
+          "isatty": false,
+          "calls": [],
+          "observed": {},
+          "skips": {
+            "test.test_os.DeviceEncodingTests.test_device_encoding": "test requires a tty and either Windows or nl_langinfo(CODESET)"
+          }
+        }
+      },
+      "pty": {
+        "stock": {
+          "isatty": true,
+          "calls": [],
+          "observed": {
+            "test.test_os.DeviceEncodingTests.test_device_encoding": [
+              "pass"
+            ]
+          },
+          "skips": {}
+        },
+        "mixed": {
+          "isatty": true,
+          "calls": [
+            {
+              "encoding_from_os": "UTF-8",
+              "native_name": "utf-8",
+              "native_truth": true
+            }
+          ],
+          "observed": {
+            "test.test_os.DeviceEncodingTests.test_device_encoding": [
+              "pass"
+            ]
+          },
+          "skips": {}
+        }
+      }
+    },
+    "3": {
+      "redirected": {
+        "stock": {
+          "isatty": false,
+          "calls": [],
+          "observed": {},
+          "skips": {
+            "test.test_os.DeviceEncodingTests.test_device_encoding": "test requires a tty and either Windows or nl_langinfo(CODESET)"
+          }
+        },
+        "mixed": {
+          "isatty": false,
+          "calls": [],
+          "observed": {},
+          "skips": {
+            "test.test_os.DeviceEncodingTests.test_device_encoding": "test requires a tty and either Windows or nl_langinfo(CODESET)"
+          }
+        }
+      },
+      "pty": {
+        "stock": {
+          "isatty": true,
+          "calls": [],
+          "observed": {
+            "test.test_os.DeviceEncodingTests.test_device_encoding": [
+              "pass"
+            ]
+          },
+          "skips": {}
+        },
+        "mixed": {
+          "isatty": true,
+          "calls": [
+            {
+              "encoding_from_os": "UTF-8",
+              "native_name": "utf-8",
+              "native_truth": true
+            }
+          ],
+          "observed": {
+            "test.test_os.DeviceEncodingTests.test_device_encoding": [
+              "pass"
+            ]
+          },
+          "skips": {}
+        }
+      }
+    }
+  }
+}

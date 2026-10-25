@@ -1,6 +1,7 @@
 //! Report the original Python filename of the syscall that actually failed.
 
 use super::*;
+use crate::StrOwner;
 use crate::objects::exceptions::Filename;
 use crate::objects::files::errno_with_filenames;
 
@@ -113,33 +114,54 @@ pub(super) unsafe fn spawn(
     cmd: &OwnedWord,
     config: &popen::LaunchConfig,
     streams: u32,
-    fds: [RawFd; 3],
-    oversized_fd: bool,
+    redirects: popen::Redirects,
+    allow_spawn: bool,
+    child_attributes: impl FnOnce(bool) -> Result<ChildAttributes>,
 ) -> Result<Child> {
+    let modes = [12, 0, 4].map(|shift| (streams >> shift) & 15);
+    // Popen already holds its pipes and shared devnull; legacy callers open
+    // their handles at launch and must still probe them on validation errors.
+    let pending = if redirects.prepared.is_some() {
+        &[][..]
+    } else {
+        &modes[..]
+    };
+    // SAFETY: the original command and configuration are still rooted.
+    unsafe { validate_command_shape(cmd, config) }
+        .map_err(|e| popen::error_after_handles(pending, false, e))?;
     // SAFETY: the caller roots the command until both launch APIs finish validation.
-    let fork_overflow = oversized_fd
-        && !uses_posix_spawn(
+    let direct = allow_spawn
+        && uses_posix_spawn(
             unsafe { has_directory(cmd, config) },
             !config.cwd.is_null(),
             streams,
-            fds,
+            redirects.fds,
         );
     // SAFETY: validation and copying complete before the command may fork.
-    let (launch, cwd) = unsafe { prepare_command(cmd, config, fork_overflow)? };
-    let has_directory = launch.search.is_none();
-    if launch.argv.strings.is_empty()
-        && uses_posix_spawn(has_directory, cwd.is_some(), streams, fds)
-    {
-        return Err(Error::new(
-            Kind::ValueError,
-            "posix_spawn: argv must not be empty",
-        ));
+    let (launch, cwd, attributes) = unsafe {
+        prepare_command(cmd, config, || {
+            let attributes = child_attributes(direct)?;
+            if redirects.oversized && !direct {
+                return Err(c_int_overflow());
+            }
+            Ok(attributes)
+        })
     }
-    if oversized_fd {
-        return Err(c_int_overflow());
+    .map_err(|e| popen::error_after_handles(pending, !direct, e))?;
+    if launch.argv.strings.is_empty() && direct {
+        let error = Error::new(Kind::ValueError, "posix_spawn: argv must not be empty");
+        return Err(popen::error_after_handles(pending, false, error));
     }
+    if redirects.oversized {
+        return Err(popen::error_after_handles(pending, false, c_int_overflow()));
+    }
+    let streams = if attributes.keep.is_empty() {
+        streams
+    } else {
+        streams & !(1 << 17) // pass_fds closes all other inherited descriptors
+    };
     launch
-        .spawn_tagged(cwd.as_ref(), streams, fds)
+        .spawn_tagged(cwd.as_ref(), streams, redirects, attributes)
         .map_err(|err| {
             let (site, err) = decode(err);
             // SAFETY: failure does not release the original command or its arguments.
@@ -151,10 +173,10 @@ pub(super) unsafe fn spawn(
                     Site::Executable if !config.executable.is_null() => filename(
                         config.executable as usize,
                         WordKind::new(config.executable_kind),
-                        !uses_posix_spawn(has_directory, cwd.is_some(), streams, fds),
+                        !direct,
                     ),
                     Site::Executable if config.shell => {
-                        Filename::Str(Rc::new(Str::from(if cfg!(target_os = "android") {
+                        Filename::Str(StrOwner::new(Str::from(if cfg!(target_os = "android") {
                             "/system/bin/sh"
                         } else {
                             "/bin/sh"
@@ -162,11 +184,7 @@ pub(super) unsafe fn spawn(
                     }
                     Site::Executable => {
                         let (word, kind) = argv::first(cmd).expect("validated nonempty argv");
-                        filename(
-                            word,
-                            kind,
-                            !uses_posix_spawn(has_directory, cwd.is_some(), streams, fds),
-                        )
+                        filename(word, kind, !direct)
                     }
                 }
             });
@@ -184,12 +202,12 @@ unsafe fn filename(word: usize, kind: WordKind, keep_path: bool) -> Filename {
     // SAFETY: argv validation admitted only rooted str, bytes, and path values.
     unsafe {
         match kind.raw() {
-            3 => Filename::Str(crate::objects::acquire_rc(word)),
-            8 => Filename::Bytes(crate::objects::acquire_rc(word)),
-            5 if keep_path => Filename::Path(crate::objects::acquire_rc(word)),
+            3 => Filename::Str(StrOwner::acquire_word(word)),
+            8 => Filename::Bytes(crate::acquire_bytes(word)),
+            5 if keep_path => Filename::Path(crate::ObjectOwner::acquire_word(word)),
             5 => object(word as *const Object)
                 .0
-                .with(|s| Filename::Str(Rc::new(Str::from(s.path())))),
+                .with(|s| Filename::Str(StrOwner::new(Str::from(s.path())))),
             _ => fail("SystemError", "unexpected subprocess error filename"),
         }
     }

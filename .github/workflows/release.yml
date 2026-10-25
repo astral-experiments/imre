@@ -64,7 +64,9 @@ jobs:
 
   build-release-artifacts:
     needs: plan
-    uses: $/.github/workflows/build-release-binaries.yml
+    uses: ./.github/workflows/build-release-binaries.yml
+    with:
+      include_macos: true
     permissions:
       contents: read
 

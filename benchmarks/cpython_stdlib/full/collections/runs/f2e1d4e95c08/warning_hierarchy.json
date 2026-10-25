@@ -1,0 +1,32 @@
+{
+  "fixture_sha256": "84cd7d495f2eaa6c8a2fbe59028a5fc21da7a2b95c9d4eeacbd4a14180208d42",
+  "imre_sha256": "e79bc979eb382176dea9ca0a601e903292830556467ef2642986ae66b2a9c341",
+  "runtime_sha256": "3e6c9e9f95a980a945958bc4daeede23c72a969264e69598298e47e96c29d9fa",
+  "reference": "RuntimeWarning('runtime')\nsubclass\nWarning('root')\nordinary\n",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "RuntimeWarning('runtime')\nsubclass\nWarning('root')\nordinary\n",
+      "stderr": ""
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "RuntimeWarning('runtime')\nsubclass\nWarning('root')\nordinary\n",
+      "stderr": ""
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "RuntimeWarning('runtime')\nsubclass\nWarning('root')\nordinary\n",
+      "stderr": ""
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "RuntimeWarning('runtime')\nsubclass\nWarning('root')\nordinary\n",
+      "stderr": ""
+    }
+  }
+}

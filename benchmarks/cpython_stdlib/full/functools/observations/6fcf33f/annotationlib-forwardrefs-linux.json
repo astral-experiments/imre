@@ -1,0 +1,60 @@
+{
+  "O0": {
+    "test.test_annotationlib.TestForwardRefClass.test_forwardref_instance_type_error": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "700d9f8cd1fe855d4164da8150d1de35f751a09cf17e2ab9d1c2f337f185ae07"
+      }
+    ],
+    "test.test_annotationlib.TestForwardRefClass.test_forwardref_only_str_arg": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "41c2e6c56bd60d2faf018e2e4c431060e6716defcb4bd95899d0f0f4a29f0e73"
+      }
+    ],
+    "test.test_annotationlib.TestForwardRefClass.test_forwardref_subclass_type_error": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "2d63ba88e3c7507df9232640249d444510b9c2ca3d89733949fe86a206f81dbb"
+      }
+    ]
+  },
+  "O3": {
+    "test.test_annotationlib.TestForwardRefClass.test_forwardref_instance_type_error": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "700d9f8cd1fe855d4164da8150d1de35f751a09cf17e2ab9d1c2f337f185ae07"
+      }
+    ],
+    "test.test_annotationlib.TestForwardRefClass.test_forwardref_only_str_arg": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "41c2e6c56bd60d2faf018e2e4c431060e6716defcb4bd95899d0f0f4a29f0e73"
+      }
+    ],
+    "test.test_annotationlib.TestForwardRefClass.test_forwardref_subclass_type_error": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "2d63ba88e3c7507df9232640249d444510b9c2ca3d89733949fe86a206f81dbb"
+      }
+    ]
+  }
+}

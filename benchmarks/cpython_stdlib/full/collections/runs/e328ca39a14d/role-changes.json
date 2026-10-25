@@ -1,0 +1,28 @@
+{
+  "O0": [
+    {
+      "id": "test.test_deque.TestBasic.test_init",
+      "before": "blocked",
+      "after": "fully-native",
+      "roles": {
+        "assertions": "imre",
+        "body": "imre",
+        "fixture": "imre",
+        "operation": "imre"
+      }
+    }
+  ],
+  "O3": [
+    {
+      "id": "test.test_deque.TestBasic.test_init",
+      "before": "blocked",
+      "after": "fully-native",
+      "roles": {
+        "assertions": "imre",
+        "body": "imre",
+        "fixture": "imre",
+        "operation": "imre"
+      }
+    }
+  ]
+}

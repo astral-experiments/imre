@@ -1,4 +1,4 @@
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 
 
 def visit(key: int, events: list[int]) -> int:
@@ -23,7 +23,25 @@ def base(owner: dict[str, list[int]]) -> dict[int, int]:
     return owner.fromkeys([1, 2], 9)
 
 
+def counter_keywords(owner: Counter[str]) -> dict[int, int]:
+    return owner.fromkeys([4], v=0)
+
+
 def main() -> None:
+    ordered = OrderedDict(seed=1)
+    keys_arg = [4, 5]
+    order: list[int] = []
+    from_positional = ordered.fromkeys(before(keys_arg, order), value=argument(keys_arg, order))
+    print(list(from_positional))
+    print(from_positional[4])
+    print(order)
+    order.clear()
+    from_keywords = ordered.fromkeys(value=argument(keys_arg, order), iterable=before(keys_arg, order))
+    print(list(from_keywords))
+    print(from_keywords[4])
+    print(order)
+    print(list(ordered.fromkeys(iterable=["b", "a", "b"])))
+
     print(dict.fromkeys("éaé"))
     print(dict.fromkeys((4, 5), 0))
     print(dict.fromkeys(range(6), 0))
@@ -72,6 +90,19 @@ def main() -> None:
         print(counts.fromkeys([4], 0))
     except NotImplementedError as error:
         print(error)
+    try:
+        counter_keywords(counts)
+    except NotImplementedError as error:
+        print(error)
+    keyword_events: list[int] = []
+    try:
+        counts.fromkeys(
+            v=visit(1, keyword_events),
+            iterable=(visit(3, keyword_events) for _ in before(source, keyword_events)),
+        )
+    except NotImplementedError as error:
+        print(error)
+    print(keyword_events)
     groups: defaultdict[str, list[int]] = defaultdict(list)
     groups['prior'].append(5)
     new = base(groups)

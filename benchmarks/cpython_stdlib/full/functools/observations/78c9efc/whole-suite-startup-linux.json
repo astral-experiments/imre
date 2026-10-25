@@ -1,0 +1,152 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "73d093c8a540642468472a41e343cd26f37557945253952b0d1e70ea4a8fc686",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_functools",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_functools.py:7:1: Imre: unsupported sealed standard-library export itertools.permutations"
+    },
+    {
+      "suite": "test.test_functools",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_functools.py:7:1: Imre: unsupported sealed standard-library export itertools.permutations"
+    },
+    {
+      "suite": "test.test_functools",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_functools.py:7:1: Imre: unsupported sealed standard-library export itertools.permutations"
+    },
+    {
+      "suite": "test.test_functools",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_functools.py:7:1: Imre: unsupported sealed standard-library export itertools.permutations"
+    },
+    {
+      "suite": "test.test_free_threading.test_functools",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_free_threading/test_functools.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+    },
+    {
+      "suite": "test.test_free_threading.test_functools",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_free_threading/test_functools.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+    },
+    {
+      "suite": "test.test_free_threading.test_functools",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_free_threading/test_functools.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+    },
+    {
+      "suite": "test.test_free_threading.test_functools",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_free_threading/test_functools.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+    },
+    {
+      "suite": "test.test_unittest",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+    },
+    {
+      "suite": "test.test_unittest",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    },
+    {
+      "suite": "test.test_unittest",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+    },
+    {
+      "suite": "test.test_unittest",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    },
+    {
+      "suite": "test.test_pathlib",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+    },
+    {
+      "suite": "test.test_pathlib",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    },
+    {
+      "suite": "test.test_pathlib",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+    },
+    {
+      "suite": "test.test_pathlib",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    },
+    {
+      "suite": "test.test_inspect",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+    },
+    {
+      "suite": "test.test_inspect",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    },
+    {
+      "suite": "test.test_inspect",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:133:29: Imre: inheriting a user exception payload layout is unsupported"
+    },
+    {
+      "suite": "test.test_inspect",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    }
+  ],
+  "compiler_revision": "78c9efc1357b88b3a4547d993e33022b4716b8c2",
+  "compiler_tree": "c3142dded8fdf777a6c7201a5851587f5a629416"
+}

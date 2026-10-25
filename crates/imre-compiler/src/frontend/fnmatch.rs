@@ -155,7 +155,7 @@ impl Checker<'_> {
                 kind: ExprKind::List(Vec::new()),
             },
         ));
-        body.extend(self.expand_items(input, call, |checker, value| {
+        let match_name = |checker: &mut Self, value: Expr| {
             if !matches!(value.ty, Type::Str | Type::Bytes) {
                 return Err(error(
                     checker.source,
@@ -180,6 +180,22 @@ impl Checker<'_> {
                 (append, Vec::new())
             };
             Ok(vec![Statement::If(matched, yes, no)])
+        };
+        body.extend(self.expand_items(input, call, |checker, value| {
+            if checker
+                .types
+                .members(value.ty)
+                .is_some_and(|m| m == [Type::Str, Type::Bytes])
+            {
+                let (slot, test, text, bytes) = checker.protocol_alternatives(value.ty).unwrap();
+                let yes = match_name(checker, text)?;
+                let no = match_name(checker, bytes)?;
+                return Ok(vec![Statement::Scope {
+                    body: vec![Statement::Assign(slot, value), Statement::If(test, yes, no)],
+                    clear: vec![slot],
+                }]);
+            }
+            match_name(checker, value)
         })?);
         Ok(Expr {
             ty,

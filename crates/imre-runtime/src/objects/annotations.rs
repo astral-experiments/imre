@@ -5,12 +5,64 @@ use super::words::{NULLABLE, WordKind};
 use super::{Str, exceptions, values};
 
 /// # Safety
-/// Both arguments borrow exact builtin class names from the compiler's closed domain.
+/// The immutable annotation box contains exactly one initialized member.
+pub(super) unsafe fn member(word: usize) -> (WordKind, usize) {
+    // SAFETY: the member is at offset zero regardless of its representation.
+    unsafe { field(word as *const usize, 0) }
+}
+
+/// # Safety
+/// Generated code roots the immutable annotation box.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_builtin_issubclass(first: *const Str, second: *const Str) -> u32 {
-    // SAFETY: builtin class operands retain their immutable native name storage.
-    let (first, second) = unsafe { ((&*first).as_str(), (&*second).as_str()) };
-    u32::from(first == second || second == "object" || (first == "bool" && second == "int"))
+pub unsafe extern "C" fn imre_annotation_kind(word: *const usize) -> u32 {
+    // SAFETY: the member descriptor lives as long as the boxed value.
+    unsafe { member(word as usize).0.raw() }
+}
+
+/// # Safety
+/// Both pointers borrow immutable annotation boxes of the closed representation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_annotation_equal(left: *const usize, right: *const usize) -> u32 {
+    // SAFETY: the generic equality traversal reads only the retained exact members.
+    u32::from(unsafe { values::equal(left as usize, right as usize, WordKind::new(13)) })
+}
+
+/// # Safety
+/// Both arguments borrow live annotation boxes through this comparison.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_annotation_is(left: *const usize, right: *const usize) -> u32 {
+    // SAFETY: the public identity is that of the two boxed members.
+    unsafe {
+        let (ka, a) = member(left as usize);
+        let (kb, b) = member(right as usize);
+        u32::from(ka == kb && (a == b || (ka.raw() == 11 && values::equal(a, b, ka))))
+    }
+}
+
+/// # Safety
+/// The arguments root the annotation and attribute name. The returned ForwardRef is owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_annotation_ref(word: *const usize, name: *const Str) -> *const usize {
+    // SAFETY: the immutable member descriptor identifies its exact layout.
+    unsafe {
+        let (kind, field) = member(word as usize);
+        if kind.raw() == 12 {
+            super::records::imre_record_retain(field as *const usize);
+            return field as *const usize;
+        }
+        let what = match kind.raw() {
+            0 => "'NoneType' object".to_owned(),
+            3 => "'str' object".to_owned(),
+            11 => format!("type object '{}'", *(field as *const Str)),
+            _ => unreachable!("unsupported annotation member"),
+        };
+        exceptions::Error::new(
+            exceptions::Kind::AttributeError,
+            format!("{what} has no attribute '{}'", *name),
+        )
+        .raise();
+        std::ptr::null()
+    }
 }
 
 /// Read the exact field kind from the descriptor, including the native owner type.
