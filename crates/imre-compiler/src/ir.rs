@@ -1236,6 +1236,10 @@ pub(crate) enum Builtin {
     },
     DequeClear,
     DequeReverse,
+    DequeGet,
+    DequeSet,
+    DequeDelete,
+    DequeContains,
     DequeMaxlen,
     DequeIter {
         reverse: bool,

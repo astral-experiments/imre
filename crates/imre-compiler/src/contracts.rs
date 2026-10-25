@@ -504,6 +504,7 @@ impl Builtin {
             | Self::IntListContains
             | Self::StringListContains
             | Self::StructListContains
+            | Self::DequeContains
             | Self::StringContains
             | Self::BytesContains
             | Self::UnionInject
@@ -562,6 +563,9 @@ impl Builtin {
             | Self::ArgparseText { .. }
             | Self::DequeAppend { .. }
             | Self::DequePop { .. }
+            | Self::DequeGet
+            | Self::DequeSet
+            | Self::DequeDelete
             | Self::Pop
             | Self::Print
             | Self::SortRestore
