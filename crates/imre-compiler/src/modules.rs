@@ -18,6 +18,7 @@ mod empty_keywords;
 mod entry_profile;
 mod namedtuple_fields;
 mod os;
+pub(crate) use os::credential_arity;
 mod reachability;
 mod type_aliases;
 
@@ -63,6 +64,7 @@ pub(crate) enum IntrinsicModule {
     Argparse,
     Errno,
     Future,
+    Builtins,
     Sys,
     SysJit,
     Typing,
@@ -95,6 +97,7 @@ pub(crate) enum IntrinsicModule {
     Tempfile,
     Subprocess,
     Os,
+    Posix,
     PosixPath,
     Urllib,
     UrllibParse,
@@ -111,6 +114,7 @@ pub(crate) enum IntrinsicModule {
     Base64,
     Zipfile,
     Csv,
+    StringFormatting,
     Re,
     Enum,
     Zlib,
@@ -130,6 +134,8 @@ pub(crate) enum Intrinsic {
     AnnotationTypeRepr,
     AnnotationFormat(i64),
     Declaration(&'static str),
+    BuiltinsLast,
+    SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
     BooleanOptionalAction,
@@ -144,6 +150,7 @@ pub(crate) enum Intrinsic {
     LevelNamesMapping,
     HandlerRename,
     HandlerLookup,
+    PrintActiveException,
     HandlerLevelType,
     LevelMap { names: bool },
     LogRecord,
@@ -243,7 +250,7 @@ pub(crate) enum Intrinsic {
     Literal,
     Callable,
     Sequence,
-    Mapping,
+    Mapping { typing_alias: bool },
     Iterable,
     Iterator,
     UnsupportedOperation,
@@ -260,6 +267,8 @@ pub(crate) enum Intrinsic {
     BadZipFile,
     BadGzipFile,
     CsvReader,
+    FormatterParser,
+    FormatterFieldNameSplit,
     CsvError,
     RegexCompile,
     RegexSearch,
@@ -271,6 +280,7 @@ pub(crate) enum Intrinsic {
     StrEnum,
     EnumAuto,
     DefaultDict,
+    ChainMap,
     NamedTuple,
     Counter,
     Deque,
@@ -333,6 +343,7 @@ pub(crate) enum Intrinsic {
     Strerror,
     StatResult,
     Fd(crate::ir::FdOperation),
+    Credential(&'static str),
     DescriptorConstant(&'static str),
     FsPath,
     PosixNormcase,
@@ -350,6 +361,12 @@ impl Intrinsic {
 }
 
 impl IntrinsicModule {
+    /// Ty resolves these builtin names solely against its bundled stdlib. Only
+    /// the exact import proved by the closed checker needs an import diagnostic.
+    pub(crate) fn lacks_builtin_stub(self) -> bool {
+        matches!(self, Self::Opcode | Self::StringFormatting)
+    }
+
     fn named(name: &str) -> Option<Self> {
         match name {
             "annotationlib" => Some(Self::AnnotationLib),
@@ -375,6 +392,7 @@ impl IntrinsicModule {
             "_opcode" => Some(Self::Opcode),
             "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
+            "builtins" => Some(Self::Builtins),
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
@@ -386,6 +404,7 @@ impl IntrinsicModule {
             "tempfile" => Some(Self::Tempfile),
             "subprocess" => Some(Self::Subprocess),
             "os" => Some(Self::Os),
+            "posix" if cfg!(unix) => Some(Self::Posix),
             "os.path" | "posixpath" => Some(Self::PosixPath),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
@@ -402,6 +421,7 @@ impl IntrinsicModule {
             "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
             "csv" => Some(Self::Csv),
+            "_string" => Some(Self::StringFormatting),
             "re" => Some(Self::Re),
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
@@ -474,6 +494,7 @@ impl IntrinsicModule {
             (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
             (Self::Logging, "logMultiprocessing") => Intrinsic::LogRecordFlag(4),
             (Self::Logging, "logAsyncioTasks") => Intrinsic::LogRecordFlag(8),
+            (Self::Logging, "raiseExceptions") => Intrinsic::LogRecordFlag(16),
             (Self::Logging, "makeLogRecord") => Intrinsic::MakeLogRecord,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
             (Self::Logging, "getLevelName") => Intrinsic::GetLevelName,
@@ -586,11 +607,13 @@ impl IntrinsicModule {
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
                 Intrinsic::RawDescriptionHelpFormatter
             }
+            (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
             (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
             (Self::Sys, "exit") => Intrinsic::SysExit,
+            (Self::Sys, "__displayhook__") => Intrinsic::SysDisplayHook,
             (Self::LoggingHandlers, "TimedRotatingFileHandler") => Intrinsic::TimedFileHandler,
             (Self::Datetime, "time") => Intrinsic::ClockTime,
             (Self::Logging, "Logger") => Intrinsic::Logger,
@@ -628,7 +651,9 @@ impl IntrinsicModule {
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Typing | Self::CollectionsAbc, "Sequence") => Intrinsic::Sequence,
-            (Self::Typing | Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping,
+            (Self::Typing | Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping {
+                typing_alias: self == Self::Typing,
+            },
             (Self::Typing | Self::CollectionsAbc, "Iterable") => Intrinsic::Iterable,
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
@@ -645,6 +670,10 @@ impl IntrinsicModule {
             (Self::Io, "StringIO") => Intrinsic::StringIo,
             (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
             (Self::Csv, "reader") => Intrinsic::CsvReader,
+            (Self::StringFormatting, "formatter_parser") => Intrinsic::FormatterParser,
+            (Self::StringFormatting, "formatter_field_name_split") => {
+                Intrinsic::FormatterFieldNameSplit
+            }
             (Self::Csv, "Error") => Intrinsic::CsvError,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
             (Self::Re, "compile") => Intrinsic::RegexCompile,
@@ -657,6 +686,7 @@ impl IntrinsicModule {
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections, "ChainMap") => Intrinsic::ChainMap,
             (Self::Collections, "deque") => Intrinsic::Deque,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
@@ -719,6 +749,7 @@ impl IntrinsicModule {
             (Self::Subprocess, "SubprocessError") => Intrinsic::SubprocessError,
             (Self::Subprocess, "CalledProcessError") => Intrinsic::CalledProcessError,
             (Self::Subprocess, "TimeoutExpired") => Intrinsic::TimeoutExpired,
+            (Self::Posix, name) => os::symbol(name)?,
             (Self::Os, "F_OK") => Intrinsic::AccessMode(0),
             (Self::Os, "X_OK") => Intrinsic::AccessMode(1),
             (Self::Os, "W_OK") => Intrinsic::AccessMode(2),
@@ -887,6 +918,13 @@ impl SourceGraph {
             scan.found
         })
     }
+    /// Ordinary file builds keep assertions at every native optimizer level.
+    pub(crate) fn python_optimization(&self) -> i32 {
+        self.command_startup
+            .as_ref()
+            .map_or(0, |(flags, _)| flags.optimize)
+    }
+
     pub(crate) fn reachable_only(&self) -> bool {
         self.reachable.is_some()
     }
@@ -981,6 +1019,12 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
     }
 
+    /// Native construction raises TypeError at this abstract class call.
+    pub(crate) fn checked_abstract_class_call(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::AbstractClassCall(call));
+    }
+
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
     pub(crate) fn diagnostic_scopes(
         &self,
@@ -1023,10 +1067,28 @@ impl SourceGraph {
                     .collect()
             })
             .collect();
-        (
-            self.reachable.as_ref().map(|r| r.skipped.clone()),
-            overloads,
-        )
+        let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
+        if self.python_optimization() > 0 {
+            use ast::visitor::{Visitor, walk_stmt};
+
+            struct OmittedAssertions<'a>(&'a mut Vec<TextRange>);
+            impl<'ast> Visitor<'ast> for OmittedAssertions<'_> {
+                fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+                    if matches!(stmt, ast::Stmt::Assert(_)) {
+                        self.0.push(stmt.range());
+                    } else {
+                        walk_stmt(self, stmt);
+                    }
+                }
+
+                fn visit_expr(&mut self, _: &'ast ast::Expr) {}
+            }
+            let ranges = skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()]);
+            for (module, ranges) in self.modules.iter().zip(ranges) {
+                OmittedAssertions(ranges).visit_body(&module.parsed.syntax().body);
+            }
+        }
+        (skipped, overloads)
     }
 
     /// Entry segments initialize class and module globals and validate platform imports in order.
@@ -1735,7 +1797,7 @@ impl<'a> Loader<'a> {
                         }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
-                        if module == IntrinsicModule::Opcode {
+                        if module.lacks_builtin_stub() {
                             self.checked_builtin_imports.push((id, alias.range()));
                         }
                         continue;
@@ -1766,6 +1828,7 @@ impl<'a> Loader<'a> {
                         let method = match alias.name.as_str() {
                             "_rename_handler" => Intrinsic::HandlerRename,
                             "_lookup_handler" => Intrinsic::HandlerLookup,
+                            "_print_active_exception" => Intrinsic::PrintActiveException,
                             "_Level" => Intrinsic::HandlerLevelType,
                             _ => {
                                 return Err(format!(
@@ -1800,11 +1863,14 @@ impl<'a> Loader<'a> {
                                     alias.name
                                 )
                             })?;
+                        if binding == Binding::Intrinsic(Intrinsic::BuiltinsLast) {
+                            return Err("from builtins import _ needs an import-time snapshot; use a qualified lookup".into());
+                        }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
-                    if module == IntrinsicModule::Opcode
+                    if module.lacks_builtin_stub()
                         && let Some(name) = &import.module
                     {
                         self.checked_builtin_imports.push((id, name.range()));

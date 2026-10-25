@@ -332,6 +332,8 @@ The `object` annotation is shared by concrete scalar/tuple values, structured ex
 
 Native `Mapping[str, object]` is a read-only view of supported concrete dictionaries. It provides string-key lookup, membership, length and truth tests. Typed `**name: T` parameters on a direct source call receive an insertion-ordered dictionary; values are evaluated left to right, and positional-only names can occur as keys. Such functions are not first-class callables in this subset.
 
+A fixed-layout class can inherit from `collections.abc.Mapping[K, V]` or `typing.Mapping[K, V]`. The class supplies `__getitem__`, `__len__` and `__iter__`; a missing primitive makes the class abstract. Membership and `get` use the subclass's lookup, including an override or a raised exception. Both exports accept dictionary instances in class checks. The `typing` alias itself is not a class when passed as the first argument to `issubclass` with the ABC as the second argument.
+
 `str.split(sep=None, maxsplit=-1)` and `str.rsplit(sep=None, maxsplit=-1)` accept both positional and named arguments. With no separator, they group Python whitespace and omit empty fields; an explicit string separator preserves empty fields and must be nonempty. The split limit follows Python's left or right scanning rules. `str.strip([chars])`, `str.lstrip([chars])`, and `str.rstrip([chars])` accept an optional positional string or `None`: omitted/`None` removes Python whitespace, while a string names a set of Unicode scalar values to remove.
 
 `str.startswith(prefix)` and `str.endswith(suffix)` accept one positional string, without tuple alternatives or bounds. `str.find(sub[, start])` accepts a positional substring and an optional integer or `None` start, returning a Unicode scalar index or `-1`; an end bound and `rfind` are not yet supported. `str.partition(sep)` requires a nonempty positional string and returns a fixed `(before, separator, after)` tuple; a missing separator returns `(original, "", "")`. `str.isspace()` is false for an empty string and otherwise checks every character against Python's whitespace definition. These operations use native UTF-8 storage and do not import or call Python methods.
@@ -594,6 +596,12 @@ The receiver of an instance call evaluates first. Supplied arguments then evalua
 
 Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins and methods accept specific keywords. `open` accepts `encoding="utf-8"`, `sum` accepts `start`, `zip` accepts `strict`, and both `sorted` and `list.sort` accept `key` and `reverse`.
 
+## String percent formatting
+
+String `%` formatting accepts an exact integer, a string, or a fixed tuple of
+integers and strings as positional operands. The entire tuple is evaluated before
+formatting begins. Width and precision arguments (`*`) consume tuple items in order.
+
 ## F-strings and repr
 
 The string `%` operator accepts an exact integer or string operand. A text
@@ -760,7 +768,9 @@ Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueErr
 
 `sys.argv` and `sys.orig_argv` are independent mutable lists, each shared across aliases and modules. In a standalone executable both start with the arguments passed to its main function. With `imre run`, `sys.argv` starts with the source path followed by the program arguments after `--`; `sys.orig_argv` contains the actual Imre command, flags, and program arguments. Element writes and list mutation are supported; rebinding a module attribute or imported name is not. Native arguments must be valid UTF-8. Invalid Unix argument bytes raise `UnicodeDecodeError` when the list is first accessed; CPython's surrogateescaped strings are outside this runtime's string domain. Programs that never read process arguments emit no argument initialization or shutdown calls.
 
-`imre [-I] [-B] [-X utf8[=0|1]] -c CODE [ARG ...]` compiles the command in memory and runs it as `__main__`. Python 3.14's command dedent applies before parsing. The program sees `['-c', *args]` in `sys.argv`; `sys.orig_argv` preserves the complete invocation, including the original indentation and option spelling. `sys.executable` identifies the Imre launcher. Commands may import supported source modules from the working directory and `PYTHONPATH`. `-I` excludes the working directory and ignores `PYTHONPATH` and other Python startup environment flags. The selected `isolated`, `ignore_environment`, `safe_path`, `no_user_site`, `dont_write_bytecode`, and `utf8_mode` fields are available through `sys.flags` in command mode. The native compiler's existing text, filesystem, and import restrictions still apply. `IMRE_ENCODED_FLAGS` and `IMREFLAGS` select the native compiler and linker settings independently of Python startup flags.
+`imre [-I] [-B] [-O ...] [-X utf8[=0|1]] -c CODE [ARG ...]` compiles the command in memory and runs it as `__main__`. Python 3.14's command dedent applies before parsing. The program sees `['-c', *args]` in `sys.argv`; `sys.orig_argv` preserves the complete invocation, including the original indentation and option spelling. `sys.executable` identifies the Imre launcher. Commands may import supported source modules from the working directory and `PYTHONPATH`. `-I` excludes the working directory and ignores `PYTHONPATH` and other Python startup environment flags. The selected `isolated`, `ignore_environment`, `safe_path`, `no_user_site`, `dont_write_bytecode`, and `utf8_mode` fields are available through `sys.flags` in command mode. The native compiler's existing text, filesystem, and import restrictions still apply. `IMRE_ENCODED_FLAGS` and `IMREFLAGS` select the native compiler and linker settings independently of Python startup flags.
+
+In command mode, each `-O` raises `sys.flags.optimize` by one. `PYTHONOPTIMIZE` can raise that level unless `-I` ignores it. At level one or higher, `__debug__` is false and assertions do not evaluate their conditions or messages. At level two or higher, the module docstring is `None`. File builds use level zero, including when LLVM code generation uses `--opt-level 3`.
 
 ## Command-line options
 
@@ -794,6 +804,12 @@ Call `format_help()` or `format_usage()` to obtain a string, including its final
 Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser.
 
 A subcommand is optional by default. With `add_subparsers(dest="command")`, the namespace contains `command=None` when omitted. Without `dest`, no command field is added. Use `required=True` or set the group's `required` attribute to require a selection. Each literal `add_parser("name", aliases=["alias"], help="...")` introduces a child parser with its own options. The destination retains the spelling the caller used; child help uses its canonical name. A `match args.command` case or `if args.command == "alias"` branch selects the child's concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
+
+For literal option declarations, a keyword outside the constructor signature of
+`BooleanOptionalAction`, `store_true`, `store_false`, `store_const`, `append_const`,
+or `count` raises `TypeError` at the `add_argument` call. An explicit `--no-` spelling on
+`BooleanOptionalAction` raises `ValueError`. Keyword expressions run before the
+constructor error. If the caller catches it, previously registered options remain usable.
 
 Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()` or `parse_known_args()`. The latter returns the namespace and a list of unrecognized arguments in order. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested subcommands are outside this grammar.
 
@@ -1061,6 +1077,13 @@ entries. A native defaultdict produces a new mapping with no default factory;
 a native Counter raises `NotImplementedError`.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
+
+`collections.ChainMap[K, V]` accepts dictionaries with matching key and value
+types and exposes them in its mutable `maps` list. A no-argument constructor
+starts with a fresh dictionary. Replacing `maps` affects all aliases of the
+ChainMap; callers that saved the previous list still hold that list. Truth
+testing checks whether any underlying dictionary is nonempty. `repr` uses the
+current mappings in order.
 
 Direct `mapping.keys()` operands and sets of the same key type support `|`, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set. Stored key-view objects and arbitrary iterables as union operands are outside the supported subset.
 
