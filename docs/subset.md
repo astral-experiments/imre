@@ -321,6 +321,10 @@ for multiline fields. Errors use `csv.Error`; the default field limit is
 keywords customize it. Other dialects, writers, dictionary adapters, and
 changing the field limit are outside the subset. An explicit text `lineterminator` is validated against the dialect characters; the reader recognizes CR and LF independently of this setting. A nonstring raises `TypeError`.
 
+Use `open(path, encoding="utf-8", newline="")` or `Path.open(..., newline="")`
+to preserve original line endings inside quoted fields. The default text reader
+recognizes the same physical lines and translates their endings to `\n`.
+
 ## Fixed regular expressions
 
 Word escapes (`\w`, `\W`) use Python's Unicode alphanumeric characters plus underscore, including inside character classes.
