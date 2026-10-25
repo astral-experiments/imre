@@ -146,7 +146,7 @@ impl Graph {
             let contents = unsafe {
                 source.0.with(|storage| match storage {
                     Storage::Sequence(words) => {
-                        let words = words.resolved();
+                        let words = words.resolved()?;
                         let mut out = Words::new(words.kind.raw());
                         out.values
                             .try_reserve_exact(words.values.len())

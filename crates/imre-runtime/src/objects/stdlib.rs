@@ -193,7 +193,7 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Option<SmallVe
     // SAFETY: only the owned permutation escapes, never a reference to key storage.
     unsafe {
         object(keys.cast()).0.with(|storage| {
-            let values = storage.sequence();
+            let values = storage.sequence().ok()?;
             values.check_kind(kind);
             ordered_indices(values.values.len(), reverse, |left, right| {
                 let (left, right) = (values.values[left], values.values[right]);
@@ -229,13 +229,18 @@ pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const 
         // SAFETY: the exact descriptor and cached length travel with the owners.
         let saved = unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let words = storage.sequence_mut();
+                let words = storage.sequence_mut()?;
                 words.check_kind(kind);
-                std::mem::replace(words, Words::sorting_empty(kind))
+                Ok(std::mem::replace(words, Words::sorting_empty(kind)))
             })
         };
         // Preserve the header verbatim, including a surrounding sort's marker.
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(saved))))).cast()
+        crate::finish(
+            saved.map(|saved| {
+                Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(saved))))).cast()
+            }),
+            std::ptr::null(),
+        )
     }
 }
 
@@ -259,7 +264,10 @@ pub unsafe extern "C" fn imre_list_extend_unhinted(list: *const (), kind: u32) {
         // SAFETY: the real length stays unchanged at zero.
         unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let words = storage.sequence_mut();
+                let words = match storage.sequence_mut() {
+                    Ok(words) => words,
+                    Err(error) => return error.raise(),
+                };
                 if words.is_sorting_empty() {
                     words.update_header();
                 }
@@ -298,11 +306,11 @@ pub unsafe extern "C" fn imre_sort_restore(
         // any value during access. Normal scope cleanup later drops the additions.
         unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let current = storage.sequence_mut();
+                let current = storage.concrete_sequence_mut();
                 let modified = !current.is_sorting_empty();
                 object(saved.cast())
                     .0
-                    .with_mut(|storage| std::mem::swap(current, storage.sequence_mut()));
+                    .with_mut(|storage| std::mem::swap(current, storage.concrete_sequence_mut()));
                 modified
             })
         }
@@ -336,7 +344,10 @@ pub unsafe extern "C" fn imre_sort_by_keys(
         // SAFETY: the exclusive list access roots both strings across comparison.
         unsafe {
             object(values.cast()).0.with_mut(|storage| {
-                let values = storage.sequence_mut();
+                let values = match storage.sequence_mut() {
+                    Ok(words) => words,
+                    Err(error) => return error.raise(),
+                };
                 values.check_kind(key_kind);
                 sort_strings(
                     &mut values.values,
@@ -364,7 +375,10 @@ pub unsafe extern "C" fn imre_sort_by_keys(
         // SAFETY: no storage reference escapes and swaps never drop an owner.
         unsafe {
             object(values.cast()).0.with_mut(|storage| {
-                let values = storage.sequence_mut();
+                let values = match storage.sequence_mut() {
+                    Ok(words) => words,
+                    Err(error) => return error.raise(),
+                };
                 values.check_kind(element_kind);
                 permute(&mut values.values, &mut order);
             })
@@ -391,7 +405,10 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
     unsafe {
         let separator = &*separator;
         object(values).0.with(|storage| {
-            let values = storage.sequence();
+            let values = match storage.sequence() {
+                Ok(values) => values,
+                Err(error) => return error.returning(std::ptr::null()),
+            };
             values.check_kind(3);
             if let [word] = values.values.as_slice() {
                 let value = *word as *const Str;
@@ -748,7 +765,12 @@ mod tests {
                 imre_sort_by_keys(pointer.cast(), 3, pointer.cast(), 3, reverse);
                 list.0.with(|storage| {
                     assert_eq!(
-                        storage.sequence().values.as_slice(),
+                        storage
+                            .sequence()
+                            .ok()
+                            .expect("fixture sequence")
+                            .values
+                            .as_slice(),
                         order.map(|i| Rc::as_ptr(&texts[i]) as usize),
                     );
                 });
@@ -791,12 +813,21 @@ mod tests {
             let target = Rc::as_ptr(&list);
             super::super::imre_seq_append(target, Rc::as_ptr(&original) as usize, 3);
             let saved = Rc::from_raw(imre_sort_detach(target.cast(), 3).cast::<Object>());
-            assert!(alias.0.with(|storage| storage.sequence().values.is_empty()));
+            assert!(alias.0.with(|storage| {
+                storage
+                    .sequence()
+                    .ok()
+                    .expect("fixture sequence")
+                    .values
+                    .is_empty()
+            }));
             assert_eq!(Rc::strong_count(&original), 2);
             super::super::imre_seq_append(target, Rc::as_ptr(&addition) as usize, 3);
             imre_sort_restore(target.cast(), 3, Rc::as_ptr(&saved).cast(), 0);
             assert_eq!(
-                alias.0.with(|storage| storage.sequence().values[0]),
+                alias
+                    .0
+                    .with(|storage| storage.sequence().ok().expect("fixture sequence").values[0]),
                 Rc::as_ptr(&original) as usize,
             );
             drop(saved);

@@ -22,6 +22,8 @@ fn rows(values: &Rc<Object>) -> Vec<String> {
     unsafe {
         values.0.with(|s| {
             s.sequence()
+                .ok()
+                .expect("fixture sequence")
                 .values
                 .iter()
                 .map(|&word| (&*(word as *const Str)).to_string())
@@ -141,7 +143,9 @@ fn sparse_projection_releases_inputs_and_restores_raw_guides() {
         let Inputs::Packed(packed) = &*inputs else {
             panic!("sparse projection should pack")
         };
-        let (left, right) = packed.unpack();
+        let (left, right) = packed
+            .unpack()
+            .unwrap_or_else(|_| panic!("restore packed rows"));
         let last = left.values.len() - 1;
         assert_eq!(left.values[last - 1], left.values[last]);
         assert_eq!(left.values[last], *right.values.last().unwrap());
@@ -215,12 +219,18 @@ fn shared_strings_preserve_duplicate_counts_order_and_slice_ownership() {
             };
             let (left, right) = (source.side("-").unwrap(), source.side("+").unwrap());
             assert_eq!(left.values[2..], right.values[2..]);
-            removed
-                .0
-                .with(|s| assert_eq!(s.sequence().values[..], left.values[..2]));
-            added
-                .0
-                .with(|s| assert_eq!(s.sequence().values[..], right.values[..2]));
+            removed.0.with(|s| {
+                assert_eq!(
+                    s.sequence().ok().expect("fixture sequence").values[..],
+                    left.values[..2]
+                )
+            });
+            added.0.with(|s| {
+                assert_eq!(
+                    s.sequence().ok().expect("fixture sequence").values[..],
+                    right.values[..2]
+                )
+            });
         });
         drop(diff);
         drop(left);
@@ -264,7 +274,7 @@ fn sorted_rows_reuse_only_live_ordered_sources_and_detach_on_write() {
             let source = origin.upgrade().unwrap();
             removed.0.with(|s| {
                 assert_eq!(
-                    s.sequence().values[..],
+                    s.sequence().ok().expect("fixture sequence").values[..],
                     source.side("-").unwrap().values[..2]
                 )
             });

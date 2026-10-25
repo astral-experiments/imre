@@ -244,23 +244,27 @@ impl Words {
         }
     }
 
-    pub(super) fn resolved(&self) -> &Self {
-        self.plan().map_or(self, Deferred::ordered)
+    pub(super) fn resolved(&self) -> Result<&Self, super::exceptions::Error> {
+        self.plan().map_or(Ok(self), Deferred::ordered)
     }
 
     /// A mutating alias gets its own ordinary buffer. Copies share only the
     /// immutable snapshot and retain independent list identities and contents.
-    pub(super) fn resolve_mut(&mut self) {
+    pub(super) fn resolve_mut(&mut self) -> Result<(), super::exceptions::Error> {
         if let Some(plan) = self.plan() {
-            *self = plan.ordered().copy_strings();
+            *self = plan.ordered()?.copy_strings()?;
         }
+        Ok(())
     }
 
-    pub(super) fn copy_strings(&self) -> Self {
+    pub(super) fn copy_strings(&self) -> Result<Self, super::exceptions::Error> {
         debug_assert!(self.plan().is_none());
         self.check_kind(3);
         let mut result = Self::new(3);
-        result.values.reserve(self.values.len());
+        result
+            .values
+            .try_reserve_exact(self.values.len())
+            .map_err(|_| super::exceptions::Error::allocation())?;
         for &word in &self.values {
             // SAFETY: the source independently owns this exact string.
             result
@@ -268,7 +272,7 @@ impl Words {
                 .push(unsafe { self.kind.acquire(word) }.into_word());
         }
         result.update_header();
-        result
+        Ok(result)
     }
 
     /// Borrows each exact string together with its independently owned word.
@@ -282,9 +286,9 @@ impl Words {
 
     /// Deferred words live in their plan even when their resolved list is
     /// small. Its inline bit must never address the plan pointer as an element.
-    pub(super) fn resolved_header(&self) -> u32 {
-        self.plan().map_or(self.header, |plan| {
-            Self::header_for(plan.ordered().values.len(), false)
+    pub(super) fn resolved_header(&self) -> Result<u32, super::exceptions::Error> {
+        self.plan().map_or(Ok(self.header), |plan| {
+            Ok(Self::header_for(plan.ordered()?.values.len(), false))
         })
     }
 
@@ -481,11 +485,14 @@ mod tests {
             }
             assert_eq!(cached.read(), 7);
             assert_eq!(Rc::strong_count(&child), 4);
-            assert!(
-                !sequence
-                    .0
-                    .with(|storage| storage.sequence().values.spilled())
-            );
+            assert!(!sequence.0.with(|storage| {
+                storage
+                    .sequence()
+                    .ok()
+                    .expect("fixture sequence")
+                    .values
+                    .spilled()
+            }));
             {
                 let view = imre_seq_data_readonly(Rc::as_ptr(&sequence));
                 assert_eq!(
@@ -498,11 +505,14 @@ mod tests {
             imre_seq_append(Rc::as_ptr(&alias), word, 5);
             assert_eq!(cached.read(), 8);
             assert_eq!(Rc::strong_count(&child), 5);
-            assert!(
-                sequence
-                    .0
-                    .with(|storage| storage.sequence().values.spilled())
-            );
+            assert!(sequence.0.with(|storage| {
+                storage
+                    .sequence()
+                    .ok()
+                    .expect("fixture sequence")
+                    .values
+                    .spilled()
+            }));
             assert_eq!(Int(imre_seq_len(Rc::as_ptr(&sequence))).as_small(), Some(4));
             {
                 let view = imre_seq_data_readonly(Rc::as_ptr(&alias));

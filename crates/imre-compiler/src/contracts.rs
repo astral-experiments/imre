@@ -57,6 +57,14 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            Self::Len => Contract::new(
+                args.first().is_some_and(|e| matches!(e.ty, Type::List(_))),
+                PreservesLists,
+            ),
+            Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) => {
+                Contract::new(true, PreservesLists)
+            }
+            Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
             Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
                 if args
@@ -404,7 +412,6 @@ impl Builtin {
             | Self::IsNone
             | Self::MockCallList { .. }
             | Self::JsonIsInt
-            | Self::Len
             | Self::JsonEmptyObject
             | Self::WallTime
             | Self::CacheNew
@@ -415,6 +422,7 @@ impl Builtin {
             | Self::CallableContext
             | Self::ModuleCache(_)
             | Self::HashStr
+            | Self::SequenceGetInBounds
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
             | Self::DirectoryContextView
@@ -425,10 +433,7 @@ impl Builtin {
             | Self::RegexSpelling
             | Self::RegexSearch
             | Self::RegexMatchStart
-            | Self::SequenceGetInBounds
             | Self::Split
-            | Self::StringListFilter(_)
-            | Self::StringListNonempty
             | Self::Str
             | Self::NominalIdentity
             | Self::ExceptionMatchesAny
@@ -439,7 +444,6 @@ impl Builtin {
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
-            | Self::StringListContains
             | Self::StringContains
             | Self::BytesContains
             | Self::UnionInject
@@ -535,10 +539,8 @@ impl Builtin {
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
-            | Self::ListExtendUnhinted
             | Self::DequeClear
             | Self::SetIter
-            | Self::SortDetach
             | Self::SplitLinesIter
             | Self::StringIter
             | Self::StringReverseIter
@@ -783,6 +785,12 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "imre_seq_len_fast"
+                | "imre_seq_len"
+                | "imre_str_list_nonempty"
+                | "imre_union_truthy"
+                | "imre_sort_detach"
+                | "imre_list_extend_unhinted"
                 | "imre_chr"
                 | "imre_int_pow"
                 | "imre_int_modpow"

@@ -201,7 +201,7 @@ pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Res
             // reference or buffer address is kept across a comparison step.
             unsafe {
                 match raw & !NULLABLE {
-                    5 => object_element(left as *const Object, right as *const Object, position),
+                    5 => object_element(left as *const Object, right as *const Object, position)?,
                     6 => record_field(left as *const usize, right as *const usize, position),
                     9 => {
                         let (left, left_kind) = super::unions::member(left);
@@ -297,63 +297,75 @@ pub unsafe extern "C" fn imre_sequence_equal(left: *const Object, right: *const 
     u32::from(unsafe { equal(left as usize, right as usize, WordKind::new(5)) })
 }
 
-unsafe fn object_element(left: *const Object, right: *const Object, position: usize) -> Comparison {
+unsafe fn object_element(
+    left: *const Object,
+    right: *const Object,
+    position: usize,
+) -> Result<Comparison, Error> {
     if left == right {
-        return Comparison::Done(true);
+        return Ok(Comparison::Done(true));
     }
     // SAFETY: both objects remain rooted and immutable. Each step returns only
     // copied words; the storage closures end before their children are visited.
     unsafe {
         object(left).0.with(|left| {
-            object(right).0.with(|right| match (left, right) {
-                (Storage::Sequence(left), Storage::Sequence(right)) => {
-                    let (left, right) = (left.resolved(), right.resolved());
-                    if left.kind != right.kind || left.values.len() != right.values.len() {
-                        return Comparison::Done(false);
+            object(right).0.with(|right| {
+                Ok(match (left, right) {
+                    (Storage::Sequence(left), Storage::Sequence(right)) => {
+                        let (left, right) = (left.resolved()?, right.resolved()?);
+                        if left.kind != right.kind || left.values.len() != right.values.len() {
+                            return Ok(Comparison::Done(false));
+                        }
+                        if !matches!(left.kind.raw() & !NULLABLE, 5 | 6 | 9) {
+                            return Ok(Comparison::Done(
+                                left.values.iter().zip(&right.values).all(
+                                    |(&left_word, &right_word)| {
+                                        scalar_equal(left_word, right_word, left.kind)
+                                    },
+                                ),
+                            ));
+                        }
+                        if position == left.values.len() {
+                            return Ok(Comparison::Done(true));
+                        }
+                        Comparison::Child {
+                            left: left.values[position],
+                            right: right.values[position],
+                            kind: left.kind,
+                            resume: (position + 1 < left.values.len()).then_some(position + 1),
+                        }
                     }
-                    if !matches!(left.kind.raw() & !NULLABLE, 5 | 6 | 9) {
-                        return Comparison::Done(left.values.iter().zip(&right.values).all(
-                            |(&left_word, &right_word)| {
-                                scalar_equal(left_word, right_word, left.kind)
-                            },
-                        ));
+                    (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
+                        super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
+                    ),
+                    (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
+                        object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)?
                     }
-                    if position == left.values.len() {
-                        return Comparison::Done(true);
+                    (Storage::Dictionary(left), Storage::Dictionary(right)) => {
+                        left.compare_entry(right, position)
                     }
-                    Comparison::Child {
-                        left: left.values[position],
-                        right: right.values[position],
-                        kind: left.kind,
-                        resume: (position + 1 < left.values.len()).then_some(position + 1),
+                    (Storage::Deque(left), Storage::Deque(right)) => {
+                        left.compare_entry(right, position)
                     }
-                }
-                (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
-                    super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
-                ),
-                (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
-                    object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)
-                }
-                (Storage::Dictionary(left), Storage::Dictionary(right)) => {
-                    left.compare_entry(right, position)
-                }
-                (Storage::Deque(left), Storage::Deque(right)) => {
-                    left.compare_entry(right, position)
-                }
-                (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
-                (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
-                (Storage::Document(left), Storage::Document(right)) => {
-                    let result = left.view().and_then(|left| Ok(left.equal(&right.view()?)));
-                    Comparison::Done(result.unwrap_or_else(|error| {
-                        error.raise();
-                        false
-                    }))
-                }
-                (
-                    left @ (Storage::Path { .. } | Storage::PurePath(_)),
-                    right @ (Storage::Path { .. } | Storage::PurePath(_)),
-                ) => Comparison::Done(left.path_equal(right)),
-                _ => Comparison::Done(false),
+                    (Storage::Set(left), Storage::Set(right)) => {
+                        Comparison::Done(left.equal(right))
+                    }
+                    (Storage::Json(left), Storage::Json(right)) => {
+                        Comparison::Done(left.equal(right))
+                    }
+                    (Storage::Document(left), Storage::Document(right)) => {
+                        let result = left.view().and_then(|left| Ok(left.equal(&right.view()?)));
+                        Comparison::Done(result.unwrap_or_else(|error| {
+                            error.raise();
+                            false
+                        }))
+                    }
+                    (
+                        left @ (Storage::Path { .. } | Storage::PurePath(_)),
+                        right @ (Storage::Path { .. } | Storage::PurePath(_)),
+                    ) => Comparison::Done(left.path_equal(right)),
+                    _ => Comparison::Done(false),
+                })
             })
         })
     }
@@ -491,7 +503,7 @@ pub(super) unsafe fn try_write_repr(
                             }
                         }
                         Storage::Sequence(values) => {
-                            let values = values.resolved();
+                            let values = values.resolved().map_err(|_| std::fmt::Error)?;
                             if position == 0 {
                                 output.write_char('[')?;
                             }

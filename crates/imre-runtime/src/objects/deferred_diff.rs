@@ -27,6 +27,14 @@ enum Inputs {
     Materialized,
 }
 
+fn cached<T>(cell: &OnceCell<T>, build: impl FnOnce() -> Result<T, Error>) -> Result<&T, Error> {
+    if let Some(value) = cell.get() {
+        return Ok(value);
+    }
+    let value = build()?;
+    Ok(cell.get_or_init(|| value))
+}
+
 impl Snapshots {
     fn side(&self, prefix: &str) -> Option<Ref<'_, Words>> {
         Ref::filter_map(self.inputs.borrow(), |inputs| match inputs {
@@ -38,8 +46,8 @@ impl Snapshots {
         .ok()
     }
 
-    fn full(&self) -> &Words {
-        self.full.get_or_init(|| {
+    fn full(&self) -> Result<&Words, Error> {
+        cached(&self.full, || {
             let mut inputs = self.inputs.borrow_mut();
             match &*inputs {
                 Inputs::Original(left, right) => {
@@ -47,32 +55,34 @@ impl Snapshots {
                     unsafe { materialize_words(left, right, Output::Full) }
                 }
                 Inputs::Packed(snapshot) => {
-                    let (left, right) = snapshot.unpack();
-                    *inputs = Inputs::Materialized;
+                    let (left, right) = snapshot.unpack()?;
                     // SAFETY: restoring the archive recovers the original sequences.
-                    unsafe { materialize_words(&left, &right, Output::Full) }
+                    let rows = unsafe { materialize_words(&left, &right, Output::Full) }?;
+                    *inputs = Inputs::Materialized;
+                    Ok(rows)
                 }
                 Inputs::Materialized => unreachable!("the full result is already cached"),
             }
         })
     }
 
-    fn signed(&self) -> &Words {
-        self.signed
-            .get_or_init(|| filter(self.full(), "+", Some("-"), None, 0, None))
+    fn signed(&self) -> Result<&Words, Error> {
+        cached(&self.signed, || {
+            filter(self.full()?, "+", Some("-"), None, 0, None)
+        })
     }
 
-    fn projected(&self) -> &Words {
+    fn projected(&self) -> Result<&Words, Error> {
         if self.full.get().is_some() {
             return self.signed();
         }
-        self.projected.get_or_init(|| {
+        cached(&self.projected, || {
             let mut inputs = self.inputs.borrow_mut();
             let Inputs::Original(left, right) = &*inputs else {
                 unreachable!("compaction follows the first projection")
             };
             // SAFETY: the snapshots own every string until the result is complete.
-            let rows = unsafe { materialize_words(left, right, Output::ProjectedChanges) };
+            let rows = unsafe { materialize_words(left, right, Output::ProjectedChanges) }?;
             let len = left.values.len().max(right.values.len());
             // Sparse projections can outlive millions of unchanged strings. Sorted
             // inputs keep equal rows adjacent, including repeated shared handles.
@@ -81,9 +91,9 @@ impl Snapshots {
                 && left.strings_ascending()
                 && right.strings_ascending()
             {
-                *inputs = Inputs::Packed(packed::Packed::new(left, right));
+                *inputs = Inputs::Packed(packed::Packed::new(left, right)?);
             }
-            rows
+            Ok(rows)
         })
     }
 }
@@ -104,20 +114,20 @@ enum View {
 }
 
 impl Deferred {
-    pub(super) fn ordered(&self) -> &Words {
+    pub(super) fn ordered(&self) -> Result<&Words, Error> {
         match &self.0 {
             View::Full(source) => source.full(),
             View::Signed(source) => source.signed(),
-            View::Sorted { rows, .. } => rows,
+            View::Sorted { rows, .. } => Ok(rows),
         }
     }
 
-    fn nonempty(&self) -> bool {
-        match &self.0 {
+    fn nonempty(&self) -> Result<bool, Error> {
+        Ok(match &self.0 {
             View::Full(source) => source.nonempty,
-            View::Signed(source) => !source.projected().values.is_empty(),
+            View::Signed(source) => !source.projected()?.values.is_empty(),
             View::Sorted { rows, .. } => !rows.values.is_empty(),
-        }
+        })
     }
 
     fn signed(&self) -> Self {
@@ -147,7 +157,7 @@ fn filter(
     exclude: Option<&str>,
     strip: usize,
     originals: Option<&Words>,
-) -> Words {
+) -> Result<Words, Error> {
     let mut result = Words::new(3);
     let mut originals = originals.map(Words::strings);
     for (word, text) in values.strings() {
@@ -156,6 +166,10 @@ fn filter(
         {
             continue;
         }
+        result
+            .values
+            .try_reserve(1)
+            .map_err(|_| Error::allocation())?;
         let selected = suffix(text, strip);
         let retained = if let Some(originals) = &mut originals {
             // Removing an ndiff tag recovers a complete original string. Every
@@ -173,12 +187,14 @@ fn filter(
             // SAFETY: retain the source string before adding it to the independent list.
             unsafe { values.kind.acquire(word) }.into_word()
         } else {
-            Rc::into_raw(Rc::new(Str::new(selected))) as usize
+            Rc::into_raw(Rc::new(
+                Str::try_new(selected).map_err(|_| Error::allocation())?,
+            )) as usize
         };
         result.values.push(element);
     }
     result.update_header();
-    result
+    Ok(result)
 }
 
 /// A merge can reuse equal strings from the first snapshot when copying the second.
@@ -222,13 +238,13 @@ pub unsafe extern "C" fn imre_ndiff_deferred(
         let left = unsafe {
             object(left)
                 .0
-                .with(|storage| snapshot(storage.sequence(), std::iter::empty()))
+                .with(|storage| snapshot(storage.sequence()?, std::iter::empty()))
         }?;
         // SAFETY: sharing equal strings acquires independent references on both sides.
         let right = unsafe {
             object(right)
                 .0
-                .with(|storage| snapshot(storage.sequence(), left.strings()))
+                .with(|storage| snapshot(storage.sequence()?, left.strings()))
         }?;
         let source = Rc::new(Snapshots {
             nonempty: !left.values.is_empty() || !right.values.is_empty(),
@@ -297,13 +313,13 @@ pub unsafe extern "C" fn imre_str_list_filter(
             let words = storage.sequence_storage();
             if let Some(plan) = words.plan() {
                 if strip == 0 && exclude.is_none() && both_signs(first, second) {
-                    return Words::deferred(plan.signed());
+                    return Ok(Words::deferred(plan.signed()));
                 }
                 if same_sign(first, second) {
                     let origin;
                     let (rows, originals) = match &plan.0 {
                         View::Full(source) | View::Signed(source) => (
-                            source.projected(),
+                            source.projected()?,
                             (strip == 2).then(|| source.side(first)).flatten(),
                         ),
                         View::Sorted { rows, origin: weak } => {
@@ -328,7 +344,7 @@ pub unsafe extern "C" fn imre_str_list_filter(
                 }
             }
             filter(
-                words.resolved(),
+                words.resolved()?,
                 first,
                 second,
                 exclude,
@@ -337,7 +353,10 @@ pub unsafe extern "C" fn imre_str_list_filter(
             )
         })
     };
-    Rc::into_raw(result.into_object())
+    crate::finish(
+        result.map(|words| Rc::into_raw(words.into_object())),
+        std::ptr::null(),
+    )
 }
 
 /// Stable ordering by the suffix starting at a fixed nonnegative scalar index.
@@ -360,7 +379,7 @@ pub unsafe extern "C" fn imre_str_list_sorted_suffix(
                 }
                 _ => None,
             };
-            let input = source.map_or_else(|| words.resolved(), |source| source.projected());
+            let input = source.map_or_else(|| words.resolved(), |source| source.projected())?;
             let mut sorted = snapshot(input, std::iter::empty())?;
             let key = |word: usize| suffix(&*(word as *const Str), skip as usize);
             sorted.values.sort_by(|&a, &b| key(a).cmp(key(b)));
@@ -389,10 +408,12 @@ pub unsafe extern "C" fn imre_str_list_nonempty(list: *const Object) -> u32 {
     unsafe {
         object(list).0.with(|storage| {
             let words = storage.sequence_storage();
-            u32::from(
+            crate::finish(
                 words
                     .plan()
-                    .map_or_else(|| !words.values.is_empty(), Deferred::nonempty),
+                    .map_or_else(|| Ok(!words.values.is_empty()), Deferred::nonempty)
+                    .map(u32::from),
+                0,
             )
         })
     }
@@ -409,6 +430,6 @@ pub unsafe extern "C" fn imre_seq_resolve_header(list: *const Object) -> u32 {
     unsafe {
         object(list)
             .0
-            .with(|storage| storage.sequence_storage().resolved_header())
+            .with(|storage| crate::finish(storage.sequence_storage().resolved_header(), 0))
     }
 }

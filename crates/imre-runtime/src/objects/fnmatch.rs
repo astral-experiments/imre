@@ -68,7 +68,7 @@ pub unsafe extern "C" fn imre_fnmatch_filter(
     // SAFETY: the pattern's tag and the list layout were checked at the call site.
     let pattern = Pattern::component(&unsafe { spelling(pat, pat_bytes != 0) });
     let filter = |storage: &super::Storage| {
-        let source = storage.sequence();
+        let source = storage.sequence()?;
         let mut output = Words::new(source.kind.raw());
         for &word in &source.values {
             let (name_bytes, pointer) = match source.kind.raw() {

@@ -164,15 +164,24 @@ impl Storage {
             _ => fail("SystemError", "expected a sequence object"),
         }
     }
-    fn sequence(&self) -> &Words {
+    fn sequence(&self) -> Result<&Words, Error> {
         self.sequence_storage().resolved()
     }
-    fn sequence_mut(&mut self) -> &mut Words {
+    // The caller owns a concrete sequence whose construction excludes a deferred plan.
+    fn concrete_sequence_mut(&mut self) -> &mut Words {
+        let Self::Sequence(words) = self else {
+            fail("SystemError", "expected a sequence object")
+        };
+        debug_assert!(words.plan().is_none());
+        words.forget_order();
+        words
+    }
+    fn sequence_mut(&mut self) -> Result<&mut Words, Error> {
         match self {
             Self::Sequence(values) => {
-                values.resolve_mut();
+                values.resolve_mut()?;
                 values.forget_order();
-                values
+                Ok(values)
             }
             _ => fail("SystemError", "expected a sequence object"),
         }
@@ -232,9 +241,14 @@ pub unsafe extern "C" fn imre_str_list_contains(needle: *const Str, list: *const
     // SAFETY: the storage borrow prevents mutation and none of the compared
     // strings can invoke user code or release its live owner during equality.
     unsafe {
-        object(list)
-            .0
-            .with(|storage| u32::from(storage.sequence().contains_string(&*needle)))
+        object(list).0.with(|storage| {
+            finish(
+                storage
+                    .sequence()
+                    .map(|words| u32::from(words.contains_string(&*needle))),
+                0,
+            )
+        })
     }
 }
 
@@ -252,7 +266,7 @@ pub unsafe extern "C" fn imre_seq_get(value: *const Object, at: usize) -> usize 
     // SAFETY: acquisition cannot reenter and only an owned word escapes.
     let owned = unsafe {
         object(value).0.with(|storage| {
-            let values = storage.sequence();
+            let values = storage.sequence()?;
             Ok(values
                 .kind
                 .acquire(values.values[index(at, values.values.len())?]))
@@ -269,7 +283,7 @@ pub unsafe extern "C" fn imre_seq_get_index(value: *const Object, at: usize) -> 
     // SAFETY: only an independently acquired value leaves the storage access.
     let owned = unsafe {
         object(value).0.with(|storage| {
-            let values = storage.sequence();
+            let values = storage.sequence()?;
             let word = *values.values.get(at).ok_or_else(Error::index)?;
             Ok(values.kind.acquire(word))
         })
@@ -298,7 +312,10 @@ pub unsafe extern "C" fn imre_seq_borrow_index_proven(value: *const Object, at: 
                 // Exact kind is part of the same caller proof as the index.
                 std::hint::unreachable_unchecked()
             };
-            *values.resolved().values.get_unchecked(at)
+            finish(
+                values.resolved().map(|rows| *rows.values.get_unchecked(at)),
+                0,
+            )
         })
     }
 }
@@ -322,22 +339,25 @@ pub unsafe extern "C" fn imre_seq_data_readonly(value: *const Object) -> *const 
         let Storage::Sequence(values) = &*(*value).0.0.get() else {
             std::hint::unreachable_unchecked()
         };
-        values.resolved().values.as_ptr()
+        finish(
+            values.resolved().map(|rows| rows.values.as_ptr()),
+            std::ptr::null(),
+        )
     }
 }
 
 /// Acquires the replacement before any existing container owner can be displaced.
-unsafe fn replacement(value: *const Object, word: usize, kind: u32) -> OwnedWord {
+unsafe fn replacement(value: *const Object, word: usize, kind: u32) -> Result<OwnedWord, Error> {
     // SAFETY: only copied descriptor metadata escapes this rooted storage read.
     let actual = unsafe {
         object(value).0.with(|storage| {
-            let values = storage.sequence();
+            let values = storage.sequence()?;
             values.check_kind(kind);
-            values.kind
+            Ok(values.kind)
         })
-    };
+    }?;
     // SAFETY: the compiler supplies a borrowed word of the exact element type.
-    unsafe { actual.acquire(word) }
+    Ok(unsafe { actual.acquire(word) })
 }
 
 /// # Safety
@@ -346,7 +366,10 @@ unsafe fn replacement(value: *const Object, word: usize, kind: u32) -> OwnedWord
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_seq_set(value: *const Object, at: usize, word: usize, kind: u32) {
     // SAFETY: the caller supplies the checked replacement and index representations.
-    let mut new = Some(unsafe { replacement(value, word, kind) });
+    let mut new = Some(match unsafe { replacement(value, word, kind) } {
+        Ok(word) => word,
+        Err(err) => return err.raise(),
+    });
     // SAFETY: the caller roots the exact canonical integer index.
     let at = unsafe { Int::borrow(at) };
     let at = match decode_index(&at) {
@@ -356,7 +379,7 @@ pub unsafe extern "C" fn imre_seq_set(value: *const Object, at: usize, word: usi
     // SAFETY: ownership leaves mutable storage before any displaced value drops.
     let old = unsafe {
         object(value).0.with_mut(|storage| {
-            let values = storage.sequence_mut();
+            let values = storage.sequence_mut()?;
             let at = index(at, values.values.len())?;
             Ok(OwnedWord::from_owned(
                 std::mem::replace(&mut values.values[at], new.take().unwrap().into_word()),
@@ -378,11 +401,14 @@ pub unsafe extern "C" fn imre_seq_set_index(
     kind: u32,
 ) {
     // SAFETY: the checked replacement is acquired before replacing its last owner.
-    let mut new = Some(unsafe { replacement(value, word, kind) });
+    let mut new = Some(match unsafe { replacement(value, word, kind) } {
+        Ok(word) => word,
+        Err(err) => return err.raise(),
+    });
     // SAFETY: no reference escapes; the displaced owner is dropped afterward.
     let old = unsafe {
         object(value).0.with_mut(|storage| {
-            let values = storage.sequence_mut();
+            let values = storage.sequence_mut()?;
             let slot = values.values.get_mut(at).ok_or_else(Error::index)?;
             Ok(OwnedWord::from_owned(
                 std::mem::replace(slot, new.take().unwrap().into_word()),
@@ -402,22 +428,20 @@ pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind
     // Acquiring a word cannot call user code or displace any existing owner.
     let appended = unsafe {
         object(value).0.with_mut(|storage| {
-            let sequence = storage.sequence_mut();
+            let sequence = storage.sequence_mut()?;
             sequence.check_kind(kind);
-            if sequence.values.try_reserve(1).is_err() {
-                return false;
-            }
+            sequence
+                .values
+                .try_reserve(1)
+                .map_err(|_| Error::allocation())?;
             sequence
                 .values
                 .push(sequence.kind.acquire(word).into_word());
             sequence.update_header();
-            true
+            Ok(())
         })
     };
-    if !appended {
-        exceptions::sequence_allocation_failed();
-    }
-    i32::from(appended)
+    finish(appended.map(|()| 1), 0)
 }
 
 /// Publish an empty typed list before releasing the elements of the old buffer.
@@ -456,7 +480,7 @@ pub unsafe extern "C" fn imre_seq_pop(value: *const Object) -> usize {
     // SAFETY: only a transferred owner escapes mutable storage.
     let owned = unsafe {
         object(value).0.with_mut(|storage| {
-            let values = storage.sequence_mut();
+            let values = storage.sequence_mut()?;
             let word = values
                 .values
                 .pop()
@@ -476,7 +500,11 @@ pub unsafe extern "C" fn imre_seq_len(value: *const Object) -> usize {
     let length = unsafe {
         object(value)
             .0
-            .with(|storage| storage.sequence().values.len())
+            .with(|storage| storage.sequence().map(|words| words.values.len()))
+    };
+    let length = match length {
+        Ok(length) => length,
+        Err(err) => return err.returning(0),
     };
     debug_assert!(length <= MAX_LIST_LEN);
     (length << 1) | 1
@@ -501,7 +529,7 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
     // SAFETY: only independent owned words escape; acquisition cannot reenter.
     let result = unsafe {
         object(value).0.with(|storage| {
-            let values = storage.sequence();
+            let values = storage.sequence()?;
             let count = usize::try_from(count).unwrap_or(0);
             let length = values
                 .values
@@ -1973,7 +2001,15 @@ mod tests {
                 }
                 let empty = imre_seq_repeat(sequence, Int::small(-1).unwrap().0);
                 assert_eq!(Int(imre_seq_len(empty)).as_small(), Some(0));
-                assert_eq!(object(empty).0.with(|s| s.sequence().kind.raw()), kind);
+                assert_eq!(
+                    object(empty).0.with(|s| s
+                        .sequence()
+                        .ok()
+                        .expect("fixture sequence")
+                        .kind
+                        .raw()),
+                    kind
+                );
                 imre_object_release(empty);
                 for (index, &value) in values.iter().enumerate() {
                     assert_eq!(imre_seq_get_index(sequence, index), value);
@@ -2192,6 +2228,8 @@ mod tests {
                 result.0.with(|storage| {
                     storage
                         .sequence()
+                        .ok()
+                        .expect("fixture sequence")
                         .values
                         .iter()
                         .map(|&word| (&*(word as *const Str)).to_string())

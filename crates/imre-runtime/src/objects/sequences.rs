@@ -358,7 +358,7 @@ pub unsafe extern "C" fn imre_seq_slice(
     // leave storage. A normalization failure is raised after the borrow ends.
     let result = unsafe {
         object(value).0.with(|storage| {
-            let values = storage.sequence();
+            let values = storage.sequence()?;
             let slice = SliceIndices::new(values.values.len(), start, stop, step)?;
             let mut result = Words::new(values.kind.raw());
             result
@@ -912,7 +912,15 @@ mod tests {
                 }
                 let slice = Rc::from_raw(imre_seq_slice(Rc::as_ptr(&source), 0, 0, integer(-1)));
                 drop(source);
-                assert_eq!(slice.0.with(|storage| storage.sequence().kind.raw()), kind);
+                assert_eq!(
+                    slice.0.with(|storage| storage
+                        .sequence()
+                        .ok()
+                        .expect("fixture sequence")
+                        .kind
+                        .raw()),
+                    kind
+                );
                 for (at, &expected) in values.iter().rev().enumerate() {
                     assert_eq!(imre_seq_get_index(Rc::as_ptr(&slice), at), expected);
                 }

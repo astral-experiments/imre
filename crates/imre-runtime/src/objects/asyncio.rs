@@ -598,7 +598,7 @@ pub unsafe extern "C" fn imre_async_gather(
     let tasks: Vec<_> = unsafe {
         object(input).0.with(|storage| {
             storage
-                .sequence()
+                .sequence_storage()
                 .values
                 .iter()
                 .map(|handle| task_of(object(*handle as *const Object)))

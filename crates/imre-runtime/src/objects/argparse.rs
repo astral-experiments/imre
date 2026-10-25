@@ -719,17 +719,21 @@ pub unsafe extern "C" fn imre_argparse_parse(
     let parser = Parser::from_schema(schema);
     // SAFETY: argv is a rooted list[str]; take independent string owners before
     // reading the argument values or constructing the output namespace.
-    let owners = unsafe {
+    let owners: Result<_, super::Error> = unsafe {
         argv.0.with(|storage| {
-            let sequence = storage.sequence();
+            let sequence = storage.sequence()?;
             sequence.check_kind(3);
-            sequence
+            Ok(sequence
                 .values
                 .iter()
                 .skip(usize::from(process_argv))
                 .map(|&word| super::acquire_rc::<Str>(word))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>())
         })
+    };
+    let owners = match owners {
+        Ok(rows) => rows,
+        Err(error) => return error.returning(std::ptr::null_mut()),
     };
     let args = owners
         .iter()

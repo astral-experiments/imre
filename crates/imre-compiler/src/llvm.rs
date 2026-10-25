@@ -1279,9 +1279,13 @@ impl Emitter<'_, '_> {
             Type::List(_) => "imre_seq_len_fast",
             _ => unreachable!("only exact lists have nonallocating snapshots"),
         };
+        let operand = self.instruction(format!("call i64 @{helper}(ptr {})", receiver.operand));
+        if self.module.types.element(receiver.ty) == Some(Type::Str) {
+            self.check_error();
+        }
         Value {
             ty: Type::Int,
-            operand: self.instruction(format!("call i64 @{helper}(ptr {})", receiver.operand)),
+            operand,
             small_integer: true,
         }
     }
@@ -3794,7 +3798,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::StringListContains => {
-                let byte = self.instruction(format!(
+                let byte = self.checked_instruction(format!(
                     "call i32 @imre_str_list_contains(ptr {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
@@ -5293,13 +5297,13 @@ impl Emitter<'_, '_> {
                     && let Some(length) = self.snapshot_length(slot, &args[0].value)
                 {
                     length
+                } else if matches!(args[0].value.ty, Type::List(_) | Type::ListInt) {
+                    self.list_length(&args[0].value)
                 } else {
                     self.call(
                         match args[0].value.ty {
                             Type::Str => "imre_str_len",
                             Type::Bytes => "imre_bytes_len",
-                            Type::ListInt => "imre_list_len",
-                            Type::List(_) => "imre_seq_len_fast",
                             Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
                             Type::Deque(_) => "imre_deque_len",
                             Type::Set(_) | Type::StringKeys => "imre_set_len",
@@ -5993,7 +5997,7 @@ impl Emitter<'_, '_> {
             ),
             Builtin::StringListCopy => self.call("imre_str_list_copy", returns, &[&args[0].value]),
             Builtin::StringListNonempty => {
-                let found = self.instruction(format!(
+                let found = self.checked_instruction(format!(
                     "call i32 @imre_str_list_nonempty(ptr {})",
                     args[0].value.operand
                 ));
@@ -6008,23 +6012,27 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
                 let exclude =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_str_list_filter(ptr {}, ptr {}, ptr {second}, ptr {exclude}, i32 {strip})",
+                    args[0].value.operand, args[1].value.operand
+                ));
                 Value {
                     ty: returns,
-                    operand: self.instruction(format!(
-                        "call ptr @imre_str_list_filter(ptr {}, ptr {}, ptr {second}, ptr {exclude}, i32 {strip})",
-                        args[0].value.operand, args[1].value.operand
-                    )),
+                    operand,
                     small_integer: false,
                 }
             }
-            Builtin::StringListSortSuffix(skip) => Value {
-                ty: returns,
-                operand: self.instruction(format!(
+            Builtin::StringListSortSuffix(skip) => {
+                let operand = self.checked_instruction(format!(
                     "call ptr @imre_str_list_sorted_suffix(ptr {}, i32 {skip})",
                     args[0].value.operand
-                )),
-                small_integer: false,
-            },
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::RStrip => {
                 let chars = if let Some(arg) = args.get(1) {
                     let word = self.word(&arg.value);
@@ -7618,8 +7626,12 @@ large:
   ret i64 %full
 }
 define internal ptr @imre_seq_data_readonly_fast(ptr %sequence) alwaysinline nounwind {
-  %header = call i32 @sequence_header(ptr %sequence)
-  %inline = trunc i32 %header to i1
+  %header_offset = load i64, ptr @sequence_layout
+  %field = getelementptr inbounds i8, ptr %sequence, i64 %header_offset
+  %header = load i32, ptr %field, align 4
+  %ordinary = icmp ne i32 %header, -1
+  %inline_bit = trunc i32 %header to i1
+  %inline = and i1 %ordinary, %inline_bit
   br i1 %inline, label %small, label %spilled
 small:
   %offset = load i64, ptr getelementptr ({ i64, i64 }, ptr @sequence_layout, i32 0, i32 1)
@@ -7631,6 +7643,11 @@ spilled:
 }
 define internal i64 @imre_seq_borrow_index_proven_fast(ptr %sequence, i64 %index) alwaysinline nounwind {
   %data = call ptr @imre_seq_data_readonly_fast(ptr %sequence)
+  %available = icmp ne ptr %data, null
+  br i1 %available, label %read, label %failed, !prof !1
+failed:
+  ret i64 0
+read:
   %slot = getelementptr inbounds i64, ptr %data, i64 %index
   %word = load i64, ptr %slot
   ret i64 %word
@@ -8875,6 +8892,18 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
     }
 
     #[test]
+    fn string_list_membership_checks_before_converting_the_fallback() {
+        let body = function_body(
+            "def contains(needle: str, rows: list[str]) -> bool:\n    return needle in rows\n",
+        );
+        let (_, after) = body
+            .split_once("call i32 @imre_str_list_contains(")
+            .unwrap();
+        let (before_conversion, _) = after.split_once("icmp ne i32").unwrap();
+        assert!(before_conversion.contains("call i32 @imre_error_pending("));
+    }
+
+    #[test]
     fn proven_sequence_reads_acquire_the_static_element_without_an_error_poll() {
         for (ty, retain) in [
             ("str", Some("@imre_str_retain(")),
@@ -8901,7 +8930,13 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
             }
             assert!(!body.contains("@imre_seq_get("));
             assert!(!body.contains("@imre_seq_get_index("));
-            assert!(!body.contains("@imre_error_pending("));
+            // A deferred string list may fail to materialize its initial length.
+            // The bounds proof still makes the subsequent element pull infallible.
+            assert_eq!(
+                body.contains("@imre_error_pending("),
+                ty == "str",
+                "{ty}: {body}"
+            );
         }
         let checked = function_body(
             "def item(values: list[str], index: int) -> str:\n    return values[index]\n",

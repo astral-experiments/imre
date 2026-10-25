@@ -335,16 +335,23 @@ pub unsafe extern "C" fn imre_linecache_line_int(
     // SAFETY: input owners survive the immutable access and the return acquires its own.
     let string = unsafe {
         super::object(lines).0.with(|s| {
-            Int::borrow(n)
+            let words = s.sequence()?;
+            Ok(Int::borrow(n)
                 .as_small()
                 .and_then(|i| usize::try_from(i).ok()?.checked_sub(1))
-                .and_then(|i| s.sequence().values.get(i))
-                .map(|&word| acquire_rc(word))
+                .and_then(|i| words.values.get(i))
+                .map(|&word| acquire_rc(word)))
         })
-    }
-    // SAFETY: the caller roots the empty-string literal while a result is acquired.
-    .unwrap_or_else(|| unsafe { acquire_rc(missing as usize) });
-    Rc::into_raw(string)
+    };
+    crate::finish(
+        string.map(|word| {
+            Rc::into_raw(word.unwrap_or_else(|| {
+                // SAFETY: the caller roots the empty-string literal while a result is acquired.
+                unsafe { acquire_rc(missing as usize) }
+            }))
+        }),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety
@@ -356,7 +363,15 @@ pub unsafe extern "C" fn imre_linecache_line_float(
     missing: *const Str,
 ) -> *const Str {
     // SAFETY: the list lives during its length query.
-    let len = unsafe { super::object(lines).0.with(|s| s.sequence().values.len()) };
+    let len = unsafe {
+        super::object(lines)
+            .0
+            .with(|s| s.sequence().map(|words| words.values.len()))
+    };
+    let len = match len {
+        Ok(len) => len,
+        Err(error) => return error.returning(std::ptr::null()),
+    };
     if 1.0 <= n && n <= len as f64 {
         Error::new(
             Kind::TypeError,
