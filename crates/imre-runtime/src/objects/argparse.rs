@@ -14,6 +14,9 @@ use super::{Object, Str, Words, fail};
 use crate::objects::paths::imre_path_new;
 
 mod help;
+mod nargs;
+
+use nargs::{Nargs, positional_counts};
 
 #[derive(Deserialize, Copy, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -30,7 +33,9 @@ struct OptionSpec {
     aliases: Vec<String>,
     enum_default: Option<usize>,
     kind: Kind,
-    many: bool,
+    nargs: Nargs,
+    constant: Option<String>,
+    list_default: bool,
     required: bool,
     choices: Vec<String>,
     converter: Option<String>,
@@ -175,27 +180,120 @@ impl Parser {
         }
     }
 
+    fn check_choices<'a>(&'a self, option: &OptionSpec, taken: &[&str]) -> Result<(), Stop<'a>> {
+        if !option.choices.is_empty()
+            && let Some(value) = taken
+                .iter()
+                .find(|&&value| !option.choices.iter().any(|choice| choice == value))
+        {
+            let choices = option
+                .choices
+                .iter()
+                .map(|choice| string_repr(choice))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(Stop::Error(
+                self,
+                format!(
+                    "argument {}: invalid choice: {} (choose from {choices})",
+                    option.error_name(),
+                    string_repr(value)
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn parse<'a>(&'a self, args: &[&'a str]) -> Result<Parsed<'a>, Stop<'a>> {
         let mut values = vec![None; self.options.len()];
         let mut extras = Vec::new();
         let mut index = 0;
         let mut selected = None;
-        let mut end_options = false;
-        let mut after_positional = None;
-        let mut positionals = self
+        let marker = args.iter().position(|&arg| arg == "--");
+        let positional_slots = self
             .options
             .iter()
             .enumerate()
-            .filter(|(_, o)| o.positional())
-            .peekable();
-        while let Some(&arg) = args.get(index) {
+            .filter_map(|(slot, option)| option.positional().then_some(slot))
+            .collect::<Vec<_>>();
+        let arities = positional_slots
+            .iter()
+            .map(|&slot| self.options[slot].nargs)
+            .chain(self.subcommands.is_some().then_some(Nargs::One))
+            .collect::<Vec<_>>();
+        let mut next_positional = 0;
+        let is_value = |i: usize| {
+            marker.is_some_and(|at| i >= at) || matches!(self.token(args[i]), Token::Value)
+        };
+        'parse: loop {
+            if index == args.len() || is_value(index) {
+                let mut end = index;
+                while end < args.len() && is_value(end) {
+                    end += 1;
+                }
+                let available =
+                    end - index - usize::from(marker.is_some_and(|m| (index..end).contains(&m)));
+                for count in
+                    positional_counts(&arities[next_positional..], available, end < args.len())
+                {
+                    let slot = positional_slots.get(next_positional);
+                    next_positional += 1;
+                    if marker == Some(index) {
+                        index += 1;
+                    }
+                    let Some(&slot) = slot else {
+                        let commands = self.subcommands.as_ref().unwrap();
+                        let name = args[index];
+                        let Some((child, definition)) = commands
+                            .choices
+                            .iter()
+                            .enumerate()
+                            .find(|(_, child)| child.name == name)
+                        else {
+                            let choices = commands
+                                .choices
+                                .iter()
+                                .map(|c| string_repr(&c.name))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            return Err(Stop::Error(
+                                self,
+                                format!(
+                                    "argument {}: invalid choice: {} (choose from {choices})",
+                                    commands.dest,
+                                    string_repr(name)
+                                ),
+                            ));
+                        };
+                        let mut parsed = definition.parser.parse(&args[index + 1..])?;
+                        extras.append(&mut parsed.extras);
+                        selected = Some((child, name, parsed.words));
+                        break 'parse;
+                    };
+                    let mut taken = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        if marker == Some(index) {
+                            index += 1;
+                        }
+                        taken.push(args[index]);
+                        index += 1;
+                    }
+                    if marker == Some(index) {
+                        index += 1;
+                    }
+                    self.check_choices(&self.options[slot], &taken)?;
+                    values[slot] = Some(taken);
+                }
+                extras.extend(args[index..end].iter().copied().map(Cow::Borrowed));
+                index = end;
+                if index == args.len() {
+                    break;
+                }
+            }
+            let arg = args[index];
             index += 1;
             let mut clustered_help = false;
-            let (slot, explicit) = match if end_options {
-                Token::Value
-            } else {
-                self.token(arg)
-            } {
+            let (slot, explicit) = match self.token(arg) {
                 Token::Help(None) => return Err(Stop::Help(self)),
                 Token::Help(Some(value)) => {
                     return Err(Stop::Error(
@@ -212,50 +310,8 @@ impl Parser {
                         format!("ambiguous option: {arg} could match {}", names.join(", ")),
                     ));
                 }
-                Token::Value if let Some((slot, _)) = positionals.next() => {
-                    after_positional = Some(index);
-                    (slot, Some(arg))
-                }
-                Token::End
-                    if self.subcommands.is_some()
-                        || positionals.peek().is_some()
-                        || after_positional == Some(index - 1) =>
-                {
-                    end_options = true;
-                    continue;
-                }
-                Token::Value if let Some(commands) = &self.subcommands => {
-                    let Some((child, definition)) = commands
-                        .choices
-                        .iter()
-                        .enumerate()
-                        .find(|(_, child)| child.name == arg)
-                    else {
-                        let choices = commands
-                            .choices
-                            .iter()
-                            .map(|child| string_repr(&child.name))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        return Err(Stop::Error(
-                            self,
-                            format!(
-                                "argument {}: invalid choice: {} (choose from {choices})",
-                                commands.dest,
-                                string_repr(arg)
-                            ),
-                        ));
-                    };
-                    let mut parsed = definition.parser.parse(&args[index..])?;
-                    extras.append(&mut parsed.extras);
-                    selected = Some((child, arg, parsed.words));
-                    break;
-                }
-                Token::End => {
-                    extras.extend(args[index - 1..].iter().copied().map(Cow::Borrowed));
-                    break;
-                }
-                Token::Value | Token::Unknown => {
+                Token::End | Token::Value => unreachable!("positional run already consumed"),
+                Token::Unknown => {
                     extras.push(Cow::Borrowed(arg));
                     continue;
                 }
@@ -328,43 +384,38 @@ impl Parser {
                         ),
                     ));
                 }
-                let mut taken = vec![value];
-                if option.positional() && option.many {
-                    // Once an option ends this positional's run, parse_args
-                    // treats later bare words as extras. The first -- inside
-                    // the run consumes the marker and makes all following words values.
-                    while let Some(&next) = args.get(index) {
-                        if !end_options && next == "--" {
-                            end_options = true;
-                        } else if end_options || matches!(self.token(next), Token::Value) {
-                            taken.push(next);
-                        } else {
-                            break;
-                        }
-                        index += 1;
-                    }
-                    after_positional = Some(index);
+                if option.nargs.bounds().0 > 1 {
+                    return Err(Stop::Error(
+                        self,
+                        format!(
+                            "argument {}: {}",
+                            option.error_name(),
+                            option.nargs.expected()
+                        ),
+                    ));
                 }
-                taken
+                vec![value]
             } else if option.kind == Kind::Bool {
                 Vec::new()
             } else {
                 let start = index;
-                while index < args.len() && matches!(self.token(args[index]), Token::Value) {
+                let (min, max) = option.nargs.bounds();
+                while index < args.len()
+                    && index - start < max
+                    && marker != Some(index)
+                    && (matches!(option.nargs, Nargs::Fixed(_))
+                        || matches!(self.token(args[index]), Token::Value))
+                {
                     index += 1;
-                    if !option.many {
-                        break;
-                    }
                 }
-                if index == start {
-                    let message = if option.many {
-                        "expected at least one argument"
-                    } else {
-                        "expected one argument"
-                    };
+                if index - start < min {
                     return Err(Stop::Error(
                         self,
-                        format!("argument {}: {message}", option.error_name()),
+                        format!(
+                            "argument {}: {}",
+                            option.error_name(),
+                            option.nargs.expected()
+                        ),
                     ));
                 }
                 args[start..index].to_vec()
@@ -372,26 +423,7 @@ impl Parser {
             if clustered_help {
                 return Err(Stop::Help(self));
             }
-            if !option.choices.is_empty()
-                && let Some(value) = taken
-                    .iter()
-                    .find(|&&value| !option.choices.iter().any(|choice| choice == value))
-            {
-                let choices = option
-                    .choices
-                    .iter()
-                    .map(|choice| string_repr(choice))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                return Err(Stop::Error(
-                    self,
-                    format!(
-                        "argument {}: invalid choice: {} (choose from {choices})",
-                        option.error_name(),
-                        string_repr(value)
-                    ),
-                ));
-            }
+            self.check_choices(option, &taken)?;
             values[slot] = Some(taken);
         }
         let mut missing = self
@@ -458,9 +490,9 @@ impl OptionSpec {
     }
 
     fn word(&self, args: Option<Vec<&str>>) -> usize {
-        if args.is_none()
-            && let Some(member) = self.enum_default
-        {
+        let missing =
+            args.is_none() || self.positional() && args.as_ref().is_some_and(Vec::is_empty);
+        if missing && let Some(member) = self.enum_default {
             return (member << 3) | 5;
         }
         if self.kind == Kind::Bool {
@@ -470,18 +502,27 @@ impl OptionSpec {
                 .or_else(|| self.default.as_deref().map(|value| value == "True"));
             return value.map_or(0, |value| usize::from(value) + usize::from(self.optional));
         }
-        if self.many {
+        if self.nargs.list() {
+            if missing && self.list_default {
+                return scalar(Kind::Str, self.default.as_deref().unwrap());
+            }
             let Some(args) = args else { return 0 };
             let mut values = Words::new(if self.kind == Kind::Path { 5 } else { 3 });
             values
                 .values
                 .extend(args.into_iter().map(|value| scalar(self.kind, value)));
-            return Rc::into_raw(values.into_object()) as usize;
+            let word = Rc::into_raw(values.into_object()) as usize;
+            // The closed str | list[str] union reserves tag 2 for the list.
+            return if self.list_default { word | 2 } else { word };
         }
-        args.as_ref()
-            .and_then(|args| args.first().copied())
-            .or(self.default.as_deref())
-            .map_or(0, |value| scalar(self.kind, value))
+        let value = if missing {
+            self.default.as_deref()
+        } else {
+            args.as_ref()
+                .and_then(|args| args.first().copied())
+                .or(self.constant.as_deref())
+        };
+        value.map_or(0, |value| scalar(self.kind, value))
     }
 }
 

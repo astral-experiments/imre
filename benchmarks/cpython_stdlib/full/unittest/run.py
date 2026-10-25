@@ -10,7 +10,8 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_in_fixtures, testcase_fixture
+from suite_evidence import roles, write_reports
+from suite_native import NativeCompileError, Toolchain, compile_blocker, native_method, run_evidence, testcase_fixture
 
 PREFIX = "test.test_unittest."
 ASSERTIONS = {
@@ -21,7 +22,7 @@ ASSERTIONS = {
 }
 
 
-def check_assertion(binary, operation):
+def check_assertion(binary, operation, level):
     def run(case, original):
         calls = []
         def bind(target):
@@ -49,46 +50,59 @@ def check_assertion(binary, operation):
         original()
         if Counter(calls) != Counter((long, msg) for long in (False, True) for msg in (False, True)):
             raise AssertionError(f"incomplete native calls: {calls}")
-        return {"execution": "host-driven-native-operation", "body": "CPython",
-                "assertions": "CPython checks the native failure message",
-                "fixture_execution": "CPython", "operation": operation, "calls": len(calls)}
+        return {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+                "evidence": {"operation": f"unittest.TestCase.{operation}", "native_calls": len(calls), "opt_level": level,
+                             "assertions": "upstream assertMessages checks each native failure message",
+                             "fixture": "upstream TestLongMessage setup and lifecycle on CPython"}}
     return run
 
 
 def run(args, level, root):
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
     reference = json.loads((HERE / "reference-linux.json").read_text())
+    if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
+        raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
     driver = root / "assertions"
     driver.mkdir()
-    binary = lang.build((HERE / "assertion_driver.py").read_bytes(), driver)
-    executions = {PREFIX + "test_assertions.TestLongMessage." + name: check_assertion(binary, op)
-                  for name, op in ASSERTIONS.items()}
+    executions, blocked = {}, {}
+    host = {PREFIX + "test_assertions.TestLongMessage." + name: op for name, op in ASSERTIONS.items()}
+    try:
+        binary = lang.build((HERE / "assertion_driver.py").read_bytes(), driver)
+    except NativeCompileError as exc:
+        blocked.update({(name, 1): compile_blocker(exc) for name in host})
+    else:
+        executions.update({name: check_assertion(binary, op, level) for name, op in host.items()})
     path = HERE / "upstream/Lib/test/test_unittest/test_result.py"
-    for method in ("test_stop", "test_startTestRun_stopTestRun"):
+    for method, operation in (("test_stop", "unittest.TestResult.stop"),
+                              ("test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun")):
         case_id = PREFIX + "test_result.Test_TestResult." + method
         directory = root / method
         directory.mkdir()
         fixture = testcase_fixture("bool" if method == "test_stop" else None)
-        executions[case_id] = native_method(lang, directory, path, "Test_TestResult", case_id, fixture)
-    evidence, failures, skips = run_in_fixtures(load_suite(manifest["module"]), executions)
-    if skips:
-        failures.extend((name, f"unexpected skip: {reason}") for name, reason in skips)
-    statuses = {name: "reference-skip" if isinstance(value, dict) and "skipped" in value
-                else "reference-only" for name, value in reference["reference"].items()}
-    for name, entries in evidence.items():
-        entry, = entries
-        statuses[name] = entry["execution"]
-    for name, reason in failures:
-        if name in statuses:
-            statuses[name] = "failed"
-        print(name, reason, file=sys.stderr)
-    missing = set(executions) - set(evidence) - {name for name, _ in failures}
-    if missing:
-        raise RuntimeError(f"selected IDs did not execute: {sorted(missing)}")
-    return {"cpython_commit": manifest["commit"], "opt_level": level, "denominator": len(statuses),
-            "counts": dict(sorted(Counter(statuses.values()).items())), "evidence": evidence,
-            "failures": failures}, bool(failures)
+        try:
+            executions[case_id] = native_method(lang, directory, path, "Test_TestResult", case_id, fixture,
+                                                operation=("imre", operation))
+        except NativeCompileError as exc:
+            blocked[case_id, 1] = compile_blocker(exc)
+    report = run_evidence(load_suite(manifest["module"]), executions, reference, level,
+                          preflight=blocked, exceptions=reference_skips(level))
+    failures = [r for r in report["records"] if r["outcome"] not in {"pass", "not-run"}
+                or r["classification"] in {"reference-failure", "reference-disagreement"}]
+    for row in failures:
+        print(row["id"], row.get("reason", row["reference"]), file=sys.stderr)
+    return report, bool(failures)
+
+
+def reference_skips(level):
+    fixture = PREFIX + "test_break.TestBreakSignalIgnored"
+    return {(fixture + "." + method, 1, level): {
+        "kind": "upstream-skip", "fixture_variant": fixture, "platform": "linux",
+        "configuration": "TestBreakSignalIgnored.int_handler = signal.SIG_IGN",
+        "condition": "signal.getsignal(signal.SIGINT) == signal.SIG_IGN",
+        "reason": "test requires SIGINT to not be ignored",
+        "source": f"Lib/test/test_unittest/test_break.py:{line}",
+    } for method, line in (("testSecondInterrupt", 102), ("testHandlerReplacedButCalled", 152))}
 
 
 def main():
@@ -112,7 +126,7 @@ def main():
         print(f"-O{level}: {report['counts']}")
         failed |= bad
         reports.append(report)
-    args.result.write_text(json.dumps(reports, indent=2) + "\n")
+    write_reports(args.result, reports, json.loads((HERE / "reference-linux.json").read_text()))
     return int(failed)
 
 

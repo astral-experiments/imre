@@ -55,7 +55,9 @@ impl Checker<'_> {
     pub(super) fn fspath_value(&self, value: Expr, expression: &ast::Expr) -> Result<Expr, String> {
         match value.ty {
             Type::Str | Type::Bytes => Ok(value),
-            Type::Path => Ok(operation(PathOperation::Text, Type::Str, vec![value])),
+            Type::Path | Type::PurePath(_) => {
+                Ok(operation(PathOperation::Text, Type::Str, vec![value]))
+            }
             _ => Err(error(
                 self.source,
                 expression,
@@ -75,7 +77,9 @@ impl Checker<'_> {
             {
                 Ok(operation(PathOperation::UnionText, Type::Str, vec![value]))
             }
-            Type::Path => Ok(operation(PathOperation::Text, Type::Str, vec![value])),
+            Type::Path | Type::PurePath(_) => {
+                Ok(operation(PathOperation::Text, Type::Str, vec![value]))
+            }
             _ => Err(error(
                 self.source,
                 node,
@@ -119,23 +123,92 @@ impl Checker<'_> {
         ))
     }
 
-    pub(super) fn path_constructor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    pub(super) fn path_constructor(
+        &mut self,
+        call: &ast::ExprCall,
+        ty: Type,
+    ) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
-        let mut args = call.arguments.args.iter();
-        let first = if let Some(argument) = args.next() {
-            self.path_argument(argument)?
-        } else {
-            Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(String::new()),
+        calls::reject_unpacking(call, self.source)?;
+        let inputs = call
+            .arguments
+            .args
+            .iter()
+            .map(|arg| self.expr(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        let checked = inputs
+            .iter()
+            .any(|value| self.types.payload(value.ty).is_some());
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        let mut parts = Vec::new();
+        for (value, syntax) in inputs.into_iter().zip(&call.arguments.args) {
+            let mut part = if checked {
+                // Method lookup and each argument expression run before the constructor
+                // inspects any part. In particular a later argument may raise first.
+                let slot = self.hidden(value.ty);
+                body.push(Statement::Assign(slot, value));
+                clear.push(slot);
+                self.local(slot)
+            } else {
+                value
+            };
+            if let Some(payload) = self.types.payload(part.ty) {
+                let missing = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::IsNone, vec![part.clone()]),
+                };
+                let error = Statement::Raise(Some(Expr { ty: Type::Exception, kind: ExprKind::Exception {
+                    kind: exception_kind("TypeError").unwrap(),
+                    message: Some(Box::new(Expr { ty: Type::Str, kind: ExprKind::Str(
+                        "argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'NoneType'".into()) })),
+                }}));
+                part = Expr {
+                    ty: payload,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::If(missing, vec![error], vec![])],
+                        value: Box::new(Expr {
+                            ty: payload,
+                            kind: ExprKind::Unwrap(Box::new(part)),
+                        }),
+                        clear: vec![],
+                    },
+                };
             }
-        };
-        let mut result = operation(PathOperation::New, Type::Path, vec![first]);
-        for argument in args {
-            let next = self.path_argument(argument)?;
-            result = operation(PathOperation::Join, Type::Path, vec![result, next]);
+            parts.push((part, syntax));
         }
-        Ok(result)
+        let mut parts = parts.into_iter();
+        let mut path = match ty {
+            Type::Path => {
+                let first = if let Some((part, syntax)) = parts.next() {
+                    if matches!(part.ty, Type::PurePath(ir::PathFlavor::Windows)) {
+                        operation(PathOperation::AsPosix, Type::Str, vec![part])
+                    } else {
+                        self.path_text(part, syntax)?
+                    }
+                } else {
+                    unpacking::string("")
+                };
+                operation(PathOperation::New, ty, vec![first])
+            }
+            Type::PurePath(flavor) => operation(PathOperation::PureNew(flavor), ty, vec![]),
+            _ => unreachable!(),
+        };
+        for (part, syntax) in parts {
+            path = self.path_join(path, part, syntax)?;
+        }
+        if checked {
+            Ok(Expr {
+                ty,
+                kind: ExprKind::Scope {
+                    body,
+                    clear,
+                    value: Box::new(path),
+                },
+            })
+        } else {
+            Ok(path)
+        }
     }
 
     pub(super) fn system_path_call(
@@ -172,20 +245,31 @@ impl Checker<'_> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        let left = if left.ty == Type::Path {
+        let left = if left.ty.is_path() {
             left
         } else {
-            operation(
-                PathOperation::New,
-                Type::Path,
-                vec![self.path_text(left, node)?],
-            )
+            let first = self.path_text(left, node)?;
+            if let Type::PurePath(flavor) = right.ty {
+                operation(
+                    PathOperation::Join,
+                    right.ty,
+                    vec![
+                        operation(PathOperation::PureNew(flavor), right.ty, vec![]),
+                        first,
+                    ],
+                )
+            } else {
+                operation(PathOperation::New, Type::Path, vec![first])
+            }
         };
-        let right = self.path_text(right, node)?;
+        let ty = left.ty;
+        if right.ty.is_path() {
+            return Ok(operation(PathOperation::JoinObject, ty, vec![left, right]));
+        }
         Ok(operation(
             PathOperation::Join,
-            Type::Path,
-            vec![left, right],
+            ty,
+            vec![left, self.path_text(right, node)?],
         ))
     }
 
@@ -198,12 +282,15 @@ impl Checker<'_> {
             "name" => (PathOperation::Name, Type::Str),
             "stem" => (PathOperation::Stem, Type::Str),
             "suffix" => (PathOperation::Suffix, Type::Str),
-            "parent" => (PathOperation::Parent, Type::Path),
+            "parent" => (PathOperation::Parent, receiver.ty),
+            "drive" => (PathOperation::Drive, Type::Str),
+            "root" => (PathOperation::Root, Type::Str),
+            "anchor" => (PathOperation::Anchor, Type::Str),
             _ => {
                 return Err(error(
                     self.source,
                     attribute,
-                    "supported Path attributes are name, stem, suffix, and parent",
+                    "unsupported native path attribute",
                 ));
             }
         };
@@ -242,7 +329,12 @@ impl Checker<'_> {
             let arguments =
                 self.arguments_with(call, &params, Some(receiver), |checker, index, value| {
                     if index == 0 {
-                        checker.path_argument(value)
+                        let pattern = checker.expr(value)?;
+                        if pattern.ty.is_path() {
+                            Ok(pattern)
+                        } else {
+                            checker.path_text(pattern, value)
+                        }
                     } else {
                         checker.expr_expected(value, optional_bool)
                     }
@@ -267,6 +359,15 @@ impl Checker<'_> {
             }
             return Ok(path);
         }
+        if matches!(receiver.ty, Type::PurePath(_))
+            && !matches!(name, "as_posix" | "is_absolute" | "with_name")
+        {
+            return Err(error(
+                self.source,
+                call,
+                "unsupported native PurePath method",
+            ));
+        }
         if name == "open" {
             return self.path_open(receiver, call);
         }
@@ -285,7 +386,7 @@ impl Checker<'_> {
         }
         let (kind, ty, arity) = match name {
             "absolute" => (PathOperation::Absolute, Type::Path, 0),
-            "as_posix" => (PathOperation::Text, Type::Str, 0),
+            "as_posix" => (PathOperation::AsPosix, Type::Str, 0),
             "exists" => (PathOperation::Exists, Type::Bool, 0),
             "is_file" => (PathOperation::IsFile, Type::Bool, 0),
             "is_dir" => (PathOperation::IsDir, Type::Bool, 0),
@@ -358,7 +459,7 @@ impl Checker<'_> {
             ),
             "with_name" => (
                 PathOperation::WithName,
-                Type::Path,
+                receiver.ty,
                 vec![parameter("name", Type::Str, None)],
             ),
             "write_bytes" => (
