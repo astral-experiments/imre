@@ -74,6 +74,8 @@ jobs:
           mkdir "$RUNNER_TEMP/receipts"
       - name: Compare executable behavior at O0 with ASan and O3
         run: |
+          cat > "$RUNNER_TEMP/compare" <<'SH'
+          set -euo pipefail
           fixtures=(tests/fixtures/callables/owned_caches.py tests/fixtures/containers/namedtuple.py)
           case "$KIND" in
             cache|both) fixtures+=(tests/fixtures/callables/cache_parameters.py tests/fixtures/containers/dict_clear.py);;
@@ -94,6 +96,8 @@ jobs:
               echo "O$opt $source $(wc -c < "$RUNNER_TEMP/out") bytes"
             done
           done
+          SH
+          bash "$RUNNER_TEMP/compare"
       - name: Run the unchanged functools methods with their reference fixtures
         if: matrix.name == 'cache' || matrix.name == 'both' || matrix.name == 'receipts'
         run: |
@@ -139,6 +143,8 @@ jobs:
       - name: Verify four complete annotationlib bodies at both levels
         if: matrix.name == 'annotation'
         run: |
+          cat > "$RUNNER_TEMP/annotations" <<'SH'
+          set -euo pipefail
           export PYTHONPATH="$GITHUB_WORKSPACE/.cpython-stdlib-reference/Lib"
           dir=benchmarks/cpython_stdlib/full/functools
           out="$RUNNER_TEMP/receipts"
@@ -147,6 +153,25 @@ jobs:
           cmp "$dir/annotationlib-linux.json" "$out/format.json"
           python "$dir/run_annotationlib.py" "${args[@]}" --forward-refs --result "$out/forwardrefs.json"
           cmp "$dir/annotation-forwardrefs-linux.json" "$out/forwardrefs.json"
+          SH
+          bash "$RUNNER_TEMP/annotations"
+      - name: Recheck current main for the defaults and annotation candidates
+        if: matrix.name == 'defaults' || matrix.name == 'annotation'
+        run: |
+          while true; do
+            read -r base tree commit < "$RUNNER_TEMP/source"
+            git fetch --quiet --no-tags origin refs/heads/main:refs/remotes/origin/main
+            if git diff --quiet "$base" origin/main -- crates Cargo.toml Cargo.lock tests/fixtures benchmarks/cpython_stdlib/full/functools; then
+              cp "$RUNNER_TEMP/source" "$RUNNER_TEMP/receipts/final-source"
+              echo "Verified final source $(cat "$RUNNER_TEMP/source")"
+              break
+            fi
+            bash "$RUNNER_TEMP/prepare" "$SEED"
+            cargo build --locked -j 2 -p imre-compiler -p imre-runtime
+            cargo test --locked -j 2 -p imre-compiler -p imre-runtime --lib
+            bash "$RUNNER_TEMP/compare"
+            if test "$KIND" = annotation; then bash "$RUNNER_TEMP/annotations"; fi
+          done
       - name: Recheck an overlapping main change on the warm runner
         if: matrix.name == 'cache' || matrix.name == 'both'
         run: |
@@ -190,7 +215,7 @@ jobs:
             fi
           done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: always() && matrix.name != 'defaults'
+        if: always()
         with:
           name: ${{ matrix.name }}-${{ github.run_id }}-receipts
           path: ${{ runner.temp }}/receipts
