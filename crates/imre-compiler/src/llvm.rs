@@ -60,6 +60,7 @@ impl Type {
             | Self::Iterator
             | Self::ByteOutput
             | Self::Exception
+            | Self::NamedException(_)
             | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
@@ -107,6 +108,7 @@ impl Type {
             | Self::Iterator
             | Self::ByteOutput
             | Self::Exception
+            | Self::NamedException(_)
             | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
@@ -682,6 +684,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
+            | Type::NamedException(_)
             | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
@@ -2267,7 +2270,12 @@ impl Emitter<'_, '_> {
                     Type::Union(_)
                 ) && matches!(
                     self.module.types.payload(value.ty).unwrap_or(value.ty),
-                    Type::Str | Type::Bytes | Type::List(_) | Type::Class(_) | Type::Exception
+                    Type::Str
+                        | Type::Bytes
+                        | Type::List(_)
+                        | Type::Class(_)
+                        | Type::Exception
+                        | Type::NamedException(_)
                 ) {
                     self.union_inject(value.clone(), storage)
                 } else {
@@ -3248,6 +3256,7 @@ impl Emitter<'_, '_> {
                 | Type::ZipInfo
                 | Type::CsvReader
                 | Type::Exception
+                | Type::NamedException(_)
                 | Type::ExitCode
                 | Type::TimeoutExpired
                 | Type::TextIO
@@ -3607,7 +3616,15 @@ impl Emitter<'_, '_> {
                 use crate::ir::LogOperation::*;
                 let name = match operation {
                     Get => "imre_log_get",
+                    AddLevel => "imre_log_add_level",
+                    LevelName => "imre_log_level_name",
+                    LevelForName => "imre_log_level_for_name",
+                    CheckLevel => "imre_log_check_level",
+                    Names => "imre_log_names",
+                    Numbers => "imre_log_numbers",
+                    NamesCopy => "imre_log_names_copy",
                     Configure => "imre_log_config",
+                    ConfigureName => "imre_log_config_named",
                     Name => "imre_log_name",
                     Parent => "imre_log_parent",
                     Root => "imre_log_root",
@@ -4099,6 +4116,12 @@ impl Emitter<'_, '_> {
                 self.call("imre_csv_line_number", Type::Int, &[&args[0].value])
             }
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
+            Builtin::HashNew => self.call(
+                "imre_hash_new",
+                Type::Sha256,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::HashAvailable => self.call("imre_hash_algorithms_available", returns, &[]),
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
             Builtin::Sha256Update => {
                 self.void_call("imre_sha256_update", &[&args[0].value, &args[1].value]);
@@ -4227,6 +4250,47 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ExceptionArgument(kind) => {
+                let arg = &args[0].value;
+                let word = self.word(arg);
+                let rep = representation_kind(arg.ty, &self.module.types);
+                let desc = if *kind >= 256 {
+                    format!(
+                        "@{}",
+                        self.output.global_ref(format!("exception_type_{kind}"))
+                    )
+                } else {
+                    "null".into()
+                };
+                Value{ty:Type::Exception,operand:self.instruction(format!("call ptr @imre_exception_argument(i32 {kind}, ptr {desc}, i64 {word}, i32 {rep})")),small_integer:false}
+            }
+            Builtin::NamedException {
+                kind,
+                message_field,
+                text,
+                repr,
+                dataclass_repr,
+            } => {
+                let record = &args[0].value;
+                let slot = self.field_pointer(record, *message_field);
+                let message = self.instruction(format!("load ptr, ptr {slot}, align 8"));
+                let desc = self.output.global_ref(format!("exception_type_{kind}"));
+                let text = text.map_or_else(
+                    || "null".into(),
+                    |f| format!("@{}", self.output.function_ref(f)),
+                );
+                let repr = repr.map_or_else(
+                    || "null".into(),
+                    |f| format!("@{}", self.output.function_ref(f)),
+                );
+                Value{ty:returns,operand:self.instruction(format!("call ptr @imre_named_exception_record_new(ptr @{desc}, ptr {}, ptr {message}, ptr {text}, ptr {repr}, i32 {})",record.operand,(u32::from(*dataclass_repr) | (u32::from(self.resource_types.contains(&record.ty)) << 1)))),small_integer:false}
+            }
+            Builtin::ExceptionRecord => {
+                self.call("imre_named_exception_record", returns, &[&args[0].value])
+            }
+            Builtin::ExceptionRepr => {
+                self.call("imre_exception_repr", Type::Str, &[&args[0].value])
+            }
             Builtin::ExceptionMessage => {
                 self.call("imre_exception_message", Type::Str, &[&args[0].value])
             }
@@ -4290,7 +4354,7 @@ impl Emitter<'_, '_> {
                 Type::ExitCode => {
                     self.call("imre_system_exit_code_text", Type::Str, &[&args[0].value])
                 }
-                Type::Exception | Type::TimeoutExpired => {
+                Type::Exception | Type::TimeoutExpired | Type::NamedException(_) => {
                     self.call("imre_exception_message", Type::Str, &[&args[0].value])
                 }
                 Type::Class(_) => self.value_repr(&args[0].value),
@@ -4840,6 +4904,7 @@ impl Emitter<'_, '_> {
                     | Type::Iterator
                     | Type::ByteOutput
                     | Type::Exception
+                    | Type::NamedException(_)
                     | Type::ExitCode
                     | Type::TimeoutExpired
                     | Type::Path
@@ -5061,6 +5126,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
+            | Type::NamedException(_)
             | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
@@ -5119,6 +5185,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
+            | Type::NamedException(_)
             | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
@@ -5677,6 +5744,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Iterator
         | Type::ByteOutput
         | Type::Exception
+        | Type::NamedException(_)
         | Type::ExitCode
         | Type::TimeoutExpired
         | Type::Path
@@ -5948,6 +6016,8 @@ declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_next(ptr, i32)
 declare i64 @imre_csv_line_number(ptr)
 declare ptr @imre_sha256_new(ptr)
+declare ptr @imre_hash_new(ptr, ptr)
+declare ptr @imre_hash_algorithms_available()
 declare void @imre_sha256_update(ptr, ptr)
 declare ptr @imre_sha256_digest(ptr)
 declare ptr @imre_sha256_hexdigest(ptr)
@@ -5993,6 +6063,10 @@ declare void @imre_union_retain(i64)
 declare void @imre_union_release(i64)
 declare i32 @imre_union_truthy(i64)
 declare ptr @imre_exception_message(ptr)
+declare ptr @imre_exception_argument(i32, ptr, i64, i32)
+declare ptr @imre_exception_repr(ptr)
+declare ptr @imre_named_exception_record(ptr)
+declare ptr @imre_named_exception_record_new(ptr, ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_exception_with_cause(ptr, ptr)
 declare ptr @imre_exception_cause(ptr)
 declare i32 @imre_exception_suppress_context(ptr)
@@ -6198,6 +6272,16 @@ declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_get(i64)
+declare void @imre_log_add_level(i64, ptr)
+declare ptr @imre_log_level_name(i64)
+declare i64 @imre_log_level_for_name(ptr)
+declare i64 @imre_log_check_level(ptr)
+declare ptr @imre_log_names()
+declare ptr @imre_log_numbers()
+declare ptr @imre_log_names_copy()
+declare void @imre_log_config_named(ptr, i64, i64, i1)
+declare i64 @imre_union_from_int(i64)
+declare i64 @imre_union_into_int(i64)
 declare void @imre_log_config(i64, i64, i64, i1)
 declare ptr @imre_log_name(ptr)
 declare i64 @imre_log_parent(ptr)
