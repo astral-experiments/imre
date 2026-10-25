@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
+from suite_evidence import roles
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import Toolchain, run_in_fixtures
 
@@ -33,8 +34,8 @@ def spelling(value):
         return "argparse.SUPPRESS"
     if isinstance(value, type) and value.__module__ == "builtins":
         return value.__name__
-    if value is argparse.BooleanOptionalAction:
-        return "argparse.BooleanOptionalAction"
+    if isinstance(value, type) and value.__module__ == "argparse":
+        return "argparse." + value.__qualname__
     if isinstance(value, (str, int, float, bool, list, tuple, set, range)) or value is None:
         return repr(value)
     raise Blocked(f"cannot emit declaration value {type(value).__module__}.{type(value).__qualname__}")
@@ -70,15 +71,24 @@ class Parser(Group):
         return Group(self.declarations, name)
 
     def parse_args(self, args=None):
+        return self._parse("parse_args", args)
+
+    def parse_known_args(self, args=None):
+        return self._parse("parse_known_args", args)
+
+    def _parse(self, method, args):
         # The upstream failure wrappers always call parse_args(args), even when
         # their test name ends in sysargs. Observe the actual call each time.
         explicit = args is not None
         arg = "words" if explicit else ""
         decl = "\n    ".join(self.declarations)
+        result = "result" if method == "parse_args" else "result[0]"
         source = (f"import argparse\nimport sys\n\ndef parse({'words: list[str]' if explicit else ''}):\n"
-                  f"    {decl}\n    return parser.parse_args({arg})\n\n"
+                  f"    {decl}\n    return parser.{method}({arg})\n\n"
                   f"result = parse({'sys.argv[1:]' if explicit else ''})\n"
-                  f"print('RETURN')\nprint(repr(result))\n")
+                  f"print('RETURN')\nprint(repr({result}))\n")
+        if method == "parse_known_args":
+            source += "print(repr(result[1]))\n"
         binary, reason = self.driver.build(source)
         if reason:
             self.driver.blocked[self.driver.name].add(reason)
@@ -88,25 +98,38 @@ class Parser(Group):
         expected = completed([sys.executable, "-B", binary.with_name("case.py"), *argv])
         if actual != expected:
             raise AssertionError(f"argv={argv!r}: native={actual!r}, CPython={expected!r}")
-        self.driver.operations += 1
+        self.driver.calls[method] += 1
         code, stdout, stderr = actual
         marker = b"RETURN\n"
         if code or not stdout.startswith(marker):
-            from test.test_argparse import ArgumentParserError
-            raise ArgumentParserError("SystemExit", stdout.decode(), stderr.decode(), code)
-        # Only transport the native namespace. CPython's copy above is used
-        # solely as a byte-for-byte process oracle, never to produce the result.
-        expr = ast.parse(stdout.removeprefix(marker).decode().strip(), mode="eval").body
+            self.exited(code, stdout, stderr)
+        # Only transport the native values. The reference process never supplies
+        # any part of the namespace or the extras used by the original assertions.
+        lines = stdout.removeprefix(marker).decode().splitlines()
+        if len(lines) != (1 if method == "parse_args" else 2):
+            raise AssertionError(f"unexpected native result: {stdout!r}")
+        expr = ast.parse(lines[0], mode="eval").body
         if not isinstance(expr, ast.Call) or not isinstance(expr.func, ast.Name) or expr.func.id != "Namespace":
             raise AssertionError(f"unexpected native namespace: {stdout!r}")
-        return types.SimpleNamespace(**{kw.arg: ast.literal_eval(kw.value) for kw in expr.keywords})
+        namespace = types.SimpleNamespace(**{kw.arg: ast.literal_eval(kw.value) for kw in expr.keywords})
+        if method == "parse_args":
+            return namespace
+        extras = ast.literal_eval(lines[1])
+        if not isinstance(extras, list) or not all(isinstance(arg, str) for arg in extras):
+            raise AssertionError(f"unexpected native extras: {extras!r}")
+        return namespace, extras
+
+    def exited(self, code, stdout, stderr):
+        from test.test_argparse import ArgumentParserError
+        raise ArgumentParserError("SystemExit", stdout.decode(), stderr.decode(), code)
 
 
 class Driver:
-    def __init__(self, toolchain, work):
+    def __init__(self, toolchain, work, observations=None):
         self.toolchain = toolchain
         self.work = work
         self.blocked = {}
+        self.observations = observations
 
     @cache
     def build(self, source):
@@ -122,17 +145,21 @@ class Driver:
                 raise
             return None, "case.py:" + diagnostic.strip()
 
+    def parser_patch(self, case):
+        return patch.object(case, "parser_class", partial(Parser, self))
+
     def execute(self, case, method):
         self.name = case.id()
-        self.operations = 0
+        self.calls = Counter()
         self.blocked[self.name] = set()
-        with patch.object(case, "parser_class", partial(Parser, self)):
+        with self.parser_patch(case):
             try:
                 method()
             except Blocked as error:
                 self.blocked[self.name].add(str(error))
                 raise
-        return self.operations
+        # unittest can still report subtest and teardown failures after this returns.
+        return dict(self.calls)
 
     def outcomes(self, suite, executions, reference):
         evidence, failures, skips = run_in_fixtures(suite, executions)
@@ -140,7 +167,20 @@ class Driver:
         for name, entries in evidence.items():
             if not entries:  # The callback raised; the runner reports its failure below.
                 continue
-            operations, = entries
+            calls, = entries
+            operations = sum(calls.values())
+            if self.observations is not None:
+                self.observations[name] = {
+                    "outcome": "pass",
+                    "roles": roles(body="cpython", assertions="cpython" if calls else "none",
+                                   operation="imre" if calls else "none", fixture="cpython"),
+                    "evidence": {"operation": ", ".join("argparse.ArgumentParser." + op for op in calls)
+                                 or "upstream input table is empty; no operation ran",
+                                 "native_calls": calls, "opt_level": self.toolchain.level,
+                                 "fixture": "CPython original method, assertions, and module/class/instance fixtures",
+                                 "process_comparison": ("exit status, stdout and stderr against a separate CPython process"
+                                                        if calls else "no subprocess needed for the empty input table")},
+                }
             results[name] = (["host-driven-native", operations] if operations else
                              ["reference-only", "no parse_args calls in the upstream routine"])
         for name, reason in skips:
@@ -163,7 +203,42 @@ class Driver:
                 results[name] = ["blocked", reason]
         if set(results) != set(executions):
             raise ValueError("shared fixture runner returned incomplete outcomes")
+        if self.observations is not None:
+            for name, (status, reason) in results.items():
+                if status in {"blocked", "failed", "reference-skip"}:
+                    self.observations[name] = {
+                        "outcome": {"blocked": "blocked", "failed": "failure", "reference-skip": "skip"}[status],
+                        "roles": roles(body="cpython", assertions="unknown", operation="unknown", fixture="cpython"),
+                        "reason": reason,
+                    }
         return results
+
+
+def measure(toolchain, module, reference, observations=None):
+    from test import test_argparse as upstream
+    results, class_cases = {}, {}
+    for case in cases(load_suite(module)):
+        class_cases.setdefault(type(case), []).append(case)
+    for cls, members in class_cases.items():
+        with tempfile.TemporaryDirectory(prefix="imre-argparse-") as work:
+            driver = Driver(toolchain, Path(work), observations)
+            executions = {}
+            for case in members:
+                name = case.id()
+                if not isinstance(cls, upstream.ParserTesterMetaclass) or not case._testMethodName.startswith(("test_failures_", "test_successes_")):
+                    results[name] = ["reference-only", "outside generated parse routine adapter"]
+                elif cls.parser_class is not upstream.ErrorRaisingArgumentParser:
+                    reason = f"custom parser class {cls.parser_class.__qualname__}"
+                    results[name] = ["blocked", reason]
+                    if observations is not None:
+                        observations[name] = {"outcome": "blocked", "reason": reason, "roles": dict.fromkeys(
+                            ("body", "assertions", "operation", "fixture"), "unobserved")}
+                else:
+                    executions[name] = driver.execute
+            if executions:
+                results.update(driver.outcomes(unittest.TestSuite(members), executions, reference))
+            driver.build.cache_clear()
+    return results
 
 
 def main():
@@ -197,27 +272,8 @@ def main():
     by_id = {c.id(): [] for c in inventory}
     # tempfile cleanup applies to each class; linked native executables are large.
     for level in (0, 3):
-        results = {}
-        class_cases = {}
-        # run_in_fixtures wraps discovered instances, so load fresh ones per level.
-        for case in cases(load_suite(manifest["module"])):
-            class_cases.setdefault(type(case), []).append(case)
-        for cls, members in class_cases.items():
-            with tempfile.TemporaryDirectory(prefix="imre-argparse-") as work:
-                toolchain = Toolchain(options.imre, options.runtime, Path(clang), level)
-                driver = Driver(toolchain, Path(work))
-                executions = {}
-                for case in members:
-                    name = case.id()
-                    if not isinstance(cls, upstream.ParserTesterMetaclass) or not case._testMethodName.startswith(("test_failures_", "test_successes_")):
-                        results[name] = ["reference-only", "outside generated parse routine adapter"]
-                    elif cls.parser_class is not upstream.ErrorRaisingArgumentParser:
-                        results[name] = ["blocked", f"custom parser class {cls.parser_class.__qualname__}"]
-                    else:
-                        executions[name] = driver.execute
-                if executions:
-                    results.update(driver.outcomes(unittest.TestSuite(members), executions, reference["reference"]))
-                driver.build.cache_clear()
+        toolchain = Toolchain(options.imre, options.runtime, Path(clang), level)
+        results = measure(toolchain, manifest["module"], reference["reference"])
         counts = dict(sorted(Counter(v[0] for v in results.values()).items()))
         report["summary"][f"-O{level}"] = counts
         for name, result in results.items():
