@@ -1133,6 +1133,7 @@ pub(crate) enum LogOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     Open,
+    Seek,
     Pipe,
     Dup2,
     Close,
@@ -1245,7 +1246,7 @@ pub(crate) enum ProcessOperation {
     Fd(FdOperation),
     OsErrorField(u32),
     Strerror,
-    OpenFlag(&'static str),
+    DescriptorConstant(&'static str),
     Which,
     RmTree,
     Copy(CopyOperation),

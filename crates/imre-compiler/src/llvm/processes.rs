@@ -484,7 +484,7 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
-            ProcessOperation::OpenFlag(name) => self.os_open_flag(name),
+            ProcessOperation::DescriptorConstant(name) => self.os_descriptor_constant(name),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
             ProcessOperation::RmTree => {

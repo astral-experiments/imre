@@ -284,7 +284,7 @@ pub(crate) enum Intrinsic {
     GetCwd,
     Strerror,
     Fd(crate::ir::FdOperation),
-    OpenFlag(&'static str),
+    DescriptorConstant(&'static str),
     FsPath,
     PosixNormcase,
     PosixPath(PosixPathOperation),
