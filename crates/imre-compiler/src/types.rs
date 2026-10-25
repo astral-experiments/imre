@@ -22,7 +22,7 @@ enum Shape {
     Tuple(Vec<Type>),
     NamedTuple(DefinitionId, Vec<Type>),
     PartialFrame(Vec<Type>),
-    LenArgument,
+    LenFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
@@ -108,7 +108,7 @@ impl Types {
                     Shape::Tuple(_)
                         | Shape::NamedTuple(..)
                         | Shape::PartialFrame(_)
-                        | Shape::LenArgument
+                        | Shape::LenFrame(_)
                 )
             ),
             Type::ForwardRef(id) => {
@@ -191,7 +191,7 @@ impl Types {
         for (id, shape) in storage.shapes.iter().enumerate() {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
-                Shape::LenArgument => vec![Type::Str, Type::Str],
+                Shape::LenFrame(prefix) => prefix.clone(),
                 Shape::Cursor(ty)
                 | Shape::List(ty)
                 | Shape::Set(ty)
@@ -342,8 +342,7 @@ impl Types {
                 | Type::Logger
                 | Type::Path
                 | Type::PurePath(_)
-        ) || self.is_len_argument(ty)
-            || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
+        ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
     }
 
     pub(crate) fn immutable_key_field(&self, ty: Type) -> bool {
@@ -616,11 +615,16 @@ impl Types {
 
     /// A live len argument owns its concrete value after its class and hash diagnostic.
     pub(crate) fn len_argument(&self) -> Type {
-        Type::Tuple(self.intern(Shape::LenArgument))
+        Type::Tuple(self.intern(Shape::LenFrame(vec![Type::Str, Type::Str, self.len_key()])))
+    }
+
+    /// The private immutable key starts with the class; its normalized value follows.
+    pub(crate) fn len_key(&self) -> Type {
+        Type::Tuple(self.intern(Shape::LenFrame(vec![Type::Str])))
     }
 
     pub(crate) fn is_len_argument(&self, ty: Type) -> bool {
-        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::LenArgument))
+        matches!(ty, Type::Tuple(id) if matches!(&self.0.borrow().shapes[id], Shape::LenFrame(prefix) if prefix.len() == 3))
     }
 
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
@@ -848,7 +852,7 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
-            Shape::LenArgument => Some(vec![Type::Str, Type::Str]),
+            Shape::LenFrame(prefix) => Some(prefix.clone()),
             Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
                 Some(fields.clone())
             }
@@ -864,7 +868,7 @@ impl Types {
             .iter()
             .enumerate()
             .filter_map(|(id, shape)| match shape {
-                Shape::LenArgument => Some((Type::Tuple(id), vec![Type::Str, Type::Str])),
+                Shape::LenFrame(prefix) => Some((Type::Tuple(id), prefix.clone())),
                 Shape::Tuple(fields)
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields) => Some((Type::Tuple(id), fields.clone())),
@@ -1033,7 +1037,13 @@ impl TypeDescription<'_> {
                     write!(self, "{value:?}")?;
                 }
             }
-            Shape::LenArgument => return self.write_str("len argument"),
+            Shape::LenFrame(prefix) => {
+                return self.write_str(if prefix.len() == 3 {
+                    "len argument"
+                } else {
+                    "len cache key"
+                });
+            }
             Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
             Shape::CachedCallable(c) => return self.write_type(c.callable),
             Shape::Callable(params, returns) => {

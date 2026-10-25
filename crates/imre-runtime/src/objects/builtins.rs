@@ -47,17 +47,17 @@ pub extern "C" fn imre_builtins_clear() {
 
 /// The bracketed value stays rooted, including mutable containers whose length can change.
 unsafe extern "C" fn original_len(_receiver: *const usize, argument: *const usize) -> usize {
-    // SAFETY: the compiler emits [class, hash diagnostic, value] with the concrete field types.
+    // SAFETY: the compiler emits [class, hash diagnostic, key, value] with concrete field types.
     unsafe {
         let class = &*(*argument as *const crate::Str);
-        let value = *argument.add(2);
+        let value = *argument.add(3);
         match class.as_bytes() {
             b"str" => crate::imre_str_len(value as *const crate::Str),
             b"bytes" => super::bytes::imre_bytes_len(value as *const super::Bytes),
             b"tuple" => {
                 crate::Int::from_usize(records::descriptor(value as *const usize).length).into_raw()
             }
-            b"list" if *records::descriptor(argument).kinds.add(2) == 4 => {
+            b"list" if *records::descriptor(argument).kinds.add(3) == 4 => {
                 crate::imre_list_len(value as *const crate::List)
             }
             b"list" => super::imre_seq_len(value as *const Object),

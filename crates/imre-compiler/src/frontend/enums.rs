@@ -187,10 +187,16 @@ impl Checker<'_> {
             ));
         }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
-        let length = self.builtin_len().ty;
-        if [left.ty, right.ty]
-            .iter()
-            .all(|&ty| ty == length || self.types.cache_signature(ty) == Some(length))
+        if matches!((left.ty, right.ty), (Type::Callable(_), Type::Callable(_)))
+            && [left.ty, right.ty].iter().all(|&ty| {
+                let signature = self.types.cache_signature(ty).unwrap_or(ty);
+                self.types
+                    .signature(signature)
+                    .is_some_and(|(params, result)| {
+                        matches!(params.as_slice(), [arg] if self.types.is_len_argument(*arg))
+                            && result == Type::Int
+                    })
+            })
         {
             return Ok(Self::identity_result(
                 vec![left, right],

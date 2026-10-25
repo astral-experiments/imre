@@ -29,6 +29,7 @@ impl Checker<'_> {
         matches!(expr, ast::Expr::Name(name) if name.id == "len" && !self.names.contains_key("len"))
             && self.resolve(expr).is_none()
     }
+
     /// Keep the actual argument alive through the cached or original function call.
     pub(super) fn pack_len_argument(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         let value = self.expr(expression)?;
@@ -46,18 +47,35 @@ impl Checker<'_> {
         let diagnostic = unhashable
             .map(|name| format!("unhashable type: '{name}'"))
             .unwrap_or_default();
+        let mut scope = calls::ArgumentScope::default();
+        let value = scope.hold(self, value);
+        let mut key_fields = vec![unpacking::string(class)];
+        if unhashable.is_none() {
+            key_fields.push(normalize_len_key(self.types, value.clone()));
+        }
+        let key = Expr {
+            ty: self.types.tuple(key_fields.iter().map(|f| f.ty).collect()),
+            kind: ExprKind::Tuple(key_fields),
+        };
+        let key = Expr {
+            ty: self.types.len_key(),
+            kind: ExprKind::Builtin(Builtin::RecordView, vec![key]),
+        };
         let frame = Expr {
-            ty: self.types.tuple(vec![Type::Str, Type::Str, value.ty]),
+            ty: self
+                .types
+                .tuple(vec![Type::Str, Type::Str, key.ty, value.ty]),
             kind: ExprKind::Tuple(vec![
                 unpacking::string(class),
                 unpacking::string(diagnostic),
+                key,
                 value,
             ]),
         };
-        Ok(Expr {
+        Ok(scope.finish(Expr {
             ty,
             kind: ExprKind::Builtin(Builtin::RecordView, vec![frame]),
-        })
+        }))
     }
 
     /// Read scalar fields of the immutable startup settings selected for a command.
@@ -330,6 +348,39 @@ impl Checker<'_> {
     }
 }
 
+/// Ordinary tuple equality equates bool with int. Only the private cache key is widened.
+fn normalize_len_key(types: &Types, value: Expr) -> Expr {
+    match value.ty {
+        Type::Bool => Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+        },
+        Type::StrLiteral(_) => literals::view(value, Type::Str),
+        Type::Tuple(_) => {
+            let fields: Vec<_> = types
+                .fields(value.ty)
+                .unwrap()
+                .into_iter()
+                .enumerate()
+                .map(|(i, ty)| {
+                    normalize_len_key(
+                        types,
+                        Expr {
+                            ty,
+                            kind: ExprKind::Field(Box::new(value.clone()), i),
+                        },
+                    )
+                })
+                .collect();
+            Expr {
+                ty: types.tuple(fields.iter().map(|field| field.ty).collect()),
+                kind: ExprKind::Tuple(fields),
+            }
+        }
+        _ => value,
+    }
+}
+
 /// The first mutable tuple element supplies the class name in a hashing error.
 fn len_argument_class(types: &Types, ty: Type) -> Option<(&'static str, Option<&'static str>)> {
     let pair = match ty {
@@ -350,7 +401,11 @@ fn len_argument_class(types: &Types, ty: Type) -> Option<(&'static str, Option<&
             };
             (class, Some(class))
         }
-        Type::Tuple(_) if !types.is_partial_frame(ty) && !types.is_len_argument(ty) => {
+        Type::Tuple(_)
+            if !types.is_partial_frame(ty)
+                && !types.is_len_argument(ty)
+                && types.namedtuple_definition(ty).is_none() =>
+        {
             let mut invalid = None;
             for child in types.fields(ty)? {
                 let (_, child_error) = len_argument_class(types, child)?;

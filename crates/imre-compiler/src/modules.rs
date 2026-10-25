@@ -878,6 +878,14 @@ impl SourceGraph {
                 }
             }
         }
+        if !self.modules.iter().any(|source| {
+            source
+                .bindings
+                .values()
+                .any(|binding| *binding == Binding::IntrinsicModule(IntrinsicModule::Builtins))
+        }) {
+            return false;
+        }
         self.modules.iter().enumerate().any(|(module, source)| {
             let mut scan = Scan {
                 graph: self,
