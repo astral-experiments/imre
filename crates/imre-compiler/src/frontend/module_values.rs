@@ -215,7 +215,8 @@ impl Checker<'_> {
             let temporary = self.hidden(value.ty);
             body.push(Statement::Assign(temporary, value));
             if matches!(binding, Some(ClassValue::Runtime { .. })) {
-                let value = self.class_storage_value(name, self.local(temporary), assign)?;
+                let value =
+                    self.class_storage_value(class_id, name, self.local(temporary), assign)?;
                 let slot = self.globals.reserve(value.ty);
                 self.globals
                     .class_slots

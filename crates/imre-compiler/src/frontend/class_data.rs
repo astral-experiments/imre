@@ -7,11 +7,33 @@ struct Cell {
     inherited: bool,
 }
 #[derive(Clone, Copy)]
-struct Shadow {
+pub(super) struct Shadow {
     ready: usize,
     value: usize,
     ty: Type,
     stored: Type,
+}
+impl Shadow {
+    pub(super) fn new(ready: usize, value: usize, ty: Type, types: &Types) -> Self {
+        Self {
+            ready,
+            value,
+            ty,
+            stored: types.optional(ty),
+        }
+    }
+    /// Readers check presence before unpacking an optional payload.
+    pub(super) fn payload(self, owner: &Expr) -> Expr {
+        let value = field(owner, self.value, self.stored);
+        if self.ty == self.stored {
+            value
+        } else {
+            Expr {
+                ty: self.ty,
+                kind: ExprKind::Unwrap(Box::new(value)),
+            }
+        }
+    }
 }
 #[derive(Default)]
 pub(super) struct Storage {
@@ -63,6 +85,7 @@ fn choose(test: Expr, yes: Expr, no: Expr) -> Expr {
 impl Checker<'_> {
     pub(super) fn class_storage_value(
         &self,
+        class: usize,
         name: &str,
         value: Expr,
         at: &impl Ranged,
@@ -71,7 +94,12 @@ impl Checker<'_> {
             return Ok(value);
         };
         let mut ty = value.ty;
-        if ty == Type::None && writes.len() == 1 {
+        if let Some(shadow) = self
+            .setup_field(Type::Class(class), name)
+            .and_then(|field| field.shared)
+        {
+            ty = shadow.ty;
+        } else if ty == Type::None && writes.len() == 1 {
             ty = self.types.optional(*writes.iter().next().unwrap());
         }
         let value = self.coerce(value, ty, at)?;
@@ -108,7 +136,11 @@ impl Checker<'_> {
             .copied()
     }
     pub(super) fn class_data_type(&self, class: usize, name: &str) -> Option<Type> {
-        self.cell(class, name).map(|cell| cell.ty)
+        self.cell(class, name).map(|cell| cell.ty).or_else(|| {
+            self.setup_field(Type::Class(class), name)?
+                .shared
+                .map(|field| field.ty)
+        })
     }
     /// A subclass can gain a new local class binding after its body returns.
     pub(super) fn inherit_class_data(
@@ -169,6 +201,12 @@ impl Checker<'_> {
             if def.dataclass.is_some_and(|options| options.frozen) {
                 continue;
             }
+            if self
+                .setup_field(Type::Class(class), name)
+                .is_some_and(|field| field.shared.is_some())
+            {
+                continue;
+            }
             let extra = data.fields.entry(class).or_default();
             let ready = self.classes.fields[class].len() + extra.len();
             let stored = self.types.optional(cell.ty);
@@ -192,6 +230,7 @@ impl Checker<'_> {
             .shadows
             .get(&(class, name.to_owned()))
             .copied()
+            .or_else(|| self.setup_field(Type::Class(class), name)?.shared)
     }
     fn cell_item(&self, c: Cell) -> Expr {
         Expr {
@@ -217,7 +256,7 @@ impl Checker<'_> {
         original: Expr,
     ) -> Result<Expr, String> {
         let name = attr.attr.as_str();
-        let Some(actual) = self.cell(class, name) else {
+        let Some(_) = self.cell(class, name) else {
             if self
                 .classes
                 .declarations
@@ -267,15 +306,7 @@ impl Checker<'_> {
             .ok_or_else(|| error(self.source, attr, "class data layout is not initialized"))?;
         let slot = self.hidden(receiver.ty);
         let local = self.local(slot);
-        let payload = field(&local, s.value, s.stored);
-        let payload = if s.stored == actual.ty {
-            payload
-        } else {
-            Expr {
-                ty: actual.ty,
-                kind: ExprKind::Unwrap(Box::new(payload)),
-            }
-        };
+        let payload = s.payload(&local);
         Ok(scope(
             vec![Statement::Assign(slot, receiver)],
             choose(field(&local, s.ready, Type::Bool), payload, value),
