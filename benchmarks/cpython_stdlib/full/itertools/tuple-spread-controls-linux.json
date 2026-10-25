@@ -87,7 +87,7 @@
   "source": "vendored and pinned Git Lib/test",
   "whole_suite": {
     "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-    "compiler_sha256": "e487493f96f63dbb1ed242b6e5b82c607f5fcb58abcc2cdf3d75762ca67fc720",
+    "compiler_sha256": "89eed3de177f7b36889db837b6886ca68ba29eec9669088902b044499fed6a22",
     "operation": "check",
     "tests_executed": 0,
     "source": "git",

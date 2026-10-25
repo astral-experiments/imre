@@ -1,8 +1,8 @@
 {
   "format_version": 1,
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "compiler_sha256": "48cadcedc48f6e0bc3f67300bd8c7a464383fe7df48586ea7579226b4ad1b979",
-  "runtime_sha256": "46a3f5c5235d4d7f4329d242f53d2755dbc7fc767e6fae5267c4b8cd9dbd8478",
+  "compiler_sha256": "89eed3de177f7b36889db837b6886ca68ba29eec9669088902b044499fed6a22",
+  "runtime_sha256": "dbe1240ecbddda2b3352c3ebc9804b4b62934b2c4b06ec2222808b33ec415a1e",
   "suites": {
     "test.test_itertools": {
       "path": "Lib/test/test_itertools.py",

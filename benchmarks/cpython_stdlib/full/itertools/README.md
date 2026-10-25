@@ -90,7 +90,7 @@ with their own `unittest.main()` entry points. It checks each staged file agains
 its pinned Git blob and records compiler and runtime hashes, output and exit
 status at O0/O3 in ordinary and reachable-only builds. The [Linux
 receipt](whole-files-linux.json), from compiler tree
-`2118d7493f4b357878aec940ac53869a10363e89`, records `_thread` as the primary blocker and
+`0b1a0563e2970b4b47ab9e691a5ef6cc2bc32626`, records `_thread` as the primary blocker and
 `threading` as the companion blocker in all four modes. These eight builds
 executed zero upstream bodies.
 
