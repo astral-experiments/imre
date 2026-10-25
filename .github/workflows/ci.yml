@@ -5,19 +5,74 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      sys_source:
+        description: Exact commit to build and verify against the Linux sys suite
+        type: string
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.sys_source || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  sys-source:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.sys_source != '' }}
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    timeout-minutes: 35
+    env:
+      SYS_SOURCE: ${{ inputs.sys_source }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          sparse-checkout: benchmarks/cpython_stdlib/full/sys
+          persist-credentials: false
+      - name: Select the sys gate for this dispatch
+        run: |
+          [[ "$SYS_SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          cp benchmarks/cpython_stdlib/full/sys/ci.sh "$RUNNER_TEMP/sys-gate.sh"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.sys_source }}
+          persist-credentials: false
+      - name: Check the source before building it
+        run: test "$(git rev-parse HEAD)" = "$SYS_SOURCE"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14.5'
+      - name: Get the original CPython test package
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-stdlib-reference
+          sparse-checkout: Lib/test
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
+      - run: cargo build -p imre-compiler -p imre-runtime --release --locked --features imre-compiler/verify-ir -j 2
+      - name: Check sys at O0 and O3
+        run: bash "$RUNNER_TEMP/sys-gate.sh"
+      - name: Retain the validated Linux sys reports and tested source
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sys-evidence-linux
+          path: |
+            ${{ runner.temp }}/sys-source.txt
+            ${{ runner.temp }}/sys-evidence.json
+            ${{ runner.temp }}/test-sys-O0.json
+            ${{ runner.temp }}/test-sys-O3.json
+          if-no-files-found: error
+          retention-days: 7
+
   build-release-artifacts:
+    if: ${{ !inputs.sys_source }}
     uses: $/.github/workflows/build-release-binaries.yml
 
   macos-arm64:
+    if: ${{ !inputs.sys_source }}
     runs-on: macos-15  # Includes Xcode 26 for the CPython 3.14 SDK; our Namespace image stops at 16.4.
     timeout-minutes: 45
     env:
@@ -86,6 +141,7 @@ jobs:
             --output "$RUNNER_TEMP/conformance-inputs" --check-reporter "$RUNNER_TEMP/conformance-report"
 
   windows-compiler:
+    if: ${{ !inputs.sys_source }}
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'namespace-profile-windows-2022-x86-64-16x32' || 'windows-2022' }}
     timeout-minutes: 45
     steps:
@@ -94,6 +150,7 @@ jobs:
       - run: cargo test -p imre-compiler --lib --locked
 
   check:
+    if: ${{ !inputs.sys_source }}
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 120
     env:
@@ -183,23 +240,7 @@ jobs:
             diff -u reference native
           done
       - name: Check sys streams and exits with vendored CPython methods
-        env:
-          LANG: C.UTF-8
-          LC_ALL: C.UTF-8
-          LC_CTYPE: C.UTF-8
-        run: |
-          unset PYTHONUTF8 PYTHONIOENCODING
-          sys_runner=(benchmarks/cpython_stdlib/full/sys/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference)
-          python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
-          for opt in 0 3; do
-            python3 -B "${sys_runner[@]}" --opt-level "$opt" --result "$RUNNER_TEMP/test-sys-O$opt.json" --evidence "$RUNNER_TEMP/sys-evidence-O$opt.json"
-            python3 -B -X utf8 "${sys_runner[@]}" --opt-level "$opt" --locale-audit "$RUNNER_TEMP/sys-locale-utf8-O$opt.json"
-            python3 benchmarks/cpython_stdlib/full/sys/argv_boundary.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt"
-          done
-          jq -s . "$RUNNER_TEMP/sys-evidence-O0.json" "$RUNNER_TEMP/sys-evidence-O3.json" > "$RUNNER_TEMP/sys-evidence.json"
-          python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json "$RUNNER_TEMP/sys-evidence.json"
-          python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json benchmarks/cpython_stdlib/full/sys/evidence-linux.json
-          git rev-parse HEAD 'HEAD^{tree}' > "$RUNNER_TEMP/sys-source.txt"
+        run: bash benchmarks/cpython_stdlib/full/sys/ci.sh
       - name: Retain the validated Linux sys reports and tested source
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -428,6 +469,7 @@ jobs:
           python3 benchmarks/memory_validate.py --python python3 --binary /tmp/memory-report --compute-binary /tmp/memory-report-compute --rust /tmp/imre-memory-reference/memory-report-reference
 
   thinlto:
+    if: ${{ !inputs.sys_source }}
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 120
     steps:

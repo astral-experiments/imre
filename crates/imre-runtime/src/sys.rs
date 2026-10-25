@@ -24,6 +24,10 @@ pub(super) fn write_stderr(text: &str, newline: bool) -> io::Result<()> {
     write_stream(&STDERR, text, newline)
 }
 
+pub(super) fn stderr_writer() -> std::sync::MutexGuard<'static, Output<io::Stderr>> {
+    STDERR.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
 pub(super) fn flush_stderr() -> io::Result<()> {
     if let Some(stream) = LazyLock::get(&STDERR) {
         stream
