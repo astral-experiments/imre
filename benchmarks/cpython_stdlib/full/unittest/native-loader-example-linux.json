@@ -1,0 +1,128 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "ec2044b4e1b15674800c1160392e207e82b6435782f47333e8e2318fbf3e4a37",
+  "runtime_sha256": "8efa9ccaa878b5b336c3113b5c554cfbdc8578e22cbeecac519e1a428988d3c2",
+  "reference": {
+    "run:upstream": {
+      "stdout": "1\n1\nTrue\n",
+      "stderr": "test_true (bar.test_bar.PassingTest.test_true) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n"
+    },
+    "run:empty": {
+      "stdout": "0\n0\nTrue\n",
+      "stderr": "\n----------------------------------------------------------------------\nRan 0 tests in <elapsed>s\n\nNO TESTS RAN\n"
+    }
+  },
+  "fixtures": {
+    "Lib/test/__init__.py": "b93054b3ecf3a5af96f4772e7208e7a18b5dd4a4",
+    "Lib/test/dis_module.py": "afbf600fdee22bbb87b2b4630c8e2ab2df2761f6",
+    "Lib/test/test_errno.py": "e7f185c6b1a1812cbe3db181c41c5a5d43be6984",
+    "Lib/test/test_unittest/namespace_test_pkg/bar/__init__.py": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "Lib/test/test_unittest/namespace_test_pkg/bar/test_bar.py": "05b184d9eba68596b4c9757a40a2e51fe22c487d"
+  },
+  "records": [
+    {
+      "capability": "run:upstream",
+      "entry_sha256": "10fdbca4ae21006a9305be0de73dfe2d4fa48bad856e227425e6e70302809e89",
+      "reachable_only": false,
+      "opt_level": 0,
+      "outcome": "verified",
+      "stdout": "1\n1\nTrue\n",
+      "stderr": "test_true (bar.test_bar.PassingTest.test_true) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": true,
+      "returncode": 0
+    },
+    {
+      "capability": "run:upstream",
+      "entry_sha256": "10fdbca4ae21006a9305be0de73dfe2d4fa48bad856e227425e6e70302809e89",
+      "reachable_only": false,
+      "opt_level": 3,
+      "outcome": "verified",
+      "stdout": "1\n1\nTrue\n",
+      "stderr": "test_true (bar.test_bar.PassingTest.test_true) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": true,
+      "returncode": 0
+    },
+    {
+      "capability": "run:upstream",
+      "entry_sha256": "10fdbca4ae21006a9305be0de73dfe2d4fa48bad856e227425e6e70302809e89",
+      "reachable_only": true,
+      "opt_level": 0,
+      "outcome": "verified",
+      "stdout": "1\n1\nTrue\n",
+      "stderr": "test_true (bar.test_bar.PassingTest.test_true) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": true,
+      "returncode": 0
+    },
+    {
+      "capability": "run:upstream",
+      "entry_sha256": "10fdbca4ae21006a9305be0de73dfe2d4fa48bad856e227425e6e70302809e89",
+      "reachable_only": true,
+      "opt_level": 3,
+      "outcome": "verified",
+      "stdout": "1\n1\nTrue\n",
+      "stderr": "test_true (bar.test_bar.PassingTest.test_true) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": true,
+      "returncode": 0
+    },
+    {
+      "capability": "run:empty",
+      "entry_sha256": "f04a3840cdbef31d8c14463f643439f710859bdb51b2e526533342d791264f66",
+      "reachable_only": false,
+      "opt_level": 0,
+      "outcome": "verified",
+      "stdout": "0\n0\nTrue\n",
+      "stderr": "\n----------------------------------------------------------------------\nRan 0 tests in <elapsed>s\n\nNO TESTS RAN\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": true,
+      "returncode": 0
+    },
+    {
+      "capability": "run:empty",
+      "entry_sha256": "f04a3840cdbef31d8c14463f643439f710859bdb51b2e526533342d791264f66",
+      "reachable_only": false,
+      "opt_level": 3,
+      "outcome": "verified",
+      "stdout": "0\n0\nTrue\n",
+      "stderr": "\n----------------------------------------------------------------------\nRan 0 tests in <elapsed>s\n\nNO TESTS RAN\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": true,
+      "returncode": 0
+    },
+    {
+      "capability": "run:empty",
+      "entry_sha256": "f04a3840cdbef31d8c14463f643439f710859bdb51b2e526533342d791264f66",
+      "reachable_only": true,
+      "opt_level": 0,
+      "outcome": "verified",
+      "stdout": "0\n0\nTrue\n",
+      "stderr": "\n----------------------------------------------------------------------\nRan 0 tests in <elapsed>s\n\nNO TESTS RAN\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": true,
+      "returncode": 0
+    },
+    {
+      "capability": "run:empty",
+      "entry_sha256": "f04a3840cdbef31d8c14463f643439f710859bdb51b2e526533342d791264f66",
+      "reachable_only": true,
+      "opt_level": 3,
+      "outcome": "verified",
+      "stdout": "0\n0\nTrue\n",
+      "stderr": "\n----------------------------------------------------------------------\nRan 0 tests in <elapsed>s\n\nNO TESTS RAN\n",
+      "matches_reference_status": true,
+      "matches_reference_stdout": true,
+      "matches_reference_stderr": true,
+      "returncode": 0
+    }
+  ]
+}
