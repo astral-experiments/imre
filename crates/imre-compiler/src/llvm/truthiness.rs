@@ -82,6 +82,10 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
+                Type::Calendar(crate::ir::CalendarType::Delta) => self.instruction(format!(
+                    "call i1 @imre_calendar_truth(ptr {})",
+                    value.operand
+                )),
                 Type::ObjectValue => {
                     let bit = self.instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",

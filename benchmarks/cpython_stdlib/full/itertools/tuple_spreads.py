@@ -1,5 +1,5 @@
 """Exercise the argument display in threading_helper.run_concurrently."""
-from annotationlib import ForwardRef
+from annotationlib import Format, ForwardRef, get_annotations
 from itertools import islice
 from typing import Callable
 
@@ -109,6 +109,21 @@ def pointer_fields() -> None:
     print(packed_refs[-1].__owner__ is int)
 
 
+def annotation_fields() -> None:
+    def declared(value: int) -> missing: ...
+
+    annotations = get_annotations(declared, format=Format.FORWARDREF)
+    values = [annotations["value"], annotations["return"]]
+    packed = (*values,)
+    values.clear()
+    del annotations["value"]
+    del annotations["return"]
+    print(packed[0] is int)
+    reference = packed[-1]
+    print(isinstance(reference, ForwardRef))
+    print(reference.__forward_arg__)
+    print(reference.__owner__ is declared)
+
 items = [3, 4]
 print(captures(items))
 print(items)
@@ -127,3 +142,4 @@ wide(list(range(1025)))
 shared = [4, 6]
 print(repr(shared_capture(shared)))
 pointer_fields()
+annotation_fields()

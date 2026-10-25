@@ -1,0 +1,1161 @@
+{
+  "cpu": 30,
+  "host": "x86_64",
+  "system": "Linux",
+  "kernel": "6.8.0-146-generic",
+  "fixture_sha256": "23283ea029fd021f9f36962d7f0416965ce00298c297d015736d021e35327831",
+  "shim_sha256": "7e7d02fd723735a184d5177f98232aabcfc285f8496ad6a11ebf478afd6a2f68",
+  "cpu_model": "AMD EPYC-Milan Processor",
+  "python": "Python 3.14.5",
+  "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+  "compiler_sha256": "a81749a1a4984754ed5dc588de0c413be23c8ee6d8825d6e9ec504125bd3fe4b",
+  "runtime_sha256": "a2397487ade3d65dd4e728a6be0174b234e6a1f306c7c789fdb013f9dcdac627",
+  "flags": [
+    "--clang",
+    "/usr/bin/clang-18",
+    "--opt-level",
+    "3",
+    "--whole-program",
+    "--no-cache"
+  ],
+  "passes": 12,
+  "rounds": 8,
+  "workloads": {
+    "distinct-10000": {
+      "checksum": 527569729440,
+      "orders": [
+        [
+          "Imre struct",
+          "Imre dataclass",
+          "CPython dataclass",
+          "CPython struct"
+        ],
+        [
+          "Imre dataclass",
+          "CPython struct",
+          "Imre struct",
+          "CPython dataclass"
+        ],
+        [
+          "CPython struct",
+          "CPython dataclass",
+          "Imre dataclass",
+          "Imre struct"
+        ],
+        [
+          "CPython dataclass",
+          "Imre struct",
+          "CPython struct",
+          "Imre dataclass"
+        ],
+        [
+          "Imre struct",
+          "Imre dataclass",
+          "CPython dataclass",
+          "CPython struct"
+        ],
+        [
+          "Imre dataclass",
+          "CPython struct",
+          "Imre struct",
+          "CPython dataclass"
+        ],
+        [
+          "CPython struct",
+          "CPython dataclass",
+          "Imre dataclass",
+          "Imre struct"
+        ],
+        [
+          "CPython dataclass",
+          "Imre struct",
+          "CPython struct",
+          "Imre dataclass"
+        ]
+      ],
+      "samples": {
+        "Imre struct": [
+          {
+            "build_ms": 0.4134178161621094,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.16427040100097656,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.4773139953613281,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11157989501953125,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.4000663757324219,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.171661376953125,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.44727325439453125,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11157989501953125,
+            "peak_kib": 3584
+          },
+          {
+            "build_ms": 0.3955364227294922,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.179290771484375,
+            "peak_kib": 3584
+          },
+          {
+            "build_ms": 0.6916522979736328,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.15282630920410156,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.39005279541015625,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.1728534698486328,
+            "peak_kib": 3584
+          },
+          {
+            "build_ms": 0.4773139953613281,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11348724365234375,
+            "peak_kib": 3584
+          }
+        ],
+        "Imre dataclass": [
+          {
+            "build_ms": 1.0256767272949219,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.14543533325195312,
+            "peak_kib": 3840
+          },
+          {
+            "build_ms": 1.0669231414794922,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.1239776611328125,
+            "peak_kib": 3840
+          },
+          {
+            "build_ms": 0.9870529174804688,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.12350082397460938,
+            "peak_kib": 3840
+          },
+          {
+            "build_ms": 1.0039806365966797,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.20074844360351562,
+            "peak_kib": 3840
+          },
+          {
+            "build_ms": 0.9696483612060547,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.1373291015625,
+            "peak_kib": 3840
+          },
+          {
+            "build_ms": 0.9791851043701172,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.1277923583984375,
+            "peak_kib": 3840
+          },
+          {
+            "build_ms": 0.9753704071044922,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.18739700317382812,
+            "peak_kib": 3584
+          },
+          {
+            "build_ms": 0.9934902191162109,
+            "first_write_ms": 0.0,
+            "scan_ms": 0.11515617370605469,
+            "peak_kib": 3584
+          }
+        ],
+        "CPython struct": [
+          {
+            "build_ms": 8.789777755737305,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.268543243408203,
+            "peak_kib": 16128
+          },
+          {
+            "build_ms": 8.463621139526367,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.288808822631836,
+            "peak_kib": 16128
+          },
+          {
+            "build_ms": 8.402585983276367,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.190818786621094,
+            "peak_kib": 16128
+          },
+          {
+            "build_ms": 8.207321166992188,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.208223342895508,
+            "peak_kib": 16128
+          },
+          {
+            "build_ms": 7.946014404296875,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.85552978515625,
+            "peak_kib": 16128
+          },
+          {
+            "build_ms": 9.006023406982422,
+            "first_write_ms": 0.0,
+            "scan_ms": 13.004302978515625,
+            "peak_kib": 16128
+          },
+          {
+            "build_ms": 8.030176162719727,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.176990509033203,
+            "peak_kib": 16128
+          },
+          {
+            "build_ms": 8.376359939575195,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.478113174438477,
+            "peak_kib": 16128
+          }
+        ],
+        "CPython dataclass": [
+          {
+            "build_ms": 4.58526611328125,
+            "first_write_ms": 0.0,
+            "scan_ms": 14.077425003051758,
+            "peak_kib": 15360
+          },
+          {
+            "build_ms": 4.378795623779297,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.233972549438477,
+            "peak_kib": 15360
+          },
+          {
+            "build_ms": 4.19306755065918,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.166738510131836,
+            "peak_kib": 15360
+          },
+          {
+            "build_ms": 4.190921783447266,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.78996467590332,
+            "peak_kib": 15360
+          },
+          {
+            "build_ms": 4.335880279541016,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.600183486938477,
+            "peak_kib": 15360
+          },
+          {
+            "build_ms": 7.05718994140625,
+            "first_write_ms": 0.0,
+            "scan_ms": 15.622377395629883,
+            "peak_kib": 15360
+          },
+          {
+            "build_ms": 4.20379638671875,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.325525283813477,
+            "peak_kib": 15360
+          },
+          {
+            "build_ms": 6.627559661865234,
+            "first_write_ms": 0.0,
+            "scan_ms": 13.595819473266602,
+            "peak_kib": 15360
+          }
+        ]
+      },
+      "medians": {
+        "Imre struct": {
+          "build_ms": 0.4303455352783203,
+          "first_write_ms": 0.0,
+          "scan_ms": 0.15854835510253906,
+          "peak_kib": 3456.0
+        },
+        "Imre dataclass": {
+          "build_ms": 0.9902715682983398,
+          "first_write_ms": 0.0,
+          "scan_ms": 0.13256072998046875,
+          "peak_kib": 3840.0
+        },
+        "CPython struct": {
+          "build_ms": 8.389472961425781,
+          "first_write_ms": 0.0,
+          "scan_ms": 12.27867603302002,
+          "peak_kib": 16128.0
+        },
+        "CPython dataclass": {
+          "build_ms": 4.357337951660156,
+          "first_write_ms": 0.0,
+          "scan_ms": 12.695074081420898,
+          "peak_kib": 15360.0
+        }
+      }
+    },
+    "distinct-1000000": {
+      "checksum": 54504508406400,
+      "orders": [
+        [
+          "Imre struct",
+          "Imre dataclass",
+          "CPython dataclass",
+          "CPython struct"
+        ],
+        [
+          "Imre dataclass",
+          "CPython struct",
+          "Imre struct",
+          "CPython dataclass"
+        ],
+        [
+          "CPython struct",
+          "CPython dataclass",
+          "Imre dataclass",
+          "Imre struct"
+        ],
+        [
+          "CPython dataclass",
+          "Imre struct",
+          "CPython struct",
+          "Imre dataclass"
+        ],
+        [
+          "Imre struct",
+          "Imre dataclass",
+          "CPython dataclass",
+          "CPython struct"
+        ],
+        [
+          "Imre dataclass",
+          "CPython struct",
+          "Imre struct",
+          "CPython dataclass"
+        ],
+        [
+          "CPython struct",
+          "CPython dataclass",
+          "Imre dataclass",
+          "Imre struct"
+        ],
+        [
+          "CPython dataclass",
+          "Imre struct",
+          "CPython struct",
+          "Imre dataclass"
+        ]
+      ],
+      "samples": {
+        "Imre struct": [
+          {
+            "build_ms": 29.902219772338867,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.81483268737793,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 29.299497604370117,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.03465461730957,
+            "peak_kib": 18432
+          },
+          {
+            "build_ms": 30.051469802856445,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.259960174560547,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 33.823490142822266,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.944221496582031,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 29.655933380126953,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.40396499633789,
+            "peak_kib": 18432
+          },
+          {
+            "build_ms": 31.354188919067383,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.06350326538086,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 29.66594696044922,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.417316436767578,
+            "peak_kib": 18688
+          },
+          {
+            "build_ms": 30.999422073364258,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.373208999633789,
+            "peak_kib": 18688
+          }
+        ],
+        "Imre dataclass": [
+          {
+            "build_ms": 96.06337547302246,
+            "first_write_ms": 0.0,
+            "scan_ms": 32.62805938720703,
+            "peak_kib": 57600
+          },
+          {
+            "build_ms": 106.2159538269043,
+            "first_write_ms": 0.0,
+            "scan_ms": 44.5401668548584,
+            "peak_kib": 57856
+          },
+          {
+            "build_ms": 248.31533432006836,
+            "first_write_ms": 0.0,
+            "scan_ms": 419.7561740875244,
+            "peak_kib": 57856
+          },
+          {
+            "build_ms": 95.78371047973633,
+            "first_write_ms": 0.0,
+            "scan_ms": 32.810211181640625,
+            "peak_kib": 57856
+          },
+          {
+            "build_ms": 94.6662425994873,
+            "first_write_ms": 0.0,
+            "scan_ms": 33.524513244628906,
+            "peak_kib": 57600
+          },
+          {
+            "build_ms": 96.50087356567383,
+            "first_write_ms": 0.0,
+            "scan_ms": 33.59198570251465,
+            "peak_kib": 57856
+          },
+          {
+            "build_ms": 100.46815872192383,
+            "first_write_ms": 0.0,
+            "scan_ms": 33.21194648742676,
+            "peak_kib": 57856
+          },
+          {
+            "build_ms": 101.23991966247559,
+            "first_write_ms": 0.0,
+            "scan_ms": 39.21914100646973,
+            "peak_kib": 57856
+          }
+        ],
+        "CPython struct": [
+          {
+            "build_ms": 1262.8920078277588,
+            "first_write_ms": 0.0,
+            "scan_ms": 1249.4969367980957,
+            "peak_kib": 132864
+          },
+          {
+            "build_ms": 782.1118831634521,
+            "first_write_ms": 0.0,
+            "scan_ms": 1267.0214176177979,
+            "peak_kib": 132864
+          },
+          {
+            "build_ms": 778.8870334625244,
+            "first_write_ms": 0.0,
+            "scan_ms": 1240.9536838531494,
+            "peak_kib": 132864
+          },
+          {
+            "build_ms": 819.3645477294922,
+            "first_write_ms": 0.0,
+            "scan_ms": 1225.463628768921,
+            "peak_kib": 132864
+          },
+          {
+            "build_ms": 833.3389759063721,
+            "first_write_ms": 0.0,
+            "scan_ms": 1883.1501007080078,
+            "peak_kib": 132864
+          },
+          {
+            "build_ms": 784.8086357116699,
+            "first_write_ms": 0.0,
+            "scan_ms": 1887.899398803711,
+            "peak_kib": 132864
+          },
+          {
+            "build_ms": 1028.5944938659668,
+            "first_write_ms": 0.0,
+            "scan_ms": 1237.7023696899414,
+            "peak_kib": 132864
+          },
+          {
+            "build_ms": 811.9468688964844,
+            "first_write_ms": 0.0,
+            "scan_ms": 1231.764316558838,
+            "peak_kib": 132864
+          }
+        ],
+        "CPython dataclass": [
+          {
+            "build_ms": 1194.4606304168701,
+            "first_write_ms": 0.0,
+            "scan_ms": 1258.99338722229,
+            "peak_kib": 131840
+          },
+          {
+            "build_ms": 527.8260707855225,
+            "first_write_ms": 0.0,
+            "scan_ms": 1235.5139255523682,
+            "peak_kib": 131840
+          },
+          {
+            "build_ms": 540.1146411895752,
+            "first_write_ms": 0.0,
+            "scan_ms": 1231.8389415740967,
+            "peak_kib": 131840
+          },
+          {
+            "build_ms": 603.9917469024658,
+            "first_write_ms": 0.0,
+            "scan_ms": 1341.3143157958984,
+            "peak_kib": 131840
+          },
+          {
+            "build_ms": 541.1267280578613,
+            "first_write_ms": 0.0,
+            "scan_ms": 1911.0803604125977,
+            "peak_kib": 131840
+          },
+          {
+            "build_ms": 572.1688270568848,
+            "first_write_ms": 0.0,
+            "scan_ms": 1291.6347980499268,
+            "peak_kib": 131840
+          },
+          {
+            "build_ms": 1400.6431102752686,
+            "first_write_ms": 0.0,
+            "scan_ms": 1236.7010116577148,
+            "peak_kib": 131840
+          },
+          {
+            "build_ms": 569.5092678070068,
+            "first_write_ms": 0.0,
+            "scan_ms": 1563.5526180267334,
+            "peak_kib": 131840
+          }
+        ]
+      },
+      "medians": {
+        "Imre struct": {
+          "build_ms": 29.976844787597656,
+          "first_write_ms": 0.0,
+          "scan_ms": 12.316584587097168,
+          "peak_kib": 18688.0
+        },
+        "Imre dataclass": {
+          "build_ms": 98.48451614379883,
+          "first_write_ms": 0.0,
+          "scan_ms": 33.55824947357178,
+          "peak_kib": 57856.0
+        },
+        "CPython struct": {
+          "build_ms": 815.6557083129883,
+          "first_write_ms": 0.0,
+          "scan_ms": 1245.2253103256226,
+          "peak_kib": 132864.0
+        },
+        "CPython dataclass": {
+          "build_ms": 570.8390474319458,
+          "first_write_ms": 0.0,
+          "scan_ms": 1275.3140926361084,
+          "peak_kib": 131840.0
+        }
+      }
+    },
+    "shared-1000000": {
+      "checksum": 1950000000,
+      "orders": [
+        [
+          "Imre struct",
+          "Imre dataclass",
+          "CPython dataclass",
+          "CPython struct"
+        ],
+        [
+          "Imre dataclass",
+          "CPython struct",
+          "Imre struct",
+          "CPython dataclass"
+        ],
+        [
+          "CPython struct",
+          "CPython dataclass",
+          "Imre dataclass",
+          "Imre struct"
+        ],
+        [
+          "CPython dataclass",
+          "Imre struct",
+          "CPython struct",
+          "Imre dataclass"
+        ],
+        [
+          "Imre struct",
+          "Imre dataclass",
+          "CPython dataclass",
+          "CPython struct"
+        ],
+        [
+          "Imre dataclass",
+          "CPython struct",
+          "Imre struct",
+          "CPython dataclass"
+        ],
+        [
+          "CPython struct",
+          "CPython dataclass",
+          "Imre dataclass",
+          "Imre struct"
+        ],
+        [
+          "CPython dataclass",
+          "Imre struct",
+          "CPython struct",
+          "Imre dataclass"
+        ]
+      ],
+      "samples": {
+        "Imre struct": [
+          {
+            "build_ms": 0.051021575927734375,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.704683303833008,
+            "peak_kib": 3072
+          },
+          {
+            "build_ms": 0.0152587890625,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.935949325561523,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.13875961303710938,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.774778366088867,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.01430511474609375,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.628866195678711,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.0152587890625,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.071609497070312,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.021457672119140625,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.533260345458984,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.26869773864746094,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.627674102783203,
+            "peak_kib": 3072
+          },
+          {
+            "build_ms": 0.014066696166992188,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.586904525756836,
+            "peak_kib": 3328
+          }
+        ],
+        "Imre dataclass": [
+          {
+            "build_ms": 12.639522552490234,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.744260787963867,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 14.886856079101562,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.916088104248047,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 12.720584869384766,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.849641799926758,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 13.27204704284668,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.720584869384766,
+            "peak_kib": 10496
+          },
+          {
+            "build_ms": 12.549400329589844,
+            "first_write_ms": 0.0,
+            "scan_ms": 12.045621871948242,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 14.085531234741211,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.870384216308594,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 13.28587532043457,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.590719223022461,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 11.918306350708008,
+            "first_write_ms": 0.0,
+            "scan_ms": 11.677742004394531,
+            "peak_kib": 10496
+          }
+        ],
+        "CPython struct": [
+          {
+            "build_ms": 6.839990615844727,
+            "first_write_ms": 0.0,
+            "scan_ms": 1509.0861320495605,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 7.005453109741211,
+            "first_write_ms": 0.0,
+            "scan_ms": 1398.6084461212158,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 8.270978927612305,
+            "first_write_ms": 0.0,
+            "scan_ms": 1403.5508632659912,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 7.7724456787109375,
+            "first_write_ms": 0.0,
+            "scan_ms": 1522.2930908203125,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 8.753776550292969,
+            "first_write_ms": 0.0,
+            "scan_ms": 1520.6935405731201,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 16.443729400634766,
+            "first_write_ms": 0.0,
+            "scan_ms": 1411.0620021820068,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 8.868932723999023,
+            "first_write_ms": 0.0,
+            "scan_ms": 1406.507968902588,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 7.348060607910156,
+            "first_write_ms": 0.0,
+            "scan_ms": 1424.140453338623,
+            "peak_kib": 22784
+          }
+        ],
+        "CPython dataclass": [
+          {
+            "build_ms": 6.476640701293945,
+            "first_write_ms": 0.0,
+            "scan_ms": 1409.3225002288818,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.822347640991211,
+            "first_write_ms": 0.0,
+            "scan_ms": 1529.6413898468018,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 7.415294647216797,
+            "first_write_ms": 0.0,
+            "scan_ms": 1530.566930770874,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.72149658203125,
+            "first_write_ms": 0.0,
+            "scan_ms": 1407.7155590057373,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 7.477521896362305,
+            "first_write_ms": 0.0,
+            "scan_ms": 1516.5674686431885,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.544828414916992,
+            "first_write_ms": 0.0,
+            "scan_ms": 1505.8448314666748,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 10.18214225769043,
+            "first_write_ms": 0.0,
+            "scan_ms": 1501.220941543579,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 8.191347122192383,
+            "first_write_ms": 0.0,
+            "scan_ms": 1397.3205089569092,
+            "peak_kib": 22016
+          }
+        ]
+      },
+      "medians": {
+        "Imre struct": {
+          "build_ms": 0.018358230590820312,
+          "first_write_ms": 0.0,
+          "scan_ms": 11.66677474975586,
+          "peak_kib": 3328.0
+        },
+        "Imre dataclass": {
+          "build_ms": 12.996315956115723,
+          "first_write_ms": 0.0,
+          "scan_ms": 11.860013008117676,
+          "peak_kib": 10752.0
+        },
+        "CPython struct": {
+          "build_ms": 8.021712303161621,
+          "first_write_ms": 0.0,
+          "scan_ms": 1417.601227760315,
+          "peak_kib": 22784.0
+        },
+        "CPython dataclass": {
+          "build_ms": 7.118821144104004,
+          "first_write_ms": 0.0,
+          "scan_ms": 1503.532886505127,
+          "peak_kib": 22016.0
+        }
+      }
+    },
+    "replace-1000000": {
+      "checksum": 1950005850,
+      "orders": [
+        [
+          "Imre struct",
+          "Imre dataclass",
+          "CPython dataclass",
+          "CPython struct"
+        ],
+        [
+          "Imre dataclass",
+          "CPython struct",
+          "Imre struct",
+          "CPython dataclass"
+        ],
+        [
+          "CPython struct",
+          "CPython dataclass",
+          "Imre dataclass",
+          "Imre struct"
+        ],
+        [
+          "CPython dataclass",
+          "Imre struct",
+          "CPython struct",
+          "Imre dataclass"
+        ],
+        [
+          "Imre struct",
+          "Imre dataclass",
+          "CPython dataclass",
+          "CPython struct"
+        ],
+        [
+          "Imre dataclass",
+          "CPython struct",
+          "Imre struct",
+          "CPython dataclass"
+        ],
+        [
+          "CPython struct",
+          "CPython dataclass",
+          "Imre dataclass",
+          "Imre struct"
+        ],
+        [
+          "CPython dataclass",
+          "Imre struct",
+          "CPython struct",
+          "Imre dataclass"
+        ]
+      ],
+      "samples": {
+        "Imre struct": [
+          {
+            "build_ms": 0.48089027404785156,
+            "first_write_ms": 0.2090930938720703,
+            "scan_ms": 11.582612991333008,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.021457672119140625,
+            "first_write_ms": 0.003337860107421875,
+            "scan_ms": 11.739492416381836,
+            "peak_kib": 3072
+          },
+          {
+            "build_ms": 0.014781951904296875,
+            "first_write_ms": 0.0030994415283203125,
+            "scan_ms": 11.548280715942383,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.014543533325195312,
+            "first_write_ms": 0.0030994415283203125,
+            "scan_ms": 11.550426483154297,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.09059906005859375,
+            "first_write_ms": 0.0050067901611328125,
+            "scan_ms": 11.663436889648438,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.01430511474609375,
+            "first_write_ms": 0.0030994415283203125,
+            "scan_ms": 11.591434478759766,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.02193450927734375,
+            "first_write_ms": 0.0030994415283203125,
+            "scan_ms": 11.595726013183594,
+            "peak_kib": 3328
+          },
+          {
+            "build_ms": 0.021696090698242188,
+            "first_write_ms": 0.0030994415283203125,
+            "scan_ms": 11.669158935546875,
+            "peak_kib": 3072
+          }
+        ],
+        "Imre dataclass": [
+          {
+            "build_ms": 12.147903442382812,
+            "first_write_ms": 0.0011920928955078125,
+            "scan_ms": 11.644124984741211,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 11.838912963867188,
+            "first_write_ms": 0.001430511474609375,
+            "scan_ms": 11.772394180297852,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 12.169361114501953,
+            "first_write_ms": 0.01049041748046875,
+            "scan_ms": 12.058258056640625,
+            "peak_kib": 10496
+          },
+          {
+            "build_ms": 11.956453323364258,
+            "first_write_ms": 0.001430511474609375,
+            "scan_ms": 11.767148971557617,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 12.082815170288086,
+            "first_write_ms": 0.0016689300537109375,
+            "scan_ms": 11.809587478637695,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 11.790752410888672,
+            "first_write_ms": 0.001430511474609375,
+            "scan_ms": 11.611700057983398,
+            "peak_kib": 10752
+          },
+          {
+            "build_ms": 12.093305587768555,
+            "first_write_ms": 0.01049041748046875,
+            "scan_ms": 11.717081069946289,
+            "peak_kib": 10496
+          },
+          {
+            "build_ms": 12.169837951660156,
+            "first_write_ms": 0.0019073486328125,
+            "scan_ms": 11.840581893920898,
+            "peak_kib": 10752
+          }
+        ],
+        "CPython struct": [
+          {
+            "build_ms": 6.882190704345703,
+            "first_write_ms": 0.00667572021484375,
+            "scan_ms": 1405.6463241577148,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.498813629150391,
+            "first_write_ms": 0.00667572021484375,
+            "scan_ms": 1405.9436321258545,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.34765625,
+            "first_write_ms": 0.007152557373046875,
+            "scan_ms": 1315.7398700714111,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.587743759155273,
+            "first_write_ms": 0.0073909759521484375,
+            "scan_ms": 1403.8288593292236,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.679773330688477,
+            "first_write_ms": 0.009059906005859375,
+            "scan_ms": 1386.7356777191162,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.537437438964844,
+            "first_write_ms": 0.0069141387939453125,
+            "scan_ms": 1384.655237197876,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.442546844482422,
+            "first_write_ms": 0.00667572021484375,
+            "scan_ms": 1382.9007148742676,
+            "peak_kib": 22784
+          },
+          {
+            "build_ms": 6.5555572509765625,
+            "first_write_ms": 0.00762939453125,
+            "scan_ms": 1437.1743202209473,
+            "peak_kib": 22784
+          }
+        ],
+        "CPython dataclass": [
+          {
+            "build_ms": 7.779598236083984,
+            "first_write_ms": 0.004291534423828125,
+            "scan_ms": 1379.479169845581,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 5.867242813110352,
+            "first_write_ms": 0.00476837158203125,
+            "scan_ms": 1407.12308883667,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.336450576782227,
+            "first_write_ms": 0.00476837158203125,
+            "scan_ms": 1394.4478034973145,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.365299224853516,
+            "first_write_ms": 0.0045299530029296875,
+            "scan_ms": 1390.383005142212,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.441354751586914,
+            "first_write_ms": 0.004291534423828125,
+            "scan_ms": 1403.186321258545,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.863594055175781,
+            "first_write_ms": 0.0040531158447265625,
+            "scan_ms": 1389.9102210998535,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.320476531982422,
+            "first_write_ms": 0.004291534423828125,
+            "scan_ms": 1377.7379989624023,
+            "peak_kib": 22016
+          },
+          {
+            "build_ms": 6.503582000732422,
+            "first_write_ms": 0.00476837158203125,
+            "scan_ms": 1395.9472179412842,
+            "peak_kib": 22016
+          }
+        ]
+      },
+      "medians": {
+        "Imre struct": {
+          "build_ms": 0.021576881408691406,
+          "first_write_ms": 0.0030994415283203125,
+          "scan_ms": 11.59358024597168,
+          "peak_kib": 3328.0
+        },
+        "Imre dataclass": {
+          "build_ms": 12.08806037902832,
+          "first_write_ms": 0.0015497207641601562,
+          "scan_ms": 11.769771575927734,
+          "peak_kib": 10752.0
+        },
+        "CPython struct": {
+          "build_ms": 6.546497344970703,
+          "first_write_ms": 0.007033348083496094,
+          "scan_ms": 1395.28226852417,
+          "peak_kib": 22784.0
+        },
+        "CPython dataclass": {
+          "build_ms": 6.403326988220215,
+          "first_write_ms": 0.004410743713378906,
+          "scan_ms": 1392.4154043197632,
+          "peak_kib": 22016.0
+        }
+      }
+    }
+  },
+  "sources": {
+    "struct": {
+      "source_sha256": "23283ea029fd021f9f36962d7f0416965ce00298c297d015736d021e35327831",
+      "llvm_sha256": "fad29446e141462816fe14df5484522c98b0a76288b7bf280182ee7e3cba6f7c",
+      "binary_sha256": "510f38a4be09992c619eb4757f585fc8d6271e5f9bac428ed4a6d711fd4a6421"
+    },
+    "dataclass": {
+      "source_sha256": "f635206a48c74ae722b8c3383b60dbea65f104577155205922a1cfe0221a585c",
+      "llvm_sha256": "1dbe64ed6c0706250d85697a676f74b0c022ec28bf38aa7fd4e8e10cd88e3d2b",
+      "binary_sha256": "5152f2916f713c781af769b21bb2197bc6c38a11209eb48a3b7e24dc0d81538a"
+    }
+  }
+}

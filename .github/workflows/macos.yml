@@ -36,8 +36,8 @@ jobs:
       - run: cargo test --workspace --release --locked
       - name: Compare string core on Apple Silicon
         run: python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
-      - name: Compare pathlib stat fields and errors on Apple Silicon
-        run: python3 tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --fixture path_stat --fixture stat_options --opt-levels 0 3
+      - name: Compare pathlib stat, constructors and samefile on Apple Silicon
+        run: python3 tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --fixture path_stat --fixture stat_options --fixture constructor_protocol --fixture path_protocol_descriptors --fixture samefile --fixture samefile_descriptors --opt-levels 0 3
       - name: Build and install a Imre extension wheel
         run: |
           python3 -m pip install "wheel==0.45.1" "packaging==25.0"
@@ -48,7 +48,7 @@ jobs:
           target/release/imre build tests/programs/control_flow.py -o "$RUNNER_TEMP/control_flow"
           lipo "$RUNNER_TEMP/control_flow" -verify_arch arm64
           python3 tests/run_suites.py --workers 3 --log-dir "$RUNNER_TEMP/imre-suites" \
-            --suites unittest_main differential io errno files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
+            --suites unittest_main differential io errno posix_readiness files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
           cat "$RUNNER_TEMP/imre-suites/errno.log"
           python3 tests/unittest_main.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --manifest benchmarks/cpython_stdlib/full/errno/UPSTREAM.json --upstream-source benchmarks/cpython_stdlib/full/errno/upstream/Lib/test/test_errno.py --opt-levels 3
