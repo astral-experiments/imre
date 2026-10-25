@@ -78,5 +78,20 @@ Both retain CPython setup, teardown and cleanup. A native child starts at the
 observed root level, holds its logging state throughout the body, then closes
 its handlers. The report also records the whole-body compiler diagnostics for
 stock unittest’s `assertIsInstance` and first-class `assertRaises`. The direct
-controls add no occurrences. Binary mode and non-UTF-8 file encoding remain
-ordinary implementation failures.
+controls add no occurrences. Binary file mode remains an ordinary implementation failure.
+
+### File encoding and errors
+
+FileHandler and writable Path.open streams use the shared codec registry.
+Conversion completes before the stream changes. A UTF-8 signature is written
+only at the start of the file. The [codec control](../../../../tests/fixtures/files/logging_file_codecs.py)
+also checks append mode, delayed CP1251 output, newline conversion, strict
+failures and the effect of invalid options on pre-existing files.
+
+The [focused report](basic-config-file-codecs-linux.json) retains the original
+ASCII `test_encoding_errors` and `test_encoding_errors_default`. CPython runs
+their unmodified bodies, file reads and assertions under the original fixture.
+Imre configures the root, reports encoding and errors, emits the record under the
+selected policy, and closes the file. Neither method has a native body or
+fixture. `test_encoding_errors_none`, which assigns a custom `handleError`,
+remains a separate blocker.

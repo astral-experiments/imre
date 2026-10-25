@@ -287,6 +287,9 @@ impl FileState {
         if self.kind == FileKind::TextMemory {
             return self.text_memory()?.write(text);
         }
+        if let Some(Stream::Write(writer)) = self.stream.as_mut() {
+            return writer.write_text(text);
+        }
         self.write_bytes(text.as_bytes())
     }
 

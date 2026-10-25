@@ -34,6 +34,8 @@ def main() -> None:
                 logging.basicConfig(filename=None, filemode=input())
             elif op == "filename,encoding,errors,format,level":
                 logging.basicConfig(filename=input(), encoding=input(), errors=input(), format=input(), level=int(input()))
+            elif op == "filename,encoding,format,level":
+                logging.basicConfig(filename=input(), encoding=input(), format=input(), level=int(input()))
             elif op == "debug":
                 logging.debug(input())
             elif op == "debug-level":
@@ -44,10 +46,14 @@ def main() -> None:
                 print(isinstance(root.handlers[int(input())], logging.FileHandler))
                 sys.stdout.flush()
                 continue
-            elif op == "handler-encoding":
+            elif op == "handler-encoding" or op == "handler-errors":
                 found = root.handlers[int(input())]
                 if isinstance(found, logging.FileHandler):
-                    print(found.encoding)
+                    if op == "handler-encoding":
+                        print(found.encoding)
+                    else:
+                        errors = found.errors
+                        print("None" if errors is None else repr(errors))
                 else:
                     raise TypeError("root handler is not a FileHandler")
                 sys.stdout.flush()

@@ -1222,6 +1222,7 @@ pub(crate) enum PathOperation {
     Info,
     InfoRepr,
     Query(PathQuery),
+    OpenTextOutput,
     ReadText,
     ReadBytes,
     WriteText,

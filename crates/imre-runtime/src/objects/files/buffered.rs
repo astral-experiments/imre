@@ -6,10 +6,18 @@ use std::mem::MaybeUninit;
 
 use smallvec::SmallVec;
 
+use super::super::codecs::Codec;
 use super::gzip::{GzipError, GzipReader};
 use super::{Bytes, Error, Kind, Result, Str, decode_text, os_error};
 
+struct TextEncoder {
+    codec: Codec,
+    errors: Option<Box<str>>,
+    newline: Option<Box<str>>,
+}
+
 pub(super) struct Output {
+    encoder: Option<Box<TextEncoder>>,
     raw: BufWriter<File>,
     text: Option<Vec<u8>>,
     line_buffering: bool,
@@ -18,6 +26,7 @@ pub(super) struct Output {
 impl Output {
     pub(super) fn new(file: File, capacity: usize, binary: bool) -> Self {
         Self {
+            encoder: None,
             line_buffering: !binary && file.is_terminal(),
             raw: BufWriter::with_capacity(capacity, file),
             text: (!binary).then(Vec::new),
@@ -29,8 +38,53 @@ impl Output {
         Self {
             raw: BufWriter::with_capacity(capacity, file),
             text: None,
+            encoder: None,
             line_buffering,
         }
+    }
+
+    /// Keep a signature pending only when this stream starts at offset zero.
+    pub(super) fn set_encoding(
+        &mut self,
+        mut codec: Codec,
+        errors: Option<&str>,
+        newline: Option<&str>,
+    ) {
+        if matches!(codec, Codec::Utf8 { signature: true })
+            && self
+                .raw
+                .get_mut()
+                .stream_position()
+                .is_ok_and(|position| position != 0)
+        {
+            codec = Codec::Utf8 { signature: false };
+        }
+        self.encoder = Some(Box::new(TextEncoder {
+            codec,
+            errors: errors.map(Into::into),
+            newline: newline
+                .filter(|value| matches!(*value, "\r" | "\r\n"))
+                .map(Into::into),
+        }));
+    }
+
+    /// Encode the entire input before changing the file or its text buffer.
+    pub(super) fn write_text(&mut self, text: &str) -> Result<()> {
+        let Some(encoder) = self.encoder.as_mut() else {
+            return self.write(text.as_bytes()).map_err(os_error);
+        };
+        let translated;
+        let text = if let Some(newline) = encoder.newline.as_deref() {
+            translated = text.replace('\n', newline);
+            &translated
+        } else {
+            text
+        };
+        let encoded = encoder.codec.encode(text, encoder.errors.as_deref())?;
+        if matches!(encoder.codec, Codec::Utf8 { signature: true }) {
+            encoder.codec = Codec::Utf8 { signature: false };
+        }
+        self.write(&encoded).map_err(os_error)
     }
 
     pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {

@@ -1,4 +1,5 @@
 """Execute original BasicConfigTest bodies against a persistent native root."""
+from ast import literal_eval
 from contextlib import chdir
 import re
 import subprocess
@@ -23,6 +24,8 @@ def option_cases(tools, work, source, prepare, setup):
             raise AssertionError("the CPython fixture did not start with an empty root")
         desc = {
             "test_incompatible": "Create one native StreamHandler and run five basicConfig calls, including four native ValueErrors",
+            "test_encoding_errors": "Emit through the native root with an ASCII file handler and the ignore policy",
+            "test_encoding_errors_default": "Read the native FileHandler error policy and emit ASCII with default backslash replacement",
             "test_encoding": "Configure and inspect a native FileHandler, emit UTF-8 through the root, and close it before the original file assertion",
         }[case._testMethodName]
         attempt = work / case._testMethodName
@@ -75,6 +78,10 @@ def option_cases(tools, work, source, prepare, setup):
                 @property
                 def encoding(self):
                     return send("handler-encoding", self.index)
+
+                @property
+                def errors(self):
+                    return literal_eval(send("handler-errors", self.index))
 
             class RootHandlers:
                 def __len__(self):
@@ -132,4 +139,4 @@ def option_cases(tools, work, source, prepare, setup):
                 "evidence": {"operation": desc, "fixture": "Original CPython setup and cleanup; native root starts at the saved level",
                              "native_calls": calls, "opt_level": tools.level,
                              "native_body_diagnostic": diagnostic, "native_body_statement": statement}}
-    return {PREFIX + name: execute for name in ("test_incompatible", "test_encoding")}
+    return {PREFIX + name: execute for name in ("test_incompatible", "test_encoding", "test_encoding_errors", "test_encoding_errors_default")}

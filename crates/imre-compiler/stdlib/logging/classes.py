@@ -236,18 +236,18 @@ def _logfile_name(filename: str | Path) -> str:
     return os.path.abspath(filename)
 
 
-def _open_logfile(filename: str, mode: str, encoding: str) -> TextIO:
-    codec = encoding.lower().replace("_", "-")
-    if codec != "utf-8" and codec != "utf8" and codec != "locale":
-        raise NotImplementedError("FileHandler stream encoding: " + encoding)
+def _open_logfile(filename: str, mode: str, encoding: str, errors: str | None) -> TextIO:
     path = Path(filename)
     if mode == "a" or mode == "at" or mode == "ta":
-        return path.open("a", encoding="utf-8")
+        return path.open("a", encoding=encoding, errors=errors)
     if mode == "w" or mode == "wt" or mode == "tw":
-        return path.open("w", encoding="utf-8")
+        return path.open("w", encoding=encoding, errors=errors)
     if mode == "x" or mode == "xt" or mode == "tx":
-        return path.open("x", encoding="utf-8")
+        return path.open("x", encoding=encoding, errors=errors)
     if mode == "r" or mode == "rt" or mode == "tr":
+        codec = encoding.lower().replace("_", "-")
+        if codec != "utf-8" and codec != "utf8" and codec != "locale":
+            raise NotImplementedError("FileHandler input stream encoding: " + encoding)
         return path.open("r", encoding="utf-8")
     raise NotImplementedError("FileHandler stream mode: " + mode)
 
@@ -268,12 +268,12 @@ class FileHandler(StreamHandler):
         self.encoding = codec
         self.errors = errors
         self.delay = delay
-        stream = None if delay else _open_logfile(path, mode, codec)
+        stream = None if delay else _open_logfile(path, mode, codec, errors)
         super().__init__(stream)
         self.stream = stream
 
     def _open(self) -> TextIO:
-        return _open_logfile(self.baseFilename, self.mode, self.encoding)
+        return _open_logfile(self.baseFilename, self.mode, self.encoding, self.errors)
 
     def emit(self, record: LogRecord | None) -> None:
         if self.stream is None:
