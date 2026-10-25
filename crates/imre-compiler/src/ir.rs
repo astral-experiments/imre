@@ -976,6 +976,7 @@ pub(crate) enum Builtin {
         left: bool,
     },
     DequeClear,
+    DequeReverse,
     DequeMaxlen,
     DequeIter {
         reverse: bool,

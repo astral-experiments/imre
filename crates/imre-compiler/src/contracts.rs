@@ -530,6 +530,7 @@ impl Builtin {
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::DequeClear
+            | Self::DequeReverse
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
