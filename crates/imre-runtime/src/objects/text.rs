@@ -1,7 +1,8 @@
 //! Native text operations preserve Python's Unicode-scalar and error semantics.
 
+mod expandtabs;
 mod lowercase;
-pub(super) use lowercase::lowercase;
+pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
 use std::mem::ManuallyDrop;
@@ -61,6 +62,17 @@ pub unsafe extern "C" fn imre_int_hex_format(value: usize, width: u32, flags: u3
 pub unsafe extern "C" fn imre_str_contains(needle: *const Str, text: *const Str) -> u32 {
     // SAFETY: the caller roots both immutable strings through the search.
     unsafe { u32::from((&*text).contains((&*needle).as_str())) }
+}
+
+/// Tests a nonempty Python string against the shared Unicode whitespace table.
+///
+/// # Safety
+/// The immutable string is rooted for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive and no character reference escapes.
+    let value = unsafe { &*value };
+    u32::from(!value.is_empty() && value.chars().all(python_whitespace))
 }
 
 /// Removes the common space/tab prefix after the caller has evaluated its text.

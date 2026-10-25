@@ -47,6 +47,20 @@ impl Emitter<'_, '_> {
     ) -> Value {
         let source = &args[0].value.operand;
         let operand = match operation {
+            TextOperation::IsSpace => {
+                let bit = self.instruction(format!("call i32 @imre_str_isspace(ptr {source})"));
+                self.instruction(format!("icmp ne i32 {bit}, 0"))
+            }
+            TextOperation::SplitLineEnds => {
+                let keep = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                self.checked_instruction(format!(
+                    "call ptr @imre_str_splitlines_options(ptr {source}, i32 {keep})"
+                ))
+            }
+            TextOperation::ExpandTabs => self.checked_instruction(format!(
+                "call ptr @imre_str_expandtabs(ptr {source}, i64 {})",
+                args[1].value.operand,
+            )),
             TextOperation::Lower => {
                 self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))
             }

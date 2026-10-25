@@ -375,6 +375,7 @@ struct Output<W = io::Stdout> {
     buffer: Vec<u8>,
     written: usize,
     line_buffered: bool,
+    captures: Vec<Vec<u8>>,
 }
 
 impl<W: Write> Output<W> {
@@ -387,6 +388,7 @@ impl<W: Write> Output<W> {
             buffer,
             written: 0,
             line_buffered,
+            captures: Vec::new(),
         }
     }
 
@@ -418,6 +420,13 @@ impl<W: Write> Output<W> {
 
 impl<W: Write> Write for Output<W> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if let Some(captured) = self.captures.last_mut() {
+            captured
+                .try_reserve(bytes.len())
+                .map_err(|_| io::ErrorKind::OutOfMemory)?;
+            captured.extend_from_slice(bytes);
+            return Ok(bytes.len());
+        }
         if bytes.len() > self.buffer.capacity() - self.buffer.len() {
             self.flush_buffer()?;
         }
@@ -430,6 +439,9 @@ impl<W: Write> Write for Output<W> {
 
     #[inline]
     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if !self.captures.is_empty() {
+            return self.write(bytes).map(|_| ());
+        }
         if bytes.len() <= self.buffer.capacity() - self.buffer.len() {
             self.buffer.extend_from_slice(bytes);
             return Ok(());
@@ -438,6 +450,9 @@ impl<W: Write> Write for Output<W> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        if !self.captures.is_empty() {
+            return Ok(());
+        }
         self.flush_buffer()?;
         self.stdout.flush()
     }
@@ -450,6 +465,7 @@ static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
     Mutex::new(Output::with_stream(stdout, line_buffered))
 });
 
+mod doctest;
 mod sys;
 
 /// Prints one value and a newline, returning with the writer lock released.
@@ -512,14 +528,11 @@ fn fail(kind: &str, message: &str) -> ! {
     std::process::exit(1)
 }
 
-/// Flushes pending output before generated code returns from the process entry.
+/// Flush both standard streams and return the process's final exit status.
 #[unsafe(no_mangle)]
-pub extern "C" fn imre_flush_stdout() {
-    if flush_stdout().is_err() {
-        Error::new(Kind::OSError, "could not write standard output").raise();
-    } else if sys::flush_stderr().is_err() {
-        Error::new(Kind::OSError, "could not write standard error").raise();
-    }
+pub extern "C" fn imre_finish_stdio() -> i32 {
+    let stderr = sys::flush_stderr();
+    objects::exceptions::status_after_flush(0, flush_stdout(), stderr)
 }
 
 /// Reads a compiler-provided UTF-8 byte span without taking ownership.
@@ -1522,6 +1535,7 @@ mod tests {
                 buffer: Vec::with_capacity(capacity),
                 written: 0,
                 line_buffered: false,
+                captures: Vec::new(),
             };
             output.write_all(b"abc").unwrap();
             assert_eq!(output.stdout.is_empty(), capacity != 0);
@@ -1560,6 +1574,7 @@ mod tests {
             buffer: Vec::with_capacity(16),
             written: 0,
             line_buffered: false,
+            captures: Vec::new(),
         };
         output.write_all(b"partial").unwrap();
         assert_eq!(

@@ -74,41 +74,7 @@ impl Checker<'_> {
         if returned_by.is_none() && matches!(value.ty, Type::Path | Type::PurePath(_)) {
             return self.fspath_value(value, at);
         }
-        if self.types.payload(value.ty).is_some() || self.types.members(value.ty).is_some() {
-            let slot = self.hidden(value.ty);
-            let (test, first, second) = if let Some(payload) = self.types.payload(value.ty) {
-                (
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Builtin(Builtin::IsNone, vec![self.local(slot)]),
-                    },
-                    Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    },
-                    Expr {
-                        ty: payload,
-                        kind: ExprKind::Unwrap(Box::new(self.local(slot))),
-                    },
-                )
-            } else {
-                let members = self.types.members(value.ty).unwrap();
-                let project = |ty| Expr {
-                    ty,
-                    kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
-                };
-                (
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Builtin(
-                            Builtin::IsInstance(vec![ir::InstanceType::Exact(members[0])]),
-                            vec![self.local(slot)],
-                        ),
-                    },
-                    project(members[0]),
-                    project(members[1]),
-                )
-            };
+        if let Some((slot, test, first, second)) = self.protocol_alternatives(value.ty) {
             let mut left = self.fspath_protocol(first, at, returned_by)?;
             let mut right = self.fspath_protocol(second, at, returned_by)?;
             // A branch that only raises supplies no Python value to the join.
