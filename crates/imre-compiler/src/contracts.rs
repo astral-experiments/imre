@@ -483,6 +483,7 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::SysStdlibModuleNames
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName

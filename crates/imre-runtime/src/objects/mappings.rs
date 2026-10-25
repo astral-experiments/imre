@@ -738,6 +738,7 @@ pub(super) struct Mapping {
 }
 pub(super) struct Set {
     tables: Tables<()>,
+    frozen: bool,
 }
 
 impl Mapping {
@@ -1139,11 +1140,42 @@ impl Mapping {
 }
 
 impl Set {
+    pub(super) fn is_empty(&self) -> bool {
+        self.tables.len() == 0
+    }
+
+    fn mutable_tables(&mut self, method: &str) -> Result<&mut Tables<()>, Error> {
+        if self.frozen {
+            return Err(Error::new(
+                Kind::AttributeError,
+                format!("'frozenset' object has no attribute '{method}'"),
+            ));
+        }
+        Ok(&mut self.tables)
+    }
+
+    /// Transfer exact string keys into a new, immutable set.
+    fn frozen_strings(keys: impl Iterator<Item = OwnedWord>) -> Result<Rc<Object>, Error> {
+        let mut tables = Tables::new(3);
+        for key in keys {
+            tables.insert(key, ())?;
+        }
+        Ok(Rc::new(Object(StorageCell::new(Storage::Set(
+            TableOwner::new(Self {
+                tables,
+                frozen: true,
+            }),
+        )))))
+    }
+
     /// Deep-copy admission proves each set member is unchanged by deepcopy.
     pub(super) fn copy_keys(&self) -> Result<Self, Error> {
         let mut tables = Tables::new(self.tables.key_kind());
         self.tables.copy_keys(&mut tables)?;
-        Ok(Self { tables })
+        Ok(Self {
+            tables,
+            frozen: self.frozen,
+        })
     }
 
     /// # Safety
@@ -1165,13 +1197,19 @@ impl Set {
     ) -> Option<super::values::ReprEntry> {
         if position == 0 {
             if self.tables.len() == 0 {
-                output.push_str("set()");
+                output.push_str(if self.frozen { "frozenset()" } else { "set()" });
                 return None;
+            }
+            if self.frozen {
+                output.push_str("frozenset(");
             }
             output.push('{');
         }
         let Some((next, key, ())) = self.tables.next(position) else {
             output.push('}');
+            if self.frozen {
+                output.push(')');
+            }
             return None;
         };
         if position != 0 {
@@ -2172,6 +2210,7 @@ pub extern "C" fn imre_set_new(kind: u32) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Set(
         TableOwner::new(Set {
             tables: Tables::new(kind),
+            frozen: false,
         }),
     )))))
 }
@@ -2182,21 +2221,41 @@ pub extern "C" fn imre_set_new(kind: u32) -> *const Object {
 /// The caller roots the list and checks pending state before using the result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_frozenset_strings(source: *const Object) -> *const Object {
-    // SAFETY: a fresh set cannot alias the list or reenter it during hashing.
-    unsafe {
-        let set = Rc::from_raw(imre_set_new(3));
-        let ok = object(source).0.with(|s| {
-            s.sequence().strings().all(|(word, _)| {
-                imre_set_add(Rc::as_ptr(&set), word);
-                super::exceptions::imre_error_pending() == 0
-            })
-        });
-        if ok {
-            Rc::into_raw(set)
-        } else {
-            std::ptr::null()
-        }
+    // SAFETY: the source roots each exact string and insertion cannot reenter Python.
+    let result = unsafe {
+        object(source).0.with(|s| {
+            Set::frozen_strings(
+                s.sequence()
+                    .strings()
+                    .map(|(word, _)| WordKind::new(3).acquire(word)),
+            )
+        })
+    };
+    crate::finish(result.map(Rc::into_raw), std::ptr::null())
+}
+
+/// Return the immutable standard library name set for the Python language target.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_stdlib_module_names() -> *const Object {
+    thread_local! {
+        static NAMES: std::cell::OnceCell<Rc<Object>> = const { std::cell::OnceCell::new() };
     }
+    NAMES.with(|root| {
+        if let Some(names) = root.get() {
+            return Rc::into_raw(names.clone());
+        }
+        let keys = include_str!("../../native/stdlib-module-names.txt")
+            .lines()
+            .map(|name| {
+                let key = Rc::into_raw(Rc::new(Str::from(name)));
+                // SAFETY: this newly owned Rc<Str> has the native string representation.
+                unsafe { OwnedWord::from_owned(key as usize, WordKind::new(3)) }
+            });
+        match Set::frozen_strings(keys) {
+            Ok(names) => Rc::into_raw(root.get_or_init(|| names).clone()),
+            Err(error) => error.returning(std::ptr::null()),
+        }
+    })
 }
 
 /// Reads distinct string keys directly from their source indexes and sorts the
@@ -2298,7 +2357,10 @@ pub unsafe extern "C" fn imre_key_union(
         }
     }
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Set(
-        TableOwner::new(Set { tables: result }),
+        TableOwner::new(Set {
+            tables: result,
+            frozen: false,
+        }),
     )))))
 }
 /// Builds an intersection directly from two key views or sets. The output owns
@@ -2409,7 +2471,7 @@ pub(super) unsafe fn set_add(value: *const Object, key: usize) -> Result<(), Err
     let old = unsafe {
         object(value)
             .0
-            .with_mut(|s| s.set_mut().tables.insert(key, ()))
+            .with_mut(|s| s.set_mut().mutable_tables("add")?.insert(key, ()))
     };
     old.map(drop)
 }
@@ -2418,8 +2480,14 @@ pub(super) unsafe fn set_add(value: *const Object, key: usize) -> Result<(), Err
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_set_discard(value: *const Object, key: usize) {
     // SAFETY: returned key owners remain independent of their former table slots.
-    let old = unsafe { object(value).0.with_mut(|s| s.set_mut().tables.remove(key)) };
-    drop(old);
+    let old = unsafe {
+        object(value).0.with_mut(|s| {
+            s.set_mut()
+                .mutable_tables("discard")
+                .map(|tables| tables.remove(key))
+        })
+    };
+    crate::finish(old.map(drop), ());
 }
 /// # Safety
 /// Root the set and release this internal cursor on every loop exit.

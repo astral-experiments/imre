@@ -32,6 +32,7 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
 - `test_43581`: the complete method, both stream attributes, equality and assertion execute in the native binary.
+- `test_module_names`: the complete unchanged method checks the concrete frozen set and iterates all 297 strings in Imre. The original CPython teardown runs on the host. The shared native TestCase does not yet supply `assertIsInstance`; the [local assertion](module_names_case.py) checks the two actual class operands and must reject both swapped operands at each optimization level.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.
 - `test_jit_is_available` and `test_jit_is_enabled`: Imre answers the parent capability query and executes both original child assertions under `PYTHON_JIT=0` and `=1`. CPython runs the parent, fixtures and child-status assertions. The fixture builds the original child source directly; its automatic `-X faulthandler` option is outside this check.
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.

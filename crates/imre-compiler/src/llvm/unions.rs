@@ -6,7 +6,8 @@ fn tag(ty: Type) -> u8 {
     match ty {
         Type::Str => 0,
         Type::Bytes => 1,
-        Type::List(_) => 2,
+        // Both are Object owners and occupy separate closed unions with str.
+        Type::List(_) | Type::FrozenStrings => 2,
         Type::Exception => 3,
         Type::Class(_) | Type::Tuple(_) => 4,
         Type::Enum(_) => 5,

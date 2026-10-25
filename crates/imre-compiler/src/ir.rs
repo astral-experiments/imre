@@ -29,6 +29,8 @@ pub(crate) enum Type {
     Deque(usize),
     /// The immutable top-level string keys of a private TOML document.
     StringKeys,
+    /// A concrete immutable set of strings.
+    FrozenStrings,
     Tuple(usize),
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
@@ -195,6 +197,7 @@ impl std::fmt::Display for Type {
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
+            Self::FrozenStrings => "frozenset[str]",
             Self::ListInt => "list[int]",
             Self::ByteOutput => "private byte output",
             Self::CacheState(_) => "private function cache",
@@ -637,6 +640,7 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysStdlibModuleNames,
     SysVersionInfo {
         implementation: bool,
     },
