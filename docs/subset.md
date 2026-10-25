@@ -667,7 +667,7 @@ On POSIX, `os.path.join(a, *parts)`, `basename(p)`, `dirname(p)`, and `splitext(
 
 `os.path.normpath(path)` removes redundant separators and dot components and collapses `..` lexically. Exactly two leading slashes survive. `os.path.abspath(path)` applies the same rules after prepending the current directory to a relative input; it does not resolve symlinks or require the path to exist. Both accept `str`, `bytes`, and native `Path`. Byte inputs produce bytes even when a path or working directory contains invalid UTF-8. Text results must be representable as Imre strings.
 
-`from pathlib import Path` exposes a sealed native POSIX path type on both supported hosts. `Path()` represents the current directory; fixed positional string or `Path` arguments join left to right. The `/` operator accepts a path and a string or path, including a string on the left. An absolute segment replaces the preceding path. Empty segments, repeated separators, and `.` components normalize lexically; `..` components and exactly two leading slashes remain intact. Construction and joining do not access the filesystem or resolve symlinks. `path.joinpath()` returns a fresh equal path. It accepts zero or more positional string or path segments, joined in order.
+`from pathlib import Path` exposes a sealed native POSIX path type on both supported hosts. `Path()` represents the current directory; positional strings, native paths, and supported `os.PathLike` instances join left to right. Arguments are evaluated before conversion; an instance must return a string from `__fspath__`. Bytes and invalid protocol results raise `TypeError`. The `/` operator accepts a path and a string or path, including a string on the left. An absolute segment replaces the preceding path. Empty segments, repeated separators, and `.` components normalize lexically; `..` components and exactly two leading slashes remain intact. Construction and joining do not access the filesystem or resolve symlinks. `path.joinpath()` returns a fresh equal path. It accepts the same segments as the constructor. `path.with_segments()` constructs a fresh path from its supplied positional segments.
 
 `PurePath` and `PurePosixPath` select POSIX lexical rules. `PureWindowsPath` handles Windows drive-relative paths, rooted paths, UNC share names and device prefixes on either host. Its equality and dictionary keys ignore case; paths of different flavors compare unequal. Nested paths of the same flavor preserve their original segments. Crossing flavors uses the other path's forward-slash spelling. Pure paths do not access the filesystem. All path types expose `drive`, `root`, and `anchor`.
 
@@ -1032,6 +1032,56 @@ Generated dataclass repr includes field names and values in declaration order, o
 
 Fixed classes reserve field names beginning with `__`. A fixed class can extend one concrete base and inherit its fields and methods. Its instances keep a statically known field layout. The compiler rejects multiple concrete bases, metaclasses, class variables and dynamically added fields. Class-field ownership types must form an acyclic graph, following list elements, dictionary values, tuple positions, and optional payloads. For example, fields `children: list["Node"]`, `named: dict[str, "Node"]`, and `parent: "Node | None"` inside class `Node` are rejected even when unused or initialized empty. Methods may accept or return their own class because those signatures do not create stored references.
 
+### Immutable value structs
+
+Use the first-party decorator for a small immutable value whose identity is never observed:
+
+```python
+from imre import struct
+
+@struct
+class Point:
+    x: float
+    y: float
+
+    def norm2(self) -> float:
+        return self.x * self.x + self.y * self.y
+
+points: list[Point] = [Point(1.0, 2.0)]
+saved = points[0]
+points[0] = Point(3.0, 4.0)
+print(saved.norm2())  # 5.0
+```
+
+A struct is final and has one or more required, exactly typed `float` or `bool` fields.
+The generated constructor accepts positional and named arguments. Fields are read-only;
+update a list entry by replacing the whole value. Ordinary instance methods are allowed.
+There are no field defaults, inheritance, or user-defined construction, equality, or hashing.
+
+Struct equality compares fields of the same declared type. All float NaNs compare equal
+*as fields of these values*, and the two signed zeros compare equal. Reading the float
+itself still uses Python floating-point behavior. Hashing, list membership, dictionary
+keys and set membership agree with that equality. Structs do not expose instance identity:
+use `==`, never `is`, `id()` or a weak reference. `p is None` on an optional value
+is supported. The enclosing list still has normal identity and mutation semantics.
+
+Imre normally stores the scalar fields of consecutive elements of `list[Point]` contiguously.
+Each field occupies an eight-byte slot; the example uses 16 bytes per element.
+There is no record header, pointer, or reference count per element in that buffer.
+For `points = [p] * n`, Imre can store one immutable point and the logical length.
+Assigning `points[i] = q` changes that slot alone. Imre stores only slots whose
+field bits differ from `p`; writing the original bits back removes the exception.
+This includes the sign of zero, even though the two zeros compare equal. Copies,
+slices, and pops can preserve sparse storage. When sufficiently many slots differ,
+one write can reserve and fill a packed buffer in O(n); subsequent writes to it
+update individual rows. These storage choices are private to Imre.
+A point taken out of the list remains valid after replacement, growth or clearing.
+The compiler can project fields directly or copy them to a stack temporary; uses that
+need an independently owned record can allocate one. This layout is private to Imre.
+On CPython, putting the repository's `stdlib/` on `PYTHONPATH` supplies the same
+decorator and value operations, with standard slotted objects and a regular list.
+CPython can still observe object identity; programs that do so are outside the contract.
+
 ## Concrete containers and optional values
 
 An empty tuple or a fixed tuple of homogeneous `str`, `bytes`, `int`, or `bool` supports `in` and `not in`. The needle and all tuple elements evaluate in Python order before the first comparison.
@@ -1042,7 +1092,7 @@ append, pop, and extend at either end, clear, shallow copy, equality, length,
 truth testing, and forward or reverse iteration. A saved append or pop method
 keeps its receiver alive. An unannotated empty deque defaults to integer elements.
 
-`list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition copies references to the same elements, so `[row] * 3` shares `row` across all three positions. `list[int]` retains its specialized tagged-integer storage and runtime calls; other lists use owned runtime slots.
+`list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition preserves element values and shares reference-type elements across positions. Lists of immutable value structs store scalar payloads inline; `list[int]` uses specialized tagged-integer storage. Other lists use owned runtime slots.
 
 An unquoted `Sequence[T]` parameter from `collections.abc` or `typing` accepts
 an exact `list[T]` or an omitted `()` default. Its body may iterate the
