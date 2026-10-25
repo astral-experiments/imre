@@ -1,0 +1,25 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "blob": "9005f1ef865c9096e6035feb7a53a98f8dade705",
+  "source": "Lib/logging/__init__.py",
+  "method": "LoggerAdapter.manager getter and setter",
+  "sha256": "0ea0703ef9937fd4069e485678f541756519e3c569d1d947414e357f52b58425",
+  "fixture": "Typed native holder and two native adapter layers; no LoggerAdapterTest fixture",
+  "logging_occurrences": 0,
+  "levels": {
+    "0": [
+      "True",
+      "True",
+      "True",
+      "True",
+      "True"
+    ],
+    "3": [
+      "True",
+      "True",
+      "True",
+      "True",
+      "True"
+    ]
+  }
+}

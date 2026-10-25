@@ -218,12 +218,29 @@ impl Reachable {
                             }
                         }
                     }
+                    // A property(get, set) declaration reads its local methods while
+                    // constructing the descriptor, even when no method is explicitly called.
+                    let mut accessors = HashSet::new();
+                    for item in &class.body {
+                        if let ast::Stmt::Assign(assign) = item
+                            && let Some((get, set)) =
+                                crate::classes::property_accessors(graph, id.module, &assign.value)
+                        {
+                            accessors.insert(get);
+                            accessors.extend(set);
+                        }
+                    }
                     for item in &class.body {
                         if let ast::Stmt::FunctionDef(method) = item {
                             let name = method.name.as_str();
                             // These protocols have implicit call sites in the supported language.
                             // An unsupported operator still fails when checking its expression.
-                            let property = refs.found.properties.contains(name) && method.decorator_list.iter().any(|d| matches!(&d.expression, ast::Expr::Name(n) if n.id == "property") || graph.resolve(id.module, &d.expression) == Some(Binding::Intrinsic(Intrinsic::CachedProperty)));
+                            let property = accessors.contains(name) || (refs.found.properties.contains(name)
+                                && method.decorator_list.iter().any(|d|
+                                    matches!(&d.expression, ast::Expr::Name(n) if n.id == "property")
+                                    || matches!(&d.expression, ast::Expr::Attribute(a) if a.attr.as_str() == "setter"
+                                        && matches!(&*a.value, ast::Expr::Name(n) if n.id.as_str() == name))
+                                    || graph.resolve(id.module, &d.expression) == Some(Binding::Intrinsic(Intrinsic::CachedProperty))));
                             let assertion_exit = source.bundled
                                 && source.name == "unittest"
                                 && class.name.as_str() == "_AssertRaisesContext"
