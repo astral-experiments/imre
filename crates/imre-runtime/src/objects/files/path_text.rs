@@ -1,7 +1,8 @@
 //! Whole-file text conversion uses the same descriptor, buffering, and close path as binary I/O.
 
 use super::super::codecs::{Codec, option_error};
-use super::{Error, Int, Kind, Object, Rc, Result, Str, finish, object, with_path_file};
+use super::{Error, Int, Kind, Object, Result, Str, finish, object, with_path_file};
+use crate::StrOwner;
 
 /// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.
 fn universal_newlines(text: String) -> String {
@@ -114,7 +115,7 @@ pub unsafe extern "C" fn imre_path_read_text_options(
             .with(|storage| read(storage.path(), encoding, errors, newline))
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(text))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
 }
@@ -154,9 +155,10 @@ pub unsafe extern "C" fn imre_path_write_text_options(
                 file.write_bytes(&codec.encode(value, errors, || {
                     if value == text.as_str() {
                         // The native write roots its input until conversion finishes.
-                        super::super::acquire_rc(text as *const Str as usize)
+                        Ok(StrOwner::acquire_word(text as *const Str as usize))
                     } else {
-                        Rc::new(Str::from(value))
+                        StrOwner::try_new(Str::try_new(value).map_err(|_| Error::allocation())?)
+                            .map_err(|_| Error::allocation())
                     }
                 })?)?;
                 Ok(Int::from_usize(text.chars().count()).into_raw())

@@ -6002,7 +6002,7 @@ impl<'a> Checker<'a> {
                             || matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
                     let comparable = match ty {
-                        Type::List(_) => tuple_list,
+                        Type::List(_) => comparable_list,
                         Type::Dict(_) => self.types.is_counter(ty),
                         Type::Tuple(_) => self.types.hashable_key(ty),
                         Type::ListInt
