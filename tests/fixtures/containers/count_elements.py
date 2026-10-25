@@ -2,6 +2,7 @@ import _collections
 import collections
 from _collections import _count_elements as native_count
 from collections import Counter, _count_elements
+from collections import _count_elements as tally_keys
 
 
 class Audit:
@@ -32,7 +33,7 @@ class Biased(Audit):
 
 
 def tally(mapping: Audit, keys: list[str]) -> None:
-    _count_elements(mapping, keys)
+    tally_keys(mapping, keys)
 
 
 def target(markers: list[int], counts: dict[int, int]) -> dict[int, int]:

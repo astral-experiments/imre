@@ -1813,7 +1813,7 @@ impl<'a> Loader<'a> {
                         if module == IntrinsicModule::Collections
                             && binding == Binding::Intrinsic(Intrinsic::CountElements)
                         {
-                            self.checked_builtin_imports.push((id, alias.name.range()));
+                            self.checked_builtin_imports.push((id, alias.range()));
                         }
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
