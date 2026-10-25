@@ -46,6 +46,15 @@ def fixture_variant(case):
     return f"{variant}[{case.id()}]" if isinstance(case, doctest.DocTestCase) else variant
 
 
+@cache
+def intact_startup():
+    checks = json.loads((HERE / "doctest-startup-linux.json").read_bytes())["checks"]
+    diagnostics = {row["diagnostic"] for row in checks}
+    if len(diagnostics) == 1 and all(row["exit"] for row in checks):
+        return ": ".join(diagnostics.pop().split(": Imre: ")[-2:])
+    return "see the four entry checks in doctest-startup-linux.json"
+
+
 def missing(source, reference, variant, level):
     """Record individually verified exceptions; ordinary API failures stay in scope."""
     if isinstance(reference, dict):
@@ -69,8 +78,7 @@ def missing(source, reference, variant, level):
         }
     if source.startswith("json"):
         case_blocker = "io.StringIO at example 7" if source == "json" else "json.encoder.JSONEncoder at example 1"
-        why = (f"intact package stops at test.support import inspect; native DocTestSuite is blocked by "
-               f"{case_blocker} (DOCTEST.md)")
+        why = f"native DocTestSuite is blocked by {case_blocker}; intact package: {intact_startup()} (DOCTEST.md)"
     elif ".test_tool." in source:
         why = "original subprocess invokes CPython -m json or json.tool; a native module entry point is required"
     else:
