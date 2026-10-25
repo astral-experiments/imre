@@ -478,6 +478,16 @@ mod tests {
         }
         let flat = format!("print(len([{}]))\n", "(1 + 2),".repeat(256));
         compile(&flat, &CompileOptions::default()).unwrap();
+
+        let fields = "{1 + 2} ".repeat(256);
+        super::check(&format!("print(f'{fields}')\n")).unwrap();
+        for fields in [
+            format!("{fields}{{{}}}", "1+".repeat(256) + "1"),
+            format!("{{{}}}{fields}", "1+".repeat(256) + "1"),
+        ] {
+            let error = super::check(&format!("print(f'{fields}')\n")).unwrap_err();
+            assert!(error.contains("syntax complexity limit"), "{error}");
+        }
     }
 
     #[test]
