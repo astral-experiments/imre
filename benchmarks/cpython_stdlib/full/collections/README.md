@@ -34,8 +34,11 @@ The free-threaded deque ID is retained even though its parent package raises
 
 Reference outcomes describe CPython only. The existing
 [`native_counter.py`](../../native_counter.py) compiles complete upstream
-methods with native assertion adapters. Other IDs require independent Imre
-execution evidence before they can count as native.
+methods with native assertion adapters. [The Counter method gate](methods.py)
+also runs seven of those complete bodies under their original unittest fixtures:
+total, membership, equality and all four ordering operations. The per-method
+[O0](methods-O0.json) and [O3](methods-O3.json) results retain the method hash
+and the host fixture role. The same cases are attributed by the full runner.
 
 `deque_methods.py` uses the shared runner to compile the four complete
 `test_big_queue_*` and `test_big_stack_*` methods. Their saved append/pop

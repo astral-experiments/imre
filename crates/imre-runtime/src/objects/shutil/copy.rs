@@ -3,7 +3,7 @@
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io;
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, symlink};
 use std::path::Path;
 use std::rc::Rc;
@@ -100,12 +100,6 @@ fn copy_data(src: &Name<'_>, dst: &Name<'_>) -> Result<()> {
 }
 
 fn copyfile(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<()> {
-    if [src, dst]
-        .iter()
-        .any(|name| name.path().as_os_str().as_bytes().contains(&0))
-    {
-        return Err(Error::new(Kind::ValueError, "embedded null byte"));
-    }
     let source = fs::metadata(src.path()).ok();
     let target = fs::metadata(dst.path()).ok();
     if let (Some(source), Some(target)) = (&source, &target)
@@ -147,28 +141,121 @@ fn copyfile(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<()> {
     copy_data(src, dst)
 }
 
+/// Keep os.path.basename's empty final component for sources ending in a slash.
+fn destination(src: &Name<'_>, dst: &Name<'_>) -> Result<std::path::PathBuf> {
+    if matches!(src, Name::Bytes(_)) != matches!(dst, Name::Bytes(_)) {
+        return Err(Error::new(
+            Kind::TypeError,
+            "Can't mix strings and bytes in path components",
+        ));
+    }
+    let name = src
+        .path()
+        .as_os_str()
+        .as_bytes()
+        .rsplit(|&b| b == b'/')
+        .next()
+        .unwrap();
+    Ok(dst.path().join(OsStr::from_bytes(name)))
+}
+
+impl Name<'_> {
+    fn joined<'a>(&self, path: &'a Path) -> Result<Name<'a>> {
+        if matches!(self, Name::Bytes(_)) {
+            Ok(Name::Bytes(path.as_os_str().as_bytes()))
+        } else {
+            path.to_str().map(Name::Text).ok_or_else(|| {
+                Error::new(
+                    Kind::UnicodeDecodeError,
+                    "filesystem path is not valid UTF-8",
+                )
+            })
+        }
+    }
+}
+
+fn run(
+    op: u32,
+    src: &Name<'_>,
+    dst: &Name<'_>,
+    follow: bool,
+) -> Result<Option<std::path::PathBuf>> {
+    if [src, dst]
+        .iter()
+        .any(|n| n.path().as_os_str().as_bytes().contains(&0))
+    {
+        return Err(Error::new(Kind::ValueError, "embedded null byte"));
+    }
+    match op {
+        0 => copyfile(src, dst, follow)?,
+        1 => metadata::copymode(src, dst, follow)?,
+        2 => metadata::copystat(src, dst, follow)?,
+        3 => metadata::copyxattr(src, dst, follow)?,
+        4 | 5 => {
+            let path = dst
+                .path()
+                .is_dir()
+                .then(|| destination(src, dst))
+                .transpose()?;
+            let joined;
+            let dst = if let Some(path) = &path {
+                joined = dst.joined(path)?;
+                &joined
+            } else {
+                dst
+            };
+            copyfile(src, dst, follow)?;
+            if op == 4 {
+                metadata::copymode(src, dst, follow)?;
+            } else {
+                metadata::copystat(src, dst, follow)?;
+            }
+            return Ok(path);
+        }
+        _ => unreachable!(),
+    }
+    Ok(None)
+}
+
+#[path = "metadata.rs"]
+mod metadata;
+
 /// # Safety
-/// The two handles are rooted and their tags are 0 (str), 1 (bytes), or 2 (Path).
-/// A successful call transfers a new reference to the *original* destination.
+/// The two handles are rooted and tagged as str, bytes, or Path. For a Path
+/// supplied to copy/copy2, a directory produces a str; otherwise tag the
+/// original Path as a member of the compiler's str | Path union.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_shutil_copyfile(
+pub unsafe extern "C" fn imre_shutil_copy(
+    op: u32,
     src: *const (),
     src_tag: u32,
     dst: *const (),
     dst_tag: u32,
     follow: u32,
-) -> *const () {
-    // SAFETY: the compiler roots the operands throughout the copy and provides their exact tags.
+) -> usize {
+    // SAFETY: both handle tags describe their exact, live compiler operands.
     let result = unsafe {
-        copyfile(
+        run(
+            op,
             &Name::from_handle(src, src_tag),
             &Name::from_handle(dst, dst_tag),
             follow != 0,
         )
     };
     finish(
-        result.map(|()| {
-            // SAFETY: acquire exactly one result reference before the caller releases its operands.
+        result.and_then(|joined| {
+            if matches!(op, 1..=3) {
+                return Ok(0);
+            }
+            if let Some(joined) = joined {
+                let value = joined.into_os_string();
+                return Ok(if dst_tag == 1 {
+                    Rc::into_raw(Rc::new(value.into_vec())) as usize
+                } else {
+                    Rc::into_raw(Rc::new(super::super::paths::path_utf8(value)?)) as usize
+                });
+            }
+            // SAFETY: return exactly one new reference of the original destination's type.
             unsafe {
                 match dst_tag {
                     0 => Rc::increment_strong_count(dst.cast::<Str>()),
@@ -177,8 +264,13 @@ pub unsafe extern "C" fn imre_shutil_copyfile(
                     _ => unreachable!(),
                 }
             }
-            dst
+            Ok(dst as usize
+                | if matches!(op, 4 | 5) && dst_tag == 2 {
+                    6
+                } else {
+                    0
+                })
         }),
-        std::ptr::null(),
+        0,
     )
 }
