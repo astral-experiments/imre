@@ -35,7 +35,7 @@ def report(stderr, failed_fixture):
 def compare(a, source, work, *, upstream=False):
     flags = [["-v"]] if upstream else [[], ["-v"], ["-q"], ["-f"]]
     refs = [(opt, invoke([a.python, "-E", "-B", source, *opt])) for opt in flags]
-    failed = not upstream and source.stem in {"lifecycle", "setup_fields"}
+    failed = not upstream and source.stem in {"lifecycle", "setup_fields", "identity"}
     if upstream and any(
         ref.returncode or not re.search(r"^Ran [1-9]\d* tests? in ", ref.stderr, re.M)
         for _, ref in refs
@@ -142,7 +142,7 @@ def main():
         sources = [source]
     else:
         sources = [
-            FIXTURES / name for name in ("discover.py", "lifecycle.py", "setup_fields.py", "empty.py")
+            FIXTURES / name for name in ("discover.py", "lifecycle.py", "setup_fields.py", "identity.py", "empty.py")
         ]
     with tempfile.TemporaryDirectory() as td:
         checks = sum(

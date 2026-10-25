@@ -102,26 +102,14 @@ pub(super) fn assigned(target: &ast::Stmt) -> Option<&str> {
 impl Checker<'_> {
     pub(super) fn checked_bound_read(&self, slot: usize, flag: usize, name: &str) -> Expr {
         let value = self.read_local(slot);
-        let (kind, message) = if self.interactive_names {
-            ("NameError", format!("name '{name}' is not defined"))
-        } else {
-            (
-                "UnboundLocalError",
-                format!(
-                    "cannot access local variable '{name}' where it is not associated with a value"
-                ),
-            )
-        };
-        let failure = Statement::Raise(Some(Expr {
-            ty: Type::Exception,
-            kind: ExprKind::Exception {
-                kind: exception_kind(kind).unwrap(),
-                message: Some(Box::new(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Str(message),
-                })),
+        let failure = unbound_failure(
+            name,
+            if self.interactive_names {
+                Missing::Interactive
+            } else {
+                Missing::Local
             },
-        }));
+        );
         Expr {
             ty: value.ty,
             kind: ExprKind::Scope {
@@ -130,5 +118,201 @@ impl Checker<'_> {
                 clear: vec![],
             },
         }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub(super) struct Binding {
+    hint: Type,
+    may_store: bool,
+}
+
+/// Assignment expressions in omitted assertions still bind in the enclosing function.
+/// A comprehension binds a walrus target there too; a lambda body has its own scope.
+pub(super) fn omitted_assert_bindings(
+    body: &[ast::Stmt],
+) -> (HashMap<String, Binding>, HashSet<String>) {
+    #[derive(Default)]
+    struct Bindings {
+        names: HashMap<String, Binding>,
+        live: HashSet<String>,
+        external: HashSet<String>,
+        inside: bool,
+    }
+    impl<'a> Visitor<'a> for Bindings {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            match stmt {
+                ast::Stmt::FunctionDef(f) => {
+                    self.live.insert(f.name.to_string());
+                }
+                ast::Stmt::ClassDef(c) => {
+                    self.live.insert(c.name.to_string());
+                }
+                ast::Stmt::Global(g) => self
+                    .external
+                    .extend(g.names.iter().map(ToString::to_string)),
+                ast::Stmt::Nonlocal(g) => self
+                    .external
+                    .extend(g.names.iter().map(ToString::to_string)),
+                ast::Stmt::Assert(_) => {
+                    self.inside = true;
+                    walk_stmt(self, stmt);
+                    self.inside = false;
+                }
+                _ => walk_stmt(self, stmt),
+            }
+        }
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            if !self.inside {
+                if let ast::Expr::Name(name) = expr
+                    && name.ctx != ast::ExprContext::Load
+                {
+                    self.live.insert(name.id.to_string());
+                }
+                if !matches!(expr, ast::Expr::Lambda(_)) {
+                    walk_expr(self, expr);
+                }
+                return;
+            }
+            if let ast::Expr::Lambda(lambda) = expr {
+                if let Some(parameters) = &lambda.parameters {
+                    self.visit_parameters(parameters);
+                }
+                return;
+            }
+            if let ast::Expr::Named(named) = expr
+                && let Some(name) = named.target.as_name_expr()
+            {
+                let hint = match &*named.value {
+                    ast::Expr::BooleanLiteral(_) => Type::Bool,
+                    ast::Expr::NumberLiteral(n) => match n.value {
+                        ast::Number::Int(_) => Type::Int,
+                        ast::Number::Float(_) => Type::Float,
+                        _ => Type::None,
+                    },
+                    ast::Expr::StringLiteral(_) => Type::Str,
+                    ast::Expr::BytesLiteral(_) => Type::Bytes,
+                    _ => Type::None,
+                };
+                self.names
+                    .entry(name.id.to_string())
+                    .and_modify(|b| {
+                        if b.hint != hint {
+                            b.hint = Type::None;
+                        }
+                    })
+                    .or_insert(Binding {
+                        hint,
+                        may_store: false,
+                    });
+            }
+            walk_expr(self, expr);
+        }
+    }
+    let mut scan = Bindings::default();
+    scan.visit_body(body);
+    scan.names.retain(|name, b| {
+        b.may_store = scan.live.contains(name);
+        !scan.external.contains(name)
+    });
+    (scan.names, scan.live)
+}
+
+enum Missing {
+    Local,
+    Interactive,
+    Free,
+}
+fn unbound_failure(name: &str, missing: Missing) -> Statement {
+    let (kind, message) = match missing {
+        Missing::Interactive => ("NameError", format!("name '{name}' is not defined")),
+        Missing::Local => (
+            "UnboundLocalError",
+            format!(
+                "cannot access local variable '{name}' where it is not associated with a value"
+            ),
+        ),
+        Missing::Free => (
+            "NameError",
+            format!(
+                "cannot access free variable '{name}' where it is not associated with a value in enclosing scope"
+            ),
+        ),
+    };
+    Statement::Raise(Some(Expr {
+        ty: Type::Exception,
+        kind: ExprKind::Exception {
+            kind: exception_kind(kind).unwrap(),
+            message: Some(Box::new(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Str(message),
+            })),
+        },
+    }))
+}
+
+impl Checker<'_> {
+    /// Read the first operand of a call, subscription or attribute before any arguments.
+    pub(super) fn unbound_assert_root<'a>(&self, expr: &'a ast::Expr) -> Option<&'a str> {
+        if self.omitted_assert_locals.is_empty() && self.omitted_assert_free.is_empty() {
+            return None;
+        }
+        let mut root = expr;
+        loop {
+            root = match root {
+                ast::Expr::Name(name) => {
+                    let name = name.id.as_str();
+                    return ((self.omitted_assert_locals.contains_key(name)
+                        || self.omitted_assert_free.contains_key(name))
+                        && !self.names.contains_key(name))
+                    .then_some(name);
+                }
+                ast::Expr::Attribute(a) => &a.value,
+                ast::Expr::Call(c) => &c.func,
+                ast::Expr::Subscript(s) => &s.value,
+                _ => return None,
+            };
+        }
+    }
+
+    pub(super) fn unbound_assert_captures(&self) -> HashMap<String, Binding> {
+        let mut inherited = self.omitted_assert_free.clone();
+        inherited.extend(
+            self.omitted_assert_locals
+                .iter()
+                .map(|(name, b)| (name.clone(), *b)),
+        );
+        inherited.retain(|name, _| !self.names.contains_key(name));
+        inherited
+    }
+    pub(super) fn omitted_assert_read(
+        &mut self,
+        name: &str,
+        expected: Option<Type>,
+        node: &ast::Expr,
+    ) -> Result<Expr, String> {
+        let (binding, missing) = if let Some(b) = self.omitted_assert_locals.get(name) {
+            (b, Missing::Local)
+        } else {
+            let b = &self.omitted_assert_free[name];
+            if b.may_store {
+                return Err(error(
+                    self.source,
+                    node,
+                    "captured local may be initialized after this definition",
+                ));
+            }
+            (b, Missing::Free)
+        };
+        let ty = expected.unwrap_or(binding.hint);
+        let unreachable_slot = self.hidden(ty);
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body: vec![unbound_failure(name, missing)],
+                value: Box::new(self.local(unreachable_slot)),
+                clear: vec![],
+            },
+        })
     }
 }

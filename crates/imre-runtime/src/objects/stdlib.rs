@@ -28,19 +28,60 @@ fn ordered_indices(
     Some(indices)
 }
 
+/// Tuple comparison may run out of traversal space. Merge indices in scratch
+/// storage so an error can leave the caller's list and all its owners untouched.
+unsafe fn tuple_key_order(words: &[usize], reverse: bool) -> Option<SmallVec<[usize; 4]>> {
+    let mut order = SmallVec::<[usize; 4]>::new();
+    order.try_reserve_exact(words.len()).ok()?;
+    order.extend(0..words.len());
+    let mut scratch = SmallVec::<[usize; 4]>::new();
+    scratch.try_reserve_exact(words.len()).ok()?;
+    scratch.resize(words.len(), 0);
+    let mut width = 1;
+    while width < words.len() {
+        for (input, output) in order.chunks(2 * width).zip(scratch.chunks_mut(2 * width)) {
+            let (mut left, mut right) = input.split_at(width.min(input.len()));
+            let mut slots = output.iter_mut();
+            while let (Some(&a), Some(&b)) = (left.first(), right.first()) {
+                // SAFETY: the key list roots all tuples of this exact ordered shape.
+                let cmp = unsafe {
+                    super::values::tuple_order(words[a] as *const usize, words[b] as *const usize)
+                }?;
+                let first = if (if reverse { cmp.reverse() } else { cmp }).is_le() {
+                    &mut left
+                } else {
+                    &mut right
+                };
+                *slots.next().unwrap() = first[0];
+                *first = &first[1..];
+            }
+            slots
+                .into_slice()
+                .copy_from_slice(if left.is_empty() { right } else { left });
+        }
+        std::mem::swap(&mut order, &mut scratch);
+        width *= 2;
+    }
+    Some(order)
+}
+
 /// Walks each cycle with owner-preserving swaps, marking visited indices in the permutation.
 fn permute<T>(values: &mut [T], order: &mut [usize]) {
-    if values.len() != order.len() {
+    permute_with(values.len(), order, |a, b| values.swap(a, b));
+}
+
+fn permute_with(len: usize, order: &mut [usize], mut swap: impl FnMut(usize, usize)) {
+    if len != order.len() {
         fail("SystemError", "sort key count differs from value count");
     }
-    for start in 0..values.len() {
+    for start in 0..len {
         let mut current = start;
         while order[current] != current {
             let next = std::mem::replace(&mut order[current], current);
             if next == start {
                 break;
             }
-            values.swap(current, next);
+            swap(current, next);
             current = next;
         }
     }
@@ -191,13 +232,15 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Option<SmallVe
         object(keys.cast()).0.with(|storage| {
             let values = storage.sequence();
             values.check_kind(kind);
+            if kind == 6 {
+                return tuple_key_order(&values.values, reverse);
+            }
             ordered_indices(values.values.len(), reverse, |left, right| {
                 let (left, right) = (values.values[left], values.values[right]);
                 match kind {
                     1 => left.cmp(&right),
                     10 => super::string_enums::compare(left, right),
                     3 => (&*(left as *const Str)).cmp(&*(right as *const Str)),
-                    6 => super::values::tuple_order(left as *const usize, right as *const usize),
                     8 => (&*(left as *const Bytes)).cmp(&*(right as *const Bytes)),
                     _ => fail("SystemError", "unsupported sort key representation"),
                 }
@@ -225,8 +268,14 @@ pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const 
         // SAFETY: the exact descriptor and cached length travel with the owners.
         let saved = unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let words = storage.sequence_mut();
-                words.check_kind(kind);
+                let words = if storage.sequence_storage().rows().is_some() {
+                    debug_assert_eq!(kind, 6);
+                    storage.sequence_storage_mut()
+                } else {
+                    let words = storage.sequence_mut();
+                    words.check_kind(kind);
+                    words
+                };
                 std::mem::replace(words, Words::sorting_empty(kind))
             })
         };
@@ -255,7 +304,7 @@ pub unsafe extern "C" fn imre_list_extend_unhinted(list: *const (), kind: u32) {
         // SAFETY: the real length stays unchanged at zero.
         unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let words = storage.sequence_mut();
+                let words = storage.sequence_storage_mut();
                 if words.is_sorting_empty() {
                     words.update_header();
                 }
@@ -294,11 +343,11 @@ pub unsafe extern "C" fn imre_sort_restore(
         // any value during access. Normal scope cleanup later drops the additions.
         unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let current = storage.sequence_mut();
+                let current = storage.sequence_storage_mut();
                 let modified = !current.is_sorting_empty();
                 object(saved.cast())
                     .0
-                    .with_mut(|storage| std::mem::swap(current, storage.sequence_mut()));
+                    .with_mut(|storage| std::mem::swap(current, storage.sequence_storage_mut()));
                 modified
             })
         }
@@ -360,9 +409,17 @@ pub unsafe extern "C" fn imre_sort_by_keys(
         // SAFETY: no storage reference escapes and swaps never drop an owner.
         unsafe {
             object(values.cast()).0.with_mut(|storage| {
-                let values = storage.sequence_mut();
-                values.check_kind(element_kind);
-                permute(&mut values.values, &mut order);
+                if let Some(rows) = storage.sequence_storage_mut().rows_mut() {
+                    match rows.reorder_shared(&order) {
+                        Ok(false) => permute_with(rows.len(), &mut order, |a, b| rows.swap(a, b)),
+                        Ok(true) => {}
+                        Err(error) => error.raise(),
+                    }
+                } else {
+                    let values = storage.sequence_mut();
+                    values.check_kind(element_kind);
+                    permute(&mut values.values, &mut order);
+                }
             })
         };
     }

@@ -710,6 +710,7 @@ dependencies = [
  "sha2",
  "smallvec",
  "toml",
+ "toml_datetime",
  "toml_parser",
  "unicode-case-mapping",
 ]
