@@ -164,7 +164,11 @@ impl OptionSpec {
     pub(super) fn flag_value<'a>(
         &'a self,
         previous: Option<Bound<'a>>,
+        spelling: &str,
     ) -> Result<Bound<'a>, String> {
+        if self.action == Action::BooleanOptional {
+            return Ok(Bound::Bool(!spelling.starts_with("--no-")));
+        }
         if self.action == Action::Count {
             let n = match previous {
                 Some(Bound::Scalar(Scalar::Int(n))) => n,
