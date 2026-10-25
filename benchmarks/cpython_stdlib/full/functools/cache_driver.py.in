@@ -21,6 +21,10 @@ def cached(PARAMETERS) -> int:
     raise RuntimeError("unreachable")
 
 
+# Infer this wrapper's CacheInfo layout without taking a fixture-only snapshot.
+snapshots = [cached.cache_info() for _ in range(0)]
+
+
 def dispatch(command: int) -> int:
     if command == 0:
         try:
@@ -30,13 +34,41 @@ def dispatch(command: int) -> int:
         else:
             emit(f"result {value}")
     elif command == 1:
-        hits, misses, maxsize, current = cached.cache_info()
-        emit(f"info {hits} {misses} {maxsize} {current}")
+        snapshot = cached.cache_info()
+        token = len(snapshots)
+        snapshots.append(snapshot)
+        hits, misses, maxsize, current = snapshot
+        emit(f"info {token} {hits} {misses} {maxsize} {current}")
     elif command == 2:
         cached.cache_clear()
         emit("cleared")
     elif command == 3:
         emit("parameters " + repr(cached.cache_parameters()))
+    elif command == 4:
+        held = snapshots[int(input())]
+        field = input()
+        if field == "hits":
+            emit(f"field {held.hits}")
+        elif field == "misses":
+            emit(f"field {held.misses}")
+        elif field == "maxsize":
+            emit(f"field {held.maxsize}")
+        elif field == "currsize":
+            emit(f"field {held.currsize}")
+        else:
+            raise RuntimeError("unknown cache_info field")
+    elif command == 5:
+        expected_hits, expected_misses = int(input()), int(input())
+        size_text = input()
+        expected_count = int(input())
+        if size_text == "None":
+            unlimited = functools._CacheInfo(hits=expected_hits, misses=expected_misses,
+                                             maxsize=None, currsize=expected_count)
+            emit("expected " + repr(unlimited[:]))
+        else:
+            bounded = functools._CacheInfo(hits=expected_hits, misses=expected_misses,
+                                           maxsize=int(size_text), currsize=expected_count)
+            emit("expected " + repr(bounded[:]))
     return 0
 
 

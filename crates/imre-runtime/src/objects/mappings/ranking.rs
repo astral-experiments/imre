@@ -102,7 +102,7 @@ pub unsafe extern "C" fn imre_counter_most_common(
                 tuple.add(1).write(entry.count.into_word());
                 result.values.push(tuple as usize);
             }
-            Some(Rc::into_raw(result.into_object()))
+            Some(crate::ObjectOwner::into_raw(result.into_object()))
         })
     };
     result.unwrap_or_else(|| Error::allocation().returning(std::ptr::null()))

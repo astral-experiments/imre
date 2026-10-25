@@ -1,0 +1,12 @@
+{
+  "compiler_commit": "2e5aaf08adb58a6f39aad53f8a1c3e29da0ff789",
+  "tree": "35cb6131cce23b73a141245406e81060ca9c0056",
+  "parents": [
+    "d0b874002792dc9eb89eb0e10f7dacfedec34bf5"
+  ],
+  "binary_sha256": {
+    "imre": "62b5cdde7cd18052d71637e13d69f3218078344cb6d50d0c5abf4a487c11e187",
+    "libimre_runtime.a": "1c9614ff3f4ab155e6f78441463e25ad3fa13dfcf91d8f550d63aefbcf808751"
+  },
+  "description": "Partial local reassignment restores the two str.join bodies; conditional Placeholder diagnostic remains"
+}

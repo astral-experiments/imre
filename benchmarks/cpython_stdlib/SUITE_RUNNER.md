@@ -4,6 +4,67 @@ Import `suite_inventory` and `suite_native` from this directory. Use the release
 test-enabled Python for discovery, shared fixtures and host assertions. Build each
 native entry at both `Toolchain(..., level=0)` and `level=3`.
 
+## Run an existing suite in both compiler modes
+
+[suite_modes.py](suite_modes.py) invokes the selected checkout's own runner
+twice. It passes `--reachable-only` to native builds on the second invocation.
+The owner supplies a runner that accepts `--imre`, `--runtime`, `--clang`,
+`--cpython-source` and `--result` and emits a full O0/O3 evidence pair. The
+launcher uses that checkout's validator and reference; it copies no outcomes
+between modes. For example, from a clean checkout with the pinned Python:
+
+```sh
+python3 benchmarks/cpython_stdlib/suite_modes.py \
+  --source "$(git rev-parse HEAD)" --entry benchmarks/cpython_stdlib/full/unittest/run.py \
+  --reference benchmarks/cpython_stdlib/full/unittest/reference-linux.json \
+  --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 \
+  --cpython-source /path/to/cpython-3.14.5 --output /tmp/unittest-evidence
+```
+
+Choose a fresh output directory. `ordinary.json` and `reachable.json` each
+retain every original occurrence and its body, assertions, operation, fixture,
+and reason. `source.json` identifies the suite revision, inputs and binary
+hashes, and both runner and validator exit codes. A runner failure, missing
+report or invalid pair fails the command, even if the other mode succeeds.
+
+The **CI** workflow's optional `unittest_source` dispatch builds an exact Imre
+commit on Linux and uploads those three files as `unittest-evidence-linux`.
+It uses the suite and validator at the selected commit, including when that
+commit predates this launcher. The build step in the dispatch establishes the
+compiler's provenance; a local invocation records the supplied binary hashes.
+
+### Verified upstream example
+
+The [Linux example](full/unittest/runner-modes-example-linux.tar.gz) contains
+both full reports and the receipt for Imre `ec4622afddbdf0b4b892220eae6580245a2f3291`.
+The unchanged CPython method
+`test.test_unittest.testmock.testmock.MockTest.test_assert_called_once_message_not_called`
+exercises a failing native `Mock.assert_called_once()` and checks its diagnostic
+with native assertions. Its original method and default fixture ran under Imre
+in all four configurations. To see its record and the actual build commands:
+
+```sh
+example=benchmarks/cpython_stdlib/full/unittest/runner-modes-example-linux.tar.gz
+tar -xOzf "$example" reachable.json | jq '.[] | .records[] | select(.id | endswith(".MockTest.test_assert_called_once_message_not_called"))'
+tar -xOzf "$example" source.json | jq '.modes'
+```
+
+Each configuration retained all **1,090** original occurrences: 8 fully native,
+8 native bodies with host fixtures, 9 host-driven native operations, 9 blocked,
+1,054 reference-only, and 2 original skips. Each mode observed 37 native builds
+at O0 and 37 at O3. Both reports matched independent runs byte for byte.
+`compiler_commands` counts actual invocations; `runner_mode_flag` records
+whether the owner's runner received its own `--reachable-only` switch.
+A record whose declared mode disagrees with the compiler, or a missing build
+at either optimization level, appears in `mode_errors` and fails the run.
+
+## Discover methods on a known class
+
+To discover method names in native code, pass a statically known class to
+`unittest.defaultTestLoader.getTestCaseNames`. The [verified loader example](full/unittest/NATIVE_LOADER.md)
+uses CPython's original `bar.test_bar.PassingTest` and documents which module
+and suite runner calls still fail.
+
 ## A verified upstream example
 
 This is the `test_stop` case used by [the unittest gate](full/unittest/run.py).
@@ -36,7 +97,7 @@ for level in (0, 3):
                       Path("/path/to/clang"), level)
     with TemporaryDirectory() as work:
         execute = native_method(tools, Path(work), source, "Test_TestResult", test_id,
-                                testcase_fixture("bool"), operation=("imre", "unittest.TestResult.stop"))
+                                testcase_fixture(), operation=("imre", "unittest.TestResult.stop"))
         report = run_evidence(load_suite("test.test_unittest"), {test_id: execute}, reference,
                               level, exceptions=reference_skips(level))
     row, = [r for r in report["records"] if r["id"] == test_id]
@@ -53,9 +114,8 @@ legitimate repeated IDs.
 
 `native_method` copies the pinned definition as bytes and records its SHA-256.
 The fixture is an Imre source prefix ending inside a class named `NativeCase`.
-Use the default fixture for the supported `TestCase` methods; the boolean
-equality fixture is shared here while the compiler requires a single parameter
-type per method. Module owners may provide their actual typed instance fixture.
+The default fixture inherits the native `TestCase`, including its boolean and
+integer equality checks. Module owners may provide their actual typed instance fixture.
 A decorated method requires a dedicated adapter; class and module fixtures
 execute on CPython. If the test requires populated instance state, reproduce or
 transfer that state into the native fixture before crediting its body.
@@ -111,6 +171,53 @@ For example, the original `TestTemplate.test_invalid_placeholders` saves
 s.substitute, ...)`. Its source prefix is `"from string import Template\n" +
 testcase_fixture()`. Pass `operation=("imre", "string.Template.substitute")` to
 `native_method`; the original class and module lifecycle remain host-assisted.
+
+### Running a method with native default fixtures
+
+Use `NativeDefaultMethod` for a discovered, directly defined method of a plain
+`unittest.TestCase` with default module, class, and instance fixtures. For
+example, the original CPython 3.14.5
+`test.test_unittest.testmock.testmock.MockTest.test_assert_not_called` calls a
+Mock child and then verifies that its second `assert_not_called()` raises
+`AssertionError`. The class, assertion, Mock, and fixture run in the same native
+process. Discovery and the reference inventory still run on CPython.
+
+```python
+from suite_inventory import load_suite
+from suite_native import NativeDefaultMethod, Toolchain, run_evidence
+
+test_id = "test.test_unittest.testmock.testmock.MockTest.test_assert_not_called"
+source = upstream / "Lib/test/test_unittest/testmock/testmock.py"
+entry = NativeDefaultMethod(
+    Toolchain(imre, runtime, clang, level), directory, source,
+    "764585ec5d54688b483dca510d6fa187a9fc2531",
+    ("imre", "unittest.mock.Mock.assert_not_called"),
+)
+report = run_evidence(load_suite(reference["module"]), {}, reference, level,
+                      native_defaults={(test_id, 1): entry})
+```
+
+Use a fresh existing directory for each binary and the full pinned reference
+from your module. Pass `reachable_only=True` to `Toolchain` to check that mode.
+Declare the location of the operation explicitly. For an operation delegated
+to a CPython child, pass `("cpython", description)`; use `assertions="mixed"`
+if assertions also run in both processes. The native entry alone cannot
+establish that a delegated operation or assertion ran in Imre.
+If your full reference includes approved skips, pass the same per-occurrence
+`exceptions` as in your other reports.
+
+The entry checks the Git blob, the discovered method's code, and the original
+import bindings. It preserves the class header and the complete method bytes,
+then invokes native `unittest.main()` with `-v`. A pass requires exit 0, empty
+stdout, the exact staged ID, one test, and the success summary on stderr. Only
+elapsed time is normalized. The receipt records the original ID and occurrence,
+the staged `__main__` ID, source blob, method and entry hashes, mode, streams,
+and status. The package itself has not been imported natively by this path.
+
+A decorated method or class, custom setup/teardown, registered cleanup,
+configured instance, additional base, class helper or unresolved global needs
+its actual fixture. Use the host fixture path when applicable and record its
+role. A native compile blocker or unsuccessful run never earns pass credit.
 
 ### Matching an exception message
 

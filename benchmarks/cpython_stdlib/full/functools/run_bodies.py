@@ -19,9 +19,9 @@ from suite_native import Toolchain, native_method, run_in_fixtures
 SOURCE = HERE / "upstream/Lib/test/test_functools.py"
 MODULE = "test.test_functools"
 
-# The shared TestCase accepts integers. This body compares strings twice.
-# Preserve the ordinary equality predicate and unittest's failure formatting.
-STRING_EQUALITY = """    def assertEqual(self, first: str, second: str, msg: str | None = None) -> None:
+# These native fixtures compare the actual operands, using ordinary equality
+# and unittest's failure formatting. The method source is copied unchanged.
+EQUALITY = """    def assertEqual(self, first: OPERAND, second: OPERAND, msg: str | None = None) -> None:
         if first != second:
             raise AssertionError(unittest.TestCase()._formatMessage(msg, f"{first!r} != {second!r}"))
 """
@@ -50,6 +50,16 @@ class Fixtures:
         source = SOURCE.read_bytes()
         self.lines = source.decode("utf-8").splitlines(keepends=True)
         self.globals = declared(ast.parse(source).body)
+        # This fixture comes from the same pinned interpreter as the host hooks.
+        # Send only its original declaration to the native compiler.
+        import test
+
+        manifest = json.loads((HERE / "UPSTREAM.json").read_text())
+        verify_interpreter_tests({"files": manifest["interpreter_fixtures"]})
+        support = (Path(test.__file__).resolve().parent / "support" / "__init__.py").read_bytes()
+        support_lines = support.decode("utf-8").splitlines(keepends=True)
+        helper = declared(ast.parse(support).body)["EqualToForwardRef"]
+        self.forward_ref_helper = "".join(support_lines[helper.lineno - 1:helper.end_lineno])
 
     def source(self, node):
         first = min([node.lineno, *(d.lineno for d in getattr(node, "decorator_list", ()))])
@@ -105,13 +115,17 @@ class Fixtures:
                 helper_nodes[helper.lineno] = self.source(helper)
                 collect(helper)
 
-        seen, declarations = set(), {}
+        seen, declarations, external = set(), {}, []
         imports = {"import unittest"}
         while names - seen:
             name = sorted(names - seen)[0]
             seen.add(name)
             if name in {"functools", "py_functools", "c_functools"}:
                 imports.add("import functools" if name == "functools" else f"import functools as {name}")
+                continue
+            if name == "EqualToForwardRef":
+                imports.add("import annotationlib")
+                external.append(self.forward_ref_helper)
                 continue
             source_node = self.globals.get(name)
             if source_node is None or source_node is node:
@@ -122,14 +136,16 @@ class Fixtures:
                 collect(source_node)
                 # Conditional global declarations are dedented to module scope.
                 declarations[source_node.lineno] = dedent(self.source(source_node))
-        simple_equality = method == "test_with_bound_and_unbound_methods"
+        equality = ({"test_with_bound_and_unbound_methods": "str",
+                     "test_get_annotations": "dict[str, type]",
+                     "test_lru_cache_parameters": ""}.get(method))
         fixture = "\n".join(sorted(imports)) + "\n\n"
-        fixture += "\n".join(declarations[k] for k in sorted(declarations))
-        fixture += "\nclass NativeCase" + (":\n" if simple_equality else "(unittest.TestCase):\n")
+        fixture += "\n".join(external + [declarations[k] for k in sorted(declarations)])
+        fixture += "\nclass NativeCase" + (":\n" if equality is not None else "(unittest.TestCase):\n")
         fixture += "".join(member_texts.values())
         fixture += "".join(helper_nodes[k] for k in sorted(helper_nodes))
-        if simple_equality:
-            fixture += STRING_EQUALITY
+        if equality is not None:
+            fixture += EQUALITY.replace(": OPERAND", f": {equality}" if equality else "")
         return owner.__name__, node, fixture
 
 

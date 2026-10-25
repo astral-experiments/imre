@@ -91,7 +91,7 @@ unsafe extern "C" fn imre_py_bytes_from_string_and_size(data: *const c_char, siz
     }
     let mut bytes = Vec::new();
     if bytes.try_reserve_exact(size).is_err() {
-        return extensions_error(Kind::MemoryError, "", Py::NULL);
+        return Error::memory_error().returning(Py::NULL);
     }
     if data.is_null() {
         // C permits unspecified contents here. Do not expose uninitialized Rust memory.
@@ -100,7 +100,8 @@ unsafe extern "C" fn imre_py_bytes_from_string_and_size(data: *const c_char, siz
         // SAFETY: C supplies a readable buffer of size bytes, with no termination requirement.
         bytes.extend_from_slice(unsafe { std::slice::from_raw_parts(data.cast::<u8>(), size) });
     }
-    Owned::bytes(bytes).into_py()
+    Owned::try_bytes(bytes)
+        .map_or_else(|| Error::memory_error().returning(Py::NULL), Owned::into_py)
 }
 
 #[unsafe(no_mangle)]
