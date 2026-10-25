@@ -21,19 +21,21 @@ The implementation covers [file contents and copy errors (#492)](https://github.
 | --- | ---: | ---: |
 | Fully native, including fixtures | 0 | 0 |
 | Native method body, assertions and operations; host fixtures | 15 | 15 |
-| Host body and assertions driving native operations | 81 | 81 |
+| Host body and assertions driving native operations | 84 | 84 |
 | Mixed host and native operations | 55 | 55 |
 | Reference only | 0 | 0 |
-| Blocked | 22 | 22 |
+| Blocked | 19 | 19 |
 | Observed failures | 0 | 0 |
 | Original CPython skips | 50 | 50 |
 | **Total** | **223** | **223** |
 
 Of the 55 mixed methods, 17 use original syscall mocks or a host stream copy during [zero-copy operations](fastcopy.md); 14 use a rename mock, copy callback or path conversion during moves; 10 use host operands or callbacks for [archive dispatch](archives.md); 8 call original Python deletion handlers, 4 use host callbacks or path conversions during tree copying, and 2 use the original default-search-path mocks. In those last two methods, both native children have no `PATH`: they request `os.confstr("CS_PATH")` and, after `ValueError`, `os.defpath`, then search for the executable.
 
-The 22 blocked methods include 4 zero-copy cases whose syscall mocks raise a Python `ZeroDivisionError`, 4 stream open/close methods, 3 `copyfileobj` methods, 4 terminal-size methods, 2 miscellaneous methods, 3 deletion methods, 1 tree-copy method and 1 public API inventory method. The 50 skips retain their original CPython reasons.
+The 19 blocked methods include 4 zero-copy cases whose syscall mocks raise a Python `ZeroDivisionError`, 4 stream open/close methods, 4 terminal-size methods, 2 miscellaneous methods, 3 deletion methods, 1 tree-copy method and 1 public API inventory method. The 50 skips retain their original CPython reasons.
 
-These reports use compiler tree `303a34eca6d143d907ab8ae9c5b8891c1ed0396c` (commit `7f0dee8`, including random, archive, and fast-copy work on main `cb99ce6`). [All four unchanged suite startup modes](archive-fastcopy-startup-linux.json) reach `Lib/test/test_shutil.py:31` and stop there; none executes a test. [The import trace](import-sequence-linux.json) shows the real Linux `posix` module binding at line 27, then the `test.support` imports at lines 31–33. On the same Imre tree, an available module, a genuinely absent module and a module raising `ImportError` during initialization all hit the same import-order restriction. The [probe](import_sequence.py) records its CPython controls separately from module operations.
+The aggregate and method reports use stream tree `ae033111d2a0f77991b345c7e57fa50fa96b674d` (commit `cf00a19`). [All four stream IDs](stream-linux.json) are included: three host-driven native operations, each copying 2 MiB through the same open file descriptions, and the original Windows skip.
+
+The separate startup and import probes use compiler tree `303a34eca6d143d907ab8ae9c5b8891c1ed0396c` (commit `7f0dee8`, including random, archive, and fast-copy work on main `cb99ce6`). [All four unchanged suite startup modes](archive-fastcopy-startup-linux.json) reach `Lib/test/test_shutil.py:31` and stop there; none executes a test. [The import trace](import-sequence-linux.json) shows the real Linux `posix` module binding at line 27, then the `test.support` imports at lines 31–33. On the same Imre tree, an available module, a genuinely absent module and a module raising `ImportError` during initialization all hit the same import-order restriction. The [probe](import_sequence.py) records its CPython controls separately from module operations.
 
 ```sh
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/evidence.py \
@@ -67,14 +69,14 @@ The [paired run](https://github.com/astral-sh/imre/actions/runs/40184043145) obs
 
 ## Reproducing complete-method attempts
 
-[method-attempts-linux.json](method-attempts-linux.json) records the compiler and runtime hashes, original method and decorator hashes, and the first diagnostic for each blocked build. The devbox used the [verified hosted compiler and runtime](https://github.com/astral-sh/imre/actions/runs/40194394062) from archive and random tree `aa9cdee42fa02f88f14dcebbdbe06f972bdeb660`. All 173 reference passes were attempted under their original CPython fixtures at both levels. Fifteen native bodies completed; 158 could not compile. Of these, 105 reached the starred tuple in `test/support/os_helper.py:778`, tracked in [#958](https://github.com/astral-sh/imre/pull/958). Each remaining diagnostic is recorded per method.
+[method-attempts-linux.json](method-attempts-linux.json) records the compiler and runtime hashes, original method and decorator hashes, and the first diagnostic for each blocked build. The devbox used stream tree `ae033111d2a0f77991b345c7e57fa50fa96b674d`; the report includes both binary digests. All 173 reference passes were attempted under their original CPython fixtures at both levels. Fifteen native bodies completed; 158 could not compile. Of these, 105 reached the starred tuple in `test/support/os_helper.py:778`, tracked in [#958](https://github.com/astral-sh/imre/pull/958). Each remaining diagnostic is recorded per method.
 
 Reproduce the method attempts with the pinned interpreter and [vendored shared fixtures](../shared/UPSTREAM.json):
 
 ```sh
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/attempt_methods.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
-    --compiler-tree aa9cdee42fa02f88f14dcebbdbe06f972bdeb660 --result /tmp/method-attempts-linux.json
+    --compiler-tree ae033111d2a0f77991b345c7e57fa50fa96b674d --result /tmp/method-attempts-linux.json
 ```
 
 Pass `--method-attempts /tmp/method-attempts-linux.json` to the evidence runner to use this result.

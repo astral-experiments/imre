@@ -1,8 +1,8 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "compiler_sha256": "57214a13d2addabe75dd21944f431ff8d1242a4878335f612639503b83ae8e9e",
-  "compiler_tree": "303a34eca6d143d907ab8ae9c5b8891c1ed0396c",
-  "runtime_sha256": "c4b54cb539001bf938fbb96782383f9396af0ba82f1d31eab98a9d0c43f87c14",
+  "compiler_sha256": "b161177ac3e3deccff02affcacd88ccd5ebc0fd502c8dc51a5a778aafc0edd79",
+  "compiler_tree": "ae033111d2a0f77991b345c7e57fa50fa96b674d",
+  "runtime_sha256": "47d6671f3ed89d3fa1d8ba799a1c41742067d8ab2b568dc16ac1860d7f9c879d",
   "fixture_manifest_sha256": "eb43d0c33580d4a45ffa369afd186b3243f9bf38b15f80fbee02b50254f4bdd9",
   "schema": "imre.shutil-method-attempts.v1",
   "denominator": 223,
@@ -2880,7 +2880,7 @@
         "decorated_sha256": "b1c2580a23d052f9992cc496221133b7a65c1b309b0e0d49d7471ab3ba038133",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:15:40: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "reason": "case.py:19:34: Imre: expected int, got bytes; annotations are enforced contracts",
         "opt_levels": [
           0,
           3
@@ -3175,7 +3175,7 @@
         "decorated_sha256": "b1c2580a23d052f9992cc496221133b7a65c1b309b0e0d49d7471ab3ba038133",
         "decorators": [],
         "status": "compile-blocked",
-        "reason": "case.py:15:40: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "reason": "case.py:19:34: Imre: expected int, got bytes; annotations are enforced contracts",
         "opt_levels": [
           0,
           3
