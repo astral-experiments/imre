@@ -630,6 +630,7 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     TimeSleep,
+    WarningFilter(u32),
     PercentScalar,
     Logging(LogOperation),
     Timed(TimedOperation),
