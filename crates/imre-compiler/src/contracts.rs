@@ -415,6 +415,8 @@ impl Builtin {
             | Self::Sha256Digest { .. }
             | Self::Sha256Copy
             | Self::ActiveException
+            | Self::SysIntern
+            | Self::SysIsInterned
             | Self::ExceptionRecord
             | Self::ExceptionCause
             // A fresh exception retains its cause without replacing any existing owner.
