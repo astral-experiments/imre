@@ -29,6 +29,8 @@ class Blocked(Exception):
 def spelling(value):
     # Render values passed by the actual test to the native declaration. Never
     # replace an unsupported converter, callback, or default with host behavior.
+    if value is argparse.SUPPRESS:
+        return "argparse.SUPPRESS"
     if isinstance(value, type) and value.__module__ == "builtins":
         return value.__name__
     if value is argparse.BooleanOptionalAction:
