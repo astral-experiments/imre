@@ -8,10 +8,11 @@ use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
-use crate::analysis::Session;
+use crate::analysis::{CheckedOverload, Session};
 use crate::ir::PosixPathOperation;
 use crate::watch::FileSystem;
 
+mod declarations;
 mod empty_keywords;
 mod entry_profile;
 mod reachability;
@@ -54,6 +55,7 @@ pub(crate) enum Binding {
 pub(crate) enum IntrinsicModule {
     AnnotationLib,
     AnnotationFormat,
+    Declaration(&'static str),
     Argparse,
     Future,
     Sys,
@@ -106,6 +108,7 @@ pub(crate) enum Intrinsic {
     GetAnnotations,
     AnnotationTypeRepr,
     AnnotationFormat(i64),
+    Declaration(&'static str),
     ArgumentParser,
     ArgparseNamespace,
     RawDescriptionHelpFormatter,
@@ -131,6 +134,7 @@ pub(crate) enum Intrinsic {
     Semaphore,
     ContextManager,
     FunctionCache,
+    CachedProperty,
     Reduce,
     TomlDumps,
     TomliLoads,
@@ -199,6 +203,9 @@ pub(crate) enum Intrinsic {
     Counter,
     Repeat,
     LengthHint,
+    Count,
+    Islice,
+    Cycle,
     GroupBy,
     Chain,
     AbstractSet,
@@ -226,6 +233,7 @@ pub(crate) enum Intrinsic {
     PurePath(crate::ir::PathFlavor),
     Which,
     TemporaryDirectory,
+    Popen,
     SubprocessRun,
     SubprocessStdout,
     CompletedProcess,
@@ -290,7 +298,7 @@ impl IntrinsicModule {
             "imre.json" => Some(Self::ImreJson),
             "imre.toml" => Some(Self::ImreToml),
             "tomllib" => Some(Self::Tomllib),
-            _ => None,
+            _ => declarations::module(name).map(Self::Declaration),
         }
     }
 
@@ -353,6 +361,7 @@ impl IntrinsicModule {
             (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
+            (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
             (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
@@ -433,6 +442,9 @@ impl IntrinsicModule {
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Itertools, "count") => Intrinsic::Count,
+            (Self::Itertools, "islice") => Intrinsic::Islice,
+            (Self::Itertools, "cycle") => Intrinsic::Cycle,
             (Self::Itertools, "repeat") => Intrinsic::Repeat,
             (Self::Itertools, "groupby") => Intrinsic::GroupBy,
             (Self::Itertools, "chain") => Intrinsic::Chain,
@@ -462,6 +474,7 @@ impl IntrinsicModule {
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
+            (Self::Subprocess, "Popen") => Intrinsic::Popen,
             (Self::Subprocess, "run") => Intrinsic::SubprocessRun,
             (Self::Subprocess, "CompletedProcess") => Intrinsic::CompletedProcess,
             (Self::Subprocess, "SubprocessError") => Intrinsic::SubprocessError,
@@ -485,7 +498,7 @@ impl IntrinsicModule {
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
-            _ => return None,
+            _ => return declarations::symbol(self, name),
         };
         Some(Binding::Intrinsic(symbol))
     }
@@ -527,6 +540,7 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
+    checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -643,9 +657,17 @@ impl SourceGraph {
         }
     }
 
-    /// Source ranges where the reachable profile or supported decorators replace ty diagnostics.
-    pub(crate) fn diagnostic_scopes(&self) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<TextRange>>) {
-        let context_decorators: Vec<Vec<_>> = self
+    /// Record only this call's overload diagnostic. Nested arguments still get
+    /// their own diagnostics, including calls with the same method name.
+    pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
+        self.checked_calls.borrow_mut()[module].push(call);
+    }
+
+    /// Source ranges where the reachable profile or native lowering handles diagnostics.
+    pub(crate) fn diagnostic_scopes(
+        &self,
+    ) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<CheckedOverload>>) {
+        let overloads: Vec<Vec<_>> = self
             .modules
             .iter()
             .enumerate()
@@ -672,14 +694,20 @@ impl SourceGraph {
                         };
                         (self.resolve(id, &decorator.expression)
                             == Some(Binding::Intrinsic(Intrinsic::ContextManager)))
-                        .then_some(decorator.range())
+                        .then_some(CheckedOverload::Decorator(decorator.range()))
+                    })
+                    .chain({
+                        let mut calls = self.checked_calls.borrow()[id].clone();
+                        calls.sort_unstable_by_key(|range| (range.start(), range.end()));
+                        calls.dedup();
+                        calls.into_iter().map(CheckedOverload::Call)
                     })
                     .collect()
             })
             .collect();
         (
             self.reachable.as_ref().map(|r| r.skipped.clone()),
-            context_decorators,
+            overloads,
         )
     }
 
@@ -700,6 +728,7 @@ impl SourceGraph {
     pub(crate) fn single_with_mode(source: &str, reachable_only: bool) -> Result<Self, String> {
         let mut loader = Loader::new(PathBuf::from("/"), &[], FileSystem::default())?;
         loader.allow_imports = false;
+        loader.reachable_only = reachable_only;
         let filename = PathBuf::from("/input.py");
         let entry = loader.add(
             filename.clone(),
@@ -787,6 +816,7 @@ impl SourceGraph {
             .read_to_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
         let mut loader = Loader::new(root, extension_paths, fs)?;
+        loader.reachable_only = reachable_only;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
         }
@@ -858,6 +888,7 @@ struct Loader<'a> {
     loading: HashSet<ModuleId>,
     import_depth: usize,
     allow_imports: bool,
+    reachable_only: bool,
     initialization: Vec<(ModuleId, Range<usize>)>,
 }
 
@@ -894,6 +925,7 @@ impl<'a> Loader<'a> {
             loading: HashSet::new(),
             import_depth: 0,
             allow_imports: true,
+            reachable_only: false,
             initialization: Vec::new(),
         })
     }
@@ -977,6 +1009,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
+            checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -1059,16 +1092,21 @@ impl<'a> Loader<'a> {
                 }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => {
                     if executable || !self.modules[id].entry_globals.is_empty() {
-                        // Fixed literal exports can precede a package re-export.
-                        // Emit the prefix now: even a list literal can fail to
-                        // allocate before the next module's initializer runs.
+                        // Emit accepted prefixes before the dependency starts:
+                        // a literal can fail to allocate, and a guard can raise.
                         if id == 0
-                            || !self.modules[id].is_package
-                            || !self.modules[id].executable.iter().all(|&at| {
-                                let stmt = &parsed.syntax().body[at];
-                                value_name(stmt).is_some()
-                                    && module_value(stmt).is_some_and(literal_export)
-                            })
+                            || !self.modules[id]
+                                .executable
+                                .iter()
+                                .rev()
+                                .take_while(|&&at| at >= segment)
+                                .all(|&at| {
+                                    let stmt = &parsed.syntax().body[at];
+                                    module_name_guard(stmt)
+                                        || (self.modules[id].is_package
+                                            && value_name(stmt).is_some()
+                                            && module_value(stmt).is_some_and(literal_export))
+                                })
                         {
                             return Err(self.modules[id].error(
                                 statement,
@@ -1180,12 +1218,24 @@ impl<'a> Loader<'a> {
                     && let Some(module) = self.intrinsic_module(&name)?
                 {
                     for alias in &import.names {
-                        let binding = module.symbol(alias.name.as_str()).ok_or_else(|| {
-                            format!(
-                                "unsupported sealed standard-library export {name}.{}",
-                                alias.name
-                            )
-                        })?;
+                        let binding = module
+                            .symbol(alias.name.as_str())
+                            .filter(|binding| {
+                                self.reachable_only
+                                    || !matches!(
+                                        binding,
+                                        Binding::Intrinsic(Intrinsic::Declaration(_))
+                                            | Binding::IntrinsicModule(
+                                                IntrinsicModule::Declaration(_)
+                                            )
+                                    )
+                            })
+                            .ok_or_else(|| {
+                                format!(
+                                    "unsupported sealed standard-library export {name}.{}",
+                                    alias.name
+                                )
+                            })?;
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
@@ -1242,7 +1292,9 @@ impl<'a> Loader<'a> {
     /// Intrinsic imports use fixed identities, but never silently accept a
     /// first-party file that attempts to shadow the standard-library namespace.
     fn intrinsic_module(&mut self, name: &str) -> Result<Option<IntrinsicModule>, String> {
-        let module = IntrinsicModule::named(name);
+        let module = IntrinsicModule::named(name).filter(|module| {
+            self.reachable_only || !matches!(module, IntrinsicModule::Declaration(_))
+        });
         if module.is_some() {
             self.reject_stdlib_shadow(name)?;
         }
@@ -1473,6 +1525,47 @@ impl<'a> Loader<'a> {
         }
         Ok(id)
     }
+}
+
+/// Allow an identity check with a closed builtin raise before importing a dependency.
+/// Keep it in the initializer so even a failing guard runs in source order.
+fn module_name_guard(statement: &ast::Stmt) -> bool {
+    let ast::Stmt::If(guard) = statement else {
+        return false;
+    };
+    let ast::Expr::Compare(test) = &*guard.test else {
+        return false;
+    };
+    let [ast::Stmt::Raise(raise)] = guard.body.as_slice() else {
+        return false;
+    };
+    if !guard.elif_else_clauses.is_empty()
+        || !matches!(test.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+        || !matches!(test.operands.as_ref(),
+            [ast::Expr::Name(n), ast::Expr::StringLiteral(_)] |
+            [ast::Expr::StringLiteral(_), ast::Expr::Name(n)] if n.id == "__name__")
+        || raise.cause.is_some()
+    {
+        return false;
+    }
+    let exception = match raise.exc.as_deref() {
+        Some(ast::Expr::Name(name)) => name,
+        Some(ast::Expr::Call(call))
+            if call.arguments.keywords.is_empty()
+                && call
+                    .arguments
+                    .args
+                    .iter()
+                    .all(|a| matches!(a, ast::Expr::StringLiteral(_))) =>
+        {
+            let ast::Expr::Name(name) = &*call.func else {
+                return false;
+            };
+            name
+        }
+        _ => return false,
+    };
+    crate::frontend::exception_kind(exception.id.as_str()).is_some()
 }
 
 /// A closed literal tree cannot read a name introduced by a later import.

@@ -55,6 +55,8 @@ pub(crate) enum Type {
     PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
+    /// A synchronous child with statically known captured stream types.
+    Popen(ProcessCapture),
     /// Async process handle, with bits for the captured stdout and stderr slots.
     AsyncProcess(u8),
     Coroutine(usize),
@@ -168,6 +170,7 @@ impl std::fmt::Display for Type {
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
             Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
+            Self::Popen(_) => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
             Self::EventLoop => "asyncio.AbstractEventLoop",
@@ -456,6 +459,11 @@ pub(crate) enum ZipField {
 pub(crate) enum Builtin {
     Repeat,
     CursorLengthHint,
+    Progression {
+        bounded: bool,
+    },
+    Islice,
+    Cycle,
     DirectoryContextView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
@@ -507,6 +515,7 @@ pub(crate) enum Builtin {
     Logging(LogOperation),
     Timed(TimedOperation),
     Input,
+    Chr,
     Int,
     Float,
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
@@ -539,6 +548,11 @@ pub(crate) enum Builtin {
     StringFormat,
     StringReplace,
     Text(TextOperation),
+    HexFormat {
+        width: u32,
+        zero: bool,
+        upper: bool,
+    },
     FloatFormat {
         precision: u32,
         percent: bool,
@@ -752,6 +766,10 @@ pub(crate) enum Builtin {
     /// The stored value type determines optional promotion on successful lookup.
     /// A third argument, when present, already has the flattened result type.
     DictTryGet(Type),
+    /// Removes a key or raises KeyError; an optional third operand is an exact default.
+    DictPop,
+    /// Transfers the removed value into an optional result, or returns the supplied default.
+    DictTryPop(Type),
     /// Arguments are key then dictionary, matching membership evaluation order.
     DictContains,
     DictDelete,
@@ -970,6 +988,17 @@ pub(crate) enum ProcessOperation {
     Run {
         streams: u32,
     },
+    Popen {
+        streams: u32,
+    },
+    PopenPid,
+    PopenArgs,
+    PopenStatus {
+        poll: bool,
+    },
+    PopenWait,
+    PopenExit,
+    PopenSignal,
     AsyncSpawn {
         stdout: u8,
         stderr: u8,
@@ -987,6 +1016,9 @@ pub(crate) enum ProcessOperation {
     },
     ContextEnter,
     ContextYield,
+    GeneratorNext,
+    GeneratorTake,
+    GeneratorYield,
     ContextExit,
     ContextThrow,
     IndirectCoroutine {
