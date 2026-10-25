@@ -16,7 +16,7 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path.insert(0, str(STDLIB))
 from suite_inventory import cases, load_suite, verify_files
-from suite_native import Toolchain, run_in_fixtures
+from suite_native import Toolchain, native_method, run_in_fixtures
 
 
 def optional(value):
@@ -119,6 +119,19 @@ def main():
     tools = Toolchain(args.imre, args.runtime, args.clang, args.opt_level)
     with tempfile.TemporaryDirectory() as work:
         binary = tools.build((HERE / "formatter_driver.py").read_bytes(), Path(work))
+        values = Path(work) / "values"
+        values.mkdir()
+        source_values = HERE / "formatter_values.py"
+        program = tools.build(source_values.read_bytes(), values)
+        def output(command):
+            done = subprocess.run(command, capture_output=True, timeout=30)
+            if done.returncode:
+                raise AssertionError((command, done.returncode, done.stdout, done.stderr))
+            return done.stdout, done.stderr
+        actual = output([program])
+        wanted = output([sys.executable, source_values])
+        if actual != wanted:
+            raise AssertionError((actual, wanted))
         def execute(case, method):
             with native_logging(binary) as (logging, called), patch.object(test_logging, "logging", logging):
                 method()
@@ -131,6 +144,23 @@ def main():
         evidence, failures, skips = run_in_fixtures(suite, executions)
         if failures or skips or set(evidence) != set(executions):
             raise AssertionError((failures, skips, set(executions) - set(evidence)))
+        precision = "test.test_logging.FormatterTest.test_issue_89047"
+        fixture = """import logging
+import time
+
+class NativeCase:
+    def assertNotIn(self, member: str, container: str) -> None:
+        if member in container:
+            raise AssertionError(f"{member!r} unexpectedly found in {container!r}")
+"""
+        body_dir = Path(work) / "precision"
+        body_dir.mkdir()
+        body = native_method(tools, body_dir, STDLIB / "upstream/Lib/test/test_logging.py",
+                             "FormatterTest", precision, fixture)
+        native, failures, skips = run_in_fixtures(load_suite("test.test_logging"), {precision: body})
+        if failures or skips or set(native) != {precision}:
+            raise AssertionError((failures, skips))
+        evidence[precision].extend(native[precision])
     data = json.dumps({"optimization": args.opt_level, "reference_denominator": 272, "evidence": evidence},
                       indent=2, sort_keys=True) + "\n"
     if args.result:

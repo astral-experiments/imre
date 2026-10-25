@@ -513,6 +513,8 @@ pub(crate) enum Builtin {
     /// Evaluates and roots all arguments, then raises the last (an exception).
     RaiseException,
     WallTime,
+    TimeSleep,
+    PercentInteger,
     Logging(LogOperation),
     Timed(TimedOperation),
     LogRecord(LogRecordOperation),

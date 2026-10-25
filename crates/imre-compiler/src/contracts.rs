@@ -158,6 +158,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::TimeSleep | Self::PercentInteger => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
@@ -663,6 +664,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_deletions"
                 | "imre_log_file_should_roll"
                 | "imre_log_file_roll"
+                | "imre_time_sleep"
+                | "imre_str_percent_int"
                 | "imre_formatter_format"
                 | "imre_formatter_time"
                 | "imre_formatter_message"

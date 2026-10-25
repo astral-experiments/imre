@@ -4322,6 +4322,12 @@ impl<'a> Checker<'a> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if op == ast::Operator::Mod && left.ty == Type::Str && right.ty == Type::Int {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::PercentInteger, vec![left, right]),
+            });
+        }
         let left = Self::integer_addend(op, left, right.ty);
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
@@ -5722,6 +5728,31 @@ impl<'a> Checker<'a> {
                 return self.root_log(level, call);
             }
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
+                self.reject_builtin_keywords(call)?;
+                let [arg] = call.arguments.args.as_ref() else {
+                    return Err(error(self.source, call, "time.sleep takes one number"));
+                };
+                let value = self.expr(arg)?;
+                let seconds = match value.ty {
+                    Type::Float => value,
+                    Type::Int | Type::Bool => Expr {
+                        ty: Type::Float,
+                        kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+                    },
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            arg,
+                            "time.sleep requires an integer or float",
+                        ));
+                    }
+                };
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::TimeSleep, vec![seconds]),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::WallTime)) if call.arguments.is_empty() => {
                 return Ok(Expr {
                     ty: Type::Float,

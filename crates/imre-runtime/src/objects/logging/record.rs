@@ -244,50 +244,56 @@ impl Record {
         if !truth(args) {
             return Ok(msg);
         }
-        let tuple = tuple_len(args);
-        let mut pos = 0;
-        let mut out = String::new();
-        let mut input = msg.as_str();
-        while let Some((literal, rest)) = input.split_once('%') {
-            out.push_str(literal);
-            if let Some(rest) = rest.strip_prefix('%') {
-                out.push('%');
-                input = rest;
-                continue;
-            }
-            let (value, rest) = if let Some(rest) = rest.strip_prefix('(') {
-                let (key, rest) = rest
-                    .split_once(')')
-                    .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format key"))?;
-                (dict_item(args, key)?, rest)
-            } else {
-                if pos >= tuple.unwrap_or(1) {
-                    return Err(Error::new(
-                        Kind::TypeError,
-                        "not enough arguments for format string",
-                    ));
-                }
-                let val = if tuple.is_some() {
-                    tuple_item(args, pos)
-                } else {
-                    args.clone()
-                };
-                pos += 1;
-                (val, rest)
-            };
-            let (piece, tail) = percent_value(rest, &value)?;
-            out.push_str(&piece);
-            input = tail;
-        }
-        if tuple.is_some_and(|n| pos < n) {
-            return Err(Error::new(
-                Kind::TypeError,
-                "not all arguments converted during string formatting",
-            ));
-        }
-        out.push_str(input);
-        Ok(out)
+        format_arguments(&msg, args)
     }
+}
+
+/// Percent formatting is shared by log messages and ordinary string expressions. Callers
+/// decide whether an empty argument tuple bypasses formatting (only LogRecord does that).
+fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
+    let tuple = tuple_len(args);
+    let mut pos = 0;
+    let mut out = String::new();
+    let mut input = msg;
+    while let Some((literal, rest)) = input.split_once('%') {
+        out.push_str(literal);
+        if let Some(rest) = rest.strip_prefix('%') {
+            out.push('%');
+            input = rest;
+            continue;
+        }
+        let (value, rest) = if let Some(rest) = rest.strip_prefix('(') {
+            let (key, rest) = rest
+                .split_once(')')
+                .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format key"))?;
+            (dict_item(args, key)?, rest)
+        } else {
+            if pos >= tuple.unwrap_or(1) {
+                return Err(Error::new(
+                    Kind::TypeError,
+                    "not enough arguments for format string",
+                ));
+            }
+            let val = if tuple.is_some() {
+                tuple_item(args, pos)
+            } else {
+                args.clone()
+            };
+            pos += 1;
+            (val, rest)
+        };
+        let (piece, tail) = percent_value(rest, &value)?;
+        out.push_str(&piece);
+        input = tail;
+    }
+    if !is_dict(args) && pos < tuple.unwrap_or(1) {
+        return Err(Error::new(
+            Kind::TypeError,
+            "not all arguments converted during string formatting",
+        ));
+    }
+    out.push_str(input);
+    Ok(out)
 }
 
 /// Reserve before filling a user-provided field width so it can raise a Python exception.
@@ -668,6 +674,18 @@ pub extern "C" fn imre_logrecord_set_flag(mask: usize, value: bool) {
     } else {
         FLAGS.get() & !mask
     });
+}
+
+/// # Safety
+/// The format and exact integer remain rooted; a successful return transfers an owned string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_percent_int(fmt: *const Str, integer: usize) -> *const Str {
+    // SAFETY: the caller roots both precise input representations for the whole operation.
+    let result = unsafe { format_arguments((&*fmt).as_str(), &WordKind::new(2).acquire(integer)) };
+    finish(
+        result.map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
+        std::ptr::null(),
+    )
 }
 
 #[cfg(test)]

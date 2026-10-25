@@ -373,6 +373,21 @@ impl Formatter {
             r.fields.insert("asctime".into(), string(&time));
         }
         let mut text = self.render(r)?;
+        if r.fields.get("exc_info").is_some_and(record::truth)
+            && !r.fields.get("exc_text").is_some_and(record::truth)
+        {
+            let info = &r.fields["exc_info"];
+            if record::tuple_len(info) == Some(3)
+                && (0..3).all(|i| record::tuple_item(info, i).kind.raw() == 0)
+            {
+                r.fields.insert("exc_text".into(), string("NoneType: None"));
+            } else {
+                return Err(Error::new(
+                    Kind::NotImplementedError,
+                    "native logging requires traceback capture to format uncached exception information",
+                ));
+            }
+        }
         for key in ["exc_text", "stack_info"] {
             if let Some(v) = r.fields.get(key).filter(|v| record::truth(v)) {
                 if !text.ends_with('\n') {
