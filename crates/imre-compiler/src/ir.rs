@@ -753,6 +753,7 @@ pub(crate) enum Builtin {
     SysOrigArgv,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
+        namespace: usize,
         children: Vec<usize>,
         process_argv: bool,
     },
