@@ -495,6 +495,60 @@ pub(super) fn record_factories(
 }
 
 impl Checker<'_> {
+    /// A checked type for a mutable field can become stale through an alias.
+    /// Load the field once per attribute access and raise Python's AttributeError
+    /// if an intervening effect cleared it.
+    pub(super) fn checked_record_receiver(
+        &mut self,
+        receiver: Expr,
+        attr: &ast::ExprAttribute,
+    ) -> Expr {
+        let Some(payload @ Type::Class(_)) = self.types.payload(receiver.ty) else {
+            return receiver;
+        };
+        if !matches!(&*attr.value, ast::Expr::Attribute(_))
+            || !self
+                .graph
+                .session
+                .narrowed_instance(self.module, &attr.value)
+        {
+            return receiver;
+        }
+        let slot = self.hidden(receiver.ty);
+        let local = self.local(slot);
+        let missing = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),
+        };
+        let error = Statement::Raise(Some(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("AttributeError").unwrap(),
+                message: Some(Box::new(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str(format!(
+                        "'NoneType' object has no attribute '{}'",
+                        attr.attr
+                    )),
+                })),
+            },
+        }));
+        Expr {
+            ty: payload,
+            kind: ExprKind::Scope {
+                body: vec![
+                    Statement::Assign(slot, receiver),
+                    Statement::If(missing, vec![error], vec![]),
+                ],
+                value: Box::new(Expr {
+                    ty: payload,
+                    kind: ExprKind::Unwrap(Box::new(local)),
+                }),
+                clear: vec![slot],
+            },
+        }
+    }
+
     pub(super) fn iteration_expression(
         &mut self,
         expr: &ast::Expr,
@@ -503,7 +557,16 @@ impl Checker<'_> {
         let previous = self.iterator_source.replace(expr.range());
         let result = self.boolean_operand(expr, hint);
         self.iterator_source = previous;
-        result.map(|value| self.document_iteration(value))
+        result.map(|value| {
+            if value.ty == Type::StringIterable {
+                Expr {
+                    ty: self.types.list(Type::Str),
+                    kind: ExprKind::Builtin(Builtin::StringIterationList, vec![value]),
+                }
+            } else {
+                self.document_iteration(value)
+            }
+        })
     }
 
     pub(super) fn record_generator(&self, context: MethodContext) -> bool {
