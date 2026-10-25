@@ -64,9 +64,9 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 13 fully native passes, 8 native bodies with host
-fixtures, 10 host-driven native operations (40 calls), 15 compile blockers,
-1,042 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+At each of O0 and O3: 14 fully native passes, 9 native bodies with host
+fixtures, 12 host-driven native operations (48 calls), 14 compile blockers,
+1,039 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
 
 The [native loader example](NATIVE_LOADER.md) exercises the same original
@@ -143,8 +143,13 @@ the same [native default fixture entry](../../SUITE_RUNNER.md#running-a-method-w
 as the four above. Each receipt includes its verbose case ID, one-test summary,
 source blob, and complete method hash.
 
-Five additional original Mock methods have measured compile blockers. One
-reaches `TestCase.assertNotIn`. The three reset methods need constructor
+`test_assert_called_once_message_not_called` checks the actual assertion message
+from a mock that was never called. The [membership control](membership.py)
+also exercises substring, list and dictionary membership, failure messages,
+operand evaluation order, and subclass overrides.
+
+Four additional original Mock methods have measured compile blockers.
+The three reset methods need constructor
 arguments (`parent` or `return_value`) or assign a mock as its own return value.
 `test_assert_called_exception_message` also reaches positional `str.format` at
 upstream `testmock.py:533`.
@@ -158,3 +163,19 @@ The [default-fixture audit](DEFAULT_FIXTURE_AUDIT.md) records what happens when
 the shared entry attempts every original occurrence with the full CPython test
 package available. Each record identifies the native outcome or the first
 fixture or compiler blocker for that entry.
+
+`assertIsNone(obj, msg=None)` and `assertIsNotNone(obj, msg=None)` test
+identity with `None`. False, zero, empty strings and the string `"None"` are
+distinct from it. The ordinary native failure path preserves `longMessage`
+and the case's `failureException`. The [control](none_assertions.py) also
+checks optional values, bytes, tuples, and argument evaluation order.
+Native values that cannot bind to the compiler's `object` parameter, such as
+a list, currently produce a compiler diagnostic.
+
+In the [ordinary and reachable O0/O3 run](https://github.com/astral-sh/imre/actions/runs/40221013955),
+`Test_TestCase.testAssertIsNone` executed its unchanged body, assertions and
+bound callbacks in Imre with the original CPython fixture. The unchanged
+`TestLongMessage.testAssertIsNone` and `testAssertIsNotNone` exercised four
+native operations each; CPython ran their fixtures and checked the eight
+failure messages. These are three host-assisted cases in the 1,090-occurrence
+report.

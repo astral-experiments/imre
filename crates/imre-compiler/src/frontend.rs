@@ -26,6 +26,7 @@ mod callables;
 mod calls;
 mod chainmap;
 mod class_data;
+mod closed_calls;
 mod codecs;
 mod comprehensions;
 mod contexts;
@@ -103,6 +104,7 @@ mod text;
 mod timed_handlers;
 mod truthiness;
 mod tuple_index;
+mod typing;
 mod unbound_locals;
 mod unions;
 mod unittest;
@@ -548,6 +550,7 @@ pub(crate) fn lower_with_owners(
     graph: &SourceGraph,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
     let types = Types::default();
+    typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
     let mut classes = ClassInfo::new(graph, &types)?;
     dataclass_values::validate(&classes, graph, &types)?;
@@ -588,6 +591,10 @@ pub(crate) fn lower_with_owners(
                     }
                     let cached = function_caches::policy(graph, module_id, function)?;
                     let mut function = function.clone();
+                    if module.overloads.contains(&statement_id) {
+                        graph.runtime_overload(module_id, function.name.range());
+                        typing::strip_overload(&mut function);
+                    }
                     if cached.is_some() {
                         function.decorator_list.clear();
                     }
@@ -793,8 +800,14 @@ pub(crate) fn lower_with_owners(
         graph,
         &types,
     )?;
+    if closed_calls::has_keyword_displays(graph) {
+        inference.discover_packed_arguments();
+    }
     for (module, function, _) in &mut definitions {
         assignments::alias_builtin_parameters(function, &graph.modules[*module].bindings);
+        if closed_calls::prepare(function, graph, *module) {
+            inference.discover_packed_arguments();
+        }
     }
     inference.solve(
         graph,
@@ -813,6 +826,11 @@ pub(crate) fn lower_with_owners(
         }
     }
     for (module, function, signature) in &definitions {
+        types.bind_function_site(
+            *module,
+            function.name.range().start().to_u32(),
+            signature.id,
+        );
         let annotated = function
             .parameters
             .iter_non_variadic_params()
@@ -890,10 +908,8 @@ pub(crate) fn lower_with_owners(
             checker.method_context(signature.method);
             checker.generator_item = classes.producer_items.get(&signature.id).copied();
             let mut params = Vec::new();
-            for (parameter, signature) in definition
-                .parameters
-                .iter_non_variadic_params()
-                .zip(&signature.params)
+            for (parameter, signature) in
+                closed_calls::parameters(&definition.parameters).zip(&signature.params)
             {
                 let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
                 checker.assigned.insert(slot);
@@ -1124,6 +1140,7 @@ pub(crate) fn lower_with_owners(
         recursion_errors.push(helper.recursion_error);
     }
     let entry = entry.expect("source graph has an entry module");
+    typing::validate_functions(&functions, &entry, &types)?;
     let callable_targets = callables::targets(&functions, &entry, &types)?;
     for (function, calls) in functions.iter().zip(&mut call_graph) {
         ir::walk_expressions(&function.body, &mut |value| {
@@ -1197,14 +1214,11 @@ fn signature(
             )
         })
         .map(|context| classes.instance(context.class));
-    if !function.decorator_list.is_empty()
-        || function.type_params.is_some()
-        || function.parameters.vararg.is_some()
-    {
+    if !function.decorator_list.is_empty() || function.type_params.is_some() {
         return Err(error(
             source,
             function,
-            "decorators, type parameters, and variadic parameters are unsupported",
+            "decorators and type parameters are unsupported",
         ));
     }
     let mut params = Vec::new();
@@ -1388,6 +1402,26 @@ fn signature(
                 && sign_parameters::only_compares_zero(function, parameter.name().as_str()),
         });
     }
+    if let Some(pack) = function.parameters.vararg.as_deref() {
+        let annotation = pack.annotation().ok_or_else(|| {
+            error(
+                source,
+                pack,
+                "a variadic positional parameter requires an exact element annotation",
+            )
+        })?;
+        let element = annotation_in_class(annotation, graph, module, classes, types, owner)?;
+        sequences::check_pack_reads(function, pack.name.as_str(), graph, module, source)?;
+        let ty = types.list(element);
+        parameter_types.push(Some(ty));
+        params.push(Parameter {
+            name: pack.name.to_string(),
+            ty,
+            kind: ParameterKind::Variadic,
+            default: None,
+            sign_only: false,
+        });
+    }
     if let Some(keyword) = &function.parameters.kwarg {
         let element = keyword.annotation.as_deref().ok_or_else(|| {
             error(
@@ -1409,8 +1443,11 @@ fn signature(
     }
     // A .pyi describes the linked C function. Its ellipsis is not an executable body.
     let inert = graph.modules[module].archive.is_none() && annotations::inert_body(function);
-    if inert && let Some(ast::Expr::Name(n)) = function.returns.as_deref() {
-        graph.deferred_name(module, n.range());
+    if inert && let Some(annotation) = function.returns.as_deref() {
+        graph.checked_inert_return(module, annotation.range());
+        if let ast::Expr::Name(name) = annotation {
+            graph.deferred_name(module, name.range());
+        }
     }
     let returns = function
         .returns
@@ -1588,6 +1625,19 @@ fn annotation_with_aliases(
     }
     match graph.resolve_type(module, expression) {
         Some(Binding::Definition(definition)) => {
+            // The integer-fd selector keeps its immutable key in both the mapping
+            // and the ready list. The data field contains a boxed Python value.
+            let owner = &graph.modules[definition.module];
+            if owner.is_bundled("selectors")
+                && types
+                    .namedtuple(definition)
+                    .is_some_and(|ty| ty.name == "SelectorKey")
+            {
+                return Ok(types.namedtuple_layout(
+                    crate::types::TupleOrigin::Declaration(definition),
+                    vec![Type::Int, Type::Int, Type::Int, Type::ObjectValue],
+                ));
+            }
             if classes.exceptions.contains_key(&definition) {
                 return Ok(classes
                     .ids
@@ -1661,6 +1711,7 @@ fn annotation_with_aliases(
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
             "int" => Ok(Type::Int),
+            "type" => Ok(Type::BuiltinClass),
             "float" => Ok(Type::Float),
             "bool" => Ok(Type::Bool),
             "str" => Ok(Type::Str),
@@ -2318,6 +2369,9 @@ impl<'a> Checker<'a> {
 
     /// Optional and finite-union promotions are explicit; containers stay invariant.
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
+        if value.ty == Type::FunctionRef && matches!(expected, Type::Callable(_)) {
+            return Ok(typing::typed_function(value, expected));
+        }
         if matches!(expected, Type::Document(_))
             || matches!(value.ty, Type::Document(_)) && expected == Type::Str
         {
@@ -4307,7 +4361,14 @@ impl<'a> Checker<'a> {
                 return self.try_statement(try_);
             }
             ast::Stmt::With(with_) if !with_.is_async => {
-                return self.with_items(&with_.items, &with_.body);
+                if !with_.body.iter().any(ast::Stmt::is_function_def_stmt) {
+                    return self.with_items(&with_.items, &with_.body);
+                }
+                let enclosing = self.local_functions.clone();
+                self.collect_suite_definitions(&with_.body, false)?;
+                let result = self.with_items(&with_.items, &with_.body);
+                self.local_functions = enclosing;
+                return result;
             }
             ast::Stmt::With(with_) if self.asynchronous => {
                 return self.async_with(&with_.items, &with_.body);
@@ -4420,11 +4481,20 @@ impl<'a> Checker<'a> {
         let archive = manager.ty == Type::ZipFile;
         let socket = manager.ty == Type::Socket;
         let popen = matches!(manager.ty, Type::Popen(..));
+        let selector_close = if let Type::Class(class) = manager.ty {
+            let owner = &self.classes.declarations.definitions[class];
+            (self.graph.modules[owner.definition.module].is_bundled("selectors")
+                && owner.name == "PollSelector")
+                .then(|| self.classes.methods[class]["close"].id)
+        } else {
+            None
+        };
         if temporary.is_none()
             && stored.is_none()
             && !archive
             && !socket
             && !popen
+            && selector_close.is_none()
             && !matches!(manager.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
         {
             return Err(error(
@@ -4457,7 +4527,13 @@ impl<'a> Checker<'a> {
         let (nested, falls) = self.with_items(remaining, body)?;
         protected.extend(nested);
         let mut statements = vec![Statement::Assign(captured, manager)];
-        if temporary.is_none() && stored.is_none() && !archive && !socket && !popen {
+        if temporary.is_none()
+            && stored.is_none()
+            && !archive
+            && !socket
+            && !popen
+            && selector_close.is_none()
+        {
             statements.push(Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
@@ -4476,13 +4552,19 @@ impl<'a> Checker<'a> {
         } else {
             Builtin::TextClose
         };
+        let cleanup = if let Some(id) = selector_close {
+            self.calls.insert(id);
+            ExprKind::Call(id, ir::CallArgs::positional(vec![self.local(captured)]))
+        } else {
+            ExprKind::Builtin(cleanup, vec![self.local(captured)])
+        };
         statements.push(Statement::Try {
             body: protected,
             handlers: Vec::new(),
             orelse: Vec::new(),
             finalbody: vec![Statement::Expr(Expr {
                 ty: Type::None,
-                kind: ExprKind::Builtin(cleanup, vec![self.local(captured)]),
+                kind: cleanup,
             })],
         });
         Ok((
@@ -5007,6 +5089,14 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
+        if binary.op == ast::Operator::Add
+            && (self.types.payload(left.ty) == Some(Type::Int)
+                || self.types.payload(right.ty) == Some(Type::Int))
+            && self.types.payload(left.ty).unwrap_or(left.ty) == Type::Int
+            && self.types.payload(right.ty).unwrap_or(right.ty) == Type::Int
+        {
+            return Ok(self.nullable_int_sum(left, right));
+        }
         if let (Type::Calendar(first), Type::Calendar(second)) = (left.ty, right.ty) {
             return calendar::binary(first, second, left, right, binary, self.source);
         }
@@ -5192,6 +5282,10 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
+        if typing::is_dummy(self.graph, self.resolve(expression)) {
+            return Ok(typing::dummy());
+        }
+
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
                 self.resolve(&attr.value)
@@ -6051,9 +6145,22 @@ impl<'a> Checker<'a> {
                             || self.types.is_value_struct(item)
                             || matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
+                    // Ordinary dictionaries compare their entries independently of insertion order.
+                    // Only enable value kinds whose Python equality has no user callbacks or boxed NaN identity.
+                    let scalar_dict = self.types.mapping(ty).is_some_and(|(_, value)| {
+                        matches!(
+                            value,
+                            Type::None
+                                | Type::Bool
+                                | Type::Int
+                                | Type::Str
+                                | Type::Bytes
+                                | Type::BuiltinClass
+                        )
+                    });
                     let comparable = match ty {
                         Type::List(_) => comparable_list,
-                        Type::Dict(_) => self.types.is_counter(ty),
+                        Type::Dict(_) => self.types.is_counter(ty) || scalar_dict,
                         Type::Tuple(_) => self.types.hashable_key(ty),
                         Type::VarTuple(_) => variable_tuple,
                         Type::ListInt
@@ -6396,6 +6503,18 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(single_dispatch::original(receiver, layout));
                 }
+                if self.types.has_reflected_functions()
+                    && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))
+                    && let Some(index) = typing::attribute_index(attribute.attr.as_str())
+                {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::Typing(ir::TypingOperation::Attr(index)),
+                            vec![receiver],
+                        ),
+                    });
+                }
                 if matches!(receiver.ty, Type::AnnotationValue(_)) {
                     return self.annotation_attribute(receiver, attribute);
                 }
@@ -6461,6 +6580,16 @@ impl<'a> Checker<'a> {
                 }
                 if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                     return self.json_load_callable(Some(receiver), None, attribute);
+                }
+                if attribute.attr.as_str() == "reverse" && self.types.element(receiver.ty).is_some()
+                {
+                    return Ok(self.bound_builtin(
+                        attribute,
+                        receiver,
+                        Builtin::ListReverse,
+                        Vec::new(),
+                        Type::None,
+                    ));
                 }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     return self.deque_attribute(attribute, receiver, element);
@@ -6849,6 +6978,19 @@ impl<'a> Checker<'a> {
         {
             return Ok(result);
         }
+        if receiver.is_none()
+            && matches!(&*call.func,ast::Expr::Name(n) if n.id.as_str()=="len")
+            && !self.names.contains_key("len")
+            && self.resolve(&call.func).is_none()
+            && call.arguments.keywords.is_empty()
+            && let [arg] = call.arguments.args.as_ref()
+            && self.resolve(arg) == Some(Binding::Intrinsic(Intrinsic::OverloadRegistry))
+        {
+            return Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::Typing(ir::TypingOperation::RegistryLen), vec![]),
+            });
+        }
         if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
             return Ok(self.materialize_fixed_tuple(tuple));
         }
@@ -6906,6 +7048,9 @@ impl<'a> Checker<'a> {
         }
         if self.unshadowed_builtin(&call.func, "dict") {
             return self.dict_constructor(call, None);
+        }
+        if let Some(expanded) = self.expand_closed_call(call) {
+            return self.call_on(&expanded, receiver);
         }
         if let Some(Binding::Intrinsic(
             kind @ (Intrinsic::TomliLoads
@@ -7036,6 +7181,12 @@ impl<'a> Checker<'a> {
                 Binary::Add
             };
             return self.counter_unbound_update(call, op, method.attr.as_str());
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "reverse"
+            && self.unshadowed_builtin(&method.value, "list")
+        {
+            return self.list_reverse(None, call);
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && matches!(method.attr.as_str(), "clear" | "setdefault")
@@ -7211,6 +7362,14 @@ impl<'a> Checker<'a> {
             });
         }
         if let Some(binding) = self.local_function_binding(&call.func) {
+            if binding.overload_stub {
+                let callable = self.local(
+                    binding
+                        .value_slot
+                        .expect("an overloaded definition has a stub object"),
+                );
+                return self.invoke(call, callable);
+            }
             if let Some(definition) = binding.generic.clone() {
                 return self.call_generic_awaitable(call, &definition);
             }
@@ -7274,6 +7433,12 @@ impl<'a> Checker<'a> {
         }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => return self.forward_ref(call),
+            binding if typing::is_dummy(self.graph, binding) => {
+                return self.invoke(call, typing::dummy());
+            }
+            Some(Binding::Intrinsic(
+                op @ (Intrinsic::Overload | Intrinsic::GetOverloads | Intrinsic::ClearOverloads),
+            )) => return self.typing_overload(call, op),
             Some(Binding::Intrinsic(Intrinsic::GetAnnotations)) => {
                 return self.get_annotations(call);
             }
@@ -7602,6 +7767,11 @@ impl<'a> Checker<'a> {
         ) {
             return self.process_run(call);
         }
+        if let Some(Binding::Intrinsic(Intrinsic::ShellOutput { status })) =
+            self.resolve(&call.func)
+        {
+            return self.shell_output(call, status);
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::CheckOutput)) {
             return self.process_check_output(call);
         }
@@ -7827,7 +7997,7 @@ impl<'a> Checker<'a> {
             }
             let receiver = if matches!(
                 attribute.attr.as_str(),
-                "append" | "pop" | "extend" | "sort" | "clear"
+                "append" | "pop" | "extend" | "sort" | "clear" | "reverse"
             ) {
                 self.json_mutation_receiver(receiver, call)?
             } else {
@@ -7983,6 +8153,9 @@ impl<'a> Checker<'a> {
                 && let Some((key, value)) = self.types.mapping(receiver.ty)
             {
                 return self.dict_update(call, receiver, key, value);
+            }
+            if attribute.attr.as_str() == "reverse" && self.types.element(receiver.ty).is_some() {
+                return self.list_reverse(Some(receiver), call);
             }
             if attribute.attr.as_str() == "sort" && self.types.element(receiver.ty).is_some() {
                 return self.list_sort(receiver, call);

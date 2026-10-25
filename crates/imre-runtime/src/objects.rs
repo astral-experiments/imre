@@ -55,6 +55,7 @@ mod string_enums;
 mod structs;
 mod tempdirs;
 mod text;
+mod typing;
 pub(crate) use text::short_string;
 mod unions;
 mod values;
@@ -515,6 +516,20 @@ pub unsafe extern "C" fn imre_seq_clear(value: *const Object) {
         })
     };
     drop(previous);
+}
+
+/// Reverse the owned slots in place without acquiring or releasing them.
+///
+/// # Safety
+/// The caller roots the mutable list for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_reverse(value: *const Object) {
+    // SAFETY: resolving the native sequence and swapping slots cannot invoke Python.
+    unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| storage.sequence_mut().values.reverse())
+    };
 }
 
 /// # Safety

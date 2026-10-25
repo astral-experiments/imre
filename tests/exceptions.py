@@ -24,6 +24,25 @@ def upstream_support_payloads() -> str:
 
 
 ACCEPTED = {
+    "private_forwarded_exception_fields": """
+class Root(Exception):
+    def __init__(self, value, *rest):
+        self.__value = value
+        super().__init__(value, *rest)
+
+    def __str__(self):
+        return self.__value
+
+class _Leaf(Root):
+    def __init__(self, first, second):
+        super().__init__(first)
+        self.__value = second
+
+error = _Leaf("root", "leaf")
+print(str(error))
+print(repr(error._Root__value))
+print(repr(error._Leaf__value))
+""",
     "upstream_support_payloads": upstream_support_payloads(),
     "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
     "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),

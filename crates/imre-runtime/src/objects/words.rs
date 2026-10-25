@@ -25,7 +25,7 @@ impl WordKind {
     const STRUCT_ROWS: Self = Self(u16::MAX - 1);
 
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 13 {
+        if kind & !NULLABLE > 14 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind as u16)
@@ -36,7 +36,7 @@ impl WordKind {
     }
 
     pub(super) fn can_queue_release(self) -> bool {
-        matches!(self.base(), 5 | 6 | 9)
+        matches!(self.base(), 5 | 6 | 9 | 14)
     }
 
     pub(super) fn base(self) -> u32 {
@@ -45,7 +45,7 @@ impl WordKind {
 
     /// Nonnullable handles whose LLVM record field is a pointer.
     fn is_pointer_field(self) -> bool {
-        matches!(self.0, 3..=6 | 8 | 11..=13)
+        matches!(self.0, 3..=6 | 8 | 11..=14)
     }
 
     /// Reads the compiler's concrete field storage without reinterpreting pointer
@@ -76,7 +76,7 @@ impl WordKind {
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
-            2..=6 | 8..=13 => word != 0 || nullable,
+            2..=6 | 8..=14 => word != 0 || nullable,
             7 => true,
             _ => unreachable!(),
         };
@@ -113,7 +113,7 @@ impl WordKind {
                 3 | 11 => StrOwner::increment_strong_count(word as *const Str),
                 4 => Rc::increment_strong_count(word as *const List),
                 5 => Rc::increment_strong_count(word as *const Object),
-                6 | 12 | 13 => records::imre_record_retain(word as *const usize),
+                6 | 12 | 13 | 14 => records::imre_record_retain(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::increment_strong_count(word as *const Bytes),
@@ -138,7 +138,7 @@ impl WordKind {
                 3 | 11 => StrOwner::decrement_strong_count(word as *const Str),
                 4 => crate::imre_list_release(word as *const List),
                 5 => records::release_object_word(Rc::from_raw(word as *const Object)),
-                6 | 12 | 13 => records::imre_record_release(word as *const usize),
+                6 | 12 | 13 | 14 => records::imre_record_release(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::decrement_strong_count(word as *const Bytes),

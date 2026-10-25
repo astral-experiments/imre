@@ -16,20 +16,6 @@ fn initialize(ty: Type, receiver: Option<Expr>, bound: Expr) -> Expr {
     }
 }
 
-fn type_error(ty: Type, mut values: Vec<Expr>, message: String) -> Expr {
-    values.push(Expr {
-        ty: Type::Exception,
-        kind: ExprKind::Exception {
-            kind: exception_kind("TypeError").unwrap(),
-            message: Some(Box::new(unpacking::string(message))),
-        },
-    });
-    Expr {
-        ty,
-        kind: ExprKind::Builtin(Builtin::RaiseException, values),
-    }
-}
-
 impl Checker<'_> {
     /// A saved method owns the receiver that was evaluated at attribute access.
     /// Its adapter has the same typed arguments as the corresponding direct call.
@@ -66,42 +52,7 @@ impl Checker<'_> {
             "copy" | "__copy__" => (Builtin::DequeCopy, vec![], receiver.ty),
             _ => return Err(error(self.source, attribute, "unsupported deque attribute")),
         };
-        let mut locals = vec![receiver.ty];
-        locals.extend(&parameters);
-        let arguments = locals
-            .iter()
-            .enumerate()
-            .map(|(slot, &ty)| Expr {
-                ty,
-                kind: ExprKind::Local(slot),
-            })
-            .collect();
-        let id = self.helpers.reserve();
-        self.helpers.finish(
-            id,
-            comprehensions::Helper {
-                module: self.module,
-                function: ir::Function {
-                    params: (0..locals.len()).collect(),
-                    returns,
-                    locals,
-                    body: vec![Statement::Return(Expr {
-                        ty: returns,
-                        kind: ExprKind::Builtin(builtin, arguments),
-                    })],
-                },
-                calls: HashSet::new(),
-                class_reads: HashSet::new(),
-                recursion_error: error(self.source, attribute, "recursive deque method adapter"),
-            },
-        );
-        Ok(Expr {
-            ty: self.types.callable(parameters, returns),
-            kind: ExprKind::Callable {
-                function: id,
-                receiver: Some(Box::new(receiver)),
-            },
-        })
+        Ok(self.bound_builtin(attribute, receiver, builtin, parameters, returns))
     }
 
     pub(super) fn deque_new(
@@ -164,7 +115,7 @@ impl Checker<'_> {
         }
         let optional = self.types.optional(Type::Int);
         let bound = if let Some(limit) = limit {
-            let mut value = self.deque_argument(limit)?;
+            let mut value = self.evaluated_argument(limit)?;
             if value.ty == Type::Bool {
                 value = Expr {
                     ty: Type::Int,
@@ -241,7 +192,7 @@ impl Checker<'_> {
                     scope.hold(self, bound)
                 };
                 let init = initialize(self.types.deque(hint.unwrap_or(Type::Int)), receiver, bound);
-                return Ok(scope.finish(type_error(
+                return Ok(scope.finish(calls::type_error(
                     result,
                     vec![init],
                     format!("'{name}' object is not iterable"),
@@ -294,17 +245,6 @@ impl Checker<'_> {
         })
     }
 
-    /// Empty containers still have to be evaluated when a call rejects their type.
-    fn deque_argument(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
-        match arg {
-            ast::Expr::List(list) if list.elts.is_empty() => self.expr_expected(arg, Type::ListInt),
-            ast::Expr::Dict(dict) if dict.items.is_empty() => {
-                self.expr_expected(arg, self.types.dict(Type::Int, Type::Int))
-            }
-            _ => self.expr(arg),
-        }
-    }
-
     /// A rejection still evaluates the receiver and every argument before raising.
     fn deque_binding_error(
         &mut self,
@@ -328,9 +268,9 @@ impl Checker<'_> {
             .iter()
             .chain(call.arguments.keywords.iter().map(|k| &k.value))
         {
-            values.push(self.deque_argument(arg)?);
+            values.push(self.evaluated_argument(arg)?);
         }
-        Ok(type_error(result, values, message))
+        Ok(calls::type_error(result, values, message))
     }
 
     fn deque_fill(

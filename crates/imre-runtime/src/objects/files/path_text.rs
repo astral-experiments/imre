@@ -4,26 +4,6 @@ use super::super::codecs::{Codec, option_error};
 use super::{Error, Int, Kind, Object, Result, Str, finish, object, with_path_file};
 use crate::StrOwner;
 
-/// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.
-fn universal_newlines(text: String) -> String {
-    let mut bytes = text.into_bytes();
-    let mut read = 0;
-    let mut written = 0;
-    while read < bytes.len() {
-        let byte = bytes[read];
-        read += 1;
-        bytes[written] = if byte == b'\r' {
-            read += usize::from(bytes.get(read) == Some(&b'\n'));
-            b'\n'
-        } else {
-            byte
-        };
-        written += 1;
-    }
-    bytes.truncate(written);
-    String::from_utf8(bytes).expect("ASCII newline conversion preserves UTF-8")
-}
-
 fn output_newlines(text: &str, replacement: &str) -> Result<String> {
     let extra = if replacement.len() == 2 {
         text.bytes().filter(|&byte| byte == b'\n').count()
@@ -60,10 +40,7 @@ fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
             "",
         ));
     }
-    match encoding {
-        None | Some("locale") => Ok(Codec::Utf8 { signature: false }),
-        Some(name) => Codec::lookup(name),
-    }
+    Codec::for_stream(encoding)
 }
 
 // An optional native string is an owned pointer word, or zero for None.
@@ -81,13 +58,11 @@ pub(super) fn read(
     with_path_file(path, 0, true, |file| {
         let codec = options(encoding, newline)?;
         let data = file.input()?.read_bytes(None)?;
-        let text = codec.decode(&data, errors)?;
-        let text = if newline.is_none() && text.contains('\r') {
-            universal_newlines(text)
-        } else {
-            text
-        };
-        Ok(Str::from(text))
+        Ok(Str::from(codec.decode_stream(
+            &data,
+            errors,
+            newline.is_none(),
+        )?))
     })
 }
 

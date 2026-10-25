@@ -165,6 +165,29 @@ impl Codec {
         }
     }
 
+    /// Text streams accept the locale sentinel in addition to registry names.
+    pub(super) fn for_stream(encoding: Option<&str>) -> Result<Self> {
+        match encoding {
+            None | Some("locale") => Ok(Self::Utf8 { signature: false }),
+            Some(name) => Self::lookup(name),
+        }
+    }
+
+    /// Decode a complete text stream, applying universal newlines when requested.
+    pub(super) fn decode_stream(
+        self,
+        data: &[u8],
+        errors: Option<&str>,
+        universal: bool,
+    ) -> Result<String> {
+        let text = self.decode(data, errors)?;
+        Ok(if universal && text.contains('\r') {
+            universal_newlines(text)
+        } else {
+            text
+        })
+    }
+
     pub(super) fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
         let capacity = if matches!(self, Self::Latin1) {
             data.len()
@@ -296,6 +319,26 @@ impl Codec {
         }
         Ok(Cow::Owned(out))
     }
+}
+
+/// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.
+fn universal_newlines(text: String) -> String {
+    let mut bytes = text.into_bytes();
+    let mut read = 0;
+    let mut written = 0;
+    while read < bytes.len() {
+        let byte = bytes[read];
+        read += 1;
+        bytes[written] = if byte == b'\r' {
+            read += usize::from(bytes.get(read) == Some(&b'\n'));
+            b'\n'
+        } else {
+            byte
+        };
+        written += 1;
+    }
+    bytes.truncate(written);
+    String::from_utf8(bytes).expect("ASCII newline conversion preserves UTF-8")
 }
 
 fn escaped(ch: char) -> Str {

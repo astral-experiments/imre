@@ -433,52 +433,49 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
 /// Returns an owned Object or null with a pending error.
 ///
 /// # Safety
-/// `path` must be rooted. Mode 4 reads universal newlines without translating them.
+/// `path` must point into a live StrOwner. Mode 4 reads universal newlines without translating them.
 /// Like other fallible entries, pending state must be clear on entry.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_open(path: *const Str, mode: u32) -> *const Object {
-    // SAFETY: the caller roots the immutable path throughout opening the stream.
-    finish(
-        open(unsafe { &*path }, mode, false, false),
-        std::ptr::null(),
-    )
+    // SAFETY: the caller keeps this string owner live throughout the call.
+    let path = unsafe { StrOwner::acquire_word(path as usize) };
+    finish(open(&path, mode, false, false), std::ptr::null())
 }
 
 /// Opens an immutable-byte stream in rb, wb, ab, or xb mode (0 through 3).
 ///
 /// # Safety
-/// Root the UTF-8 path; the compiler validates the mode and clear pending state.
+/// The path must point into a live StrOwner; the compiler validates the mode and clear pending state.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_binary_open(path: *const Str, mode: u32) -> *const Object {
-    // SAFETY: the caller roots the immutable path throughout opening the stream.
-    finish(open(unsafe { &*path }, mode, true, false), std::ptr::null())
+    // SAFETY: the caller keeps this string owner live throughout the call.
+    let path = unsafe { StrOwner::acquire_word(path as usize) };
+    finish(open(&path, mode, true, false), std::ptr::null())
 }
 
 /// Opens a gzip source without consuming a header until the first read.
 ///
 /// # Safety
-/// Root the UTF-8 path. The compiler passes 0 for text or 1 for binary.
+/// The path must point into a live StrOwner. The compiler passes 0 for text or 1 for binary.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const Object {
     if binary > 1 {
         fail("SystemError", "invalid gzip mode");
     }
-    // SAFETY: the caller roots the immutable path throughout the open.
-    finish(
-        open(unsafe { &*path }, 0, binary == 1, true),
-        std::ptr::null(),
-    )
+    // SAFETY: the caller keeps this string owner live throughout the call.
+    let path = unsafe { StrOwner::acquire_word(path as usize) };
+    finish(open(&path, 0, binary == 1, true), std::ptr::null())
 }
 
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
-pub(super) fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
+pub(super) fn open(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
     let state = open_state(path, mode, binary, gzip)?;
     Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
         Storage::File(Box::new(state)),
     )))))
 }
 
-fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
+fn open_state(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
     let (file, metadata) = open_file(path, mode)?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
     let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
@@ -498,7 +495,7 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
         fd: Some(fd),
         raw: false,
         stream: Some(stream),
-        name: Some(StrOwner::new(Str::new(path))),
+        name: Some(path.clone()),
         kind: match (binary, mode) {
             (false, _) => FileKind::Text,
             (true, 0) if gzip => FileKind::GzipBinaryRead,
@@ -509,29 +506,39 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
 }
 
 /// Open a raw descriptor with the same pathname and directory errors as Python open().
-pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
+pub(super) fn open_file(path: &StrOwner, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
     super::super::initialize_io();
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
     }
+    let path_error = |error| {
+        errno_with_filenames(
+            error,
+            Some(super::exceptions::Filename::Str(path.clone())),
+            None,
+        )
+    };
     let mut file = match mode {
-        0 | 4 => OpenOptions::new().read(true).open(path),
+        0 | 4 => OpenOptions::new().read(true).open(path.as_str()),
         1 => OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
-            .open(path),
-        2 => OpenOptions::new().append(true).create(true).open(path),
-        3 => OpenOptions::new().write(true).create_new(true).open(path),
+            .open(path.as_str()),
+        2 => OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path.as_str()),
+        3 => OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path.as_str()),
         _ => fail("SystemError", "invalid file mode"),
     }
-    .map_err(|error| errno_with_filename(error, Some(path)))?;
+    .map_err(path_error)?;
     let metadata = file.metadata().map_err(errno_error)?;
     if metadata.is_dir() {
-        return Err(errno_with_filename(
-            io::Error::from_raw_os_error(libc::EISDIR),
-            Some(path),
-        ));
+        return Err(path_error(io::Error::from_raw_os_error(libc::EISDIR)));
     }
     // FileIO starts append streams at EOF before the first write. Pipes may
     // still be opened for append even though they have no file position.
@@ -552,7 +559,8 @@ fn with_path_file<T>(
     binary: bool,
     operation: impl FnOnce(&mut FileState) -> Result<T>,
 ) -> Result<T> {
-    let mut state = open_state(path, mode, binary, false)?;
+    let path = StrOwner::new(Str::from(path));
+    let mut state = open_state(&path, mode, binary, false)?;
     let result = operation(&mut state);
     let closed = state.stream.take().unwrap().close().map_err(os_error);
     closed.and(result)
@@ -934,10 +942,14 @@ mod tests {
         }
     }
 
+    fn path_name(path: &std::path::Path) -> StrOwner {
+        StrOwner::new(Str::from(path.to_str().unwrap()))
+    }
+
     fn open(path: &str, mode: u32) -> Rc<Object> {
-        let path = Str::new(path);
-        // SAFETY: the local string is rooted; this helper requires a successful open.
-        let result = unsafe { imre_text_open(&path, mode) };
+        let path = StrOwner::new(Str::new(path));
+        // SAFETY: the path owner stays live; this helper requires a successful open.
+        let result = unsafe { imre_text_open(StrOwner::as_ptr(&path), mode) };
         assert!(!result.is_null());
         // SAFETY: open transfers this one owned reference to the Rc.
         unsafe { Rc::from_raw(result) }
@@ -1000,9 +1012,7 @@ mod tests {
                 [first.as_bytes(), second.as_bytes()].concat()
             };
             std::fs::write(&path, bytes).unwrap();
-            let mut state = open_state(path.to_str().unwrap(), 0, false, gzip)
-                .ok()
-                .unwrap();
+            let mut state = open_state(&path_name(&path), 0, false, gzip).ok().unwrap();
             let input = state.input().ok().unwrap();
             assert_eq!(
                 input.text_line().ok().unwrap().as_str(),
@@ -1019,9 +1029,7 @@ mod tests {
         bytes.resize(8191, b'a');
         bytes.extend(b"\xf0\x9f\xff");
         std::fs::write(&path, bytes).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, false, false)
-            .ok()
-            .unwrap();
+        let mut state = open_state(&path_name(&path), 0, false, false).ok().unwrap();
         let input = state.input().ok().unwrap();
         assert_eq!(input.text_line().ok().unwrap().as_str(), "first\n");
         for _ in 0..2 {
@@ -1035,9 +1043,7 @@ mod tests {
         let directory = Directory::new();
         let path = directory.0.join("data.gz");
         std::fs::write(&path, member(b"original")).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
-            .ok()
-            .unwrap();
+        let mut state = open_state(&path_name(&path), 0, true, true).ok().unwrap();
         std::fs::remove_file(&path).unwrap();
         std::fs::write(&path, member(b"replacement")).unwrap();
 
@@ -1071,9 +1077,7 @@ mod tests {
         .concat();
         gzip.splice(10..10, metadata);
         std::fs::write(&path, &gzip).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
-            .ok()
-            .unwrap();
+        let mut state = open_state(&path_name(&path), 0, true, true).ok().unwrap();
         let input = state.input().ok().unwrap();
         assert_eq!(input.read_bytes(Some(2)).ok().unwrap(), b"ab");
         assert_eq!(input.binary_line().ok().unwrap(), b"c\n");
@@ -1086,9 +1090,7 @@ mod tests {
         let end = gzip.len();
         gzip[end - 8] ^= 1;
         std::fs::write(&path, &gzip).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
-            .ok()
-            .unwrap();
+        let mut state = open_state(&path_name(&path), 0, true, true).ok().unwrap();
         let input = state.input().ok().unwrap();
         assert_eq!(input.read_bytes(Some(7)).ok().unwrap(), b"abc\ndef");
         input.read_bytes(None).unwrap_err().raise();
@@ -1110,9 +1112,7 @@ mod tests {
             ),
         ] {
             std::fs::write(&path, bytes).unwrap();
-            let mut state = open_state(path.to_str().unwrap(), 0, true, true)
-                .ok()
-                .unwrap();
+            let mut state = open_state(&path_name(&path), 0, true, true).ok().unwrap();
             let input = state.input().ok().unwrap();
             assert!(input.read_bytes(Some(0)).ok().unwrap().is_empty());
             input.read_bytes(None).unwrap_err().raise();
@@ -1128,9 +1128,7 @@ mod tests {
         invalid.resize(invalid.len() + 9000, b'a');
         invalid.push(7);
         std::fs::write(&path, invalid).unwrap();
-        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
-            .ok()
-            .unwrap();
+        let mut state = open_state(&path_name(&path), 0, true, true).ok().unwrap();
         state
             .input()
             .ok()
@@ -1413,8 +1411,9 @@ mod tests {
             ),
             ("nul\0path".to_owned(), Kind::ValueError),
         ] {
-            // SAFETY: the temporary path remains rooted for this failed call.
-            assert!(unsafe { imre_text_open(&Str::from(path), 0) }.is_null());
+            let path = StrOwner::new(Str::from(path));
+            // SAFETY: the path owner stays live throughout the failed call.
+            assert!(unsafe { imre_text_open(StrOwner::as_ptr(&path), 0) }.is_null());
             take_error(kind);
         }
         os_error(io::ErrorKind::OutOfMemory.into()).raise();

@@ -98,3 +98,62 @@ impl Checker<'_> {
         }
     }
 }
+
+impl Checker<'_> {
+    /// Evaluate both operands before handling nullable integers at the addition.
+    pub(super) fn nullable_int_sum(&mut self, left: Expr, right: Expr) -> Expr {
+        let mut scope = calls::ArgumentScope::default();
+        let left = scope.hold(self, left);
+        let right = scope.hold(self, right);
+        let integer = |v: &Expr| {
+            if v.ty == Type::Int {
+                v.clone()
+            } else {
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Unwrap(Box::new(v.clone())),
+                }
+            }
+        };
+        let if_none = |v: &Expr, absent: Expr, present: Expr| {
+            if v.ty == Type::Int {
+                present
+            } else {
+                let test = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::IsNone, vec![v.clone()]),
+                };
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Conditional(
+                        Box::new(test),
+                        Box::new(absent),
+                        Box::new(present),
+                    ),
+                }
+            }
+        };
+        let error = |l, r| {
+            calls::type_error(
+                Type::Int,
+                Vec::new(),
+                format!("unsupported operand type(s) for +: '{l}' and '{r}'"),
+            )
+        };
+        let sum = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Binary(
+                Binary::Add,
+                Box::new(integer(&left)),
+                Box::new(integer(&right)),
+            ),
+        };
+        let absent = if_none(
+            &right,
+            error("NoneType", "NoneType"),
+            error("NoneType", "int"),
+        );
+        let present = if_none(&right, error("int", "NoneType"), sum);
+        scope.finish(if_none(&left, absent, present))
+    }
+}
