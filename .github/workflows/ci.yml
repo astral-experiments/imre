@@ -79,7 +79,9 @@ jobs:
           fixtures=(tests/fixtures/callables/owned_caches.py tests/fixtures/containers/namedtuple.py)
           case "$KIND" in
             cache|both) fixtures+=(tests/fixtures/callables/cache_parameters.py tests/fixtures/containers/dict_clear.py);;
-            annotation) fixtures+=(tests/fixtures/callables/forward_refs.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py);;
+            annotation)
+              fixtures+=(tests/fixtures/callables/forward_refs.py tests/fixtures/unions/boolean_integer.py tests/fixtures/module_values/wrapper_attributes/main.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py)
+              if test -f tests/fixtures/callables/annotations_deferred.py; then fixtures+=(tests/fixtures/callables/annotations_deferred.py); fi;;
             defaults) fixtures+=(tests/fixtures/module_values/wrapper_attributes/main.py);;
             dispatch) fixtures+=(tests/fixtures/callables/single_dispatch.py);;
             wraps) fixtures+=(tests/fixtures/callables/wraps_application.py);;
