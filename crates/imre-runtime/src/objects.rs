@@ -53,8 +53,8 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Sequence(Words),
-    Dictionary(Box<mappings::Mapping>),
-    Set(Box<mappings::Set>),
+    Dictionary(mappings::TableOwner<mappings::Mapping>),
+    Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     Repeat(itertools::Repeat),
