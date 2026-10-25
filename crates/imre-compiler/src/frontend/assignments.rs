@@ -552,6 +552,11 @@ impl Checker<'_> {
                 {
                     return Some(ty);
                 }
+                if let Type::ChainMap(id) = receiver.ty
+                    && attribute.attr.as_str() == "maps"
+                {
+                    return Some(self.types.list(Type::Dict(id)));
+                }
                 if let Some(class) = self.writable_property(receiver.ty, attribute) {
                     let setter = &self.classes.setters[class][attribute.attr.as_str()];
                     return match self.inference {

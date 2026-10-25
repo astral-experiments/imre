@@ -1,0 +1,95 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "aa3a0f36d2a141c93c2eede03875fd0889bc50654c239db0eec36fb2e01b1ae7",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_os",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\""
+    },
+    {
+      "suite": "test.test_os",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\""
+    },
+    {
+      "suite": "test.test_os",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\""
+    },
+    {
+      "suite": "test.test_os",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_os.py:8:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\""
+    },
+    {
+      "suite": "test.test_posix",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_posix.py:1845:45: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_posix",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_posix.py:1845:45: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_posix",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_posix.py:1845:45: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_posix",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_posix.py:1845:45: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_genericpath",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_genericpath.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"genericpath\""
+    },
+    {
+      "suite": "test.test_genericpath",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_genericpath.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"genericpath\""
+    },
+    {
+      "suite": "test.test_genericpath",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_genericpath.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"genericpath\""
+    },
+    {
+      "suite": "test.test_genericpath",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_genericpath.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"genericpath\""
+    }
+  ],
+  "compiler_commit": "624d69d664944054951e727b0e30ff313325e5c0"
+}

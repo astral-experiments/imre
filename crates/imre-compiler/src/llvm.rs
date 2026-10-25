@@ -60,6 +60,7 @@ impl Type {
             | Self::Callable(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
             | Self::StringKeys
@@ -129,6 +130,7 @@ impl Type {
             | Self::Callable(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
             | Self::StringKeys
@@ -734,6 +736,7 @@ impl Emitter<'_, '_> {
             | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
+            | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
             | Type::StringKeys
@@ -3416,6 +3419,7 @@ impl Emitter<'_, '_> {
                 )),
                 Type::ListInt
                 | Type::StringKeys
+                | Type::ChainMap(_)
                 | Type::CacheState(_)
                 | Type::Iterator
                 | Type::Cursor(_)
@@ -3971,6 +3975,7 @@ impl Emitter<'_, '_> {
                     Get => "imre_log_get",
                     HandlerRename => "imre_log_handler_rename",
                     HandlerLookup => "imre_log_handler_lookup",
+                    PrintActiveException => "imre_log_print_active_exception",
                     AddLevel => "imre_log_add_level",
                     LevelName => "imre_log_level_name",
                     LevelForName => "imre_log_level_for_name",
@@ -5598,6 +5603,31 @@ impl Emitter<'_, '_> {
                 Type::Int,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::FormatCursor { split } => {
+                let (cursor, outer) = if *split {
+                    let fields = self.module.types.fields(returns).unwrap();
+                    let layout = self
+                        .output
+                        .global_ref(format!("layout_{}", record_name(returns)));
+                    (fields[1], Some(layout))
+                } else {
+                    (returns, None)
+                };
+                let row = self.module.types.cursor_element(cursor).unwrap();
+                let row = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(row)));
+                let input = &args[0].value.operand;
+                let operand = match outer {
+                    Some(outer) => self.checked_pointer(format!("call ptr @imre_formatter_field_name_split(ptr {input}, ptr @{outer}, ptr @{row})")),
+                    None => self.instruction(format!("call ptr @imre_formatter_parser(ptr {input}, ptr @{row})")),
+                };
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::Repeat => {
                 let value = &args[0].value;
                 let word = self.word(value);
@@ -5676,6 +5706,15 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::ChainMapNew => self.call("imre_chainmap_new", returns, &[&args[0].value]),
+            Builtin::ChainMapMaps => self.call("imre_chainmap_maps", returns, &[&args[0].value]),
+            Builtin::ChainMapSetMaps => {
+                self.line(format!(
+                    "call void @imre_chainmap_set_maps(ptr {}, ptr {})",
+                    args[1].value.operand, args[0].value.operand
+                ));
+                none()
+            }
             Builtin::DequeNew => {
                 let element = self.module.types.deque_element(returns).unwrap();
                 let limit = self.word(&args[0].value);
@@ -6151,6 +6190,7 @@ impl Emitter<'_, '_> {
                     | Type::Class(_)
                     | Type::List(_)
                     | Type::Dict(_)
+                    | Type::ChainMap(_)
                     | Type::Set(_)
                     | Type::Deque(_)
                     | Type::StringKeys
@@ -6414,6 +6454,7 @@ impl Emitter<'_, '_> {
             | Type::Callable(_)
             | Type::List(_)
             | Type::Dict(_)
+            | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
             | Type::StringKeys
@@ -6497,6 +6538,7 @@ impl Emitter<'_, '_> {
             | Type::Callable(_)
             | Type::List(_)
             | Type::Dict(_)
+            | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
             | Type::StringKeys
@@ -7096,6 +7138,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(..) => 6,
         Type::List(_)
         | Type::Dict(_)
+        | Type::ChainMap(_)
         | Type::Set(_)
         | Type::Deque(_)
         | Type::StringKeys
@@ -7707,6 +7750,10 @@ declare i64 @imre_deque_len(ptr)
 declare i64 @imre_deque_maxlen(ptr)
 declare ptr @imre_deque_iter(ptr, i32)
 declare ptr @imre_counter_new(i32)
+declare ptr @imre_chainmap_new(ptr)
+declare ptr @imre_chainmap_maps(ptr)
+declare void @imre_chainmap_set_maps(ptr, ptr)
+declare i32 @imre_chainmap_truth(ptr)
 declare void @imre_counter_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
@@ -7897,6 +7944,7 @@ declare ptr @imre_logrecord_repr(ptr)
 declare ptr @imre_log_get(i64)
 declare void @imre_log_handler_rename(ptr, i64, i64)
 declare i64 @imre_log_handler_lookup(ptr)
+declare void @imre_log_print_active_exception()
 declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)
 declare i64 @imre_log_level_for_name(ptr)
@@ -7940,6 +7988,8 @@ declare ptr @imre_islice(i32, i64, i64, i64, i64)
 declare ptr @imre_cycle(i32, i64)
 declare i64 @imre_cursor_length_hint(ptr, i64)
 declare ptr @imre_repeat(i32, i64, i64)
+declare ptr @imre_formatter_parser(ptr, ptr)
+declare ptr @imre_formatter_field_name_split(ptr, ptr, ptr)
 declare ptr @imre_str_iter(ptr)
 declare ptr @imre_str_reverse_iter(ptr)
 declare ptr @imre_str_int_list(ptr)
