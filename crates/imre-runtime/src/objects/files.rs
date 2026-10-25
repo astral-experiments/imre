@@ -474,14 +474,14 @@ pub(super) fn open_file(
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
     }
     let file = match mode {
-        0 | 4 => OpenOptions::new().read(true).open(path),
+        0 | 4 => OpenOptions::new().read(true).open(path.as_str()),
         1 => OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
-            .open(path),
-        2 => OpenOptions::new().append(true).create(true).open(path),
-        3 => OpenOptions::new().write(true).create_new(true).open(path),
+            .open(path.as_str()),
+        2 => OpenOptions::new().append(true).create(true).open(path.as_str()),
+        3 => OpenOptions::new().write(true).create_new(true).open(path.as_str()),
         _ => fail("SystemError", "invalid file mode"),
     }
     .map_err(|error| errno_with_filename(error, Some(path)))?;
