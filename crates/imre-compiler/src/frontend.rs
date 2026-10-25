@@ -2507,19 +2507,8 @@ impl<'a> Checker<'a> {
             checker.apply_facts(&value.test, truth);
             let expression = if truth { &*value.body } else { &*value.orelse };
             let guards = checker.namespace_guards.len();
-            let mut condition = &*value.test;
-            let mut present = truth;
-            while let ast::Expr::UnaryOp(unary) = condition
-                && unary.op == ast::UnaryOp::Not
-            {
-                present = !present;
-                condition = &unary.operand;
-            }
-            if present
-                && narrowing::expression_assignments(expression).is_empty()
-                && let Some(field) = checker.namespace_guard(condition, &[])
-            {
-                checker.namespace_guards.push(field);
+            if narrowing::expression_assignments(expression).is_empty() {
+                checker.enter_namespace_guards(&value.test, truth, &[]);
             }
             let result = check(checker, expression);
             checker.namespace_guards.truncate(guards);
@@ -4438,7 +4427,7 @@ impl<'a> Checker<'a> {
                 self.regex_guards.push(guard);
             }
             let namespace_depth = self.namespace_guards.len();
-            self.enter_namespace_guards(test, body);
+            self.enter_namespace_guards(test, true, body);
             // In a reachable-only profile, an impossible compatibility guard's
             // expression-only body contains no local declarations to preserve.
             let (yes, yes_falls) = if self.graph.reachable_only()
@@ -4465,7 +4454,16 @@ impl<'a> Checker<'a> {
             arms.push((condition, yes));
         }
         let (mut no, no_falls) = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
-            self.block(&tail.body)?
+            let guards = self.namespace_guards.len();
+            let last_test = clauses
+                .iter()
+                .rev()
+                .find_map(|clause| clause.test.as_ref())
+                .unwrap_or(&branch.test);
+            self.enter_namespace_guards(last_test, false, &tail.body);
+            let result = self.block(&tail.body);
+            self.namespace_guards.truncate(guards);
+            result?
         } else {
             (Vec::new(), true)
         };
@@ -6356,6 +6354,41 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::CsvReader)) => return self.csv_reader(call),
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::WarningFilter)) => {
+                let positional = call.arguments.args.as_ref();
+                let (action, category) = match (positional, call.arguments.keywords.as_slice()) {
+                    ([action], []) => (action, None),
+                    ([action, category], []) => (action, Some(category)),
+                    ([action], [kw])
+                        if kw.arg.as_ref().is_some_and(|k| k.as_str() == "category") =>
+                    {
+                        (action, Some(&kw.value))
+                    }
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "simplefilter requires an action and an optional static warning category",
+                        ));
+                    }
+                };
+                let category = match category {
+                    None => 0,
+                    Some(expr) if self.unshadowed_builtin(expr, "Warning") => 0,
+                    Some(expr) if self.unshadowed_builtin(expr, "ResourceWarning") => 1,
+                    Some(expr) if self.unshadowed_builtin(expr, "RuntimeWarning") => 2,
+                    Some(expr) => {
+                        return Err(error(self.source, expr, "unsupported warning category"));
+                    }
+                };
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::WarningFilter(category),
+                        vec![self.expr_expected(action, Type::Str)?],
+                    ),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
                 self.reject_builtin_keywords(call)?;
                 let [arg] = call.arguments.args.as_ref() else {
