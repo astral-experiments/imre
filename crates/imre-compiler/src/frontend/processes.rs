@@ -303,6 +303,23 @@ fn stream_mode(graph: &SourceGraph, module: ModuleId, value: &ast::Expr) -> u32 
     }
 }
 
+/// Python accepts integer truth values as well as booleans for text mode.
+fn literal_text_flag(value: &ast::Expr) -> Option<bool> {
+    match value {
+        ast::Expr::BooleanLiteral(flag) => Some(flag.value),
+        ast::Expr::NumberLiteral(number) => match &number.value {
+            ast::Number::Int(n) => Some(n.as_u64() != Some(0)),
+            _ => None,
+        },
+        ast::Expr::UnaryOp(unary)
+            if matches!(unary.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub) =>
+        {
+            literal_text_flag(&unary.operand)
+        }
+        _ => None,
+    }
+}
+
 /// Capture determines the returned layout. Ordinary stream expressions are
 /// evaluated in source order, including ones rejected by run/check_output.
 fn stream_plan(
@@ -332,6 +349,8 @@ fn stream_plan(
                 let flag = match value {
                     ast::Expr::BooleanLiteral(flag) => flag.value,
                     ast::Expr::NoneLiteral(_) => false,
+                    _ if name != "capture_output" => literal_text_flag(value)
+                        .ok_or("process text mode requires a literal bool, integer, or None")?,
                     _ => {
                         return Err("process capture_output and text require literal bool or None");
                     }
@@ -848,10 +867,8 @@ impl Checker<'_> {
                 .find(|kw| kw.arg.as_deref() == Some(name))
                 .map(|kw| &kw.value)
         };
-        let text_flag = |name| match keyword(name) {
-            Some(ast::Expr::BooleanLiteral(flag)) => Some(flag.value),
-            _ => None,
-        };
+        let text_flag = |name| keyword(name).and_then(literal_text_flag);
+        let conflicting_text = matches!((text_flag("text"), text_flag("universal_newlines")), (Some(a), Some(b)) if a != b);
         let errors = match keyword("errors") {
             Some(ast::Expr::StringLiteral(v)) if v.value.to_str() == "ignore" => 1,
             Some(ast::Expr::StringLiteral(v)) if v.value.to_str() == "replace" => 2,
@@ -866,14 +883,17 @@ impl Checker<'_> {
             3
         } else if streams & 256 != 0 {
             4
-        } else if matches!((text_flag("text"), text_flag("universal_newlines")), (Some(a), Some(b)) if a != b)
-        {
+        } else if conflicting_text {
             5
         } else {
             0
         };
         let stdin = if input_given { 1 } else { stdin };
-        let mut streams = streams | (stdin << 12) | (u32::from(capture.text) << 16);
+        // Popen and call use the same launch path, including text-mode validation.
+        let mut streams = streams
+            | (u32::from(conflicting_text) << 9)
+            | (stdin << 12)
+            | (u32::from(capture.text) << 16);
         let default_bufsize = || Expr {
             ty: Type::Int,
             kind: ExprKind::Int("-1".into()),
@@ -936,6 +956,17 @@ impl Checker<'_> {
                 });
             }
         }
+        if matches!(api, LaunchApi::Popen | LaunchApi::Call(_))
+            && keyword("universal_newlines").is_some()
+        {
+            params.push(Parameter {
+                name: "universal_newlines".into(),
+                ty: Type::Bool,
+                default: None,
+                sign_only: false,
+                kind: ParameterKind::KeywordOnly,
+            });
+        }
         let child_options = params.len();
         if ["process_group", "umask", "start_new_session", "pass_fds"]
             .iter()
@@ -967,6 +998,9 @@ impl Checker<'_> {
             });
         }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
+            if params[index].name == "universal_newlines" {
+                return Ok(boolean(false)); // stream_plan already checked this literal
+            }
             if index >= child_options {
                 let name = params[index].name.as_str();
                 if name == "pass_fds" {

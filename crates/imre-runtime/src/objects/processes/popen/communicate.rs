@@ -95,7 +95,11 @@ pub unsafe extern "C" fn imre_run_config(
         2 => Some("check argument not allowed, it will be overridden."),
         3 => Some("stdin and input arguments may not both be used."),
         4 => Some("stdout and stderr arguments may not be used with capture_output."),
-        5 => return Error::new(Kind::SubprocessError, "Cannot disambiguate when both text and universal_newlines are supplied but different. Pass one or the other.").returning(std::ptr::null()),
+        // Older run/check_output call sites pass the conflict as a validation code.
+        5 => {
+            config.streams |= CONFLICTING_TEXT_MODES;
+            None
+        }
         _ => fail("SystemError", "unknown check_output validation"),
     };
     if let Some(message) = invalid {

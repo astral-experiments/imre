@@ -14,6 +14,8 @@ use std::sync::Arc;
 
 type Pipes = [Option<Rc<Object>>; 3];
 
+const CONFLICTING_TEXT_MODES: u32 = 1 << 9;
+
 thread_local! {
     // Like subprocess._active: dropping the last handle neither kills a live
     // child nor blocks. A subsequent launch collects its status and pipes.
@@ -276,6 +278,13 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
         return Err(Error::new(
             Kind::ValueError,
             "STDOUT can only be used for stderr",
+        ));
+    }
+    // Popen rejects conflicting text modes before it collects stream handles.
+    if streams & CONFLICTING_TEXT_MODES != 0 {
+        return Err(Error::new(
+            Kind::SubprocessError,
+            "Cannot disambiguate when both text and universal_newlines are supplied but different. Pass one or the other.",
         ));
     }
     let c_int = |n: &Int| n.as_small().and_then(|n| i32::try_from(n).ok());
