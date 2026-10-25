@@ -541,6 +541,9 @@ pub(crate) enum Builtin {
     Formatter(FormatterOperation),
     Input,
     Chr,
+    IntegerPower,
+    ModularPower,
+    NegativeIntegerPower,
     Int,
     Float,
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
@@ -789,6 +792,7 @@ pub(crate) enum Builtin {
     TextClosed,
     FileFileno,
     DictGet,
+    DictCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
     CounterNew,
@@ -1089,6 +1093,18 @@ pub(crate) enum FdOperation {
     SetInheritable,
 }
 
+/// Filesystem copy operations using the same ordered pair of path operands.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub(crate) enum CopyOperation {
+    File = 0,
+    Mode = 1,
+    Stat = 2,
+    Xattr = 3,
+    Copy = 4,
+    Copy2 = 5,
+}
+
 /// Synchronous process operations cannot invoke language callbacks.
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
@@ -1173,7 +1189,7 @@ pub(crate) enum ProcessOperation {
     Fd(FdOperation),
     OpenFlag(&'static str),
     Which,
-    CopyFile,
+    Copy(CopyOperation),
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

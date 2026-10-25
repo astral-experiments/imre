@@ -13,7 +13,7 @@ The runner verifies both the vendored and installed test blobs, discovers the fu
 
 ## Native execution
 
-[evidence-linux.json](evidence-linux.json) contains one row per occurrence at `-O0` and `-O3`, including every original skip and its source condition. At this revision, seven complete methods run their bodies and assertions in Imre under CPython fixtures; 23 use host assertions on a native operation. Two methods also call CPython `shutil.rmtree` from the original body. The two default-search-path assertions fail: Imre does not see the host's replacements of `os.confstr` and `os.defpath`. The remaining 139 are reference-only; none of the 50 upstream skips is counted as a native pass.
+[evidence-linux.json](evidence-linux.json) contains one row per occurrence at `-O0` and `-O3`, including every original skip and its source condition. At this revision, seven complete methods run their bodies and assertions in Imre under CPython fixtures; 33 use host assertions on native lookup, copying, or metadata operations. Two methods also call CPython `shutil.rmtree` from the original body. The two default-search-path assertions fail: Imre does not see the host's replacements of `os.confstr` and `os.defpath`. The remaining 129 are reference-only; none of the 50 upstream skips is counted as a native pass.
 
 ```sh
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/evidence.py \
@@ -24,3 +24,5 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
 ```
 
 The first command writes all outcomes and exits unsuccessfully when an assertion fails. The second checks the report against the full pinned denominator. [mock-fixtures.json](mock-fixtures.json) identifies the original `unittest.mock` call sites, decorators and affected IDs, including those skipped by CPython.
+
+The [complete TestCopy run](copy-linux.json) also checks the real 1 KiB user extended attribute outside the upstream trusted-attribute skip. The return-value test exercises four native calls; its complete-method compile stops on the tuple of shutil function values. It remains host-driven.

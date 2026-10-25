@@ -19,6 +19,7 @@ mod callables;
 mod calls;
 mod comprehensions;
 mod contexts;
+mod copying;
 mod counter;
 mod csv;
 mod dataclass_values;
@@ -44,9 +45,11 @@ mod matching;
 mod module_values;
 mod native_generators;
 mod os;
+mod partials;
 mod paths;
 mod pipelines;
 mod posixpath;
+mod powers;
 mod processes;
 mod projected_equality;
 mod record_inputs;
@@ -320,6 +323,7 @@ const RESERVED: &[&str] = &[
     "set",
     "len",
     "abs",
+    "pow",
     "chr",
     "sorted",
     "divmod",
@@ -4327,6 +4331,16 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::PercentInteger, vec![left, right]),
             });
         }
+        if op == ast::Operator::Pow {
+            let (operation, ty) = self.integer_power(&left, &right, false, node)?;
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Builtin(
+                    operation,
+                    vec![powers::integer(left), powers::integer(right)],
+                ),
+            });
+        }
         let left = Self::integer_addend(op, left, right.ty);
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
@@ -5193,6 +5207,13 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "join"
+                    && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
+                    && !self.names.contains_key("str")
+                    && self.resolve(&attribute.value).is_none()
+                {
+                    return Ok(self.string_join_value(None, attribute));
+                }
                 if attribute.attr.as_str() == "encoding"
                     && matches!(
                         self.resolve(&attribute.value),
@@ -5210,6 +5231,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
+                    return Ok(self.string_join_value(Some(receiver), attribute));
+                }
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
@@ -5693,6 +5717,7 @@ impl<'a> Checker<'a> {
                 };
                 return self.typed_expr(value);
             }
+            Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
@@ -5733,6 +5758,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
@@ -5763,7 +5789,7 @@ impl<'a> Checker<'a> {
                 return self.popen(call, Some(true));
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
-            Some(Binding::Intrinsic(Intrinsic::CopyFile)) => return self.shutil_copyfile(call),
+            Some(Binding::Intrinsic(Intrinsic::Copy(op))) => return self.shutil_copy(op, call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;
                 let [path] = call.arguments.args.as_ref() else {
@@ -6425,6 +6451,7 @@ impl<'a> Checker<'a> {
             "list" => return self.list_call(call, None),
             "sorted" => return self.sorted_call(call, None),
             "abs" => return self.abs_call(call),
+            "pow" => return self.pow_call(call),
             "next" => return self.next_cursor(call),
             "iter" if call.arguments.args.len() == 1 => return self.iter_cursor(call),
             "sum" => return self.sum_call(call),
@@ -6835,7 +6862,7 @@ impl<'a> Checker<'a> {
             }
         };
         let path = self.path_argument(path)?;
-        let (ty, builtin) = match (gzip, mode) {
+        let (ty, mut builtin) = match (gzip, mode) {
             (true, "rt") => (Type::TextIO, Builtin::GzipOpen),
             (true, "rb") => (Type::BinaryIO, Builtin::GzipOpen),
             (true, _) => {
@@ -6855,13 +6882,61 @@ impl<'a> Checker<'a> {
         };
         if ty == Type::BinaryIO {
             self.reject_builtin_keywords(call)?;
-        } else if gzip || !call.arguments.keywords.is_empty() {
+        } else if gzip {
             self.utf8_encoding(call)?;
+        } else {
+            let (mut encoding, mut newline) = (false, false);
+            for keyword in &call.arguments.keywords {
+                match keyword.arg.as_deref() {
+                    Some("encoding") if !encoding => {
+                        self.utf8_encoding_keyword(keyword)?;
+                        encoding = true;
+                    }
+                    Some("newline") if !newline => {
+                        builtin = self.text_newline(&keyword.value, builtin)?;
+                        newline = true;
+                    }
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            keyword,
+                            "unexpected or repeated text open keyword",
+                        ));
+                    }
+                }
+            }
         }
         Ok(Expr {
             ty,
             kind: ExprKind::Builtin(builtin, vec![path]),
         })
+    }
+
+    /// POSIX writers already preserve newlines. Readers must retain CR and
+    /// CRLF while still recognizing each as a physical line terminator.
+    fn text_newline(&self, value: &ast::Expr, builtin: Builtin) -> Result<Builtin, String> {
+        if !matches!(builtin, Builtin::TextOpen(_)) {
+            return Err(error(
+                self.source,
+                value,
+                "binary open does not accept newline",
+            ));
+        }
+        match value {
+            ast::Expr::NoneLiteral(_) => Ok(builtin),
+            ast::Expr::StringLiteral(s) if s.value.to_str().is_empty() => {
+                Ok(if matches!(builtin, Builtin::TextOpen(0)) {
+                    Builtin::TextOpen(4)
+                } else {
+                    builtin
+                })
+            }
+            _ => Err(error(
+                self.source,
+                value,
+                "expected newline=None or an empty literal string",
+            )),
+        }
     }
 
     /// Validate an explicit encoding for native text I/O.

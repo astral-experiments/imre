@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::PosixPathOperation;
+use crate::ir::{CopyOperation, PosixPathOperation};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -87,6 +87,7 @@ pub(crate) enum IntrinsicModule {
     UrllibParse,
     Collections,
     CollectionsAbc,
+    Copy,
     Itertools,
     Operator,
     Textwrap,
@@ -113,6 +114,7 @@ pub(crate) enum Intrinsic {
     ArgparseNamespace,
     RawDescriptionHelpFormatter,
     FutureAnnotations,
+    ShallowCopy,
     TypeChecking,
     GetLogger,
     GetLevelName,
@@ -142,6 +144,8 @@ pub(crate) enum Intrinsic {
     LruCache,
     CachedProperty,
     NewType,
+    Partial,
+    Placeholder,
     Reduce,
     TomlDumps,
     TomliLoads,
@@ -245,7 +249,7 @@ pub(crate) enum Intrinsic {
     Path,
     PurePath(crate::ir::PathFlavor),
     Which,
-    CopyFile,
+    Copy(CopyOperation),
     ShutilError,
     SameFileError,
     SpecialFileError,
@@ -303,6 +307,7 @@ impl IntrinsicModule {
             "urllib.parse" => Some(Self::UrllibParse),
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
+            "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
             "operator" => Some(Self::Operator),
             "textwrap" => Some(Self::Textwrap),
@@ -392,6 +397,8 @@ impl IntrinsicModule {
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
+            (Self::Functools, "partial") => Intrinsic::Partial,
+            (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
             (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
@@ -476,6 +483,7 @@ impl IntrinsicModule {
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
@@ -507,7 +515,12 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Shutil, "which") => Intrinsic::Which,
-            (Self::Shutil, "copyfile") => Intrinsic::CopyFile,
+            (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
+            (Self::Shutil, "copymode") => Intrinsic::Copy(CopyOperation::Mode),
+            (Self::Shutil, "copystat") => Intrinsic::Copy(CopyOperation::Stat),
+            (Self::Shutil, "_copyxattr") => Intrinsic::Copy(CopyOperation::Xattr),
+            (Self::Shutil, "copy") => Intrinsic::Copy(CopyOperation::Copy),
+            (Self::Shutil, "copy2") => Intrinsic::Copy(CopyOperation::Copy2),
             (Self::Shutil, "Error") => Intrinsic::ShutilError,
             (Self::Shutil, "SameFileError") => Intrinsic::SameFileError,
             (Self::Shutil, "SpecialFileError") => Intrinsic::SpecialFileError,
