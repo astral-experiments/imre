@@ -4,6 +4,7 @@ import hashlib
 from collections import Counter
 from contextlib import contextmanager
 import json
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -97,12 +98,15 @@ def run(args, level, root):
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
     for name in ["equality_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
-                 "callable_binding", "context_regex", *("context_" + family for family in families)]:
+                 "callable_binding", "context_regex", "loader_names", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
+        if name == "loader_names":
+            shutil.copytree(HERE / "upstream/Lib/test/test_unittest/namespace_test_pkg/bar", control / "bar")
         program = HERE / (name + ".py")
         native = lang.build(program.read_bytes(), control)
-        oracle = subprocess.run([sys.executable, "-B", program], capture_output=True, timeout=30, check=True)
+        oracle = subprocess.run([sys.executable, "-E", "-B", control / "case.py"], cwd=control,
+                                capture_output=True, timeout=30, check=True)
         observed = subprocess.run([native], capture_output=True, timeout=30, check=True)
         if (observed.stdout, observed.stderr) != (oracle.stdout, oracle.stderr):
             raise AssertionError(f"{program.name} differs from CPython: {observed!r} != {oracle!r}")
@@ -117,6 +121,7 @@ def run(args, level, root):
     else:
         executions.update({name: check_assertion(binary, op, level) for name, op in host.items()})
     for module, owner, method, operation in (
+        ("test_loader", "Test_TestLoader", "test___init__", "unittest.TestLoader construction and its errors list"),
         ("test_result", "Test_TestResult", "test_stop", "unittest.TestResult.stop"),
         ("test_result", "Test_TestResult", "test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun"),
         ("test_case", "Test_TestCase", "testAssertRaisesNoExceptionType", "unittest.TestCase.assertRaises"),
