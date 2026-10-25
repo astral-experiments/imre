@@ -26,6 +26,7 @@ mod dispatch;
 mod documents;
 mod enums;
 mod expansions;
+mod fixed_tuples;
 mod functools;
 mod hashlib;
 mod inference;
@@ -35,6 +36,7 @@ mod json;
 mod literals;
 mod local_functions;
 mod logging;
+mod logging_records;
 mod matching;
 mod module_values;
 mod native_generators;
@@ -1246,19 +1248,58 @@ fn annotation_at(
     source: &str,
     owner: Option<usize>,
 ) -> Result<Type, String> {
+    annotation_with_aliases(
+        expression,
+        graph,
+        (module, source),
+        classes,
+        types,
+        owner,
+        0,
+    )
+}
+
+fn annotation_with_aliases(
+    expression: &ast::Expr,
+    graph: &SourceGraph,
+    (module, source): (ModuleId, &str),
+    classes: &Classes,
+    types: &Types,
+    owner: Option<usize>,
+    alias_depth: usize,
+) -> Result<Type, String> {
+    if alias_depth >= 32 {
+        return Err(error(
+            source,
+            expression,
+            "type aliases nest more than 32 levels or form a cycle",
+        ));
+    }
+    if let Some(Binding::TypeAlias(origin, index)) = graph.resolve_type(module, expression) {
+        let module = &graph.modules[origin];
+        return annotation_with_aliases(
+            &module.aliases[index].value,
+            graph,
+            (origin, &module.source),
+            classes,
+            types,
+            owner,
+            alias_depth + 1,
+        );
+    }
     if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
         let contents = value.value.to_str();
         let parsed = ruff_python_parser::parse_expression(contents)
             .map_err(|_| error(source, expression, "invalid quoted type annotation"))?;
-        return annotation_at(
+        return annotation_with_aliases(
             parsed.expr(),
             graph,
-            module,
+            (module, contents),
             classes,
             types,
-            contents,
             owner,
+            alias_depth,
         )
         .map_err(|message| {
             error(
@@ -1299,6 +1340,7 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
@@ -1310,7 +1352,15 @@ fn annotation_at(
         _ => {}
     }
     let nested = |expression: &ast::Expr| {
-        annotation_at(expression, graph, module, classes, types, source, owner)
+        annotation_with_aliases(
+            expression,
+            graph,
+            (module, source),
+            classes,
+            types,
+            owner,
+            alias_depth,
+        )
     };
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
@@ -1638,6 +1688,7 @@ struct Checker<'a> {
     /// A later local assignment shadows builtin iter throughout a function.
     local_iter: bool,
     context_method: bool,
+    fixed_tuple: Option<fixed_tuples::Call>,
     generator_item: Option<Type>,
     asynchronous: bool,
     /// Capture only the outer sum of an assignment with a neighboring sum.
@@ -1699,6 +1750,7 @@ impl<'a> Checker<'a> {
             zip_sum_rhs: None,
             asynchronous: false,
             context_method: false,
+            fixed_tuple: None,
             generator_item: None,
             zip_sums: HashMap::new(),
             source: &graph.modules[module].source,
@@ -2022,6 +2074,26 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        // A record can carry user fields with distinct types. An expected scalar type
+        // permits reading such a field; the runtime checks its actual representation.
+        if let ast::Expr::Attribute(attr) = expression
+            && let ast::Expr::Name(owner) = &*attr.value
+            && self
+                .names
+                .get(owner.id.as_str())
+                .is_some_and(|&slot| self.locals[slot] == Type::LogRecord)
+            && matches!(
+                self.types.payload(expected).unwrap_or(expected),
+                Type::Str | Type::Int | Type::Float | Type::Bool | Type::Bytes | Type::None
+            )
+        {
+            let record = self.expr(&attr.value)?;
+            return Ok(logging_records::op(
+                ir::LogRecordOperation::Read,
+                expected,
+                vec![record, unpacking::string(attr.attr.as_str())],
+            ));
+        }
         if expected == Type::JsonObject
             && matches!(expression, ast::Expr::Dict(_))
             && documents::constant(expression)
@@ -3214,6 +3286,7 @@ impl<'a> Checker<'a> {
         let reachable = self.reachable;
         let enclosing_sum = self.zip_sum_rhs;
         let mut previous_sum = false;
+        let mut length_guard = None;
         for (index, statement) in statements.iter().enumerate() {
             if let ast::Stmt::Assign(assignment) = statement
                 && let [ast::Expr::Name(name)] = assignment.targets.as_slice()
@@ -3263,7 +3336,13 @@ impl<'a> Checker<'a> {
                     && (previous_sum || statements.get(index + 1).and_then(zip_sums::rhs).is_some())
             });
             previous_sum = sum.is_some();
+            let tuple = length_guard.and_then(|guard| self.guarded_tuple(statement, guard));
+            let enclosing_tuple = std::mem::replace(&mut self.fixed_tuple, tuple);
             let (mut lowered, continues) = self.statement(statement)?;
+            self.fixed_tuple = enclosing_tuple;
+            length_guard = self
+                .list_length_guard(statement)
+                .or_else(|| length_guard.filter(|guard| fixed_tuples::preserves(*guard, &lowered)));
             self.remember_regex_assignment(statement, &mut lowered, &statements[index + 1..]);
             if let Some(flag) =
                 unbound_locals::assigned(statement).and_then(|n| self.bound_flags.get(n))
@@ -3474,6 +3553,22 @@ impl<'a> Checker<'a> {
             ast::Stmt::Delete(delete) => {
                 let mut statements = Vec::new();
                 for target in &delete.targets {
+                    if let ast::Expr::Name(name) = target
+                        && let Some(&slot) = self.names.get(name.id.as_str())
+                        && matches!(self.locals[slot], Type::Cursor(_))
+                    {
+                        if !self.assigned.contains(&slot) {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "iterator deletion requires a bound local",
+                            ));
+                        }
+                        self.assigned.remove(&slot);
+                        self.narrowed.remove_mut(&slot);
+                        statements.push(Statement::Clear(slot));
+                        continue;
+                    }
                     let ast::Expr::Subscript(target) = target else {
                         return Err(error(
                             self.source,
@@ -3916,7 +4011,16 @@ impl<'a> Checker<'a> {
         let mut normal_exit = (body_falls && else_falls).then(|| self.local_state());
 
         let mut handler_assigned = before.clone();
-        for name in narrowing::deleted_names(&try_.body) {
+        // Releasing a definitely bound cursor cannot raise. A handler can only
+        // be reached before a trailing deletion of plain locals takes effect.
+        let protected_prefix = if let [prefix @ .., ast::Stmt::Delete(last)] = try_.body.as_slice()
+            && last.targets.iter().all(ast::Expr::is_name_expr)
+        {
+            prefix
+        } else {
+            try_.body.as_slice()
+        };
+        for name in narrowing::deleted_names(protected_prefix) {
             if let Some(slot) = self.names.get(&name) {
                 handler_assigned.remove(slot);
             }
@@ -4375,6 +4479,13 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Str("/dev/null".into()),
                     });
                 }
+                Intrinsic::LogRecordFlag(mask) => {
+                    return Ok(logging_records::op(
+                        ir::LogRecordOperation::Flag,
+                        Type::Bool,
+                        vec![logging::number(mask)],
+                    ));
+                }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
                 Intrinsic::SysExecutable | Intrinsic::SysPlatform | Intrinsic::OsName => {
@@ -4632,6 +4743,9 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
+                    if let Some(fields) = self.types.fields(receiver.ty) {
+                        return self.tuple_contains(key, receiver, &fields, compare);
+                    }
                     let (key_type, builtin) =
                         if let Some((key, _)) = self.types.mapping(receiver.ty) {
                             (key, Builtin::DictContains)
@@ -5101,6 +5215,9 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::TimedFileHandler | Type::ClockTime) {
                     return self.timed_attribute(receiver, attribute);
                 }
+                if receiver.ty == Type::LogRecord {
+                    return self.log_record_field(receiver, attribute);
+                }
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
                 }
@@ -5127,6 +5244,11 @@ impl<'a> Checker<'a> {
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
                         "code" => (Type::ExitCode, Builtin::SystemExitCode),
+                        "msg" => (Type::Str, Builtin::JsonErrorField(0)),
+                        "doc" => (Type::Str, Builtin::JsonErrorField(1)),
+                        "pos" => (Type::Int, Builtin::JsonErrorField(2)),
+                        "lineno" => (Type::Int, Builtin::JsonErrorField(3)),
+                        "colno" => (Type::Int, Builtin::JsonErrorField(4)),
                         "__cause__" => (
                             self.types.optional(Type::Exception),
                             Builtin::ExceptionCause,
@@ -5270,6 +5392,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
+            return Ok(self.materialize_fixed_tuple(tuple));
+        }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
@@ -5477,6 +5602,19 @@ impl<'a> Checker<'a> {
                     &format!("no native implementation for {symbol}"),
                 ));
             }
+            Some(Binding::TypeAlias(module, index))
+                if self.graph.modules[module].aliases[index].constructor =>
+            {
+                self.reject_builtin_keywords(call)?;
+                let [value] = call.arguments.args.as_ref() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "NewType constructors take one positional value",
+                    ));
+                };
+                return self.typed_expr(value);
+            }
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
@@ -5519,6 +5657,7 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
+            Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Islice | Intrinsic::Cycle)) => {
                 return self.source_adapter(call);
@@ -5548,6 +5687,10 @@ impl<'a> Checker<'a> {
                 };
                 return self.fspath_argument(path);
             }
+            Some(Binding::Intrinsic(Intrinsic::MakeLogRecord)) => {
+                return self.make_log_record(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return self.log_record(call),
             Some(Binding::Intrinsic(Intrinsic::GetLogger)) => return self.get_logger(call),
             Some(Binding::Intrinsic(
                 symbol @ (Intrinsic::AddLevelName
@@ -5587,6 +5730,20 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
                 return self.text_function(call, "text", ir::TextOperation::Dedent);
+            }
+            Some(Binding::Intrinsic(Intrinsic::UrlsafeB64encode)) => {
+                let args = self.arguments(
+                    call,
+                    &[Parameter {
+                        name: "s".into(),
+                        ty: Type::Bytes,
+                        kind: ParameterKind::PositionalOrKeyword,
+                        default: None,
+                        sign_only: false,
+                    }],
+                    None,
+                )?;
+                return Ok(self.ordered_builtin(Builtin::UrlsafeB64encode, Type::Bytes, args));
             }
             Some(Binding::Intrinsic(Intrinsic::Unquote)) => {
                 return self.text_function(call, "string", ir::TextOperation::Unquote);
@@ -5788,8 +5945,16 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::TimedFileHandler {
                 return self.timed_method(receiver, attribute, call);
             }
+            if receiver.ty == Type::LogRecord {
+                return self.log_record_method(receiver, attribute, call);
+            }
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
+            }
+            if attribute.attr.as_str() == "lower"
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.text_method(Self::string_value(receiver), "lower", call);
             }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -5919,6 +6084,15 @@ impl<'a> Checker<'a> {
                 return Ok(Expr {
                     ty,
                     kind: ExprKind::Builtin(builtin, args),
+                });
+            }
+            if receiver.ty == Type::Bytes
+                && attribute.attr.as_str() == "decode"
+                && matches!(call.arguments.args.as_ref(), [ast::Expr::StringLiteral(s)] if s.value.to_str().eq_ignore_ascii_case("ascii"))
+            {
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::DecodeAscii, vec![receiver]),
                 });
             }
             if call.arguments.args.is_empty()
@@ -6341,6 +6515,20 @@ impl<'a> Checker<'a> {
             return Ok(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::ExceptionRepr, args),
+            });
+        }
+        if args.len() == 1
+            && args[0].ty == Type::LogRecord
+            && matches!(name.id.as_str(), "repr" | "str" | "print")
+        {
+            let text = logging_records::op(ir::LogRecordOperation::Repr, Type::Str, args);
+            return Ok(if name.id == "print" {
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
+                }
+            } else {
+                text
             });
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
