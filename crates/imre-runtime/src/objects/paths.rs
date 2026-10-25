@@ -15,6 +15,7 @@ use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
 mod matching;
 mod pure;
+mod traversal;
 pub(super) use pure::PurePath;
 
 #[derive(Clone)]
@@ -524,6 +525,32 @@ pub unsafe extern "C" fn imre_path_with_name(
     finish(result, std::ptr::null())
 }
 
+/// Count exact (case-sensitive) components, including a nonempty anchor.
+///
+/// # Safety
+/// The caller roots the native path and comparison string until the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_count_part(path: *const Object, part: *const Str) -> usize {
+    // SAFETY: both inputs remain rooted, and component comparison cannot call Python.
+    let count = unsafe {
+        object(path).0.with(|storage| {
+            let part = (&*part).as_str();
+            if let Storage::PurePath(p) = storage {
+                return p.count_part(part);
+            }
+            let path = storage.path();
+            let tail = path.trim_start_matches('/');
+            let anchor = &path[..path.len() - tail.len()];
+            usize::from(!anchor.is_empty() && part == anchor)
+                + tail
+                    .split('/')
+                    .filter(|s| !s.is_empty() && *s != "." && *s == part)
+                    .count()
+        })
+    };
+    Int::from_usize(count).into_raw()
+}
+
 /// # Safety
 /// Both arguments are rooted exact Paths; comparison borrows immutable storage.
 #[unsafe(no_mangle)]
@@ -900,11 +927,8 @@ pub(super) struct PathIterator {
 }
 
 enum IterationState {
-    PendingGlob(Pattern),
-    Snapshot {
-        names: std::vec::IntoIter<OsString>,
-        pattern: Option<Pattern>,
-    },
+    Glob(traversal::Glob),
+    Snapshot(std::vec::IntoIter<OsString>),
     Exhausted,
 }
 
@@ -931,59 +955,77 @@ fn snapshot(root: &str, suppress_errors: bool) -> Result<Vec<OsString>> {
 impl PathIterator {
     fn new(root: Str, pattern: Option<&str>) -> Result<Self> {
         let state = if let Some(pattern) = pattern {
-            IterationState::PendingGlob(Pattern::new(pattern)?)
+            IterationState::Glob(traversal::Glob::new(
+                root.clone(),
+                pattern,
+                0,
+                false,
+                false,
+            )?)
         } else {
-            IterationState::Snapshot {
-                names: snapshot(&root, false)?.into_iter(),
-                pattern: None,
-            }
+            IterationState::Snapshot(snapshot(&root, false)?.into_iter())
         };
         Ok(Self { root, state })
     }
 
-    fn next(&mut self) -> Result<*const Object> {
-        if matches!(self.state, IterationState::PendingGlob(_)) {
-            let IterationState::PendingGlob(pattern) =
-                std::mem::replace(&mut self.state, IterationState::Exhausted)
-            else {
-                unreachable!()
-            };
-            if let Pattern::Literal(text) = &pattern {
-                let path = join(&self.root, text);
-                // Literal globbing uses lexists, so dangling symlinks are included
-                // without scanning or inspecting unrelated directory names.
-                return Ok(if fs::symlink_metadata(path.as_str()).is_ok() {
-                    new_path(path)
-                } else {
-                    std::ptr::null()
-                });
-            }
-            let names = snapshot(&self.root, true)?;
-            self.state = IterationState::Snapshot {
-                names: names.into_iter(),
-                pattern: Some(pattern),
-            };
-        }
-        let IterationState::Snapshot { names, pattern } = &mut self.state else {
-            return Ok(std::ptr::null());
+    pub(super) fn next(&mut self) -> Result<*const Object> {
+        let next = match &mut self.state {
+            IterationState::Glob(glob) => glob.next(),
+            IterationState::Snapshot(names) => names
+                .next()
+                .map(|name| {
+                    name.into_string()
+                        .map(|name| join(&self.root, &name))
+                        .map_err(|_| {
+                            Error::new(
+                                Kind::UnicodeDecodeError,
+                                "directory entry is not valid UTF-8",
+                            )
+                        })
+                })
+                .transpose(),
+            IterationState::Exhausted => Ok(None),
         };
-        for name in names {
-            let name = name.into_string().map_err(|_| {
-                Error::new(
-                    Kind::UnicodeDecodeError,
-                    "directory entry is not valid UTF-8",
-                )
-            })?;
-            if pattern
-                .as_ref()
-                .is_none_or(|pattern| pattern.matches(&name))
-            {
-                return Ok(new_path(join(&self.root, &name)));
+        match next {
+            Ok(Some(path)) => Ok(new_path(path)),
+            result => {
+                self.state = IterationState::Exhausted;
+                result.map(|_| std::ptr::null())
             }
         }
-        self.state = IterationState::Exhausted;
-        Ok(std::ptr::null())
     }
+
+    fn into_object(self) -> *const Object {
+        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::PathIterator(
+            Box::new(self),
+        )))))
+    }
+}
+
+/// # Safety
+/// The path and pattern stay rooted while the selector copies its inputs; no filesystem
+/// scan occurs until the first pull. A zero case word selects platform defaults.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_glob(
+    path: *const Object,
+    pattern: *const Str,
+    case: usize,
+    follow: u32,
+    recursive: u32,
+) -> *const Object {
+    // SAFETY: construction has no user callbacks and no borrowed input escapes.
+    let result = unsafe {
+        object(path).0.with(|storage| {
+            let root = Str::from(storage.path());
+            let glob =
+                traversal::Glob::new(root.clone(), &*pattern, case, follow != 0, recursive != 0)?;
+            Ok(PathIterator {
+                root,
+                state: IterationState::Glob(glob),
+            })
+        })
+    };
+    finish(result.map(PathIterator::into_object), std::ptr::null())
 }
 
 /// # Safety
@@ -1001,14 +1043,7 @@ pub unsafe extern "C" fn imre_path_iter(path: *const Object, pattern: *const Str
             )
         })
     };
-    finish(
-        result.map(|iterator| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::PathIterator(
-                Box::new(iterator),
-            )))))
-        }),
-        std::ptr::null(),
-    )
+    finish(result.map(PathIterator::into_object), std::ptr::null())
 }
 
 /// # Safety
@@ -1016,14 +1051,18 @@ pub unsafe extern "C" fn imre_path_iter(path: *const Object, pattern: *const Str
 /// result owns one Path; null denotes exhaustion unless an exception is pending.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_next(iterator: *const Object) -> *const Object {
-    // SAFETY: no callback or storage reference escapes the exclusive iterator step.
-    let result = unsafe {
+    // SAFETY: the root is held through this single synchronous pull.
+    finish(unsafe { pull_path(iterator) }, std::ptr::null())
+}
+
+unsafe fn pull_path(iterator: *const Object) -> Result<*const Object> {
+    // SAFETY: the caller roots the cursor and the synchronous scan cannot reenter it.
+    unsafe {
         object(iterator).0.with_mut(|storage| match storage {
             Storage::PathIterator(iterator) => iterator.next(),
             _ => fail("SystemError", "expected a path iterator"),
         })
-    };
-    finish(result, std::ptr::null())
+    }
 }
 
 enum Pattern {
@@ -1042,6 +1081,7 @@ enum Token {
 }
 
 impl Pattern {
+    #[cfg(test)]
     fn new(pattern: &str) -> Result<Self> {
         if pattern.is_empty() || pattern == "." {
             return Err(Error::new(

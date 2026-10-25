@@ -946,6 +946,7 @@ pub(crate) enum PathOperation {
     Drive,
     Root,
     Anchor,
+    CountPart,
     AsPosix,
     Join,
     Match {
@@ -985,8 +986,9 @@ pub(crate) enum PathOperation {
     ContextExit,
     UnionText,
     Iterdir,
-    Glob,
-    Next,
+    Glob {
+        recursive: bool,
+    },
 }
 
 /// POSIX lexical operations preserve raw str or bytes spellings.

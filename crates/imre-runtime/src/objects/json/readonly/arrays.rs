@@ -1,7 +1,7 @@
 //! Large nested arrays used only for lookup or truth must not allocate a node
 //! for every descendant. Keep their validated span and expand it on demand.
 
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell};
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -10,7 +10,7 @@ use serde_json::value::RawValue;
 use super::{KeyMemo, Nodes, Source, View, elements, push_array};
 
 pub(in crate::objects::json) struct Deferred {
-    text: Rc<str>,
+    text: Rc<super::Str>,
     normalized: Option<(Rc<String>, usize)>,
     range: Range<usize>,
     parsed: OnceCell<View>,
@@ -18,10 +18,13 @@ pub(in crate::objects::json) struct Deferred {
 }
 
 impl Deferred {
-    pub(super) fn new(raw: &str, source: Source<'_>) -> Option<Rc<Self>> {
+    pub(super) fn new(
+        raw: &str,
+        source: Source<'_>,
+    ) -> Result<Option<Rc<Self>>, serde_json::Error> {
         // Sealing small arrays immediately avoids an extra owner on ordinary rows.
         if raw.len() < 4096 {
-            return None;
+            return Ok(None);
         }
         let original = source.token(raw);
         let (text, start) = if let Some((owner, start)) = source.shared {
@@ -31,9 +34,11 @@ impl Deferred {
             )
         } else {
             if !unicode_scalars(original) {
-                return None;
+                return Ok(None);
             }
-            (Rc::<str>::from(original), 0)
+            let text = super::Str::try_new(original)
+                .map_err(|_| super::allocation_error(source.refused))?;
+            (Rc::new(text), 0)
         };
         // The parser has already validated the same-width substitutions. Keep the
         // spelling for this span so a later read never has to allocate it again.
@@ -54,13 +59,13 @@ impl Deferred {
                 raw.as_ptr() as usize - patched.as_ptr() as usize,
             ))
         });
-        Some(Rc::new(Self {
+        Ok(Some(Rc::new(Self {
             text,
             normalized,
             range: start..start + raw.len(),
             parsed: OnceCell::new(),
             keys: source.keys.shared(),
-        }))
+        })))
     }
 
     pub(super) fn truth(&self) -> bool {
@@ -81,6 +86,7 @@ impl Deferred {
             };
             let mut nodes = Vec::new();
             let source = Source {
+                refused: &Cell::new(false),
                 text,
                 original: spelling,
                 shared: Some((&self.text, self.range.start)),
@@ -141,12 +147,13 @@ mod tests {
                 .unwrap(),
         );
         let source = Source {
+            refused: &Cell::new(false),
             text: &patched,
             original: Some((&input, &patched)),
             shared: None,
             keys: &KeyMemo::default(),
         };
-        let raw = Deferred::new(&patched, source).unwrap();
+        let raw = Deferred::new(&patched, source).unwrap().unwrap();
         assert!(raw.truth());
         assert!(raw.parsed.get().is_none());
         let outer = raw.view();

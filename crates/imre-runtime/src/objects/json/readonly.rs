@@ -10,6 +10,7 @@ mod keys;
 mod values;
 mod writer;
 
+use std::cell::Cell;
 use std::fmt;
 use std::rc::Rc;
 
@@ -393,9 +394,10 @@ impl View {
 /// would discard. Array children stay in the same immutable document arena.
 #[derive(Clone, Copy)]
 struct Source<'a> {
+    refused: &'a Cell<bool>,
     text: &'a str,
     original: Option<(&'a str, &'a Rc<String>)>,
-    shared: Option<(&'a Rc<str>, usize)>,
+    shared: Option<(&'a Rc<Str>, usize)>,
     keys: &'a KeyMemo,
 }
 
@@ -410,6 +412,11 @@ impl Source<'_> {
     }
 }
 
+fn allocation_error(refused: &Cell<bool>) -> serde_json::Error {
+    refused.set(true);
+    serde_json::Error::custom("JSON storage allocation failed")
+}
+
 fn push_node(
     nodes: &mut Vec<Node>,
     raw: &RawValue,
@@ -420,7 +427,7 @@ fn push_node(
         b'{' => Node::Object(source.keys.fields(
             serde_json::Deserializer::from_str(raw).deserialize_map(Fields(nodes, source))?,
         )),
-        b'[' => match arrays::Deferred::new(raw, source) {
+        b'[' => match arrays::Deferred::new(raw, source)? {
             Some(array) => Node::Deferred(array),
             None => push_array(nodes, raw, source)?,
         },
@@ -532,6 +539,9 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
             nodes.push(Node::Object(source.keys.fields(fields)));
             index
         } else {
+            if source.refused.get() {
+                return Err(allocation_error(source.refused));
+            }
             // Preserve the original error location if a validated field cannot be decoded.
             nodes.clear();
             let raw = serde_json::from_str::<&RawValue>(text)?;
@@ -572,22 +582,34 @@ pub(super) fn loads(
 ) -> Result<*const Object, Error> {
     check_depth(text).map_err(|message| Error::new(Kind::ValueError, message))?;
     let keys = KeyMemo::default();
+    let refused = Cell::new(false);
     build(Source {
+        refused: &refused,
         text,
         original: None,
         shared: None,
         keys: &keys,
     })
     .or_else(|error| {
+        if refused.get() {
+            return Err(Error::allocation());
+        }
         if let Some(patched) = constants::normalize(text, &error)? {
             let patched = Rc::new(patched);
             build(Source {
+                refused: &refused,
                 text: &patched,
                 original: Some((text, &patched)),
                 shared: None,
                 keys: &keys,
             })
-            .map_err(|error| super::syntax::decode_error(text, error, owner))
+            .map_err(|error| {
+                if refused.get() {
+                    Error::allocation()
+                } else {
+                    super::syntax::decode_error(text, error, owner)
+                }
+            })
         } else {
             Err(super::syntax::decode_error(text, error, owner))
         }
