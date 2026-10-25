@@ -118,6 +118,7 @@ with open("buffered.txt", "w", encoding="utf-8") as writer:
     with open("buffered.txt", "rb") as reader:
         print(len(reader.read()))
 """,
+    "splitlines_argument": 'print("a\\nb".splitlines(True))',
     "splitlines_and_formatting": r"""
 def nothing() -> None:
     print("None argument evaluated")
@@ -569,7 +570,6 @@ REJECTED = {
     "seek": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.seek(0)',
     "write_type": 'with open("output.txt", "w", encoding="utf-8") as stream:\n    stream.write(1)',
     "closed_assignment": 'stream = open("input.txt", "r", encoding="utf-8")\nstream.closed = False',
-    "splitlines_argument": 'print("a\\nb".splitlines(True))',
     "str_resource_list": "print(str([open('input.txt', 'r')]))",
     "text_constructor": "from typing import TextIO\nTextIO()",
     "decode_constructor": 'raise UnicodeDecodeError("not a valid constructor")',
