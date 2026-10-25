@@ -635,9 +635,7 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
-    checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
-    checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
-    checked_tuple_reads: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -763,7 +761,13 @@ impl SourceGraph {
     /// Record only this call's overload diagnostic. Nested arguments still get
     /// their own diagnostics, including calls with the same method name.
     pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
-        self.checked_calls.borrow_mut()[module].push(call);
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
+    }
+
+    /// Mark the precise call where lowering raises Python's missing-argument TypeError.
+    pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::MissingArgument(call));
     }
 
     pub(crate) fn checked_keywords(
@@ -771,14 +775,16 @@ impl SourceGraph {
         module: ModuleId,
         keywords: impl Iterator<Item = TextRange>,
     ) {
-        self.checked_keywords.borrow_mut()[module].extend(keywords);
+        self.checked_diagnostics.borrow_mut()[module]
+            .extend(keywords.map(CheckedDiagnostic::Keyword));
     }
 
     /// Record the exact list read proved by lowering a fixed-width tuple spread.
     /// Other diagnostics at this index or inside the receiver remain visible.
     pub(crate) fn checked_tuple_list_read(&self, module: ModuleId, read: TextRange) {
         if self.session.has_tuple_spreads(module) {
-            self.checked_tuple_reads.borrow_mut()[module].push(read);
+            self.checked_diagnostics.borrow_mut()[module]
+                .push(CheckedDiagnostic::TupleListRead(read));
         }
     }
 
@@ -816,22 +822,10 @@ impl SourceGraph {
                         .then_some(CheckedDiagnostic::Decorator(decorator.range()))
                     })
                     .chain({
-                        let mut calls = self.checked_calls.borrow()[id].clone();
-                        calls.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        calls.dedup();
-                        calls.into_iter().map(CheckedDiagnostic::Call)
-                    })
-                    .chain({
-                        let mut keywords = self.checked_keywords.borrow()[id].clone();
-                        keywords.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        keywords.dedup();
-                        keywords.into_iter().map(CheckedDiagnostic::Keyword)
-                    })
-                    .chain({
-                        let mut reads = self.checked_tuple_reads.borrow()[id].clone();
-                        reads.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        reads.dedup();
-                        reads.into_iter().map(CheckedDiagnostic::TupleListRead)
+                        let mut diagnostics = self.checked_diagnostics.borrow()[id].clone();
+                        diagnostics.sort_unstable_by_key(|note| note.sort_key());
+                        diagnostics.dedup();
+                        diagnostics
                     })
                     .collect()
             })
@@ -1206,9 +1200,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
-            checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
-            checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
-            checked_tuple_reads: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
