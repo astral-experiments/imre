@@ -1,4 +1,4 @@
-name: macOS socket descriptors
+name: macOS synchronous socketserver
 on: workflow_dispatch
 permissions:
   contents: read
@@ -9,20 +9,20 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 04a82c96423c424aa6fba360a221661801ae5882
+          ref: 5ac151ac9eb776db4555e34a8fc7d145f4012615
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
       - name: Confirm the actual product and select the CPython SDK
         run: |
-          test "$(git rev-parse HEAD)" = 04a82c96423c424aa6fba360a221661801ae5882
+          test "$(git rev-parse HEAD)" = 5ac151ac9eb776db4555e34a8fc7d145f4012615
           git rev-parse HEAD
           uname -ms
           bash .github/scripts/select-macos-sdk.sh
       - run: cargo build --release --locked -p imre-compiler -p imre-runtime
-      - name: Compare native loopback and descriptors to Darwin CPython at O0 and O3
-        run: python3 tests/socket_tcp.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang --opt-levels 0 3
+      - name: Compare synchronous handler dispatch and descriptor cleanup on Darwin
+        run: python3 tests/socketserver_tcp.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang --opt-levels 0 3
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: python/cpython
@@ -30,41 +30,31 @@ jobs:
           path: .cpython-socket-reference
           sparse-checkout: Lib/test
           persist-credentials: false
-      - name: Run the original inheritance methods and wrong-CLOEXEC control on Darwin
+      - name: Run original SocketServerTest context close, bind leak and TCP requests
         env:
           PYTHONPATH: .cpython-socket-reference/Lib
         run: |
           python3 - <<'PY'
-          import json, subprocess, sys, tempfile, unittest
           from pathlib import Path
-          sys.path.insert(0, str(Path("benchmarks/cpython_stdlib/full/socket").resolve()))
+          import json,sys,tempfile
+          sys.path.insert(0,str(Path("benchmarks/cpython_stdlib/full/socketserver").resolve()))
           import run as probe
-          from test import test_socket
-          manifest = json.loads((probe.HERE / "UPSTREAM.json").read_text())
-          probe.verify_files(probe.HERE / "upstream", manifest["files"])
-          probe.verify_interpreter_tests(manifest)
-          source, _ = probe.source()
-          native = source.replace(b"# NATIVE_BYTES_EQUALITY", probe.NATIVE_BYTES_EQUALITY).replace(b"# NATIVE_BOOL_EQUALITY", probe.NATIVE_BOOL_EQUALITY)
-          def check(command):
-              for method in probe.DESCRIPTORS:
-                  case = test_socket.InheritanceTest(method)
-                  def body(method=method):
-                      p = subprocess.run([*command, "descriptors", method], capture_output=True, timeout=15)
-                      assert (p.returncode, p.stdout, p.stderr) == (0, b"", b""), p
-                  setattr(case, method, body)
-                  result = unittest.TestResult()
-                  unittest.TestSuite([case]).run(result)
-                  assert result.testsRun == 1 and result.wasSuccessful() and not result.skipped, vars(result)
-              p = subprocess.run([*command, "wrong-cloexec"], capture_output=True, timeout=15)
-              assert p.returncode != 0 and b"AssertionError" in p.stderr, p
+          m=json.loads((probe.HERE/"UPSTREAM.json").read_text())
+          probe.verify_files(probe.HERE/"upstream",m["files"])
+          probe.verify_interpreter_tests(m)
           with tempfile.TemporaryDirectory() as tmp:
-              work = Path(tmp)
-              script = work / "oracle.py"
-              script.write_bytes(source.replace(b"# NATIVE_BYTES_EQUALITY", b"").replace(b"# NATIVE_BOOL_EQUALITY", b""))
-              check([sys.executable, "-E", script])
-              print("Darwin CPython: three original descriptor bodies passed; wrong CLOEXEC rejected", flush=True)
-              for level in (0, 3):
-                  binary = probe.Toolchain(Path("target/release/imre").resolve(), Path("target/release/libimre_runtime.a").resolve(), Path("/usr/bin/clang"), level).build(native, work)
-                  check([binary])
-                  print(f"Darwin O{level}: three original descriptor bodies passed; wrong CLOEXEC rejected", flush=True)
+              p={}
+              for key,data in (("normal",probe.entry()),("bad",probe.entry(True)),("server",(probe.HERE/"serve.py").read_bytes())):
+                  w=Path(tmp)/key
+                  w.mkdir()
+                  if key=="bad":
+                      (w/"leaking.py").write_bytes(probe.LEAK)
+                  p[key]=w/"case.py"
+                  p[key].write_bytes(data)
+              probe.observe({k:[sys.executable,"-E",v] for k,v in p.items()})
+              print("Darwin CPython: context close, bind leak and three original TCP requests passed; three controls rejected",flush=True)
+              for level in (0,3):
+                  tc=probe.Toolchain(Path("target/release/imre").resolve(),Path("target/release/libimre_runtime.a").resolve(),Path("/usr/bin/clang"),level)
+                  probe.observe({k:[tc.build(v.read_bytes(),v.parent)] for k,v in p.items()})
+                  print(f"Darwin O{level}: two original native bodies, one host-driven method, three controls rejected",flush=True)
           PY
