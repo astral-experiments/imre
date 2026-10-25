@@ -21,7 +21,8 @@ fn invalid_aggregate(ty: Type, types: &Types) -> bool {
     if matches!(
         ty,
         Type::Callable(_) | Type::ForwardRef(_) | Type::AnnotationValue(_)
-    ) || types.is_partial_frame(ty) {
+    ) || types.is_partial_frame(ty)
+    {
         false
     } else if let Some(payload) = types.payload(ty) {
         invalid_aggregate(payload, types)

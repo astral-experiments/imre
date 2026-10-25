@@ -1122,8 +1122,8 @@ fn signature(
     }
     // A .pyi describes the linked C function. Its ellipsis is not an executable body.
     let inert = graph.modules[module].archive.is_none() && annotations::inert_body(function);
-    if inert && let Some(ast::Expr::Name(n)) = function.returns.as_deref() {
-        graph.deferred_name(module, n.range());
+    if inert && let Some(annotation) = function.returns.as_deref() {
+        graph.inert_return(module, annotation);
     }
     let returns = function
         .returns
@@ -5050,7 +5050,15 @@ impl<'a> Checker<'a> {
                     // Ordinary dictionaries compare their entries independently of insertion order.
                     // Only enable value kinds whose Python equality has no user callbacks or boxed NaN identity.
                     let scalar_dict = self.types.mapping(ty).is_some_and(|(_, value)| {
-                        matches!(value, Type::None | Type::Bool | Type::Int | Type::Str | Type::Bytes | Type::BuiltinClass)
+                        matches!(
+                            value,
+                            Type::None
+                                | Type::Bool
+                                | Type::Int
+                                | Type::Str
+                                | Type::Bytes
+                                | Type::BuiltinClass
+                        )
                     });
                     if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
                         || matches!(ty, Type::StringKeys | Type::Optional(_) | Type::Union(_))
