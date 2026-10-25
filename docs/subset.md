@@ -2,6 +2,8 @@
 
 This is a deliberately restricted Python dialect for closed, statically typed source graphs, including selected unchanged pure-Python libraries. Imre targets 64-bit Linux with Clang 18 and Apple Silicon macOS with Apple Clang. Compilation uses Rust, Ruff, and ty; the executable links only the independent Rust runtime and system libraries. It does not import CPython or interpret unsupported operations.
 
+See the [standard library support table](stdlib.md) for module examples and native CPython test counts.
+
 ## Accepted source
 
 Module functions with annotated results can use `functools.cache` or
