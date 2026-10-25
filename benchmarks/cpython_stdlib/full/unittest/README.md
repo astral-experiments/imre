@@ -104,6 +104,11 @@ checks both decisions after a reset, previously held call lists, child identity,
 and the different reset rules for children and cached return values. The mock
 tree can keep an exception instance as its `side_effect`.
 
+A Mock stored in an imported module records calls during module initialization,
+through an imported alias, and through the module attribute. The [import control](mock_globals/case.py)
+checks that all three calls share one history and compares the failed
+`assert_called_once()` message with CPython.
+
 Seven additional original Mock methods have measured compile blockers. Three
 stop when `TestCase.assertRaises` receives a mock assertion as a callback. One
 reaches `TestCase.assertNotIn`. The three reset methods need constructor

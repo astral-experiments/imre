@@ -4,7 +4,9 @@ import hashlib
 from collections import Counter
 from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -95,12 +97,17 @@ def run(args, level, root):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["equality_protocol", "mock_protocol", "mock_reset", *("context_" + family for family in families)]:
+    for name in ["equality_protocol", "mock_protocol", "mock_reset", "mock_globals", *("context_" + family for family in families)]:
         control = root / name
-        control.mkdir()
-        program = HERE / (name + ".py")
+        if (HERE / name).is_dir():
+            shutil.copytree(HERE / name, control)
+            program = control / "case.py"
+        else:
+            control.mkdir()
+            program = HERE / (name + ".py")
         native = lang.build(program.read_bytes(), control)
-        oracle = subprocess.run([sys.executable, "-B", program], capture_output=True, timeout=30, check=True)
+        oracle = subprocess.run([sys.executable, "-B", control / "case.py"], capture_output=True,
+                                env={**os.environ, "PYTHONPATH": str(control)}, timeout=30, check=True)
         observed = subprocess.run([native], capture_output=True, timeout=30, check=True)
         if (observed.stdout, observed.stderr) != (oracle.stdout, oracle.stderr):
             raise AssertionError(f"{program.name} differs from CPython: {observed!r} != {oracle!r}")
