@@ -5532,7 +5532,13 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
                 });
             }
-            Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call),
+            Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
+            Some(Binding::Intrinsic(Intrinsic::SubprocessCall)) => {
+                return self.popen(call, Some(false));
+            }
+            Some(Binding::Intrinsic(Intrinsic::SubprocessCheckCall)) => {
+                return self.popen(call, Some(true));
+            }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;
