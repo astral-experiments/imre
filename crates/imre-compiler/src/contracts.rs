@@ -277,6 +277,9 @@ impl Builtin {
                 | ProcessOperation::UnregisterArchive(_)
                 | ProcessOperation::SetArchiveRoot(_)
                 | ProcessOperation::RegisterArchive { .. }
+                | ProcessOperation::FastCopy(_)
+                | ProcessOperation::FastCopyBlocksize
+                | ProcessOperation::FastCopyFlag { .. }
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)

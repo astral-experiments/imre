@@ -12,6 +12,7 @@ STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import copyfile
 import archive_ops
+import fastcopy_ops
 import native_copy
 import native_rmtree
 import tree_ops
@@ -91,12 +92,17 @@ def run_level(args, module, reference, level, directory):
     archive_blockers = {}
     executions.update(archive_ops.executors(module, tools, archive_work, with_roles=True,
                                            blockers=archive_blockers))
+    fastcopy_work = directory / "zero-copy"
+    fastcopy_work.mkdir()
+    executions.update(fastcopy_ops.executors(module, tools, fastcopy_work, with_roles=True))
     preflight = {}
     for cls, operation, blockers in (
         (module.TestCopy, "shutil metadata", native_copy.MOCK_CASES),
         (module.TestRmTree, "shutil.rmtree", native_rmtree.BLOCKERS),
         (module.TestCopyTree, "shutil.copytree", tree_ops.BLOCKERS),
         (module.TestArchives, "shutil archive registry", archive_blockers),
+        (module.TestZeroCopySendfile, "shutil.copyfile via os.sendfile", fastcopy_ops.BLOCKERS),
+        (module.TestZeroCopyCopyFileRange, "shutil.copyfile via os.copy_file_range", fastcopy_ops.BLOCKERS),
     ):
         for name, reason in blockers.items():
             test_id = cls(name).id()

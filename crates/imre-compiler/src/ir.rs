@@ -1537,6 +1537,12 @@ pub(crate) enum ProcessOperation {
         frame: Option<Type>,
         root_flag: Option<(usize, usize)>,
     },
+    FastCopy(u32),
+    FastCopyBlocksize,
+    FastCopyFlag {
+        method: u32,
+        set: bool,
+    },
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

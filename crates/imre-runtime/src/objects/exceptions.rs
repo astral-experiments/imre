@@ -53,6 +53,7 @@ pub(crate) enum Kind {
     SameFileError = 65,
     SpecialFileError = 66,
     CsvError = 67,
+    GiveupOnFastCopy = 69,
     TypeError = 13,
     AttributeError = 14,
     MemoryError = 15,
@@ -118,6 +119,7 @@ impl Kind {
             65 => Self::SameFileError,
             66 => Self::SpecialFileError,
             67 => Self::CsvError,
+            69 => Self::GiveupOnFastCopy,
             13 => Self::TypeError,
             14 => Self::AttributeError,
             15 => Self::MemoryError,
@@ -179,6 +181,7 @@ impl Kind {
             Self::ShutilError => "Error",
             Self::SameFileError => "SameFileError",
             Self::SpecialFileError => "SpecialFileError",
+            Self::GiveupOnFastCopy => "_GiveupOnFastCopy",
             Self::TypeError => "TypeError",
             Self::AttributeError => "AttributeError",
             Self::MemoryError => "MemoryError",
@@ -334,6 +337,8 @@ impl Drop for DirectoryFrame {
 enum Payload {
     Empty,
     Message(Rc<Str>),
+    /// Native fallback exceptions preserve the actual caught exception as their sole argument.
+    ExceptionArgument(Rc<Object>),
     /// Some builtins render a human message that differs from their original arguments.
     Arguments(Box<BuiltinArguments>),
     Json(Rc<JsonError>),
@@ -470,7 +475,12 @@ pub(crate) struct Error {
     kind: Kind,
     // A missing payload uses the preallocated MemoryError when raised.
     payload: Option<Payload>,
-    cause: Option<Rc<Object>>,
+    cause: Option<ExplicitCause>,
+}
+
+enum ExplicitCause {
+    Exception(Rc<Object>),
+    None,
 }
 
 impl Error {
@@ -579,6 +589,16 @@ impl Error {
         self.kind == kind
     }
 
+    pub(super) fn fastcopy_giveup(original: Option<Self>) -> Self {
+        Self {
+            kind: Kind::GiveupOnFastCopy,
+            payload: Some(original.map_or(Payload::Empty, |e| {
+                Payload::ExceptionArgument(e.into_object())
+            })),
+            cause: None,
+        }
+    }
+
     pub(super) fn json_decode(
         msg: &str,
         doc: Rc<Str>,
@@ -646,7 +666,13 @@ impl Error {
 
     /// Retain the original exception when a native operation translates an error.
     pub(super) fn with_cause(mut self, cause: Self) -> Self {
-        self.cause = Some(cause.into_object());
+        self.cause = Some(ExplicitCause::Exception(cause.into_object()));
+        self
+    }
+
+    /// Match raising the original exception from None, including __suppress_context__.
+    pub(super) fn suppress_context(mut self) -> Self {
+        self.cause = Some(ExplicitCause::None);
         self
     }
 
@@ -845,16 +871,19 @@ fn new_exception(kind: Kind, payload: impl Into<Payload>) -> Rc<Object> {
     exception_with_cause(kind, payload.into(), None)
 }
 
-fn exception_with_cause(kind: Kind, payload: Payload, cause: Option<Rc<Object>>) -> Rc<Object> {
+fn exception_with_cause(kind: Kind, payload: Payload, cause: Option<ExplicitCause>) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
         kind,
         payload,
         suppress_context: cause.is_some(),
-        details: cause.map(|cause| {
-            Rc::new(ExceptionDetails {
+        details: cause.and_then(|cause| {
+            let ExplicitCause::Exception(cause) = cause else {
+                return None;
+            };
+            Some(Rc::new(ExceptionDetails {
                 cause: Some(cause),
                 ..Default::default()
-            })
+            }))
         }),
     }))))
 }
@@ -1152,6 +1181,8 @@ impl Storage {
             Payload::Positional(args) => args.message(),
             Payload::Exit(code) => exit_text(code.as_ref(), ""),
             Payload::Empty => Rc::new(Str::new("")),
+            // SAFETY: the newly constructed wrapper owns a distinct, immutable builtin exception.
+            Payload::ExceptionArgument(error) => unsafe { error.0.with(|s| s.exception_message()) },
             Payload::Message(message) => Rc::clone(message),
             Payload::Arguments(arguments) => Rc::clone(&arguments.message),
             Payload::Json(e) => Rc::new(Str::from(format!(
@@ -1644,6 +1675,10 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
                 Payload::Positional(args) => args.repr_args(),
                 Payload::Tree(errors) => errors.message().as_ref().clone(),
                 Payload::Empty => Str::new(""),
+                Payload::ExceptionArgument(error) => {
+                    // The new builtin wraps a separate, still-rooted builtin exception.
+                    (*Rc::from_raw(imre_exception_repr(Rc::as_ptr(error)))).clone()
+                }
                 Payload::Arguments(arguments) => {
                     let mut result = String::new();
                     for (index, arg) in arguments.args.iter().enumerate() {

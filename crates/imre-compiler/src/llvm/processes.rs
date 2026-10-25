@@ -673,6 +673,35 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
+            ProcessOperation::FastCopy(method) => {
+                let flags = args.get(2).map_or("0", |arg| arg.value.operand.as_str());
+                self.checked_line(format!(
+                    "call void @imre_shutil_fastcopy(i32 {method}, ptr {}, ptr {}, i64 {flags})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
+            ProcessOperation::FastCopyBlocksize => self.call(
+                "imre_shutil_fastcopy_blocksize",
+                Type::Int,
+                &[&args[0].value],
+            ),
+            ProcessOperation::FastCopyFlag { method, set: true } => {
+                let flag = self.instruction(format!("zext i1 {} to i32", args[0].value.operand));
+                self.line(format!(
+                    "call void @imre_shutil_set_fastcopy_flag(i32 {method}, i32 {flag})"
+                ));
+                none()
+            }
+            ProcessOperation::FastCopyFlag { method, set: false } => {
+                let flag =
+                    self.instruction(format!("call i32 @imre_shutil_fastcopy_flag(i32 {method})"));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {flag}, 0")),
+                    small_integer: false,
+                }
+            }
             ProcessOperation::RmTree => {
                 let [path, ignore, _, _, fd] = args else {
                     unreachable!()
