@@ -6,6 +6,7 @@ use crate::{Bytes, Int};
 #[derive(Clone)]
 pub(super) struct Import {
     args: OwnedWord,
+    msg: OwnedWord,
     fields: [OwnedWord; 3],
 }
 
@@ -21,6 +22,9 @@ impl Import {
     }
 
     pub(super) fn message(&self) -> Rc<Str> {
+        if self.msg.kind.raw() == 3 {
+            return word_text(self.msg.kind, self.msg.word, false);
+        }
         match self.len() {
             0 => Rc::new(Str::new("")),
             1 => {
@@ -111,8 +115,14 @@ pub unsafe extern "C" fn imre_import_error_new(
     // SAFETY: every incoming field is rooted until this exception retains it.
     unsafe {
         let named = descriptor.as_ref();
+        let (msg_kind, msg) = if records::descriptor(args).length == 1 {
+            tuple_item(args as usize, 0)
+        } else {
+            (WordKind::new(0), 0)
+        };
         let payload = Import {
             args: WordKind::new(6).acquire(args as usize),
+            msg: msg_kind.acquire(msg),
             fields: [(name_kind, name), (path_kind, path), (from_kind, from)]
                 .map(|(k, w)| WordKind::new(k).acquire(w)),
         };
@@ -144,8 +154,7 @@ pub unsafe extern "C" fn imre_import_error_field(err: *const Object, field: u32)
             };
             let (kind, word) = match field {
                 0 => (e.args.kind, e.args.word),
-                1 if e.len() == 1 => e.item(0),
-                1 => (WordKind::new(0), 0),
+                1 => (e.msg.kind, e.msg.word),
                 2..=4 => {
                     let x = &e.fields[field as usize - 2];
                     (x.kind, x.word)
@@ -172,6 +181,31 @@ pub unsafe extern "C" fn imre_import_error_reset(err: *const Object, replacement
             };
             e.payload = new;
         });
+    }
+}
+
+/// BaseException installs the argument tuple before ImportError validates its keywords.
+///
+/// # Safety
+/// The caller roots the import exception, positional tuple and error message.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_import_error_reject_reset(
+    err: *const Object,
+    args: *const usize,
+    message: *const Str,
+) {
+    // SAFETY: all three inputs remain rooted through the update and error construction.
+    unsafe {
+        object(err).0.with_mut(|s| {
+            let Storage::Exception(exception) = s else {
+                unreachable!()
+            };
+            let Payload::Import(import) = &mut exception.payload else {
+                unreachable!()
+            };
+            import.args = WordKind::new(6).acquire(args as usize);
+        });
+        Error::new(Kind::TypeError, (&*message).as_str()).raise();
     }
 }
 

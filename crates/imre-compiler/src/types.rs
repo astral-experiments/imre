@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Write};
 
 use crate::ir::Type;
+use crate::modules::DefinitionId;
+use std::rc::Rc;
 
 const MAX_DESCRIPTION_BYTES: usize = 1024;
 
@@ -18,6 +20,8 @@ enum Shape {
     Counter(Type),
     Set(Type),
     Tuple(Vec<Type>),
+    NamedTuple(DefinitionId, Vec<Type>),
+    PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
     Awaitable(Type),
     DirectoryContext(Type),
@@ -34,9 +38,15 @@ pub(crate) struct NamedException {
     pub ancestors: Vec<u32>,
 }
 
+pub(crate) struct NamedTuple {
+    pub(crate) name: String,
+    pub(crate) fields: Vec<String>,
+}
+
 #[derive(Default)]
 struct Storage {
     shapes: Vec<Shape>,
+    named_tuples: HashMap<DefinitionId, Rc<NamedTuple>>,
     exceptions: Vec<NamedException>,
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
@@ -67,7 +77,10 @@ impl Types {
                 Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
             ),
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
-            Type::Tuple(id) => matches!(storage.shapes.get(id), Some(Shape::Tuple(_))),
+            Type::Tuple(id) => matches!(
+                storage.shapes.get(id),
+                Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
+            ),
             Type::Callable(id) => matches!(storage.shapes.get(id), Some(Shape::Callable(..))),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
@@ -147,7 +160,10 @@ impl Types {
                 | Shape::ProcessArgs(ty)
                 | Shape::Optional(ty) => vec![*ty],
                 Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => vec![*key, *value],
-                Shape::Tuple(fields) | Shape::Union(fields) => fields.clone(),
+                Shape::Tuple(fields)
+                | Shape::NamedTuple(_, fields)
+                | Shape::PartialFrame(fields)
+                | Shape::Union(fields) => fields.clone(),
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
                 }
@@ -265,6 +281,7 @@ impl Types {
                 | Type::StrEnum(_)
                 | Type::Enum(_)
                 | Type::Bytes
+                | Type::Logger
                 | Type::Path
                 | Type::PurePath(_)
         ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
@@ -284,6 +301,7 @@ impl Types {
             | Type::Bytes
             | Type::Path
             | Type::PurePath(_)
+            | Type::Logger
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) => self
@@ -509,6 +527,40 @@ impl Types {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
     }
 
+    pub(crate) fn declare_namedtuple(&self, definition: DefinitionId, declaration: NamedTuple) {
+        self.0
+            .borrow_mut()
+            .named_tuples
+            .insert(definition, Rc::new(declaration));
+    }
+
+    pub(crate) fn namedtuple(&self, definition: DefinitionId) -> Option<Rc<NamedTuple>> {
+        self.0.borrow().named_tuples.get(&definition).cloned()
+    }
+
+    pub(crate) fn namedtuple_layout(&self, definition: DefinitionId, fields: Vec<Type>) -> Type {
+        Type::Tuple(self.intern(Shape::NamedTuple(definition, fields)))
+    }
+
+    pub(crate) fn namedtuple_definition(&self, ty: Type) -> Option<DefinitionId> {
+        let Type::Tuple(id) = ty else {
+            return None;
+        };
+        match self.0.borrow().shapes[id] {
+            Shape::NamedTuple(definition, _) => Some(definition),
+            _ => None,
+        }
+    }
+
+    /// Immutable private storage for the callable and arguments retained by partial.
+    pub(crate) fn partial_frame(&self, fields: Vec<Type>) -> Type {
+        Type::Tuple(self.intern(Shape::PartialFrame(fields)))
+    }
+
+    pub(crate) fn is_partial_frame(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::PartialFrame(_)))
+    }
+
     pub(crate) fn process_args(&self, command: Type) -> usize {
         self.intern(Shape::ProcessArgs(command))
     }
@@ -623,7 +675,9 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
-            Shape::Tuple(fields) => Some(fields.clone()),
+            Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
+                Some(fields.clone())
+            }
             _ => unreachable!("tuple type identity has a tuple shape"),
         }
     }
@@ -636,7 +690,9 @@ impl Types {
             .iter()
             .enumerate()
             .filter_map(|(id, shape)| match shape {
-                Shape::Tuple(fields) => Some((Type::Tuple(id), fields.clone())),
+                Shape::Tuple(fields)
+                | Shape::NamedTuple(_, fields)
+                | Shape::PartialFrame(fields) => Some((Type::Tuple(id), fields.clone())),
                 _ => None,
             })
             .collect()
@@ -815,7 +871,7 @@ impl TypeDescription<'_> {
                 })?;
                 self.write_type(*element)?;
             }
-            Shape::Tuple(fields) => {
+            Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
                 self.write_str("tuple[")?;
                 self.write_types(fields, ", ")?;
             }

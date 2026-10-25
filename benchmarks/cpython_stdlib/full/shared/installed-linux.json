@@ -1,0 +1,85 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "verified_fixture_files": 168,
+  "configurations": {
+    "gil": {
+      "instances": 7294,
+      "outcomes": {
+        "pass": 6701,
+        "skipped": 593
+      },
+      "modules": {
+        "unittest": {
+          "pass": 1088,
+          "skipped": 2
+        },
+        "sys": {
+          "pass": 89,
+          "skipped": 8
+        },
+        "json": {
+          "pass": 215,
+          "skipped": 1
+        },
+        "os": {
+          "pass": 488,
+          "skipped": 91
+        },
+        "pathlib": {
+          "pass": 978,
+          "skipped": 391
+        },
+        "subprocess": {
+          "skipped": 39,
+          "pass": 314
+        },
+        "shutil": {
+          "pass": 173,
+          "skipped": 50
+        },
+        "collections": {
+          "pass": 656,
+          "skipped": 3
+        },
+        "logging": {
+          "pass": 269,
+          "skipped": 3
+        },
+        "itertools": {
+          "pass": 132,
+          "skipped": 5
+        },
+        "functools": {
+          "pass": 325
+        },
+        "argparse": {
+          "pass": 1893
+        },
+        "copy": {
+          "pass": 81
+        }
+      },
+      "installed_only_passes": [
+        "test.test_subprocess.ProcessTestCase.test_executable_without_cwd",
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_without_cwd"
+      ]
+    },
+    "free-threaded": {
+      "instances": 5,
+      "outcomes": {
+        "pass": 5
+      },
+      "modules": {
+        "functools": {
+          "pass": 4
+        },
+        "itertools": {
+          "pass": 1
+        }
+      },
+      "installed_only_passes": []
+    }
+  },
+  "imre_revision": "4798a585c0a0fa19daa06311605597f380ddd4c8"
+}

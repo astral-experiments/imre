@@ -1,0 +1,152 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "cases": {
+    "test.test_os.EnvironTests.test_items": {
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "0bea17cd779e45ac77c77a4ce5d3588f08a5fff86a4e7a94edaebd9f3b7b2cbc",
+      "observation": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "os.environ.get",
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "0bea17cd779e45ac77c77a4ce5d3588f08a5fff86a4e7a94edaebd9f3b7b2cbc"
+        }
+      },
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "EnvironTests.setUp and tearDown",
+        "EnvironTests._reference",
+        "test_os.tearDownModule"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.MiscTests.test_getcwd": {
+      "status": "host_driven_native",
+      "native_getcwd_calls": 1,
+      "host_calls": {},
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "observation": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "cpython"
+        },
+        "evidence": {
+          "operation": "os.getcwd",
+          "fixture": "test_os.tearDownModule",
+          "native_call_count": 1,
+          "host_calls": {}
+        }
+      },
+      "native_body_blocker": "MiscTests.test_getcwd, self.assertIsInstance(cwd, str): unknown class method",
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.MiscTests.test_getcwd_long_path": {
+      "status": "mixed",
+      "native_getcwd_calls": 11,
+      "host_calls": {
+        "path.join": 10,
+        "mkdir": 10,
+        "chdir": 10
+      },
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "observation": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "mixed",
+          "fixture": "cpython"
+        },
+        "evidence": {
+          "operation": "os.getcwd",
+          "fixture": "test_os.tearDownModule",
+          "native_call_count": 11,
+          "host_calls": {
+            "path.join": 10,
+            "mkdir": 10,
+            "chdir": 10
+          }
+        }
+      },
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.TestPEP519.test_return_bytes": {
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "5acb0abaf3e5a1a1f8012d36b15eb76bbdbcf5cc90c5c2fdab2a2f7fa9d4bdaf",
+      "observation": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "os.fspath",
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "5acb0abaf3e5a1a1f8012d36b15eb76bbdbcf5cc90c5c2fdab2a2f7fa9d4bdaf"
+        }
+      },
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.TestPEP519.test_return_string": {
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "e84b23ca0e8caa7a1007c3c0a062f194d8331a900b3969b7cfadcf2305091c95",
+      "observation": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "os.fspath",
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "e84b23ca0e8caa7a1007c3c0a062f194d8331a900b3969b7cfadcf2305091c95"
+        }
+      },
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    }
+  }
+}
