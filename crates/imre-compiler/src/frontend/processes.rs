@@ -168,7 +168,10 @@ pub(super) fn process_error_view(
                 tree_issue = Some(*issue);
                 return;
             }
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::Copy(_)), _) => {
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::Copy(_) | ProcessOperation::Move(_)),
+                _,
+            ) => {
                 other_shutil = true;
                 return;
             }
@@ -718,6 +721,110 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Which), returns, args))
     }
 
+    /// Consume the original iterable and quote each fsdecoded path as a Windows argument.
+    pub(super) fn subprocess_list2cmdline(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = call.arguments.args.as_ref();
+        let keywords = call.arguments.keywords.as_ref();
+        let source = match (args, keywords) {
+            ([arg], []) => arg,
+            ([], [kw]) if kw.arg.as_deref() == Some("seq") => &kw.value,
+            _ => {
+                self.graph.checked_keywords(
+                    self.module,
+                    keywords
+                        .iter()
+                        .filter(|kw| kw.arg.as_deref() != Some("seq"))
+                        .map(Ranged::range),
+                );
+                if args.is_empty() && !keywords.iter().any(|kw| kw.arg.as_deref() == Some("seq")) {
+                    self.graph
+                        .checked_missing_argument(self.module, call.range());
+                }
+                if !args.is_empty() {
+                    for kw in keywords
+                        .iter()
+                        .filter(|kw| kw.arg.as_deref() == Some("seq"))
+                    {
+                        self.graph.checked_repeated_keyword(self.module, kw.range());
+                    }
+                }
+                for extra in args.iter().skip(1) {
+                    self.graph
+                        .checked_excess_argument(self.module, extra.range());
+                }
+                let message = if let Some(name) = keywords
+                    .iter()
+                    .filter_map(|kw| kw.arg.as_deref())
+                    .find(|name| *name != "seq" || !args.is_empty())
+                {
+                    if name == "seq" {
+                        "list2cmdline() got multiple values for argument 'seq'".to_owned()
+                    } else {
+                        format!("list2cmdline() got an unexpected keyword argument '{name}'")
+                    }
+                } else if args.is_empty() {
+                    "list2cmdline() missing 1 required positional argument: 'seq'".to_owned()
+                } else {
+                    format!(
+                        "list2cmdline() takes 1 positional argument but {} were given",
+                        args.len()
+                    )
+                };
+                return self.sys_type_error(call, Type::Str, message);
+            }
+        };
+        self.join_parts(
+            unpacking::string(" "),
+            source,
+            call,
+            stdlib::JoinStyle::WindowsCommand,
+        )
+    }
+
+    /// Evaluate a fresh command list in source order, including mixed path representations.
+    pub(super) fn process_argument_list(
+        &mut self,
+        display: &ast::ExprList,
+    ) -> Result<Expr, String> {
+        let items = display
+            .elts
+            .iter()
+            .map(|item| self.expr(item))
+            .collect::<Result<Vec<_>, _>>()?;
+        let kinds = items
+            .iter()
+            .map(|e| {
+                if matches!(e.ty, Type::StrLiteral(_)) {
+                    Type::Str
+                } else {
+                    e.ty
+                }
+            })
+            .collect::<Vec<_>>();
+        let ty = if kinds.is_empty() {
+            Some(Type::Str)
+        } else {
+            self.types.union(&kinds)
+        }
+        .ok_or_else(|| {
+            error(
+                self.source,
+                display,
+                "command list elements need a representable union",
+            )
+        })?;
+        let items = items
+            .into_iter()
+            .zip(&display.elts)
+            .map(|(value, source)| self.coerce(value, ty, source))
+            .collect::<Result<_, _>>()?;
+        Ok(Expr {
+            ty: self.types.list(ty),
+            kind: ExprKind::List(items),
+        })
+    }
+
     /// Keep the caller's argument object; only the OS launch converts each entry to bytes.
     fn command_argument(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
         let scalar = |ty| {
@@ -732,42 +839,7 @@ impl Checker<'_> {
                 .iter()
                 .any(|item| matches!(item, ast::Expr::Starred(_)))
         {
-            let items = display
-                .elts
-                .iter()
-                .map(|item| self.expr(item))
-                .collect::<Result<Vec<_>, _>>()?;
-            let kinds = items
-                .iter()
-                .map(|e| {
-                    if matches!(e.ty, Type::StrLiteral(_)) {
-                        Type::Str
-                    } else {
-                        e.ty
-                    }
-                })
-                .collect::<Vec<_>>();
-            let ty = if kinds.is_empty() {
-                Some(Type::Str)
-            } else {
-                self.types.union(&kinds)
-            }
-            .ok_or_else(|| {
-                error(
-                    self.source,
-                    arg,
-                    "command list elements need a representable str, bytes or Path union",
-                )
-            })?;
-            let items = items
-                .into_iter()
-                .zip(&display.elts)
-                .map(|(value, source)| self.coerce(value, ty, source))
-                .collect::<Result<_, _>>()?;
-            Expr {
-                ty: self.types.list(ty),
-                kind: ExprKind::List(items),
-            }
+            self.process_argument_list(display)?
         } else {
             self.expr(arg)?
         };
@@ -933,7 +1005,64 @@ impl Checker<'_> {
                 });
             }
         }
+        let child_options = params.len();
+        if ["process_group", "umask", "start_new_session", "pass_fds"]
+            .iter()
+            .any(|name| keyword(name).is_some())
+        {
+            streams |= 1 << 18; // native LaunchConfig includes the child settings trailer
+            for (name, ty, default) in [
+                ("process_group", Type::Int, default_bufsize()),
+                ("umask", Type::Int, default_bufsize()),
+                ("start_new_session", Type::Bool, boolean(false)),
+            ] {
+                params.push(Parameter {
+                    name: name.into(),
+                    ty,
+                    default: Some(default),
+                    sign_only: false,
+                    kind: ParameterKind::KeywordOnly,
+                });
+            }
+        }
+        if keyword("pass_fds").is_some() {
+            streams |= 1 << 19;
+            params.push(Parameter {
+                name: "pass_fds".into(),
+                ty: Type::ListInt,
+                default: None,
+                sign_only: false,
+                kind: ParameterKind::KeywordOnly,
+            });
+        }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
+            if index >= child_options {
+                let name = params[index].name.as_str();
+                if name == "pass_fds" {
+                    let value = checker.expr(arg)?;
+                    let fd = |ty| matches!(ty, Type::Int | Type::Bool);
+                    if value.ty == Type::None || checker.types.element(value.ty).is_some_and(fd)
+                        || checker.types.set_element(value.ty) == Some(Type::Int)
+                        || checker.types.fields(value.ty).is_some_and(|fields| fields.into_iter().all(fd))
+                    {
+                        return Ok(value);
+                    }
+                    return Err(error(checker.source, arg,
+                        "pass_fds requires a native list, tuple, or set of integer descriptors"));
+                }
+                if name == "start_new_session" {
+                    return checker.condition(arg);
+                }
+                let value = checker.expr(arg)?;
+                if value.ty == Type::Bool {
+                    return Ok(Expr { ty: Type::Int, kind: ExprKind::Builtin(Builtin::Int, vec![value]) });
+                }
+                return if name == "process_group" {
+                    checker.coerce(value, checker.types.optional(Type::Int), arg)
+                } else {
+                    checker.coerce(value, Type::Int, arg)
+                };
+            }
             match index {
                 0 => checker.command_argument(arg),
                 1 if matches!(arg, ast::Expr::NoneLiteral(_)) => Ok(default_bufsize()),
@@ -1013,6 +1142,23 @@ impl Checker<'_> {
         receiver: Expr,
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
+        if receiver.ty == Type::ActivePopen {
+            let (op, ty) = match attr.attr.as_str() {
+                "pid" => (ProcessOperation::PopenPid, Type::Int),
+                "returncode" => (
+                    ProcessOperation::PopenStatus { poll: false },
+                    self.types.optional(Type::Int),
+                ),
+                _ => {
+                    return Err(error(
+                        self.source,
+                        attr,
+                        "this Popen has unknown stream and argument types",
+                    ));
+                }
+            };
+            return Ok(operation(op, ty, vec![receiver]));
+        }
         let Type::Popen(capture, stdin, cmd) = receiver.ty else {
             unreachable!()
         };
@@ -1059,7 +1205,11 @@ impl Checker<'_> {
             ),
             "communicate" => {
                 let Type::Popen(capture, ..) = args[0].ty else {
-                    unreachable!()
+                    return Err(error(
+                        self.source,
+                        call,
+                        "cannot infer capture modes for an active child",
+                    ));
                 };
                 let input = self
                     .types

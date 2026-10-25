@@ -1,4 +1,5 @@
 //! POSIX executable lookup shares the caller's credentials and current working directory.
+use crate::StrOwner;
 mod copy;
 mod rmtree;
 
@@ -243,7 +244,7 @@ pub unsafe extern "C" fn imre_shutil_which(
         Ok(None) => Ok(std::ptr::null()),
         Ok(Some(name)) if cmd_bytes != 0 => Ok(Rc::into_raw(Rc::new(name)).cast()),
         Ok(Some(name)) => super::paths::path_utf8(OsString::from_vec(name))
-            .map(|text| Rc::into_raw(Rc::new(text)).cast()),
+            .map(|text| StrOwner::into_raw(StrOwner::new(text)).cast()),
     };
     finish(result, std::ptr::null())
 }

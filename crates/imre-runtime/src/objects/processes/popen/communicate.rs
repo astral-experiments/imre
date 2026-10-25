@@ -14,7 +14,7 @@ pub(super) struct Communication {
 
 enum Exchange {
     Done([Vec<u8>; 2]),
-    Timeout([Option<Vec<u8>>; 2]),
+    Timeout([Option<Vec<u8>>; 2], Option<f64>),
 }
 
 /// Decode the rooted input using the stream mode chosen at the call site.
@@ -79,7 +79,7 @@ pub unsafe extern "C" fn imre_run_config(
     descriptor: *const RecordDescriptor,
 ) -> *const () {
     // SAFETY: the caller roots this immutable configuration throughout launch.
-    let (mut config, redirects) = unsafe { (*config, LaunchConfig::redirect_words(config)) };
+    let (mut config, extras) = unsafe { (*config, LaunchConfig::extras(config)) };
     let mut validation = validation;
     if !descriptor.is_null() && input != 0 {
         // run(input=None) inherits stdin; a present value, even empty, demands a pipe.
@@ -107,7 +107,7 @@ pub unsafe extern "C" fn imre_run_config(
         (
             Deadline::from_word(deadline_kind, deadline),
             input_bytes(input as *const (), config.streams & (1 << 16) != 0),
-            spawn(&config, redirects),
+            spawn(&config, extras),
         )
     };
     let kind = if config.streams & (1 << 16) != 0 {
@@ -154,6 +154,7 @@ pub unsafe extern "C" fn imre_run_config(
                 let code = p.control.status().expect("communicate reaped the child");
                 if check && code != 0 {
                     raise_process(ProcessError {
+                        positional_streams: false,
                         cmd: p.args.clone(),
                         returncode: code,
                         stdout,
@@ -170,10 +171,11 @@ pub unsafe extern "C" fn imre_run_config(
                     .cast())
                 }
             }
-            Exchange::Timeout([stdout, stderr]) => {
+            Exchange::Timeout([stdout, stderr], wait_budget) => {
                 raise_timeout(TimeoutError {
                     cmd: p.args.clone(),
                     timeout: timeout.expect("timed communication"),
+                    wait_budget,
                     stdout: stdout.map(Rc::new),
                     stderr: stderr.map(Rc::new),
                 });
@@ -198,7 +200,7 @@ fn copy(bytes: &[u8]) -> Result<Vec<u8>> {
 impl Communication {
     fn timeout(&self) -> Result<Exchange> {
         let snapshot = |i: usize| self.observed[i].then(|| copy(&self.output[i])).transpose();
-        Ok(Exchange::Timeout([snapshot(0)?, snapshot(1)?]))
+        Ok(Exchange::Timeout([snapshot(0)?, snapshot(1)?], None))
     }
 }
 
@@ -266,19 +268,14 @@ impl Popen {
                 };
             }
         }
+        let select = selector::current();
         while pollfds.iter().any(|poll| poll.fd >= 0) {
             let remaining = timeout.map(|t| t - start.elapsed().as_secs_f64());
             if remaining.is_some_and(|t| t <= 0.0) {
                 return data.timeout();
             }
-            let ms = remaining.map(poll_milliseconds).transpose()?.unwrap_or(-1);
-            // SAFETY: each open descriptor remains rooted in self.pipes for this poll.
-            if unsafe { libc::poll(pollfds.as_mut_ptr(), 3, ms) } < 0 {
-                let error = io::Error::last_os_error();
-                if error.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(errno_error(error));
+            if !selector::wait(select, &mut pollfds, remaining)? {
+                continue;
             }
             if timeout.is_some_and(|t| start.elapsed().as_secs_f64() >= t) {
                 return data.timeout();
@@ -333,10 +330,13 @@ impl Popen {
                 }
             }
         }
-        let remaining = timeout.map(|t| Deadline::Float(t - start.elapsed().as_secs_f64()));
-        if self.wait(remaining.as_ref())?.is_none() {
+        let remaining = timeout.map(|t| t - start.elapsed().as_secs_f64());
+        if self
+            .wait(remaining.map(Deadline::Float).as_ref())?
+            .is_none()
+        {
             // A timeout raised by wait itself has no captured streams.
-            return Ok(Exchange::Timeout([None, None]));
+            return Ok(Exchange::Timeout([None, None], remaining));
         }
         Ok(Exchange::Done([
             copy(&self.communication.output[0])?,
@@ -378,10 +378,11 @@ pub unsafe extern "C" fn imre_popen_communicate(
                     }
                     Ok(tuple)
                 }
-                Exchange::Timeout([stdout, stderr]) => {
+                Exchange::Timeout([stdout, stderr], wait_budget) => {
                     raise_timeout(TimeoutError {
                         cmd: p.args.clone(),
                         timeout: timeout.expect("timed communication"),
+                        wait_budget,
                         stdout: stdout.map(Rc::new),
                         stderr: stderr.map(Rc::new),
                     });

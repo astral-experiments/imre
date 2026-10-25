@@ -2,6 +2,13 @@
 use super::*;
 
 impl Checker<'_> {
+    pub(super) fn exception_tuple_slot(&self, class: usize) -> bool {
+        self.classes.declarations.definitions[class]
+            .fields
+            .iter()
+            .any(|field| field.name == crate::classes::EXCEPTION_ARGS_SLOT)
+    }
+
     pub(super) fn is_import_error(&self, kind: u32) -> bool {
         let base = self
             .types
@@ -12,19 +19,18 @@ impl Checker<'_> {
         matches!(base, 41 | 42)
     }
 
-    pub(super) fn import_argument_supported(&self, ty: Type) -> bool {
+    pub(super) fn boxable_value(&self, ty: Type) -> bool {
         matches!(
             ty,
             Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_) | Type::Bytes
         ) || self
             .types
             .payload(ty)
-            .is_some_and(|ty| self.import_argument_supported(ty))
-            || self.types.fields(ty).is_some_and(|items| {
-                items
-                    .into_iter()
-                    .all(|item| self.import_argument_supported(item))
-            })
+            .is_some_and(|ty| self.boxable_value(ty))
+            || self
+                .types
+                .fields(ty)
+                .is_some_and(|items| items.into_iter().all(|item| self.boxable_value(item)))
     }
 
     pub(super) fn import_error(
@@ -69,7 +75,7 @@ impl Checker<'_> {
         }
         let mut value = |node: &ast::Expr| {
             let arg = self.expr(node)?;
-            if !self.import_argument_supported(arg.ty) {
+            if !self.boxable_value(arg.ty) {
                 return Err(error(
                     self.source,
                     node,
