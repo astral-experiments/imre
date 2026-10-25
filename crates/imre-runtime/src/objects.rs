@@ -11,6 +11,7 @@ mod args;
 mod asyncio;
 mod bytes;
 mod contexts;
+mod copying;
 mod csv;
 mod deferred_diff;
 mod difflib;

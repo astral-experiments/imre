@@ -4,6 +4,8 @@
 
 mod arrays;
 mod constants;
+mod deep;
+mod deep_values;
 pub(in crate::objects) mod document;
 mod elements;
 mod keys;
@@ -103,8 +105,11 @@ impl Node {
 #[derive(Clone)]
 pub(super) enum Nodes {
     Document(Rc<Vec<Node>>),
+    /// The iterative parser emits every subtree contiguously in postorder.
+    Deep(Rc<Vec<Node>>),
     /// Keep aliases of a mutable root array without enlarging every scalar view.
     Root(Rc<Vec<Node>>, Rc<Object>),
+    DeepRoot(Rc<Vec<Node>>, Rc<Object>),
     /// Computed scalars and missing defaults do not need a second allocation.
     Single(Node),
 }
@@ -113,7 +118,10 @@ impl std::ops::Deref for Nodes {
     type Target = [Node];
     fn deref(&self) -> &[Node] {
         match self {
-            Self::Document(nodes) | Self::Root(nodes, _) => nodes,
+            Self::Document(nodes)
+            | Self::Deep(nodes)
+            | Self::Root(nodes, _)
+            | Self::DeepRoot(nodes, _) => nodes,
             Self::Single(node) => std::slice::from_ref(node),
         }
     }
@@ -122,7 +130,7 @@ impl std::ops::Deref for Nodes {
 impl Nodes {
     pub(super) fn root_items(&self) -> Option<&Rc<Object>> {
         match self {
-            Self::Root(_, items) => Some(items),
+            Self::Root(_, items) | Self::DeepRoot(_, items) => Some(items),
             _ => None,
         }
     }
@@ -130,7 +138,20 @@ impl Nodes {
     fn child(&self) -> Self {
         match self {
             Self::Root(nodes, _) => Self::Document(Rc::clone(nodes)),
+            Self::DeepRoot(nodes, _) => Self::Deep(Rc::clone(nodes)),
             _ => self.clone(),
+        }
+    }
+
+    fn deep(&self) -> bool {
+        matches!(self, Self::Deep(_) | Self::DeepRoot(..))
+    }
+
+    fn copied(nodes: Vec<Node>, deep: bool) -> Self {
+        if deep {
+            Self::Deep(Rc::new(nodes))
+        } else {
+            Self::Document(Rc::new(nodes))
         }
     }
 }
@@ -181,7 +202,7 @@ impl View {
         let mut nodes = Vec::new();
         let index = self.copy_to(self.index, &mut nodes);
         Some(Self {
-            nodes: Nodes::Document(Rc::new(nodes)),
+            nodes: Nodes::copied(nodes, self.nodes.deep()),
             index,
         })
     }
@@ -205,6 +226,9 @@ impl View {
     /// Preserve nested array elements and object lookups when concatenating
     /// values borrowed from two independently owned documents.
     fn copy_to(&self, index: usize, destination: &mut Vec<Node>) -> usize {
+        if self.nodes.deep() && !(index == self.index && self.nodes.root_items().is_some()) {
+            return deep_values::copy(self, index, destination);
+        }
         let node = match (&self.nodes[index], self.nodes.root_items()) {
             (Node::Array(_), Some(items)) if index == self.index => {
                 // SAFETY: the list roots all immutable JSON views while their children are copied.
@@ -286,7 +310,7 @@ impl View {
             let index = nodes.len();
             nodes.push(Node::Array(items));
             return Ok(Self {
-                nodes: Nodes::Document(Rc::new(nodes)),
+                nodes: Nodes::copied(nodes, self.nodes.deep() || other.nodes.deep()),
                 index,
             });
         } else {
@@ -435,12 +459,21 @@ fn push_node(
         b't' => Node::Bool(true),
         b'f' => Node::Bool(false),
         b'n' => Node::Null,
-        _ if raw.contains(['.', 'e', 'E']) => match source.token(raw) {
-            "NaN" => Node::ConstantNan,
-            "Infinity" => Node::Float(f64::INFINITY),
-            "-Infinity" => Node::Float(f64::NEG_INFINITY),
-            _ => Node::Float(raw.parse().expect("validated JSON float")),
-        },
+        _ => number(source.token(raw)),
+    };
+    let index = nodes.len();
+    nodes.push(node);
+    Ok(index)
+}
+
+fn number(raw: &str) -> Node {
+    match raw {
+        "NaN" => Node::ConstantNan,
+        "Infinity" => Node::Float(f64::INFINITY),
+        "-Infinity" => Node::Float(f64::NEG_INFINITY),
+        _ if raw.contains(['.', 'e', 'E']) => {
+            Node::Float(raw.parse().expect("validated JSON float"))
+        }
         _ => Node::Integer(
             raw.parse::<i64>()
                 .ok()
@@ -452,10 +485,7 @@ fn push_node(
                     )
                 }),
         ),
-    };
-    let index = nodes.len();
-    nodes.push(node);
-    Ok(index)
+    }
 }
 
 fn push_array(
@@ -580,7 +610,9 @@ pub(super) fn loads(
     text: &str,
     owner: impl FnOnce() -> Option<Rc<Str>>,
 ) -> Result<*const Object, Error> {
-    check_depth(text).map_err(|message| Error::new(Kind::ValueError, message))?;
+    if check_depth(text).is_err() {
+        return deep::loads(text, owner);
+    }
     let keys = KeyMemo::default();
     let refused = Cell::new(false);
     build(Source {
