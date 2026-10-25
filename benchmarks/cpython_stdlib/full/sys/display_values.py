@@ -1,6 +1,7 @@
 """Native process fixture for the builtins binding used by sys.__displayhook__."""
 
 import builtins as namespace
+import errno
 import sys
 
 
@@ -59,6 +60,18 @@ def main() -> None:
         sys.__displayhook__()  # ty: ignore[missing-argument]
     except TypeError as error:
         print(str(error))
+
+    key = "errorcode"
+    namespace._ = getattr(errno, key)
+    print(isinstance(namespace._, dict))
+    print(len(namespace._) == len(errno.errorcode))
+    print(namespace._ == errno.errorcode)
+    key = "__loader__"
+    sys.__displayhook__(getattr(errno, key))
+    print(repr(namespace._))
+    key = "EDOM"
+    sys.__displayhook__(getattr(errno, key))
+    print(namespace._ == errno.EDOM)
 
 
 main()

@@ -99,13 +99,6 @@ impl Drop for TupleKey {
         unsafe { super::records::imre_record_release(self.0) };
     }
 }
-impl PartialEq for TupleKey {
-    fn eq(&self, other: &Self) -> bool {
-        // SAFETY: both keys root immutable tuples with no float or mutable fields.
-        unsafe { super::values::equal(self.0 as usize, other.0 as usize, WordKind::new(6)) }
-    }
-}
-impl Eq for TupleKey {}
 impl Hash for TupleKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // SAFETY: checked tuple keys contain only immutable scalar/tuple fields.
@@ -174,8 +167,25 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
     }
 }
 
+trait KeyEq {
+    fn try_eq(&self, other: &Self) -> Result<bool, Error>;
+}
+
+impl<T: Eq> KeyEq for T {
+    fn try_eq(&self, other: &Self) -> Result<bool, Error> {
+        Ok(self == other)
+    }
+}
+
+impl KeyEq for TupleKey {
+    fn try_eq(&self, other: &Self) -> Result<bool, Error> {
+        // SAFETY: both keys root immutable records of the checked key type.
+        unsafe { super::values::try_equal(self.0 as usize, other.0 as usize, WordKind::new(6)) }
+    }
+}
+
 /// Only the table's exact immutable key representation implements this.
-trait ScalarKey: Clone + Eq + Hash {
+trait ScalarKey: Clone + KeyEq + Hash {
     const KIND: u32;
     fn word(&self) -> usize;
     unsafe fn borrow(word: usize) -> ManuallyDrop<Self>;
@@ -331,6 +341,32 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
             .copied()
     }
 
+    fn key_matches<'a>(
+        entries: &'a [Option<Entry<K, V>>],
+        hash: u64,
+        key: &'a K,
+        error: &'a mut Option<Error>,
+    ) -> impl FnMut(&usize) -> bool + 'a {
+        move |&position| {
+            let entry = entries[position].as_ref().unwrap();
+            entry.hash == hash
+                && entry.key.try_eq(key).unwrap_or_else(|err| {
+                    // Stop the bucket probe. Its caller checks the error before using the slot.
+                    *error = Some(err);
+                    true
+                })
+        }
+    }
+
+    fn key_position(&self, hash: u64, key: &K) -> Result<Option<usize>, Error> {
+        let mut error = None;
+        let found = self.index.find(
+            hash,
+            Self::key_matches(&self.entries, hash, key, &mut error),
+        );
+        error.map_or(Ok(found.copied()), Err)
+    }
+
     fn reserve(&mut self, additional: usize) -> Result<(), Error> {
         let entries = &self.entries;
         self.index
@@ -355,7 +391,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     /// Preserves first-insertion position and returns owners displaced by an update.
     fn insert(&mut self, key: K, value: V) -> Result<Option<(K, V)>, Error> {
         let hash = HASHER.hash_one(&key);
-        if let Some(position) = self.position(hash, &key) {
+        if let Some(position) = self.key_position(hash, &key)? {
             let entry = self.entries[position].as_mut().unwrap();
             return Ok(Some((key, std::mem::replace(&mut entry.value, value))));
         }
@@ -364,19 +400,23 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     }
 
     /// Transfers the removed key and value so they can drop outside the mutation.
-    fn remove(&mut self, key: &K) -> Option<Entry<K, V>> {
+    fn remove(&mut self, key: &K) -> Result<Option<Entry<K, V>>, Error> {
         let hash = HASHER.hash_one(key);
-        let slot = self
-            .index
-            .find_entry(hash, |&position| {
-                let entry = self.entries[position].as_ref().unwrap();
-                entry.hash == hash && &entry.key == key
-            })
-            .ok()?;
+        let mut error = None;
+        let found = self.index.find_entry(
+            hash,
+            Self::key_matches(&self.entries, hash, key, &mut error),
+        );
+        if let Some(error) = error {
+            return Err(error);
+        }
+        let Ok(slot) = found else {
+            return Ok(None);
+        };
         let (position, _) = slot.remove();
         let entry = self.entries[position].take().unwrap();
         self.compact();
-        Some(entry)
+        Ok(Some(entry))
     }
 
     fn compact(&mut self) {
@@ -415,7 +455,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     fn copy_keys(&self, result: &mut Table<K, ()>) -> Result<(), Error> {
         result.reserve(self.index.len().saturating_sub(result.index.len()))?;
         for entry in self.entries.iter().flatten() {
-            if result.position(entry.hash, &entry.key).is_none() {
+            if result.key_position(entry.hash, &entry.key)?.is_none() {
                 result.insert_absent(entry.hash, entry.key.clone(), ())?;
             }
         }
@@ -445,7 +485,10 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         key
     }
 
-    unsafe fn lookup(&self, word: usize) -> Option<&Entry<K, V>> {
+    unsafe fn lookup(&self, word: usize) -> Option<&Entry<K, V>>
+    where
+        K: Eq,
+    {
         // SAFETY: the caller roots this table's exact key representation.
         let key = unsafe { K::borrow(word) };
         self.position(HASHER.hash_one(&*key), &*key)
@@ -458,10 +501,15 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         // SAFETY: the caller roots a word of this table's key kind.
         let key = unsafe { K::borrow(word) };
         let hash = HASHER.hash_one(&*key);
-        let Some(slot) = self.index.find_mut(hash, |&i| {
-            let entry = self.entries[i].as_ref().unwrap();
-            entry.hash == hash && entry.key == *key
-        }) else {
+        let mut error = None;
+        let found = self.index.find_mut(
+            hash,
+            Self::key_matches(&self.entries, hash, &key, &mut error),
+        );
+        if let Some(error) = error {
+            return Err(error);
+        }
+        let Some(slot) = found else {
             return Ok(false);
         };
         if *slot + 1 != self.entries.len() {
@@ -504,7 +552,7 @@ impl<K: ScalarKey> Table<K, usize> {
         // SAFETY: the incoming key remains rooted for this whole operation.
         let key = unsafe { K::borrow(word) };
         let hash = HASHER.hash_one(&*key);
-        if let Some(position) = self.position(hash, &*key) {
+        if let Some(position) = self.key_position(hash, &*key)? {
             let value = self.entries[position].as_ref().unwrap().value;
             // SAFETY: the table roots the stored value of the declared kind.
             return Ok(Some(unsafe { kind.acquire(value) }));
@@ -612,9 +660,22 @@ impl<V: Copy> Tables<V> {
     fn iterator_position(&mut self) -> Rc<Cell<usize>> {
         table!(self, table => table.iterator_position())
     }
+    unsafe fn try_lookup(&self, word: usize) -> Result<Option<V>, Error> {
+        unsafe fn find<K: ScalarKey, V: Copy>(
+            table: &Table<K, V>,
+            word: usize,
+        ) -> Result<Option<V>, Error> {
+            // SAFETY: the caller roots the exact key kind of the dispatched table.
+            let key = unsafe { K::borrow(word) };
+            let position = table.key_position(HASHER.hash_one(&*key), &key)?;
+            Ok(position.map(|index| table.entries[index].as_ref().unwrap().value))
+        }
+        // SAFETY: each table borrows its exact rooted key kind.
+        table!(self, table => unsafe { find(table, word) })
+    }
     unsafe fn lookup(&self, word: usize) -> Option<V> {
-        // SAFETY: each dispatched table borrows its exact rooted key kind.
-        table!(self, table => unsafe { table.lookup(word) }.map(|entry| entry.value))
+        // SAFETY: the caller roots the key for this table.
+        unsafe { self.try_lookup(word) }.unwrap_or_else(|error| error.returning(None))
     }
     fn insert(&mut self, key: OwnedWord, value: V) -> Result<Option<(OwnedWord, V)>, Error> {
         fn insert<K: ScalarKey, V: Copy>(
@@ -635,14 +696,14 @@ impl<V: Copy> Tables<V> {
         }
         table!(self, table => insert(table, key, value))
     }
-    unsafe fn remove(&mut self, word: usize) -> Option<(OwnedWord, V)> {
+    unsafe fn remove(&mut self, word: usize) -> Result<Option<(OwnedWord, V)>, Error> {
         unsafe fn remove<K: ScalarKey, V: Copy>(
             table: &mut Table<K, V>,
             word: usize,
-        ) -> Option<(OwnedWord, V)> {
+        ) -> Result<Option<(OwnedWord, V)>, Error> {
             // SAFETY: the caller roots an exact key of this table's kind.
             let key = unsafe { K::borrow(word) };
-            table.remove(&key).map(|entry| {
+            Ok(table.remove(&key)?.map(|entry| {
                 // SAFETY: the table transferred the stored key owner.
                 unsafe {
                     (
@@ -650,7 +711,7 @@ impl<V: Copy> Tables<V> {
                         entry.value,
                     )
                 }
-            })
+            }))
         }
         // SAFETY: dispatch preserves the exact key kind.
         table!(self, table => unsafe { remove(table, word) })
@@ -823,6 +884,40 @@ impl Mapping {
         }
     }
 
+    /// Look up an integer through an object view without reading a string-key
+    /// table as a tagged integer. The result retains its exact value descriptor.
+    pub(super) fn integer_word(&self, key: &Int) -> Option<OwnedWord> {
+        let Tables::Int(table) = &self.tables else {
+            return None;
+        };
+        // SAFETY: the caller roots an exact integer; the table owns the value.
+        unsafe {
+            table
+                .lookup(key.0)
+                .map(|entry| self.value_kind.acquire(entry.value))
+        }
+    }
+
+    /// Subscribe with a dynamic format-field key, preserving the mapping's missing-key policy.
+    pub(super) fn logging_item(&mut self, key: &OwnedWord) -> Result<Option<OwnedWord>, Error> {
+        if key.kind.raw() != self.tables.key_kind() {
+            return Ok(matches!(self.missing, Missing::Zero).then(|| {
+                // SAFETY: a Counter has integer values and zero is immediate.
+                unsafe { self.value_kind.acquire(Int::small(0).unwrap().0) }
+            }));
+        }
+        // SAFETY: the rooted key matches the table's exact representation.
+        unsafe { self.subscript(key.word) }
+    }
+
+    /// The caller roots a key with this table's exact representation.
+    unsafe fn subscript(&mut self, key: usize) -> Result<Option<OwnedWord>, Error> {
+        // SAFETY: the table owns its values and only a sealed list factory can run.
+        unsafe {
+            table!(&mut self.tables, table => table.subscript(key, self.value_kind, self.missing))
+        }
+    }
+
     pub(super) fn integer_entries(&self) -> impl Iterator<Item = (&Int, usize)> {
         let Tables::Int(table) = &self.tables else {
             fail("SystemError", "expected an integer-key dictionary");
@@ -832,6 +927,17 @@ impl Mapping {
             .iter()
             .flatten()
             .map(|entry| (&entry.key.0, entry.value))
+    }
+
+    /// A character ordinal probes only an exact integer-key table. Returned words
+    /// borrow this immutable mapping; string, bytes, and tuple keys never match.
+    pub(super) fn translation_entry(&self, ch: char) -> Option<(WordKind, usize)> {
+        let Tables::Int(table) = &self.tables else {
+            return None;
+        };
+        let key = Int::small(i64::from(u32::from(ch))).unwrap().into_raw();
+        // SAFETY: every Unicode ordinal is a tagged immediate of this table's key type.
+        unsafe { table.lookup(key) }.map(|entry| (self.value_kind, entry.value))
     }
 
     /// Transfers two exact owners only for a new key. Duplicate inputs are
@@ -844,7 +950,7 @@ impl Mapping {
         assert_eq!(key.kind.raw(), self.tables.key_kind());
         assert_eq!(value.kind, self.value_kind);
         // SAFETY: the temporary key roots this table's exact immutable key kind.
-        if unsafe { self.tables.lookup(key.word) }.is_some() {
+        if unsafe { self.tables.try_lookup(key.word) }?.is_some() {
             return Ok(false);
         }
         let displaced = self.insert(key, value)?;
@@ -1326,7 +1432,7 @@ impl Storage {
             _ => fail("SystemError", "expected a dictionary object"),
         }
     }
-    fn dictionary_mut(&mut self) -> &mut Mapping {
+    pub(super) fn dictionary_mut(&mut self) -> &mut Mapping {
         match self {
             Self::Dictionary(value) => value,
             _ => fail("SystemError", "expected a dictionary object"),
@@ -1389,7 +1495,8 @@ impl FunctionCache {
             -1 => unsafe {
                 self.table
                     .0
-                    .with(|s| s.dictionary().tables.lookup(key).is_some())
+                    .with(|s| s.dictionary().tables.try_lookup(key))?
+                    .is_some()
             },
             // SAFETY: only the private insertion order changes; no user code can run.
             _ => unsafe {
@@ -1416,7 +1523,7 @@ impl FunctionCache {
         unsafe {
             self.table.0.with_mut(|s| {
                 let mapping = s.dictionary_mut();
-                if mapping.tables.lookup(key).is_some() {
+                if mapping.tables.try_lookup(key)?.is_some() {
                     return Ok(None);
                 }
                 let key = WordKind::new(mapping.tables.key_kind()).acquire(key);
@@ -1430,7 +1537,7 @@ impl FunctionCache {
                 // Reserve and insert first: an allocation error must not evict the oldest entry.
                 let table = &mut mapping.tables;
                 let oldest = table!(table, table => table.eviction_key());
-                let (key, word) = table.remove(oldest.word).unwrap();
+                let (key, word) = table.remove(oldest.word)?.unwrap();
                 mapping.update_ascii_int(key.word, 0);
                 Ok(Some((key, OwnedWord::from_owned(word, mapping.value_kind))))
             })
@@ -1553,6 +1660,30 @@ pub unsafe extern "C" fn imre_cache_clear(state: *const Object, key: u32, value:
             .0
             .with_mut(|s| std::mem::replace(s.cache_mut(), empty))
     });
+}
+
+/// Look up one value lazily through a read-only string-key mapping view.
+///
+/// # Safety
+/// Both handles are rooted; the mapping stores supported concrete or boxed values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_mapping_object_get(
+    value: *const Object,
+    key: *const Str,
+) -> *const Object {
+    // SAFETY: the shared dictionary borrow only retains the found value.
+    let found = unsafe { object(value).0.with(|s| s.dictionary().logging_key(&*key)) };
+    let Some(field) = found else {
+        // SAFETY: the same dictionary and string key remain rooted.
+        return unsafe { missing_key(value, key as usize) }.returning(std::ptr::null());
+    };
+    if field.kind.raw() == 5 {
+        // The only accepted object-handle value layout is the existing box.
+        return field.into_word() as *const Object;
+    }
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ObjectValue(
+        field,
+    )))))
 }
 
 /// Creates a dictionary with concrete scalar keys and one shared value descriptor.
@@ -1736,17 +1867,21 @@ pub unsafe extern "C" fn imre_dict_contains(value: *const Object, key: usize) ->
             .with(|s| s.dictionary().tables.lookup(key).is_some())
     })
 }
-pub(super) unsafe fn lookup(value: *const Object, key: usize) -> Option<OwnedWord> {
+unsafe fn try_lookup(value: *const Object, key: usize) -> Result<Option<OwnedWord>, Error> {
     // SAFETY: only an independently acquired value leaves storage.
     unsafe {
         object(value).0.with(|s| {
             let mapping = s.dictionary();
-            mapping
+            Ok(mapping
                 .tables
-                .lookup(key)
-                .map(|word| mapping.value_kind.acquire(word))
+                .try_lookup(key)?
+                .map(|word| mapping.value_kind.acquire(word)))
         })
     }
+}
+pub(super) unsafe fn lookup(value: *const Object, key: usize) -> Option<OwnedWord> {
+    // SAFETY: both inputs stay rooted for this lookup.
+    unsafe { try_lookup(value, key) }.unwrap_or_else(|error| error.returning(None))
 }
 unsafe fn missing_key(value: *const Object, key: usize) -> Error {
     // SAFETY: only copied key-kind metadata leaves storage.
@@ -1762,10 +1897,9 @@ pub unsafe extern "C" fn imre_dict_get(value: *const Object, key: usize) -> usiz
     // SAFETY: this native subscription only hashes immutable keys and constructs
     // an empty builtin list, so no storage borrow crosses a user callback.
     let owned = unsafe {
-        object(value).0.with_mut(|storage| {
-        let mapping = storage.dictionary_mut();
-        table!(&mut mapping.tables, table => table.subscript(key, mapping.value_kind, mapping.missing))
-    })
+        object(value)
+            .0
+            .with_mut(|storage| storage.dictionary_mut().subscript(key))
     };
     match owned {
         Ok(Some(owned)) => return owned.into_word(),
@@ -1936,8 +2070,10 @@ pub unsafe extern "C" fn imre_dict_get_default(
     default: usize,
 ) -> usize {
     // SAFETY: all declared input representations remain rooted.
-    if let Some(owned) = unsafe { lookup(value, key) } {
-        return owned.into_word();
+    match unsafe { try_lookup(value, key) } {
+        Ok(Some(owned)) => return owned.into_word(),
+        Ok(None) => {}
+        Err(error) => return error.returning(0),
     }
     // SAFETY: only copied representation metadata escapes this rooted read.
     let kind = unsafe { object(value).0.with(|s| s.dictionary().value_kind) };
@@ -1980,17 +2116,17 @@ pub(super) unsafe fn dict_set(value: *const Object, key: usize, word: usize) -> 
 unsafe fn take_entry(
     value: *const Object,
     key: usize,
-) -> (Option<(OwnedWord, OwnedWord)>, Missing) {
+) -> Result<(Option<(OwnedWord, OwnedWord)>, Missing), Error> {
     // SAFETY: lookup/removal cannot reenter; returned values own their references.
     unsafe {
         object(value).0.with_mut(|s| {
             let mapping = s.dictionary_mut();
-            mapping.update_ascii_int(key, 0);
             let old = mapping
                 .tables
-                .remove(key)
+                .remove(key)?
                 .map(|(key, word)| (key, OwnedWord::from_owned(word, mapping.value_kind)));
-            (old, mapping.missing)
+            mapping.update_ascii_int(key, 0);
+            Ok((old, mapping.missing))
         })
     }
 }
@@ -2004,7 +2140,11 @@ pub unsafe extern "C" fn imre_dict_try_pop(
     out: *mut usize,
 ) -> u32 {
     // SAFETY: roots and output satisfy the caller contract.
-    let Some((_key, value)) = (unsafe { take_entry(value, key) }).0 else {
+    let old = match unsafe { take_entry(value, key) } {
+        Ok((old, _)) => old,
+        Err(error) => return error.returning(0),
+    };
+    let Some((_key, value)) = old else {
         return 0;
     };
     // SAFETY: only success writes one owned word to the independent output slot.
@@ -2022,7 +2162,11 @@ pub unsafe extern "C" fn imre_dict_pop(
     required: u32,
 ) -> usize {
     // SAFETY: all inputs remain rooted across the removal.
-    if let Some((_key, value)) = (unsafe { take_entry(value, key) }).0 {
+    let old = match unsafe { take_entry(value, key) } {
+        Ok((old, _)) => old,
+        Err(error) => return error.returning(0),
+    };
+    if let Some((_key, value)) = old {
         return value.into_word();
     }
     if required != 0 {
@@ -2043,7 +2187,10 @@ pub unsafe extern "C" fn imre_dict_pop(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_dict_delete(value: *const Object, key: usize) {
     // SAFETY: inputs remain rooted until after the operation.
-    let (old, missing) = unsafe { take_entry(value, key) };
+    let (old, missing) = match unsafe { take_entry(value, key) } {
+        Ok(removed) => removed,
+        Err(error) => return error.raise(),
+    };
     if old.is_none() && missing != Missing::Zero {
         // SAFETY: the missing input remains rooted after the failed lookup.
         unsafe { missing_key(value, key) }.raise();
@@ -2106,6 +2253,29 @@ pub extern "C" fn imre_set_new(kind: u32) -> *const Object {
             tables: Tables::new(kind),
         }),
     )))))
+}
+
+/// Materialize an immutable string set from an exact list of strings.
+///
+/// # Safety
+/// The caller roots the list and checks pending state before using the result.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_frozenset_strings(source: *const Object) -> *const Object {
+    // SAFETY: a fresh set cannot alias the list or reenter it during hashing.
+    unsafe {
+        let set = Rc::from_raw(imre_set_new(3));
+        let ok = object(source).0.with(|s| {
+            s.sequence().strings().all(|(word, _)| {
+                imre_set_add(Rc::as_ptr(&set), word);
+                super::exceptions::imre_error_pending() == 0
+            })
+        });
+        if ok {
+            Rc::into_raw(set)
+        } else {
+            std::ptr::null()
+        }
+    }
 }
 
 /// Reads distinct string keys directly from their source indexes and sorts the
@@ -2327,8 +2497,10 @@ pub(super) unsafe fn set_add(value: *const Object, key: usize) -> Result<(), Err
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_set_discard(value: *const Object, key: usize) {
     // SAFETY: returned key owners remain independent of their former table slots.
-    let old = unsafe { object(value).0.with_mut(|s| s.set_mut().tables.remove(key)) };
-    drop(old);
+    let removed = unsafe { object(value).0.with_mut(|s| s.set_mut().tables.remove(key)) };
+    if let Err(error) = removed {
+        error.raise();
+    }
 }
 /// # Safety
 /// Root the set and release this internal cursor on every loop exit.
@@ -2355,8 +2527,10 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
                     .then(|| (OwnedWord::from_owned(path as usize, WordKind::new(5)), None))
             }),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
+            Storage::RegexIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
+            Storage::DequeIterator(iterator) => iterator.next(),
             _ => storage
                 .mapping_iterator_mut()
                 .next()
@@ -2481,7 +2655,7 @@ mod tests {
             assert!(table.insert_absent(HASHER.hash_one(key), key, ()).is_ok());
             let oldest = table.eviction_key();
             assert_eq!(oldest.word, key - 1);
-            assert!(table.remove(&oldest.word).is_some());
+            assert!(matches!(table.remove(&oldest.word), Ok(Some(_))));
         }
     }
 

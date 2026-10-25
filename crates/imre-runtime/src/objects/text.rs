@@ -2,6 +2,7 @@
 
 mod expandtabs;
 mod lowercase;
+mod translate;
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
@@ -32,6 +33,53 @@ pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
         )),
     };
     finish(result, std::ptr::null())
+}
+
+/// Returns the scalar value of one character or the unsigned value of one byte.
+///
+/// # Safety
+/// The caller roots a concrete string, bytes, or their checked nullable union.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_ord(mut word: usize, mut kind: u32) -> usize {
+    let result = (|| {
+        if word == 0 {
+            return Err(Error::new(
+                Kind::TypeError,
+                "ord() expected string of length 1, but NoneType found",
+            ));
+        }
+        kind &= !super::words::NULLABLE;
+        if kind == 9 {
+            let (payload, member) = super::unions::member(word);
+            word = payload;
+            kind = member.base();
+        }
+        let length = match kind {
+            3 => {
+                // SAFETY: the representation identifies a rooted UTF-8 string.
+                let mut chars = unsafe { &*(word as *const Str) }.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(ch), None) => return Ok(Int::from_usize(ch as usize).into_raw()),
+                    (None, None) => 0,
+                    _ => 2 + chars.count(),
+                }
+            }
+            8 => {
+                // SAFETY: the representation identifies an immutable rooted bytes value.
+                let bytes = unsafe { &*(word as *const crate::Bytes) };
+                if let [byte] = bytes.as_slice() {
+                    return Ok(Int::from_usize(usize::from(*byte)).into_raw());
+                }
+                bytes.len()
+            }
+            _ => unreachable!("ord's checked character layout"),
+        };
+        Err(Error::new(
+            Kind::TypeError,
+            format!("ord() expected a character, but string of length {length} found"),
+        ))
+    })();
+    finish(result, 0)
 }
 
 /// # Safety
@@ -73,6 +121,38 @@ pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
     // SAFETY: the receiver stays alive and no character reference escapes.
     let value = unsafe { &*value };
     u32::from(!value.is_empty() && value.chars().all(python_whitespace))
+}
+
+/// Return true when text contains a cased character and every cased character is uppercase.
+///
+/// # Safety
+/// The caller roots an immutable native string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
+    use icu_properties::{
+        CodePointSetData,
+        props::{Cased, Uppercase},
+    };
+    // SAFETY: the caller supplies a rooted, exact UTF-8 string.
+    let text = unsafe { &*value };
+    let mut seen = false;
+    for c in text.chars() {
+        if c.is_ascii_uppercase() {
+            seen = true;
+        } else if c.is_ascii_lowercase() || c == '\u{295}' {
+            // U+0295 was lowercase in Unicode 16, uncased in newer ICU data.
+            return 0;
+        } else if !c.is_ascii()
+            && CodePointSetData::new::<Cased>().contains(c)
+            && !crate::integer_text::newer_printable(c)
+        {
+            if !CodePointSetData::new::<Uppercase>().contains(c) {
+                return 0;
+            }
+            seen = true;
+        }
+    }
+    u32::from(seen)
 }
 
 /// Removes the common space/tab prefix after the caller has evaluated its text.

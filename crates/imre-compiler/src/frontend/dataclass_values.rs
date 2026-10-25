@@ -36,6 +36,8 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::Semaphore
         | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::NativeModule
+        | Type::ModuleNamespace
         | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
@@ -45,10 +47,11 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::CodecWriterClass
         | Type::CodecWriter
         | Type::Sha256
+        | Type::JsonDecoder
         | Type::CsvReader
         | Type::RegexPattern
         | Type::RegexMatch
-        | Type::ValueView
+        | Type::ObjectValue
         | Type::TextIO
         | Type::StringIO
         | Type::BinaryIO
@@ -145,6 +148,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
             | Type::CodecWriterClass
             | Type::CodecWriter
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::StringKeys

@@ -6,9 +6,11 @@
 //! except for compiler-proven readonly loop views; displaced owners are dropped
 //! only after mutable storage access ends.
 
+mod annotations;
 mod argparse;
 mod args;
 mod asyncio;
+mod boxed_values;
 mod builtins;
 mod bytes;
 mod charmaps;
@@ -17,7 +19,9 @@ mod contexts;
 mod copying;
 mod csv;
 mod deferred_diff;
+mod deque;
 mod difflib;
+mod errno;
 pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
@@ -55,6 +59,11 @@ use super::{
 };
 use num_traits::ToPrimitive;
 use std::rc::Rc;
+
+/// Literal constructors share the same empty and Latin-1 owners as chr and indexing.
+pub(crate) fn literal_string(text: &str) -> Rc<Str> {
+    self::text::owned_string(text)
+}
 use words::{OwnedWord, Words};
 
 // All C ints fit in the immediate representation. Heap integers cannot fit.
@@ -78,11 +87,14 @@ enum Storage {
     Plain,
     StrDescriptor(u32),
     Sequence(Words),
+    Deque(Box<deque::Deque>),
+    DequeIterator(deque::DequeIterator),
     Dictionary(mappings::TableOwner<mappings::Mapping>),
     FunctionCache(Box<mappings::FunctionCache>),
     Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
+    RegexIterator(regexes::FindIter),
     Repeat(itertools::Repeat),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
@@ -90,12 +102,15 @@ enum Storage {
     ByteOutput(bytes::ByteOutput),
     SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
+    NativeModule(errno::Module),
+    ModuleNamespace(Rc<errno::Registry>),
+    ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
     CodecInfo(codecs::Codec),
     CodecWriterClass(codecs::writer::WriterClass),
     CodecWriter(Box<codecs::writer::Writer>),
     Exception(exceptions::Exception),
-    ValueView(OwnedWord),
+    ObjectValue(OwnedWord),
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),
@@ -123,6 +138,7 @@ enum Storage {
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
+    JsonDecoder(Rc<Object>),
 }
 
 /// Acquires a reference without consuming the caller's live Rc handle.
@@ -192,6 +208,25 @@ pub unsafe extern "C" fn imre_object_release(value: *const Object) {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_seq_new(kind: u32) -> *const Object {
     Rc::into_raw(Words::new(kind).into_object())
+}
+
+/// Remember a mock history's `_CallList` identity across aliases and resets.
+/// Copies get the ordinary list representation from their fresh sequence storage.
+///
+/// # Safety
+/// The caller roots a native sequence of recorded mock calls.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_mock_call_list(value: *const Object, mark: bool) -> bool {
+    // SAFETY: the caller roots the list and only the copied flag escapes the borrow.
+    unsafe {
+        object(value).0.with(|storage| {
+            let flag = &storage.sequence_storage().mock_call_list;
+            if mark {
+                flag.set(true);
+            }
+            flag.get()
+        })
+    }
 }
 
 /// Tests string membership with the list and needle rooted for the whole read.

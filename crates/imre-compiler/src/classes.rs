@@ -13,11 +13,12 @@ mod dataclasses;
 mod enums;
 mod exceptions;
 mod inheritance;
+mod init_hooks;
 mod record_hash;
 pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
 pub(crate) use exceptions::explicit_message_initializer;
-pub(crate) use inheritance::super_init;
+pub(crate) use inheritance::{super_init, super_method};
 
 pub(crate) const EXCEPTION_ARGS_SLOT: &str = "<exception arguments>";
 
@@ -49,6 +50,8 @@ pub(crate) struct Class {
     pub(crate) node: ast::StmtClassDef,
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
+    /// Field writes required of every override called during construction.
+    pub(crate) init_hooks: HashMap<String, Vec<String>>,
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
@@ -56,6 +59,8 @@ pub(crate) struct Class {
     pub(crate) bases: Vec<usize>,
     pub(crate) abstract_methods: HashSet<String>,
     pub(crate) abc: bool,
+    /// This layout inherits the collections.abc.Mapping primitives and mixins.
+    pub(crate) mapping: bool,
     pub(crate) toml_hash: bool,
     pub(crate) dataclass: Option<DataclassOptions>,
     pub(crate) enum_members: Option<enums::Members>,
@@ -171,6 +176,31 @@ impl Classes {
     }
 }
 
+/// Resolve the origin of a Mapping base, including aliases and its two static type arguments.
+pub(crate) fn mapping_base(graph: &SourceGraph, module: usize, expression: &ast::Expr) -> bool {
+    let origin = match expression {
+        ast::Expr::Subscript(subscript) => {
+            let ast::Expr::Tuple(args) = &*subscript.slice else {
+                return false;
+            };
+            if args.elts.len() != 2 || !args.elts.iter().all(|arg| match graph.resolve(module, arg) {
+                Some(Binding::Definition(id)) => matches!(graph.modules[id.module].parsed.syntax().body[id.statement], ast::Stmt::ClassDef(_)),
+                None => matches!(arg, ast::Expr::Name(n) if matches!(n.id.as_str(), "int" | "bool" | "float" | "str" | "bytes" | "list" | "tuple" | "dict" | "set" | "object")),
+                _ => false,
+            })
+            {
+                return false;
+            }
+            subscript.value.as_ref()
+        }
+        origin => origin,
+    };
+    matches!(
+        graph.resolve(module, origin),
+        Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+    )
+}
+
 fn collect_class(
     graph: &SourceGraph,
     module: &SourceModule,
@@ -184,7 +214,14 @@ fn collect_class(
         matches!(arguments.args.as_ref(), [base] if matches!(graph.resolve(definition.module, base), Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))))
             && arguments.keywords.is_empty()
     });
-    let abc = base.is_some_and(|(_, parent)| parent.abc)
+    let direct_mapping = node.arguments.as_ref().is_some_and(|args| {
+        args.args
+            .iter()
+            .any(|arg| mapping_base(graph, definition.module, arg))
+    });
+    let mapping = direct_mapping || base.is_some_and(|(_, parent)| parent.mapping);
+    let abc = mapping
+        || base.is_some_and(|(_, parent)| parent.abc)
         || node.arguments.as_ref().is_some_and(|args| {
             args.args.iter().any(|arg| {
                 graph.resolve(definition.module, arg) == Some(Binding::Intrinsic(Intrinsic::Abc))
@@ -218,6 +255,15 @@ fn collect_class(
     let mut abstract_methods = base
         .map(|(_, parent)| parent.abstract_methods.clone())
         .unwrap_or_default();
+    if direct_mapping {
+        for primitive in ["__getitem__", "__iter__", "__len__"] {
+            if !base.is_some_and(|(_, parent)| {
+                parent.methods.iter().any(|m| m.name.as_str() == primitive)
+            }) {
+                abstract_methods.insert(primitive.to_owned());
+            }
+        }
+    }
     let mut exception_aliases =
         base.map_or_else(HashMap::new, |(_, b)| b.exception_aliases.clone());
     let mut static_bindings = base.map_or_else(HashMap::new, |(_, b)| b.static_bindings.clone());
@@ -374,10 +420,11 @@ fn collect_class(
                 let unary_protocol = matches!(
                     name,
                     "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__" | "__fspath__"
-                );
+                ) || (mapping && name == "__len__");
                 if name.starts_with("__")
                     && name != "__init__"
                     && !unary_protocol
+                    && !(mapping && matches!(name, "__getitem__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())
                     && !(name == "__repr__" && exception_layout)
                 {
@@ -615,21 +662,6 @@ fn collect_class(
             ));
         }
     };
-    if let Some(initializer) = initializer
-        && method_origins[initializer] == definition
-    {
-        check_initializer(
-            module,
-            &methods[initializer],
-            &fields,
-            if generated_initializer {
-                &[]
-            } else {
-                inherited_fields
-            },
-            exception_layout,
-        )?;
-    }
     let mut bases = Vec::new();
     if let Some((id, base)) = base {
         bases.push(id);
@@ -647,9 +679,42 @@ fn collect_class(
             }
         }
     }
+    let mut init_hooks = base
+        .map(|(_, parent)| parent.init_hooks.clone())
+        .unwrap_or_default();
+    for (name, expected) in &init_hooks {
+        if names.contains(name) {
+            let actual =
+                init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name);
+            if actual.transpose()?.as_ref() != Some(expected) {
+                return Err(module.error(
+                    node,
+                    "an initializer hook override must initialize the same fields",
+                ));
+            }
+        }
+    }
+    if let Some(initializer) = initializer
+        && method_origins[initializer] == definition
+    {
+        check_initializer(
+            module,
+            &methods[initializer],
+            &fields,
+            if generated_initializer {
+                &[]
+            } else {
+                inherited_fields
+            },
+            exception_layout,
+            &mut init_hooks,
+            |name| init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name),
+        )?;
+    }
     Ok(Class {
         definition,
         name: node.name.as_str().to_owned(),
+        init_hooks,
         node: node.clone(),
         fields,
         toml_hash: hash.is_some(),
@@ -659,6 +724,7 @@ fn collect_class(
         bases,
         abstract_methods,
         abc,
+        mapping,
         dataclass,
         enum_members,
         exception_aliases,
@@ -724,6 +790,23 @@ fn class_static_binding(
     }
     let binding = graph.resolve(module, value)?;
     match (wrapped, binding) {
+        (false, Binding::Value(id)) => {
+            // A compiled regex is an immutable object in a fixed module binding.
+            let stmt = &graph.modules[id.module].parsed.syntax().body[id.statement];
+            let init = match stmt {
+                ast::Stmt::Assign(a) => Some(a.value.as_ref()),
+                ast::Stmt::AnnAssign(a) => a.value.as_deref(),
+                _ => None,
+            };
+            if let Some(ast::Expr::Call(call)) = init
+                && graph.resolve(id.module, &call.func)
+                    == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
+            {
+                Some(binding)
+            } else {
+                None
+            }
+        }
         (false, Binding::IntrinsicModule(_)) | (true, Binding::Intrinsic(_)) => Some(binding),
         (true, Binding::Definition(id))
             if matches!(
@@ -797,6 +880,8 @@ fn check_initializer(
     fields: &[Field],
     inherited: &[Field],
     exception_layout: bool,
+    hooks: &mut init_hooks::Hooks,
+    lookup: impl Fn(&str) -> Option<Result<Vec<String>, String>>,
 ) -> Result<(), String> {
     let receiver = initializer
         .parameters
@@ -831,6 +916,27 @@ fn check_initializer(
             // Calling BaseException directly bypasses any user base initializer.
             // Its ordinary fields still have to be initialized by this method.
             called_exception_base = true;
+            continue;
+        }
+        if let Some(name) = init_hooks::called_method(statement, receiver)
+            && name != "__init__"
+            && let Some(writes) = lookup(name)
+        {
+            let writes = writes?;
+            for field in &writes {
+                let Some(&declared_field) = declared.get(field.as_str()) else {
+                    return Err(
+                        module.error(statement, "initializer hook writes an undeclared field")
+                    );
+                };
+                if !initialized.insert(declared_field) {
+                    return Err(module.error(
+                        statement,
+                        "initializer hook writes an already initialized field",
+                    ));
+                }
+            }
+            hooks.insert(name.to_owned(), writes);
             continue;
         }
         let assignment = match statement {

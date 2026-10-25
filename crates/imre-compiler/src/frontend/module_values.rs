@@ -122,7 +122,7 @@ impl ModuleValues {
 
     pub(super) fn regex_groups(&self, pattern: &Expr) -> Option<regex::CaptureLayout> {
         match &pattern.kind {
-            ExprKind::Builtin(Builtin::RegexCompile(source), _) => {
+            ExprKind::Builtin(Builtin::RegexCompile { source, .. }, _) => {
                 self.regex_literals.borrow().get(source).cloned()
             }
             ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
@@ -239,6 +239,25 @@ impl Initialization {
                 }
                 ast::Stmt::FunctionDef(_) => {
                     available.insert(definition);
+                    continue;
+                }
+                ast::Stmt::ImportFrom(import)
+                    if crate::modules::errno_import(statement).is_some() =>
+                {
+                    let start = body.len();
+                    body.extend(import.names.iter().map(|alias| {
+                        checker
+                            .graph
+                            .checked_builtin_import(checker.module, alias.range());
+                        checker.check_errno_import(alias.name.as_str())
+                    }));
+                    checkpoints.push(Checkpoint {
+                        statement: index,
+                        body: start..body.len(),
+                        initialized: checker.globals.types.borrow().len(),
+                        definitions: available.clone(),
+                        class_reads: std::mem::take(checker.class_reads.get_mut()),
+                    });
                     continue;
                 }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => continue,
