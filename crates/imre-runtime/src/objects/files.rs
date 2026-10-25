@@ -275,8 +275,7 @@ impl FileState {
             .as_mut()
             .ok_or_else(|| Error::new(Kind::ValueError, closed))?;
         if let Stream::Standard(stderr) = stream {
-            return crate::sys::write_standard(*stderr, bytes)
-                .map_err(super::errno_error);
+            return crate::sys::write_standard(*stderr, bytes).map_err(super::errno_error);
         }
         let Stream::Write(writer) = stream else {
             return Err(Error::new(Kind::UnsupportedOperation, "not writable"));
@@ -299,7 +298,9 @@ impl FileState {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Standard(stderr) => crate::sys::flush_standard(*stderr).map_err(super::errno_error),
+            Stream::Standard(stderr) => {
+                crate::sys::flush_standard(*stderr).map_err(super::errno_error)
+            }
             Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) | Stream::TextMemory(_) => {
                 Ok(())
             }
