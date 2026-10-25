@@ -1450,6 +1450,7 @@ pub(crate) enum FdOperation {
     Remove,
     Seek,
     Pipe,
+    Pipe2,
     Dup2,
     Close,
     Dup,

@@ -31,10 +31,14 @@ struct References<'a> {
 impl References<'_> {
     /// Root an implicit index method only if argument binding can reach conversion.
     fn invokes_index(&self, call: &ast::ExprCall) -> bool {
-        if let Some(Binding::Intrinsic(Intrinsic::Credential(name))) =
-            self.graph.resolve(self.module, &call.func)
-        {
-            let arity = super::credential_arity(name);
+        let arity = match self.graph.resolve(self.module, &call.func) {
+            Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
+                Some(super::credential_arity(name))
+            }
+            Some(Binding::Intrinsic(Intrinsic::Fd(crate::ir::FdOperation::Pipe2))) => Some(1),
+            _ => None,
+        };
+        if let Some(arity) = arity {
             return arity != 0
                 && call.arguments.keywords.is_empty()
                 && (call.arguments.args.len() == arity
