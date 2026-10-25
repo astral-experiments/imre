@@ -111,6 +111,7 @@ impl Checker<'_> {
         ) {
             return Ok(vec![InstanceType::Exact(Type::CompletedProcess(
                 crate::ir::ProcessCapture::TEXT,
+                None,
             ))]);
         }
         if let Some(Binding::Definition(definition)) = self.resolve(expression)

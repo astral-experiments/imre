@@ -177,6 +177,29 @@ impl Checker<'_> {
                 ),
             });
         }
+        if types
+            .iter()
+            .any(|ty| matches!(ty, Type::PlainObject | Type::StrDescriptor(_)))
+            && (types == [left.ty, right.ty] || types[0] == types[1])
+        {
+            if types[0] == types[1] {
+                return Ok(Self::identity_result(
+                    vec![left, right],
+                    op == ast::CmpOp::IsNot,
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(left), Statement::Expr(right)],
+                    value: Box::new(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(op == ast::CmpOp::IsNot),
+                    }),
+                    clear: vec![],
+                },
+            });
+        }
         if types.contains(&Type::StringIterable) && types == [left.ty, right.ty] {
             // Both operands must reach identity with the same pointer tag.
             let left = self.coerce(left, Type::StringIterable, node)?;
@@ -202,6 +225,14 @@ impl Checker<'_> {
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::ForwardRef(_) | Type::Callable(_)))
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes))
+            || (types[0] == types[1]
+                && self
+                    .types
+                    .members(types[0])
+                    .is_some_and(|members| members == [Type::Str, Type::Bytes]))
             || types.iter().all(|ty| {
                 matches!(
                     ty,

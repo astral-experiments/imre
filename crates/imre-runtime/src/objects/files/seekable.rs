@@ -1,6 +1,6 @@
 //! Positioned binary I/O on ordinary files, in-memory files, and ZIP members.
 
-use super::super::{acquire_rc, zipfile::Member};
+use super::super::{acquire_rc, os::c_int, zipfile::Member};
 use super::*;
 use num_traits::ToPrimitive;
 
@@ -134,6 +134,32 @@ impl FileState {
         }
     }
 
+    /// Convert a signed absolute seek using this stream's Python rules.
+    pub(in crate::objects) fn absolute_offset(&mut self, offset: i128) -> Result<u64> {
+        match self.kind {
+            FileKind::Memory => {
+                let signed = i64::try_from(offset).map_err(|_| {
+                    Error::new(
+                        Kind::OverflowError,
+                        "Python int too large to convert to C ssize_t",
+                    )
+                })?;
+                self.stream()?;
+                u64::try_from(signed).map_err(|_| {
+                    Error::new(Kind::ValueError, format!("negative seek value {offset}"))
+                })
+            }
+            FileKind::Member => {
+                self.check_member("seek on closed file.")?;
+                Ok(offset.clamp(0, i128::from(i64::MAX)) as u64)
+            }
+            _ => {
+                self.stream()?;
+                disk_offset(offset)
+            }
+        }
+    }
+
     pub(in crate::objects) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
         if self.kind == FileKind::BinaryRead && self.stream.is_none() {
             return Err(Error::new(Kind::ValueError, "seek of closed file"));
@@ -165,6 +191,18 @@ impl FileState {
     }
 }
 
+/// Convert a Python file offset into the position used by POSIX file operations.
+pub(in crate::objects) fn disk_offset(offset: i128) -> Result<u64> {
+    let signed = i64::try_from(offset).map_err(|_| {
+        Error::new(
+            Kind::ValueError,
+            "cannot fit 'int' into an offset-sized integer",
+        )
+    })?;
+    u64::try_from(signed)
+        .map_err(|_| super::errno_error(io::Error::from_raw_os_error(libc::EINVAL)))
+}
+
 /// Construct a BytesIO, sharing its immutable initial bytes until the first write.
 ///
 /// # Safety
@@ -193,14 +231,17 @@ pub unsafe extern "C" fn imre_binary_seek(
     // SAFETY: no callbacks can invalidate any of the three borrowed values.
     let result = unsafe {
         let offset = Int::borrow(offset);
-        let whence = Int::borrow(whence);
         object(file).0.with_mut(|s| {
             let f = s.file_mut();
             f.check_member("seek on closed file.")?;
-            let whence = whence
-                .as_small()
-                .or_else(|| whence.big().to_i64())
-                .unwrap_or(i64::MAX);
+            if f.kind == FileKind::GzipBinaryRead {
+                f.stream()?;
+            }
+            let whence = if f.kind == FileKind::Member {
+                Int::borrow(whence).as_small().unwrap_or(-1)
+            } else {
+                i64::from(c_int(whence)?)
+            };
             let off = match f.kind {
                 FileKind::Member => offset
                     .as_small()
@@ -247,19 +288,7 @@ pub unsafe extern "C" fn imre_binary_seek(
                 }
             };
             let at = match whence {
-                0 if off >= 0 => SeekFrom::Start(off as u64),
-                0 if f.kind == FileKind::Member => SeekFrom::Start(0),
-                0 if f.kind == FileKind::Memory => {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        format!("negative seek value {off}"),
-                    ));
-                }
-                0 => {
-                    return Err(super::errno_error(io::Error::from_raw_os_error(
-                        libc::EINVAL,
-                    )));
-                }
+                0 => SeekFrom::Start(f.absolute_offset(i128::from(off))?),
                 1 => SeekFrom::Current(off),
                 2 => SeekFrom::End(off),
                 _ if f.kind == FileKind::Member => {
