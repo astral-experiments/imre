@@ -209,7 +209,7 @@ impl Session {
             .any(|token| token.kind() == TokenKind::Star)
         {
             tuple_displays::check(&parsed.syntax().body).map_err(|(node, reason)| {
-                format!("{path}: {}", crate::frontend::error(source, node, reason))
+                format!("{path}:{}", crate::frontend::error(source, node, reason))
             })?
         } else {
             HashMap::new()
@@ -224,6 +224,12 @@ impl Session {
     /// Width proved before ty expands the display's field types.
     pub(crate) fn tuple_spread_width(&self, module: usize, start: TextSize) -> Option<usize> {
         self.tuple_spreads.get(module)?.get(&start).copied()
+    }
+
+    /// Only modules with statically proved starred tuple fields can need the
+    /// corresponding exact list-subscript diagnostic site.
+    pub(crate) fn has_tuple_spreads(&self, module: usize) -> bool {
+        !self.tuple_spreads[module].is_empty()
     }
 
     fn write_file(&self, path: &str, source: &str) -> Result<File, String> {
@@ -428,6 +434,7 @@ pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
     Keyword(TextRange),
+    TupleListRead(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -438,6 +445,7 @@ impl CheckedDiagnostic {
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
+            Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
         }
     }
 }
@@ -513,6 +521,7 @@ impl CachedSession {
     }
 
     fn update(&mut self, fresh: &Session, inputs: &crate::SourceInputs) -> Result<(), String> {
+        self.session.tuple_spreads.clone_from(&fresh.tuple_spreads);
         for (index, (old, new)) in self.inputs.files.iter_mut().zip(&inputs.files).enumerate() {
             if old.2 == new.2 {
                 continue;

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use ruff_python_ast::visitor::source_order::{self, SourceOrderVisitor};
-use ruff_python_ast::visitor::{Visitor, walk_expr, walk_parameters, walk_stmt};
+use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 use ruff_python_ast::{self as ast, Expr, ExprContext, Stmt};
 use ruff_text_size::{Ranged, TextSize};
 
@@ -65,6 +65,14 @@ struct Uses<'a> {
 }
 
 impl<'a> SourceOrderVisitor<'a> for Uses<'a> {
+    fn visit_alias(&mut self, alias: &'a ast::Alias) {
+        if alias.asname.is_none() {
+            self.bindings
+                .remove(alias.name.as_str().split('.').next().unwrap());
+        }
+        source_order::walk_alias(self, alias);
+    }
+
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         let previous = self.nested;
         self.nested |= matches!(stmt, Stmt::FunctionDef(_) | Stmt::ClassDef(_));
@@ -167,27 +175,32 @@ fn local_widths(function: &ast::StmtFunctionDef, widths: &mut Widths) {
 struct Displays<'a> {
     widths: Widths,
     function: bool,
-    parameters: bool,
+    function_body: Option<TextSize>,
     error: Option<(&'a ast::ExprStarred, &'static str)>,
 }
 
 impl<'a> Visitor<'a> for Displays<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        let previous = self.function;
+        let previous = (self.function, self.function_body);
         if let Stmt::FunctionDef(function) = stmt {
             local_widths(function, &mut self.widths);
-            self.function = true;
+            self.function = false;
+            self.function_body = function.body.first().map(Ranged::start);
         } else if matches!(stmt, Stmt::ClassDef(_)) {
             self.function = false;
         }
         walk_stmt(self, stmt);
-        self.function = previous;
+        (self.function, self.function_body) = previous;
     }
 
-    fn visit_parameters(&mut self, parameters: &'a ast::Parameters) {
-        let previous = std::mem::replace(&mut self.parameters, true);
-        walk_parameters(self, parameters);
-        self.parameters = previous;
+    fn visit_body(&mut self, body: &'a [Stmt]) {
+        if body
+            .first()
+            .is_some_and(|stmt| Some(stmt.start()) == self.function_body)
+        {
+            self.function = true;
+        }
+        ruff_python_ast::visitor::walk_body(self, body);
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
@@ -204,7 +217,7 @@ impl<'a> Visitor<'a> for Displays<'a> {
                 .count();
             for element in &tuple.elts {
                 if let Expr::Starred(star) = element {
-                    if !self.function || self.parameters {
+                    if !self.function {
                         self.error = Some((
                             star,
                             "starred elements in tuple displays require a function body",

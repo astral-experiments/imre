@@ -5160,6 +5160,12 @@ impl<'a> Checker<'a> {
                 })?;
                 let index = self.expr(&subscript.slice)?;
                 self.expect(Type::Int, index.ty, expression)?;
+                if let ExprKind::Field(tuple, _) = &list.kind
+                    && self.types.fields(tuple.ty).is_some()
+                {
+                    self.graph
+                        .checked_tuple_list_read(self.module, subscript.range());
+                }
                 (
                     element,
                     ExprKind::Builtin(Builtin::ListGet, vec![list, index]),
