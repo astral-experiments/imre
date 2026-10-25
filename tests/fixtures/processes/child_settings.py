@@ -74,6 +74,26 @@ for large in [1099511627776, 1267650600228229401496703205376]:
     except OverflowError as exc:
         print(str(exc))
 
+# A direct launch can ignore even an unbounded negative umask. Looking up a
+# bare command or starting a new session forces conversion in fork/exec.
+for program in ["/bin/true", "true"]:
+    try:
+        print(subprocess.call([program], umask=-(2**90), close_fds=False))
+    except OverflowError as exc:
+        print(str(exc))
+for session in [False, True]:
+    try:
+        subprocess.call(["/bin/true\x00"], stdin=1237940039285380274899124224, start_new_session=session, close_fds=False)
+    except ValueError:
+        print("invalid executable first")
+    except OverflowError:
+        print("invalid descriptor first")
+    empty: list[str] = []
+    try:
+        print(subprocess.call(empty, executable="/bin/true", start_new_session=session, close_fds=False))
+    except ValueError as exc:
+        print(str(exc))
+
 # The parent resolves stream handles before fork converts the child attributes.
 try:
     subprocess.Popen(identity, stdout=report, process_group=2**65)

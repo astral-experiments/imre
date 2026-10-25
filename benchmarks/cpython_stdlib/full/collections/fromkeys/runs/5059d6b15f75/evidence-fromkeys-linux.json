@@ -1,0 +1,32 @@
+[
+{
+  "schema": "imre.cpython-stdlib.native-evidence/v1",
+  "suite": "collections.dict.fromkeys",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "opt_level": 0,
+  "denominator": 1,
+  "distinct_ids": 1,
+  "counts": {
+    "blocked": 1
+  },
+  "records": [
+    {"id": "test.test_dict.DictTest.test_fromkeys", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_dict.DictTest", "reference": "pass", "outcome": "blocked", "reason": " Compiling <work>/case.py (-O0)\n<work>/case.py:7:26: Imre: expected int, got dict[str, None]; annotations are enforced contracts\n", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "evidence": {"compiler_revision": "5059d6b15f750e7fc057190aa583b5e52a084da7", "method_sha256": "148efb6c533eb6e153506a612e21047a14951a16dcb970b8f83489a16c12e390"}, "classification": "blocked"}
+  ]
+},
+{
+  "schema": "imre.cpython-stdlib.native-evidence/v1",
+  "suite": "collections.dict.fromkeys",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "opt_level": 3,
+  "denominator": 1,
+  "distinct_ids": 1,
+  "counts": {
+    "blocked": 1
+  },
+  "records": [
+    {"id": "test.test_dict.DictTest.test_fromkeys", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_dict.DictTest", "reference": "pass", "outcome": "blocked", "reason": " Compiling <work>/case.py (-O3)\n<work>/case.py:7:26: Imre: expected int, got dict[str, None]; annotations are enforced contracts\n", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "evidence": {"compiler_revision": "5059d6b15f750e7fc057190aa583b5e52a084da7", "method_sha256": "148efb6c533eb6e153506a612e21047a14951a16dcb970b8f83489a16c12e390"}, "classification": "blocked"}
+  ]
+}
+]

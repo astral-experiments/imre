@@ -127,21 +127,6 @@ struct LaunchExtras {
     child: Option<(usize, usize, bool)>,
 }
 
-/// # Safety
-/// The caller roots an exact native Python int for the duration of the borrow.
-unsafe fn c_int(word: usize) -> Result<i32> {
-    // SAFETY: the compiler supplies a tagged or rooted integer.
-    unsafe { Int::borrow(word) }
-        .as_small()
-        .and_then(|n| i32::try_from(n).ok())
-        .ok_or_else(|| {
-            Error::new(
-                Kind::OverflowError,
-                "Python int too large to convert to C int",
-            )
-        })
-}
-
 impl LaunchConfig {
     fn has_redirects(streams: u32) -> bool {
         [12, 0, 4]
@@ -277,11 +262,24 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             "STDOUT can only be used for stderr",
         ));
     }
+    let c_int = |n: &Int| n.as_small().and_then(|n| i32::try_from(n).ok());
     let mut descriptors = [-1; 3];
+    let mut oversized = false;
     for (i, mode) in modes.into_iter().enumerate() {
         descriptors[i] = match mode {
-            // SAFETY: mode 6 denotes a rooted integer descriptor.
-            6 => unsafe { c_int(extras.redirects[i]) }?,
+            6 => {
+                // SAFETY: mode 6 denotes the caller's rooted integer descriptor.
+                let fd = unsafe { Int::borrow(extras.redirects[i]) };
+                c_int(&fd).unwrap_or_else(|| {
+                    oversized = true;
+                    // Preserve the launch-mode comparison to fd 2 without truncation.
+                    if fd.big().sign() == num_bigint::Sign::Minus {
+                        i32::MIN
+                    } else {
+                        i32::MAX
+                    }
+                })
+            }
             // SAFETY: mode 7 denotes a rooted native file; only its fd escapes the borrow.
             7 => unsafe {
                 object(extras.redirects[i] as *const Object)
@@ -293,18 +291,33 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
     }
     // Python opens the parent-side pipe wrappers after it collects the file handles.
     let bufsize = if modes.contains(&1) {
-        // SAFETY: the buffer size is a rooted canonical integer.
-        unsafe { c_int(config.bufsize) }?
+        // SAFETY: the caller roots the buffer-size integer.
+        let size = unsafe { Int::borrow(config.bufsize) };
+        c_int(&size).ok_or_else(c_int_overflow)?
     } else {
         -1
     };
-    let child = || {
+    let child = |may_spawn| {
         let Some((group, mask, new_session)) = extras.child else {
             return Ok(ChildAttributes::default());
         };
         // SAFETY: the group is a nullable integer (None uses a zero word);
         // the mask is an exact integer. Both owners span the launch.
-        let (group, mask) = unsafe { (if group == 0 { -1 } else { c_int(group)? }, c_int(mask)?) };
+        let group = if group == 0 {
+            -1
+        } else {
+            // SAFETY: a non-null group is a rooted integer.
+            let group = unsafe { Int::borrow(group) };
+            c_int(&group).ok_or_else(c_int_overflow)?
+        };
+        // SAFETY: the caller roots the requested mask through spawn.
+        let mask = unsafe { Int::borrow(mask) };
+        if may_spawn && !new_session && group == -1 && mask.big().sign() == num_bigint::Sign::Minus
+        {
+            // posix_spawn inherits the mask without narrowing a negative Python integer.
+            return Ok(ChildAttributes::default());
+        }
+        let mask = c_int(&mask).ok_or_else(c_int_overflow)?;
         Ok(ChildAttributes {
             new_session,
             group,
@@ -312,7 +325,9 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
         })
     };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
-    unsafe { launch_error::spawn(&args, config, streams, descriptors, child) }.map(|mut child| {
+    let child =
+        unsafe { launch_error::spawn(&args, config, streams, descriptors, oversized, child) };
+    child.map(|mut child| {
         let text = streams & (1 << 16) != 0;
         let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
         let pipes = [
