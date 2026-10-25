@@ -17,7 +17,7 @@ from bindings import Boundary, PRIVATE, Probe
 from bodies import compiled
 from deep_decode import DRIVER as DEEP_DRIVER, METHOD as DEEP_METHOD, fixture as deep_fixture
 from key_identity import METHOD as KEY_METHOD, OPERATIONS as KEY_OPERATIONS, SOURCE as KEY_SOURCE
-from key_identity import native_identity_control, owner_fixture, typed_body_fixture
+from key_identity import native_identity_control, native_key_fixture, owner_fixture
 from formatting import METHODS as FORMATTING, Native as NativeFormatter, formatting_method
 from native import counts
 from reference import BENCH, COMMIT, HERE, routine, verify
@@ -185,8 +185,7 @@ def run(tools, directory, reference):
         body_dir.mkdir()
         helper = method_bytes(KEY_SOURCE, "TestDecode", "check_keys_reuse")
         body = native_method(tools, body_dir, KEY_SOURCE, "TestDecode", ids[KEY_METHOD][0],
-                             typed_body_fixture(string_identity=True, memo_truth=True),
-                             operation=("imre", KEY_OPERATIONS))
+                             native_key_fixture(), operation=("imre", KEY_OPERATIONS))
 
         def native_key_body(case, original):
             try:

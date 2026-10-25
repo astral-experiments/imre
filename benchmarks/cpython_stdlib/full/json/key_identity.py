@@ -26,7 +26,7 @@ SOURCE = BENCH / "upstream/Lib/test/test_json/test_decode.py"
 OPERATIONS = "json.loads, native JSONDecoder construction and decode, sorted decoded keys, identity and memo truth"
 
 
-def typed_body_fixture(*, string_identity=False, memo_truth=False):
+def typed_body_fixture(*, string_identity=False, memo_truth=False, standalone=False):
     """Bind both public entry points without copying any decoded value."""
     prefix = """import json
 import unittest
@@ -41,11 +41,13 @@ class JsonModule:
     def __init__(self):
         self.decoder = DecoderModule()
 
-class NativeCase(unittest.TestCase):
+"""
+    base = "" if standalone else "(unittest.TestCase)"
+    init = "" if standalone else "        super().__init__()\n"
+    prefix += f"""class NativeCase{base}:
     json: JsonModule
     def __init__(self):
-        super().__init__()
-        self.json = JsonModule()
+{init}        self.json = JsonModule()
 
     def loads(self, source: str) -> list[dict[str, Any]]:
         return json.loads(source)
@@ -66,10 +68,16 @@ class NativeCase(unittest.TestCase):
     return prefix + method_bytes(SOURCE, "TestDecode", "check_keys_reuse").decode()
 
 
+def native_key_fixture():
+    # A concrete child fixture can accept the two actual operand types without
+    # narrowing TestCase's public assertion signatures. CPython owns lifecycle.
+    return typed_body_fixture(string_identity=True, memo_truth=True, standalone=True)
+
+
 def native_identity_control(tools, directory):
     """The same native assertion must reject equal keys from separate scans."""
     directory.mkdir()
-    fixture = typed_body_fixture(string_identity=True, memo_truth=True)
+    fixture = native_key_fixture()
     program = fixture + "\n" + method_bytes(SOURCE, "TestDecode", "test_keys_reuse").decode() + '''
 case = NativeCase()
 case.test_keys_reuse()
@@ -314,7 +322,8 @@ def run(tools, work):
     for name, fixture in (("general", general), ("unshadowed-module", unshadowed),
                           ("typed-module-bindings", typed_body_fixture()),
                           ("typed-string-identity", typed_body_fixture(string_identity=True)),
-                          ("typed-key-assertions", typed_body_fixture(string_identity=True, memo_truth=True))):
+                          ("typed-key-assertions", typed_body_fixture(string_identity=True, memo_truth=True)),
+                          ("native-key-assertions", native_key_fixture())):
         directory = work / name
         directory.mkdir()
         try:
