@@ -88,6 +88,7 @@ mod unittest;
 mod unittest_equality;
 mod unittest_main;
 mod unittest_mock;
+mod unittest_patch;
 mod unpacking;
 mod warnings;
 mod zip_sums;
@@ -4063,6 +4064,11 @@ impl<'a> Checker<'a> {
             && self.unittest_context(class)
         {
             return self.assert_raises_scope(item, remaining, body, class, manager);
+        }
+        if let Type::Class(class) = manager.ty
+            && self.bundled_mock_class(class, "_DictionaryPatch")
+        {
+            return self.mock_dictionary_scope(item, remaining, body, class, manager);
         }
         if manager.ty == Type::GeneratorContext {
             return self.generator_scope(item, remaining, body, manager);

@@ -1012,6 +1012,12 @@ impl Checker<'_> {
         {
             return Ok(context);
         }
+        if attribute.attr.as_str() == "dict"
+            && self.bundled_mock_class(class, "_PatchFactory")
+            && let Some(object) = &receiver
+        {
+            return self.mock_dictionary_call(call, class, object.clone());
+        }
         if self.native_mock(class)
             && let Some(object) = &receiver
         {

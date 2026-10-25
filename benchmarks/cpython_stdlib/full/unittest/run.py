@@ -97,7 +97,8 @@ def run(args, level, root):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["equality_protocol", "mock_protocol", "mock_reset", "mock_globals", *("context_" + family for family in families)]:
+    for name in ["equality_protocol", "mapping_protocol", "mock_protocol", "mock_reset", "mock_globals",
+                 "dictionary_patch", *("context_" + family for family in families)]:
         control = root / name
         if (HERE / name).is_dir():
             shutil.copytree(HERE / name, control)
@@ -134,6 +135,9 @@ def run(args, level, root):
         ("testmock.testmock", "MockTest", "test_assert_called", "unittest.mock.Mock.assert_called"),
         ("testmock.testmock", "MockTest", "test_assert_called_once", "unittest.mock.Mock.assert_called_once"),
         ("testmock.testmock", "MockTest", "test_ordered_call_signature", "unittest.mock.Mock.call_args and its representation"),
+        *(("testmock.testpatch", "PatchTest", method, "unittest.mock.patch.dict and restoration")
+          for method in ("test_patch_dict_as_context_manager", "test_patch_dict_start_stop",
+                         "test_patch_dict_stop_without_start")),
         *(("testmock.testmock", "MockTest", method, "unittest.mock recording, reset, and call assertions")
           for method in MOCK_BLOCKERS),
     ):
@@ -144,6 +148,8 @@ def run(args, level, root):
         fixture = testcase_fixture("bool" if method == "test_stop" else None)
         if module == "testmock.testmock":
             fixture = "from unittest.mock import Mock\n" + fixture
+        elif module == "testmock.testpatch":
+            fixture = "from unittest.mock import patch\n" + fixture
         try:
             executions[case_id] = native_method(lang, directory, path, owner, case_id, fixture,
                                                 operation=("imre", operation))

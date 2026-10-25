@@ -1,0 +1,39 @@
+"""Check real aliasing, nested restoration, exceptions and early return."""
+from unittest.mock import patch
+
+
+def leave(mapping: dict[str, str]) -> str:
+    with patch.dict(mapping, {"outer": "returning"}, clear=True) as changed:
+        return changed["outer"]
+
+
+mapping = {"before": "original", "kept": "second"}
+alias = mapping
+scope = patch.dict(mapping, [("before", "positional")], before="keyword", extra="new")
+print(scope.stop() is None)
+with scope as changed:
+    print(changed is alias)
+    print(changed["before"])
+    print(mapping["extra"])
+    try:
+        with patch.dict(alias, {"inner": "active"}, clear=True):
+            print(mapping["inner"])
+            del alias["inner"]
+            alias["during"] = "body"
+            raise ValueError("inside patch")
+    except ValueError as exc:
+        print(str(exc))
+    print(mapping["before"])
+    print("during" in changed)
+    del changed["kept"]
+print(mapping["before"])
+print(mapping["kept"])
+print("extra" in alias)
+print(leave(mapping))
+print(mapping["before"])
+active = scope.start()
+active["during"] = "body"
+print(mapping["during"])
+print(scope.stop() is False)
+print("during" in alias)
+print(scope.stop() is None)
