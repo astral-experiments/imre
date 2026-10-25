@@ -4352,6 +4352,9 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::Repr if args[0].value.ty == Type::ExitCode => {
+                self.call("imre_system_exit_code_repr", Type::Str, &[&args[0].value])
+            }
             Builtin::Repr => self.value_repr(&args[0].value),
             Builtin::Str => match args[0].value.ty {
                 Type::Path | Type::PurePath(_) => {
@@ -4617,6 +4620,67 @@ impl Emitter<'_, '_> {
                     ty: Type::Int,
                     operand,
                     small_integer: true,
+                }
+            }
+            Builtin::Progression { bounded: false } if args[0].value.ty == Type::Float => {
+                let step = &args[1].value;
+                let kind = representation_kind(step.ty, &self.module.types);
+                let word = self.word(step);
+                let start = &args[0].value.operand;
+                let operand = self.instruction(format!(
+                    "call ptr @imre_float_count(double {start}, i32 {kind}, i64 {word})"
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::Progression { bounded } => {
+                let (stop, step) = if *bounded {
+                    (
+                        args[1].value.operand.as_str(),
+                        args[2].value.operand.as_str(),
+                    )
+                } else {
+                    ("0", args[1].value.operand.as_str())
+                };
+                let start = &args[0].value.operand;
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_progression(i64 {start}, i64 {stop}, i64 {step})"
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::Islice | Builtin::Cycle => {
+                let source = &args[0].value;
+                let mode = match source.ty {
+                    Type::Cursor(_) => 0,
+                    Type::Str => 1,
+                    Type::Bytes => 2,
+                    Type::ListInt => 3,
+                    Type::List(_) => 4,
+                    Type::Tuple(_) => 5,
+                    Type::Dict(_) => 6,
+                    Type::Set(_) => 7,
+                    _ => unreachable!("checked iterable"),
+                };
+                let word = self.word(source);
+                let operand = if args.len() == 1 {
+                    self.instruction(format!("call ptr @imre_cycle(i32 {mode}, i64 {word})"))
+                } else {
+                    let start = self.word(&args[1].value);
+                    let stop = self.word(&args[2].value);
+                    let step = self.word(&args[3].value);
+                    self.checked_instruction(format!("call ptr @imre_islice(i32 {mode}, i64 {word}, i64 {start}, i64 {stop}, i64 {step})"))
+                };
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
                 }
             }
             Builtin::CursorLengthHint => self.call(
@@ -6399,6 +6463,7 @@ declare ptr @imre_system_exit_new(i32, i64)
 declare ptr @imre_system_exit_code(ptr)
 declare i32 @imre_system_exit_code_kind(ptr)
 declare ptr @imre_system_exit_code_text(ptr)
+declare ptr @imre_system_exit_code_repr(ptr)
 declare i32 @imre_system_exit_code_equal(ptr, i32, i64)
 declare i32 @imre_system_exit_code_truth(ptr)
 declare void @imre_args_clear()
@@ -6462,6 +6527,10 @@ declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)
 declare ptr @imre_str_slice(ptr, i64, i64, i64)
+declare ptr @imre_float_count(double, i32, i64)
+declare ptr @imre_progression(i64, i64, i64)
+declare ptr @imre_islice(i32, i64, i64, i64, i64)
+declare ptr @imre_cycle(i32, i64)
 declare i64 @imre_cursor_length_hint(ptr, i64)
 declare ptr @imre_repeat(i32, i64, i64)
 declare ptr @imre_str_iter(ptr)

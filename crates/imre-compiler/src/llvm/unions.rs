@@ -87,11 +87,17 @@ impl Emitter<'_, '_> {
         if value.ty == Type::ExitCode {
             // The view retains its heterogeneous payload. None is not a class
             // accepted by this subset, and bool is also an instance of int.
-            let mask = [Type::None, Type::Bool, Type::Int, Type::Str]
+            let mut mask = [Type::None, Type::Bool, Type::Int, Type::Str]
                 .iter()
                 .enumerate()
                 .filter(|(_, ty)| classes.iter().any(|class| class.accepts(**ty)))
                 .fold(0, |mask, (kind, _)| mask | 1 << kind);
+            if classes
+                .iter()
+                .any(|class| matches!(class, InstanceType::Tuple))
+            {
+                mask |= 1 << 6;
+            }
             let kind = self.instruction(format!(
                 "call i32 @imre_system_exit_code_kind(ptr {})",
                 value.operand

@@ -73,6 +73,17 @@ Omitting `times` repeats forever; a nonpositive integer exhausts immediately.
 `operator.length_hint(it[, default])` returns the remaining finite count or the
 default for an unbounded repeat. A finite repeat's repr shows the current count.
 
+`itertools.islice(source, stop)` and `islice(source, start, stop[, step])`
+consume only the underlying items needed to reach each result. Exhausting a
+finite slice advances a sufficiently long source to `max(start, stop)`. The
+cursor releases its source on exhaustion or a pull error. `cycle(source)`
+retains each item from its first pass and then replays those same objects.
+Sources include supported cursors, ranges, lists, strings, bytes, dictionary
+keys, sets and homogeneous fixed tuples. A list stays live during iteration.
+`count(start=0, step=1)` supports integers of any size and floating-point starts
+with integer or floating-point steps. A floating-point step with an integer
+start requires a mixed numeric element type and is currently unsupported.
+
 `itertools.chain` accepts a fixed number of positional iterables with one exact
 element type. A loop, comprehension, or immediate consumer can use the chain.
 It evaluates source expressions left to right, then acquires each iterator on
@@ -1173,7 +1184,7 @@ python3 tests/bytes.py --compiler target/release/imre --runtime target/release/l
 
 ### Closed entry profiles
 
-`--reachable-only` checks and compiles definitions used by the entrypoint. `--entry-profile FILE` also selects particular branch bodies in named functions. The JSON file maps each qualified function name to the condition and value it requires.
+`--reachable-only` checks and compiles definitions used by the entrypoint. It can resolve selected standard-library declarations, such as `configparser.ConfigParser`, when only an unused function needs them. Using one in executable code still requires a native implementation. Unknown exports, modules with observable import effects, and first-party module initializers remain subject to normal checks. `--entry-profile FILE` also selects particular branch bodies in named functions. The JSON file maps each qualified function name to the condition and value it requires.
 
 ```json
 {"tools.report.run": {"mode": "Mode.markdown", "args.debug": "False"}}

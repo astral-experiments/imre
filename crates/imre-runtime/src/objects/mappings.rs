@@ -723,6 +723,15 @@ impl Mapping {
         keys
     }
 
+    /// Borrowed document values stay rooted by the unmodified mapping.
+    pub(super) fn document_values(&self) -> impl Iterator<Item = usize> + '_ {
+        assert_eq!(self.value_kind.raw(), 5);
+        let Tables::Str(table) = &self.tables else {
+            unreachable!("expected a string-keyed document");
+        };
+        table.entries.iter().flatten().map(|entry| entry.value)
+    }
+
     pub(super) fn document_pairs(&self) -> Vec<(Rc<Str>, Rc<Object>)> {
         assert_eq!((self.tables.key_kind(), self.value_kind.raw()), (3, 5));
         let mut pairs = Vec::with_capacity(self.tables.len());
@@ -1761,6 +1770,31 @@ pub unsafe extern "C" fn imre_set_iter(value: *const Object) -> *const Object {
     // SAFETY: the caller supplies the exact set shape.
     unsafe { new_iterator(value, IteratorKind::Set) }
 }
+/// Pull one owned item (two owned words in dictionary-items mode). Release
+/// the Object storage borrow before a composed iterator can pull another cursor.
+pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, Error> {
+    let mut adapter = None;
+    // SAFETY: leaf cursor pulls cannot reenter. Only owners escape the borrow.
+    let next = unsafe {
+        cursor.0.with_mut(|storage| match storage {
+            Storage::IteratorAdapter(state) => {
+                adapter = Some(Rc::clone(state));
+                Ok(None)
+            }
+            Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
+            Storage::StringIterator(iterator) => Ok(iterator.next()),
+            Storage::LineIterator(iterator) => Ok(iterator.next()),
+            Storage::BytesIterator(iterator) => Ok(iterator.next()),
+            _ => storage.mapping_iterator_mut().next(),
+        })
+    }
+    .map_err(|error| Error::new(Kind::RuntimeError, error.message()))?;
+    match adapter {
+        Some(adapter) => adapter.next().map(|item| item.map(|item| (item, None))),
+        None => Ok(next),
+    }
+}
+
 /// # Safety
 /// Root the cursor; output words are aligned, independent, outside runtime storage,
 /// and contain no unconsumed owner. Only success writes them; keys/set/string mode
@@ -1771,19 +1805,10 @@ pub unsafe extern "C" fn imre_mapping_iter_next(
     key_out: *mut usize,
     value_out: *mut usize,
 ) -> u32 {
-    // SAFETY: the rooted iterator snapshots independent owners before returning.
-    let next = unsafe {
-        object(value).0.with_mut(|storage| match storage {
-            Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
-            Storage::StringIterator(iterator) => Ok(iterator.next()),
-            Storage::LineIterator(iterator) => Ok(iterator.next()),
-            Storage::BytesIterator(iterator) => Ok(iterator.next()),
-            _ => storage.mapping_iterator_mut().next(),
-        })
-    };
-    let next = match next {
+    // SAFETY: the caller roots an exact cursor.
+    let next = match pull(unsafe { object(value) }) {
         Ok(next) => next,
-        Err(error) => return Error::new(Kind::RuntimeError, error.message()).returning(0),
+        Err(error) => return error.returning(0),
     };
     let Some((key, item)) = next else {
         return 0;

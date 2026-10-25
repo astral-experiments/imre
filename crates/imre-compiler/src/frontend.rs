@@ -4305,6 +4305,13 @@ impl<'a> Checker<'a> {
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(Binding::Intrinsic(Intrinsic::Declaration(symbol))) = self.resolve(expression) {
+            return Err(error(
+                self.source,
+                expression,
+                &format!("no native implementation for {symbol}"),
+            ));
+        }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level) | Intrinsic::SignalNumber(level),
         )) = self.resolve(expression)
@@ -4789,21 +4796,13 @@ impl<'a> Checker<'a> {
                 if values.iter().any(|value| value.ty == Type::ExitCode) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                         || !values.iter().all(|v| {
-                            matches!(
-                                v.ty,
-                                Type::None
-                                    | Type::Bool
-                                    | Type::Int
-                                    | Type::Str
-                                    | Type::StrLiteral(_)
-                                    | Type::ExitCode
-                            )
+                            v.ty == Type::ExitCode || sys::exit_payload_supported(v.ty, self.types)
                         })
                     {
                         return Err(error(
                             self.source,
                             expression,
-                            "exit codes support equality with None, bool, int, or str",
+                            "unsupported comparison with a SystemExit payload",
                         ));
                     }
                     let reversed = values[0].ty != Type::ExitCode;
@@ -5481,6 +5480,13 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Declaration(symbol))) => {
+                return Err(error(
+                    self.source,
+                    call,
+                    &format!("no native implementation for {symbol}"),
+                ));
+            }
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
@@ -5522,6 +5528,10 @@ impl<'a> Checker<'a> {
                 return self.cursor_length_hint(call);
             }
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
+            Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
+            Some(Binding::Intrinsic(Intrinsic::Islice | Intrinsic::Cycle)) => {
+                return self.source_adapter(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
                     self.source,
@@ -6289,6 +6299,12 @@ impl<'a> Checker<'a> {
                     }),
                     clear: slots,
                 },
+            });
+        }
+        if name.id == "repr" && args.len() == 1 && args[0].ty == Type::ExitCode {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Repr, args),
             });
         }
         if matches!(name.id.as_str(), "str" | "print")
