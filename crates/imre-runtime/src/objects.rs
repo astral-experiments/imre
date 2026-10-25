@@ -12,6 +12,7 @@ mod args;
 mod asyncio;
 mod bytes;
 mod contexts;
+mod csv;
 mod deferred_diff;
 mod difflib;
 pub(crate) mod exceptions;
@@ -63,6 +64,7 @@ enum Storage {
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
     Sha256(Box<sha2::Sha256>),
+    CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
     ExceptionField(OwnedWord),
     File(Box<files::FileState>),
