@@ -15,6 +15,7 @@ mod annotations;
 mod argparse;
 mod assignments;
 mod asyncio;
+mod bytes;
 mod cached_properties;
 mod callables;
 mod calls;
@@ -36,6 +37,7 @@ mod functools;
 mod hashlib;
 mod import_errors;
 mod inference;
+mod inspect;
 mod iterables;
 mod itertools;
 mod json;
@@ -47,6 +49,7 @@ mod logging_records;
 mod matching;
 mod module_values;
 mod namedtuples;
+mod namespaces;
 mod native_generators;
 mod os;
 mod partials;
@@ -160,6 +163,9 @@ impl ClassInfo {
                     .fields
                     .iter()
                     .map(|field| {
+                        if field.name == crate::classes::EXCEPTION_ARGS_SLOT {
+                            return Ok(Type::ExceptionField);
+                        }
                         annotation_in_class(
                             &field.annotation,
                             graph,
@@ -316,6 +322,14 @@ impl ClassInfo {
                             states[id] = 1;
                             pending.push(Step::Finish(id));
                             pending.extend(fields[id].iter().copied().map(Step::Visit));
+                            // A base-typed field can own any concrete subclass.
+                            pending.extend(
+                                types
+                                    .concrete_subclasses(id)
+                                    .iter()
+                                    .copied()
+                                    .map(Step::Visit),
+                            );
                         }
                     },
                     Step::Visit(ty) => {
@@ -1119,7 +1133,13 @@ fn signature(
                     .default
                     .as_deref()
                     .filter(|_| !empty_sequence)
-                    .map(|value| calls::scalar_literal(value, source).map(|value| value.ty))
+                    .map(|value| {
+                        if inspect::is_sentinel(graph, module, value) {
+                            Ok(Type::PlainObject)
+                        } else {
+                            calls::scalar_literal(value, source).map(|value| value.ty)
+                        }
+                    })
                     .transpose()?)
         };
         parameter_types.push(ty);
@@ -1143,6 +1163,8 @@ fn signature(
                         ty,
                         kind: ExprKind::List(Vec::new()),
                     })
+                } else if ty == Type::PlainObject && inspect::is_sentinel(graph, module, value) {
+                    Ok(inspect::sentinel())
                 } else {
                     calls::scalar_default(value, ty, types, source)
                 }
@@ -1368,7 +1390,10 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
-            return Ok(Type::CompletedProcess(crate::ir::ProcessCapture::TEXT));
+            return Ok(Type::CompletedProcess(
+                crate::ir::ProcessCapture::TEXT,
+                None,
+            ));
         }
         _ => {}
     }
@@ -1449,7 +1474,7 @@ fn annotation_with_aliases(
                     ));
                 }
             };
-            Ok(Type::CompletedProcess(capture))
+            Ok(Type::CompletedProcess(capture, None))
         }
         ast::Expr::Subscript(value)
             if matches!(
@@ -3604,19 +3629,36 @@ impl<'a> Checker<'a> {
                 for target in &delete.targets {
                     if let ast::Expr::Name(name) = target
                         && let Some(&slot) = self.names.get(name.id.as_str())
-                        && matches!(self.locals[slot], Type::Cursor(_))
+                        && matches!(
+                            self.locals[slot],
+                            Type::Cursor(_) | Type::SimpleNamespace(_)
+                        )
                     {
                         if !self.assigned.contains(&slot) {
                             return Err(error(
                                 self.source,
                                 target,
-                                "iterator deletion requires a bound local",
+                                "deletion requires a bound local",
                             ));
                         }
                         self.assigned.remove(&slot);
                         self.narrowed.remove_mut(&slot);
                         statements.push(Statement::Clear(slot));
                         continue;
+                    }
+                    if let ast::Expr::Attribute(attr) = target {
+                        let receiver = self.expr(&attr.value)?;
+                        if matches!(receiver.ty, Type::SimpleNamespace(_)) {
+                            let name = self.namespace_attr_name(attr)?;
+                            statements.push(Statement::Expr(Expr {
+                                ty: Type::None,
+                                kind: ExprKind::Builtin(
+                                    Builtin::NamespaceDelete,
+                                    vec![receiver, name],
+                                ),
+                            }));
+                            continue;
+                        }
                     }
                     let ast::Expr::Subscript(target) = target else {
                         return Err(error(
@@ -4446,10 +4488,13 @@ impl<'a> Checker<'a> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        if op == ast::Operator::Mod && left.ty == Type::Str && right.ty == Type::Int {
+        if op == ast::Operator::Mod
+            && left.ty == Type::Str
+            && matches!(right.ty, Type::Int | Type::Str)
+        {
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::PercentInteger, vec![left, right]),
+                kind: ExprKind::Builtin(Builtin::PercentScalar, vec![left, right]),
             });
         }
         if op == ast::Operator::Pow {
@@ -4574,7 +4619,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
-            | Intrinsic::SignalNumber(level)
+            | Intrinsic::IntConstant(level)
             | Intrinsic::AnnotationFormat(level),
         )) = self.resolve(expression)
         {
@@ -4640,6 +4685,18 @@ impl<'a> Checker<'a> {
             });
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
+            if let Some((flags, executable)) = &self.graph.command_startup {
+                match symbol {
+                    Intrinsic::SysExecutable => return Ok(unpacking::string(executable.clone())),
+                    Intrinsic::SysDontWriteBytecode => {
+                        return Ok(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Bool(flags.dont_write_bytecode),
+                        });
+                    }
+                    _ => {}
+                }
+            }
             match symbol {
                 Intrinsic::DescriptorConstant(name) => {
                     return Ok(Expr {
@@ -4656,6 +4713,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::HashAvailable, vec![]),
                     });
                 }
+                Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
                 Intrinsic::OsDevnull => {
                     return Ok(Expr {
                         ty: Type::Str,
@@ -4722,6 +4780,25 @@ impl<'a> Checker<'a> {
                 } else {
                     (Type::None, ExprKind::None)
                 }
+            }
+            ast::Expr::Name(name)
+                if name.id == "__file__"
+                    && self.module == self.graph.entry
+                    && self.graph.command_startup.is_some() =>
+            {
+                let exception = Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Exception {
+                        kind: exception_kind("NameError").unwrap(),
+                        message: Some(Box::new(unpacking::string(
+                            "name '__file__' is not defined",
+                        ))),
+                    },
+                };
+                (
+                    Type::Str,
+                    ExprKind::Builtin(Builtin::RaiseException, vec![exception]),
+                )
             }
             ast::Expr::Name(name) if name.id == "__file__" => (
                 Type::Str,
@@ -4899,6 +4976,9 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
+                    if receiver.ty == Type::Bytes {
+                        return self.bytes_membership(key, receiver, compare.ops[0], expression);
+                    }
                     if let Some(fields) = self.types.fields(receiver.ty) {
                         return self.tuple_contains(key, receiver, &fields, compare);
                     }
@@ -4992,6 +5072,11 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if let ([left, right], [op]) = (values.as_slice(), compare.ops.as_ref())
+                    && let Some(result) = inspect::equality(left, right, *op)
+                {
+                    return Ok(result);
+                }
                 if values.iter().any(|value| {
                     matches!(
                         value.ty,
@@ -5331,10 +5416,20 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if let Some(flag) = self.command_flag(attribute)? {
+                    return Ok(flag);
+                }
                 if let Some(Binding::Definition(definition)) = self.resolve(&attribute.value)
                     && let Some(declaration) = self.types.namedtuple(definition)
                 {
                     return self.namedtuple_class_attribute(attribute, &declaration);
+                }
+                if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
+                    && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
+                    && !self.names.contains_key("str")
+                    && self.resolve(&attribute.value).is_none()
+                {
+                    return Ok(inspect::descriptor(method));
                 }
                 if attribute.attr.as_str() == "join"
                     && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
@@ -5360,6 +5455,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
+                    return Ok(wrapped);
+                }
                 if receiver.ty == Type::BuiltinClass {
                     match attribute.attr.as_str() {
                         "__name__" | "__qualname__" => return Ok(annotations::type_name(receiver)),
@@ -5376,6 +5474,9 @@ impl<'a> Checker<'a> {
                         _ => {}
                     }
                 }
+                if let Type::StrDescriptor(method) = receiver.ty {
+                    return self.descriptor_attribute(receiver, method, attribute);
+                }
                 if let Some(definition) = self.types.namedtuple_definition(receiver.ty) {
                     return self.namedtuple_instance_attribute(attribute, receiver, definition);
                 }
@@ -5385,6 +5486,16 @@ impl<'a> Checker<'a> {
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
+                    let field = self.classes.fields[class].len() - 1;
+                    if self.classes.fields[class][field] == Type::ExceptionField {
+                        return Ok(Expr {
+                            ty: Type::ExceptionField,
+                            kind: ExprKind::Field(
+                                Box::new(Self::exception_record(receiver)),
+                                field,
+                            ),
+                        });
+                    }
                     let message = Expr {
                         ty: self.types.optional(Type::Str),
                         kind: ExprKind::Field(
@@ -5430,6 +5541,9 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
                     return self.zip_attribute(receiver, attribute);
                 }
+                if let Type::SimpleNamespace(id) = receiver.ty {
+                    return self.namespace_attribute(receiver, id, attribute);
+                }
                 if receiver.ty == Type::CsvReader && attribute.attr.as_str() == "line_num" {
                     return Ok(Expr {
                         ty: Type::Int,
@@ -5460,7 +5574,7 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::Popen(..)) {
                     return self.popen_attribute(receiver, attribute);
                 }
-                if matches!(receiver.ty, Type::CompletedProcess(_)) {
+                if matches!(receiver.ty, Type::CompletedProcess(..)) {
                     return self.process_attribute(receiver, attribute);
                 }
                 if matches!(
@@ -5630,6 +5744,19 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if call
+            .func
+            .as_name_expr()
+            .is_some_and(|n| n.id == "object" && !self.names.contains_key("object"))
+            && self.resolve(&call.func).is_none()
+            && call.arguments.args.is_empty()
+            && call.arguments.keywords.is_empty()
+        {
+            return Ok(Expr {
+                ty: Type::PlainObject,
+                kind: ExprKind::Builtin(Builtin::NewPlainObject, vec![]),
+            });
+        }
         // A method result becomes the next receiver before its arguments are
         // evaluated. Check such chains in that order without retaining a full
         // expression and call-dispatch frame for every intermediate receiver.
@@ -5658,7 +5785,10 @@ impl<'a> Checker<'a> {
         if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
             return Ok(self.materialize_fixed_tuple(tuple));
         }
-        if let Some(value) = self.cache_control(call)? {
+        if let Some(value) = self.cache_constructor(call)? {
+            return Ok(value);
+        }
+        if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
         }
         if let Some(value) = self.sys_call(call)? {
@@ -5740,6 +5870,9 @@ impl<'a> Checker<'a> {
         }
         if crate::classes::super_init(call) {
             return self.call_super_initializer(call);
+        }
+        if let Some(expr) = self.explicit_exception_initializer(call)? {
+            return Ok(expr);
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "most_common"
@@ -5823,6 +5956,9 @@ impl<'a> Checker<'a> {
                 call,
                 "argument unpacking requires a source-defined function or method",
             ));
+        }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) {
+            return self.simple_namespace(call);
         }
         calls::reject_unpacking(call, self.source)?;
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
@@ -6050,6 +6186,12 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::InspectIsMethodDescriptor)) => {
+                return self.is_method_descriptor(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::InspectGetattrStatic)) => {
+                return self.static_attribute(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::CsvReader)) => return self.csv_reader(call),
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
@@ -6231,6 +6373,13 @@ impl<'a> Checker<'a> {
             return self.invoke(call, callable);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
+            if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
+                && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
+                && !self.names.contains_key("str")
+                && self.resolve(&attribute.value).is_none()
+            {
+                return self.invoke_descriptor(call, inspect::descriptor(method), method);
+            }
             if attribute.attr.as_str() == "count"
                 && let ast::Expr::Attribute(parts) = &*attribute.value
                 && parts.attr.as_str() == "parts"
@@ -6317,7 +6466,7 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::Popen(..)) {
                 return self.popen_method(receiver, attribute, call);
             }
-            if matches!(receiver.ty, Type::CompletedProcess(_)) {
+            if matches!(receiver.ty, Type::CompletedProcess(..)) {
                 return self.process_method(receiver, attribute, call);
             }
             if matches!(
@@ -6355,6 +6504,15 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
+            }
+            if matches!(attribute.attr.as_str(), "splitlines" | "isspace")
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.line_method(
+                    Self::string_value(receiver),
+                    attribute.attr.as_str(),
+                    call,
+                );
             }
             if matches!(attribute.attr.as_str(), "lower" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -6519,20 +6677,6 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(builtin, vec![receiver]),
                     });
                 }
-            }
-            if receiver.ty == Type::Str
-                && attribute.attr.as_str() == "splitlines"
-                && call.arguments.args.is_empty()
-            {
-                return Ok(Expr {
-                    ty: self.types.list(Type::Str),
-                    kind: match receiver.kind {
-                        ExprKind::Builtin(Builtin::Decode, bytes) => {
-                            ExprKind::Builtin(Builtin::DecodeSplitLines, bytes)
-                        }
-                        _ => ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
-                    },
-                });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
                 if attribute.attr.as_str() == "clear"
@@ -6969,6 +7113,29 @@ impl<'a> Checker<'a> {
                 text
             });
         }
+        if args.len() == 1
+            && matches!(args[0].ty, Type::PlainObject | Type::StrDescriptor(_))
+            && matches!(name.id.as_str(), "repr" | "str" | "print")
+        {
+            let rendered = Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Repr, args),
+            };
+            return Ok(if name.id == "print" {
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![rendered]),
+                }
+            } else {
+                rendered
+            });
+        }
+        if name.id == "vars"
+            && let [receiver] = args.as_slice()
+            && let Type::SimpleNamespace(id) = receiver.ty
+        {
+            return Ok(namespaces::backing(receiver.clone(), id));
+        }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
             if name.id == "repr" || (name.id == "str" && self.types.element(args[0].ty).is_some()) {
                 if !dataclass_values::can_format(args[0].ty, self.types, self.classes) {
@@ -6987,7 +7154,8 @@ impl<'a> Checker<'a> {
                 && (matches!(
                     args[0].ty,
                     Type::Class(_)
-                        | Type::CompletedProcess(_)
+                        | Type::CompletedProcess(..)
+                        | Type::SimpleNamespace(_)
                         | Type::Dict(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
@@ -7337,6 +7505,18 @@ scan("a\nb", Path("lines.txt"), "4")
             let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
             assert!(llvm.contains("call ptr @imre_seq_new("), "{source}");
         }
+    }
+
+    #[test]
+    fn fields_can_own_a_concrete_subclass_of_the_declared_type() {
+        use super::{ClassInfo, Type, Types};
+
+        let types = Types::default();
+        types.add_concrete_subclass(1, &[0]);
+        let mut fields = vec![vec![], vec![], vec![types.list(Type::Class(0))]];
+        assert_eq!(ClassInfo::cyclic_field_root(&fields, &types), None);
+        fields[1].push(Type::Class(2));
+        assert!(ClassInfo::cyclic_field_root(&fields, &types).is_some());
     }
 
     #[test]

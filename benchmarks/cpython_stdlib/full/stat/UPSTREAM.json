@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_stat",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/stat.py": "81f694329bf4ff04aeed40a03e43798639fd2ddb",
+    "Lib/test/test_stat.py": "a83f7d076f027ef67ee73490b2ff561f0970460d",
+    "Modules/_stat.c": "1dabf2f6d5b07fa584bedc00e57f5b2462e1ada3"
+  }
+}

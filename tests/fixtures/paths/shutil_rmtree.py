@@ -1,4 +1,4 @@
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from shutil import rmtree
 
 print(rmtree.avoids_symlink_attacks)
@@ -26,3 +26,20 @@ except NotADirectoryError as exc:
     print(repr(exc.filename))
 rmtree(b"input.txt", ignore_errors=True)
 print(Path("input.txt").is_file())
+try:
+    rmtree(Path("missing-root"))
+except FileNotFoundError as exc:
+    print(repr(exc.filename))
+try:
+    rmtree(PurePosixPath("missing-root"))
+except FileNotFoundError as exc:
+    print(repr(exc.filename))
+for ignore in [False, True]:
+    try:
+        rmtree("bad\0name", ignore_errors=ignore, dir_fd=2**65)
+    except ValueError:
+        print("invalid text path")
+    try:
+        rmtree(b"bad\0name", ignore_errors=ignore, dir_fd="bad")
+    except ValueError:
+        print("invalid bytes path")

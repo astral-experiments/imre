@@ -46,6 +46,16 @@ for spelling in ["", "/", "C:", "C:/A", "C:a", "D:/a", "//Srv/Share/Dir/a", "x/.
     for base in ["/", "c:", "C:/a", "C:A/B", "D:/a", "//sRv/sHare", "C:/x/..", "x/../b"]:
         for walk in [False, True]:
             windows(PureWindowsPath(spelling), PureWindowsPath(base), walk)
+for spelling, base in [
+    ("\U00016eb3/leaf", "\U00016ece"),
+    ("//host/\U00016eb3/leaf", "//host/\U00016ece"),
+    ("A:Σ/leaf", "a:ς"),
+    ("A:Σ/leaf", "a:σ"),
+    ("İ:İ/leaf", "i\u0307:i\u0307"),
+    ("İ:", "i\u0307:"),
+]:
+    for walk in [False, True]:
+        windows(PureWindowsPath(spelling), PureWindowsPath(base), walk)
 print(PurePosixPath("a").is_relative_to(PureWindowsPath("a")))
 print(PureWindowsPath("a").is_relative_to(PurePosixPath("a")))
 try:

@@ -118,6 +118,7 @@ with open("buffered.txt", "w", encoding="utf-8") as writer:
     with open("buffered.txt", "rb") as reader:
         print(len(reader.read()))
 """,
+    "splitlines_argument": 'print("a\\nb".splitlines(True))',
     "splitlines_and_formatting": r"""
 def nothing() -> None:
     print("None argument evaluated")
@@ -372,6 +373,7 @@ class Group:
     first: Leaf
     direct: BinaryIO
     nested: list[Leaf]
+    mapped: dict[tuple[int, int], Leaf]
     pair: tuple[Leaf, Leaf]
     last: Leaf
 
@@ -383,7 +385,11 @@ def writer(mark: bytes) -> BinaryIO:
 def group(shared: bool) -> Group:
     first = Leaf(writer(b"A"))
     last = first if shared else Leaf(writer(b"D"))
-    return Group(first, writer(b"B"), [Leaf(writer(b"C")), Leaf(writer(b"E"))],
+    nested = [Leaf(writer(b"C")), Leaf(writer(b"E")), Leaf(writer(b"H")), Leaf(writer(b"I"))]
+    mapped: dict[tuple[int, int], Leaf] = {}
+    for i, mark in enumerate([b"J", b"K", b"L", b"M"]):
+        mapped[(i, i + 1)] = Leaf(writer(mark))
+    return Group(first, writer(b"B"), nested, mapped,
                  (Leaf(writer(b"F")), Leaf(writer(b"G"))), last)
 
 def discard(shared: bool) -> None:
@@ -568,7 +574,6 @@ REJECTED = {
     "seek": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.seek(0)',
     "write_type": 'with open("output.txt", "w", encoding="utf-8") as stream:\n    stream.write(1)',
     "closed_assignment": 'stream = open("input.txt", "r", encoding="utf-8")\nstream.closed = False',
-    "splitlines_argument": 'print("a\\nb".splitlines(True))',
     "str_resource_list": "print(str([open('input.txt', 'r')]))",
     "text_constructor": "from typing import TextIO\nTextIO()",
     "decode_constructor": 'raise UnicodeDecodeError("not a valid constructor")',

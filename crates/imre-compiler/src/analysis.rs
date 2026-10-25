@@ -117,6 +117,17 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // typeshed omits inspect's private default; preserve all its public signatures.
+        let inspect = vendored
+            .read_to_string("stdlib/inspect.pyi")
+            .map_err(|e| e.to_string())?;
+        system
+            .fs()
+            .write_file_all(
+                SystemPathBuf::from(root).join("inspect.pyi"),
+                format!("{inspect}\n_sentinel: object\n"),
+            )
+            .map_err(|e| e.to_string())?;
         // Popen tests and programs pass shell=0/1. Preserve all of typeshed's
         // overloads while admitting the integer truth values CPython accepts.
         let subprocess = vendored
@@ -211,7 +222,12 @@ impl Session {
     }
 
     /// Parses a normalized source once; semantic checks wait until every import is present.
-    pub(crate) fn add(&mut self, path: &Path, source: &str) -> Result<ParsedModuleRef, String> {
+    pub(crate) fn add(
+        &mut self,
+        path: &Path,
+        source: &str,
+        kind: crate::SourceKind,
+    ) -> Result<ParsedModuleRef, String> {
         let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
         check_source_complexity(source).map_err(|error| format!("{path}: {error}"))?;
         let file = self.write_file(path, source)?;
@@ -220,7 +236,12 @@ impl Session {
             return Err(format!("{path}: {error}"));
         }
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
-        check_indentation(source, parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
+        // The parser has already checked Python indentation; file inputs additionally
+        // enforce Imre's source-file policy. -c accepts legal tab-indented blocks.
+        if kind == crate::SourceKind::File {
+            check_indentation(source, parsed.tokens())
+                .map_err(|error| format!("{path}: {error}"))?;
+        }
         let mut limits = SuiteLimits {
             tokens: parsed.tokens(),
             scope_start: TextSize::default(),
@@ -407,6 +428,25 @@ impl Session {
         .map(|(_, ty)| ty)
     }
 
+    /// Compare an argv expression to the canonical built-in list[str] instance,
+    /// as declared for sys.argv in ty's vendored standard library. Equality
+    /// (not assignability) rules out Any and lists with a different field ABI.
+    pub(crate) fn is_string_list(&self, module: usize, value: &Expr) -> bool {
+        self.used_hints.set(true);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        let Some(actual) = value.inferred_type(&model) else {
+            return false;
+        };
+        let Ok(sys) = ruff_db::files::vendored_path_to_file(&self.db, "stdlib/sys/__init__.pyi")
+        else {
+            return false;
+        };
+        let sys_model = SemanticModel::new(&self.db, self.db.program_file(sys));
+        self.parsed(sys).syntax().body.iter().any(|stmt| {
+            matches!(stmt, Stmt::AnnAssign(a) if a.target.as_name_expr().is_some_and(|name| name.id == "argv") && a.target.inferred_type(&sys_model) == Some(actual))
+        })
+    }
+
     pub(crate) fn is_never(&self, module: usize, value: &ruff_python_ast::Expr) -> bool {
         self.used_hints.set(true);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
@@ -473,6 +513,8 @@ pub(crate) enum CheckedDiagnostic {
     Keyword(TextRange),
     TupleListRead(TextRange),
     MissingArgument(TextRange),
+    BuiltinImport(TextRange),
+    ExcessArgument(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -483,6 +525,8 @@ impl CheckedDiagnostic {
             Self::Keyword(range) => (range, 2),
             Self::TupleListRead(range) => (range, 3),
             Self::MissingArgument(range) => (range, 4),
+            Self::BuiltinImport(range) => (range, 5),
+            Self::ExcessArgument(range) => (range, 6),
         };
         (range.start(), range.end(), kind)
     }
@@ -496,6 +540,10 @@ impl CheckedDiagnostic {
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
+            Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
+            Self::ExcessArgument(arg) => {
+                diagnostic == "too-many-positional-arguments" && arg == range
+            }
         }
     }
 }
@@ -1049,7 +1097,11 @@ mod diagnostic_mode_tests {
         let root = Path::new("/project");
         let mut session = Session::new(root, &[]).unwrap();
         session
-            .add(&root.join("main.py"), "def f(x: int) -> None:\n    x()\n")
+            .add(
+                &root.join("main.py"),
+                "def f(x: int) -> None:\n    x()\n",
+                crate::SourceKind::File,
+            )
             .unwrap();
         let file = session.files[0];
         assert!(

@@ -540,7 +540,7 @@ Imports are resolved statically from `.py` files and packages with `__init__.py`
 
 Closed built-in generic aliases such as `Pair = tuple[str, int]` can be shared between modules. `typing.NewType("Name", str)` can annotate values and its positional constructor returns the original value. Imports and type aliases under a sealed `if TYPE_CHECKING:` introduce annotation-only names.
 
-The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes its trailing LF. A preceding CR remains part of the value, matching CPython's piped input on both hosts. `int(str)` accepts signed decimal digits, optional underscores between digits, and surrounding Python numeric whitespace. Decimal classification is pinned to Unicode 16, matching CPython 3.14; mixed decimal digit families are accepted, while superscripts and other numeric lookalikes are rejected. Other bases remain unsupported. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. `text.splitlines()` recognizes LF, CR, CRLF, vertical tab, form feed, U+001C through U+001E, U+0085, U+2028, and U+2029. It returns no elements for empty input and no extra element for a final line break; U+001F remains ordinary text. Additional string operations and their accepted signatures are listed under [native text operations](#native-text-operations). Retained line endings, general formatting protocols, and arbitrary codecs remain unsupported. CPython's configurable integer conversion digit limit is not reproduced.
+The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes its trailing LF. A preceding CR remains part of the value, matching CPython's piped input on both hosts. `int(str)` accepts signed decimal digits, optional underscores between digits, and surrounding Python numeric whitespace. Decimal classification is pinned to Unicode 16, matching CPython 3.14; mixed decimal digit families are accepted, while superscripts and other numeric lookalikes are rejected. Other bases remain unsupported. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. `text.splitlines()` recognizes LF, CR, CRLF, vertical tab, form feed, U+001C through U+001E, U+0085, U+2028, and U+2029. It returns no elements for empty input and no extra element for a final line break; U+001F remains ordinary text. Additional string operations and their accepted signatures are listed under [native text operations](#native-text-operations). `text.splitlines(keepends)` accepts a positional or keyword flag and truth-tests it before scanning, even for empty input. A true flag includes each original line ending (CRLF stays together); a final separator adds no trailing empty item. `text.isspace()` requires a nonempty string and checks Python’s Unicode whitespace characters, including U+001C through U+001F. General formatting protocols and arbitrary codecs remain unsupported. CPython's configurable integer conversion digit limit is not reproduced.
 
 `typing.cast("T", value)` returns the original value; the quoted type adds no runtime check or conversion.
 
@@ -563,6 +563,12 @@ The receiver of an instance call evaluates first. Supplied arguments then evalua
 Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins and methods accept specific keywords. `open` accepts `encoding="utf-8"`, `sum` accepts `start`, `zip` accepts `strict`, and both `sorted` and `list.sort` accept `key` and `reverse`.
 
 ## F-strings and repr
+
+The string `%` operator accepts an exact integer or string operand. A text
+operand supports `%s`, `%r`, `%a`, and a single Unicode character for `%c`.
+Literal widths and precisions count Unicode characters. Escaped percent signs
+do not consume an operand. A missing argument or a conversion which requires a
+number raises a Python exception.
 
 F-strings interpolate exact `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed builtin exception values, fixed records, and lists of values with a supported representation. Ordinary, raw, triple-quoted, and adjacent literals are supported, including escaped braces, Unicode, and escaped NULs. Each field expression and its conversion complete before the next field evaluates. Nested f-strings may appear inside field expressions. Optional values require the same local narrowing as other scalar operations.
 
@@ -599,6 +605,8 @@ A string template can substitute named `str` and `int` arguments, as in `url.for
 
 `bytes()` returns empty bytes; `bytes(count)` creates that many zero bytes; `bytes(list_of_ints)` checks each integer is in 0 through 255; and `bytes(existing_bytes)` preserves its value. Counts must fit a native signed index before the nonnegative check: negative representable counts raise `ValueError`, unrepresentable counts raise `OverflowError`, and out-of-range list values raise `ValueError`. Booleans do not satisfy these exact integer inputs. Other iterable constructors and the string-plus-encoding constructor are outside this milestone.
 
+For `needle in data` and `needle not in data`, a bytes needle searches for a contiguous subsequence (an empty needle always matches). An integer or bool tests for one byte. Integers outside 0 through 255 raise `ValueError`, even for empty data. Exact `None`, text, float, list, tuple, dictionary and set needles raise `TypeError`. User-defined index or buffer protocols and mutable buffer exporters such as `bytearray`, `memoryview` and `array.array` are outside this subset.
+
 Indexing uses exact integer indexes, including negative indexes, and returns an `int` in 0 through 255. Out-of-range indexes raise `IndexError`. Slicing follows the sequence rules above and returns bytes. Iteration, comprehensions, and loop-head `enumerate` yield integers in byte order while retaining the original immutable source independently of rebinding. Concatenation requires two byte values; repetition accepts bytes and an exact integer in either order. Repetition converts the count to a native signed index even for empty input and rejects an overflowing result. All six comparisons use unsigned-byte lexicographic order. `print`, `str`, and scalar f-strings use Python's `b'...'` representation, including quote selection and hexadecimal escaping.
 
 `base64.urlsafe_b64encode(data)` accepts immutable bytes and returns padded bytes using the URL-safe alphabet.
@@ -607,10 +615,7 @@ Indexing uses exact integer indexes, including negative indexes, and returns an 
 
 ## Native paths and directory traversal
 
-`os.unlink(path, *, dir_fd=None)` and `os.remove` accept text, bytes and native
-path objects. They remove the directory entry itself, including a dangling
-symbolic link. Relative paths may resolve from a supplied directory descriptor;
-byte names and trailing slashes retain their original POSIX meaning.
+On Linux and macOS, `stat` exposes the POSIX mode constants, `S_IFMT`, `S_IMODE`, the file-type predicates, and `filemode`. These accept positional integer modes, including arbitrary-precision inputs: the accelerated CPython rules raise `OverflowError` when a value does not fit the platform's unsigned mode type. Direct calls also accept booleans. Darwin's whiteout type and file flags use Darwin values. [CPython parity and exact test coverage](../benchmarks/cpython_stdlib/full/stat/README.md).
 
 On POSIX, `os.devnull` is `"/dev/null"`. `os.path.commonpath(paths)` compares path components for lists of `str`, `bytes`, or native `Path` objects and literal list or tuple displays. It removes redundant separators and `.` components, preserves `..`, and rejects an empty sequence, mixed string and byte paths, or mixed absolute and relative paths.
 
@@ -708,6 +713,8 @@ Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueErr
 
 `sys.argv` and `sys.orig_argv` are independent mutable lists, each shared across aliases and modules. In a standalone executable both start with the arguments passed to its main function. With `imre run`, `sys.argv` starts with the source path followed by the program arguments after `--`; `sys.orig_argv` contains the actual Imre command, flags, and program arguments. Element writes and list mutation are supported; rebinding a module attribute or imported name is not. Native arguments must be valid UTF-8. Invalid Unix argument bytes raise `UnicodeDecodeError` when the list is first accessed; CPython's surrogateescaped strings are outside this runtime's string domain. Programs that never read process arguments emit no argument initialization or shutdown calls.
 
+`imre [-I] [-B] [-X utf8[=0|1]] -c CODE [ARG ...]` compiles the command in memory and runs it as `__main__`. Python 3.14's command dedent applies before parsing. The program sees `['-c', *args]` in `sys.argv`; `sys.orig_argv` preserves the complete invocation, including the original indentation and option spelling. `sys.executable` identifies the Imre launcher. Commands may import supported source modules from the working directory and `PYTHONPATH`. `-I` excludes the working directory and ignores `PYTHONPATH` and other Python startup environment flags. The selected `isolated`, `ignore_environment`, `safe_path`, `no_user_site`, `dont_write_bytecode`, and `utf8_mode` fields are available through `sys.flags` in command mode. The native compiler's existing text, filesystem, and import restrictions still apply. `IMRE_ENCODED_FLAGS` and `IMREFLAGS` select the native compiler and linker settings independently of Python startup flags.
+
 ## Command-line options
 
 A function can declare an `argparse.ArgumentParser`, add required positional arguments and named options, and return the result of `parse_args()`. An explicit `list[str]` supplies the arguments to parse; omitting it or passing `None` reads `sys.argv[1:]`. Imre derives a read-only namespace with a concrete field for each option. Hyphens become underscores in field names. A choice of strings gives the field a string `Literal` type. A value option without a default or `required=True` produces an optional field.
@@ -741,7 +748,7 @@ Use `group = parser.add_argument_group(title, description)` to place arguments i
 
 A subcommand is optional by default. With `add_subparsers(dest="command")`, the namespace contains `command=None` when omitted. Without `dest`, no command field is added. Use `required=True` or set the group's `required` attribute to require a selection. Each literal `add_parser("name", aliases=["alias"], help="...")` introduces a child parser with its own options. The destination retains the spelling the caller used; child help uses its canonical name. A `match args.command` case or `if args.command == "alias"` branch selects the child's concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
-Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()`. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested subcommands are outside this grammar.
+Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()` or `parse_known_args()`. The latter returns the namespace and a list of unrecognized arguments in order. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested subcommands are outside this grammar.
 
 ## Standard logging
 
@@ -817,6 +824,8 @@ remain available when the program accesses them.
 `sys.getdefaultencoding()` and `sys.getfilesystemencoding()` return the native text encoding (`"utf-8"`). The native standard streams expose that encoding as `.encoding`, including through `sys.__stdin__`, `sys.__stdout__` and `sys.__stderr__`.
 
 `sys.platform` gives the target platform name; `os.name` gives its OS interface (`posix` or `nt`). `sys.stdout.write(text)` and `sys.stderr.write(text)` return the number of Unicode characters written. Each stream’s `flush()` flushes that stream.
+
+`_opcode.ENABLE_SPECIALIZATION` and `_opcode.ENABLE_SPECIALIZATION_FT` are both the integer `0`: Imre emits native code and does not specialize CPython bytecode at runtime. Other `_opcode` operations are unsupported.
 
 `sys.exception()` returns the actual exception being handled, or `None` outside a handler. Nested handlers restore their caller’s active exception. Exception identity can be compared with `is` and `is not`.
 
@@ -1077,8 +1086,11 @@ User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent
 Python method resolution order. A class that carries fields can use an ordinary
 typed initializer or a dataclass initializer with `__post_init__`. Its constructor
-must call `super().__init__(message)` once with a string. Keyword arguments,
-typed fields, `.args` on the concrete exception, and custom `__str__` and
+must initialize its base exactly once. An explicit `Exception.__init__(self, ...)`
+or `BaseException.__init__(self, ...)` keeps the positional arguments in `.args`,
+including `None`, booleans, integers, strings, bytes, and fixed tuples of those
+values. The `super().__init__` form accepts zero arguments, one string, or
+multiple supported values. Constructor keyword arguments, typed fields, and custom `__str__` and
 `__repr__` methods use the same object after a raise. A class attribute can name
 such a constructor. Inheriting a user payload layout, dynamic constructors, and
 reinitializing an exception are outside this subset.

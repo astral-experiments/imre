@@ -309,6 +309,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
+                    object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)
+                }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
                     left.compare_entry(right, position)
                 }
@@ -373,6 +376,19 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::Plain => {
+                            write!(output, "<object object at {owner:p}>").unwrap();
+                            None
+                        }
+                        Storage::StrDescriptor(index) => {
+                            write!(
+                                output,
+                                "<method '{}' of 'str' objects>",
+                                super::inspect::descriptor_name(*index)
+                            )
+                            .unwrap();
+                            None
+                        }
                         Storage::IteratorAdapter(adapter) => {
                             adapter.write_repr(output, owner);
                             None
@@ -412,6 +428,13 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         Storage::Dictionary(mapping) => {
                             format_entry(owner, mapping.repr_entry(output, position), &mut pending)
                         }
+                        Storage::SimpleNamespace(dict) => dict
+                            .0
+                            .with(|state| state.dictionary().namespace_repr_entry(output, position))
+                            .map(|(next, word, kind)| {
+                                pending.push(ReprTask::Object(owner, next));
+                                ReprTask::Word(word, kind)
+                            }),
                         Storage::Set(set) => {
                             format_entry(owner, set.repr_entry(output, position), &mut pending)
                         }

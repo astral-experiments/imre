@@ -33,6 +33,10 @@ impl WordKind {
         u32::from(self.0)
     }
 
+    pub(super) fn can_queue_release(self) -> bool {
+        matches!(self.base(), 5 | 6 | 9)
+    }
+
     pub(super) fn base(self) -> u32 {
         self.raw() & !NULLABLE
     }
@@ -422,6 +426,10 @@ impl Drop for Words {
         if self.kind == WordKind::DEFERRED {
             // SAFETY: the deferred header owns exactly this one boxed plan.
             drop(unsafe { Box::from_raw(self.values[0] as *mut Deferred) });
+            return;
+        }
+        if self.values.spilled() && self.kind.can_queue_release() {
+            records::release_sequence_words(self.kind, std::mem::take(&mut self.values).into_vec());
             return;
         }
         for word in self.values.drain(..).rev() {
