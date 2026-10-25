@@ -423,6 +423,7 @@ fn collect_class(
                 ) || (mapping && name == "__len__");
                 if name.starts_with("__")
                     && name != "__init__"
+                    && name != "__setitem__"
                     && !unary_protocol
                     && !(mapping && matches!(name, "__getitem__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())
@@ -433,6 +434,13 @@ fn collect_class(
                     );
                 }
                 let kind = method_kind(graph, definition.module, method, &class_bindings)?;
+                if name == "__setitem__"
+                    && (kind != MethodKind::Instance
+                        || method.parameters.len() != 3
+                        || method.parameters.posonlyargs.len() + method.parameters.args.len() != 3)
+                {
+                    return Err(module.error(method, "__setitem__ requires self, key and value"));
+                }
                 if kind == MethodKind::PropertySetter {
                     let mut accessors = methods
                         .iter()

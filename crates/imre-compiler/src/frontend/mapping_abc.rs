@@ -135,7 +135,13 @@ impl Checker<'_> {
         arguments: &[Expr],
         at: &impl Ranged,
     ) -> Result<Expr, String> {
-        let class = self.mapping_class(receiver.ty).unwrap();
+        let Type::Class(class) = receiver.ty else {
+            return Err(error(
+                self.source,
+                at,
+                "mapping protocol requires a class instance",
+            ));
+        };
         let direct = |checker: &mut Self, class: usize, receiver: Expr| {
             checker.mapping_slot(class, receiver, name, arguments, at)
         };
@@ -156,9 +162,12 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let method = self.classes.methods[class]
             .get(name)
-            .ok_or_else(|| error(self.source, at, "missing Mapping primitive"))?
+            .ok_or_else(|| error(self.source, at, &format!("missing mapping method {name}")))?
             .clone();
-        if method.params.len() != arguments.len() + 1 {
+        if method.params.len() != arguments.len() + 1
+            || method.method.unwrap().kind(&self.classes.declarations)
+                != crate::classes::MethodKind::Instance
+        {
             return Err(error(
                 self.source,
                 at,
