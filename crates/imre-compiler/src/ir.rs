@@ -381,6 +381,8 @@ pub(crate) struct Module {
     pub class_fields: Vec<Vec<Type>>,
     /// Static names and generated value behavior; instance layouts stay unchanged.
     pub class_metadata: Vec<ClassMetadata>,
+    /// Single-generator list builds, keyed by the outlined helper they describe.
+    pub list_builds: std::collections::HashMap<usize, ListBuild>,
     /// Concrete JSON field schemas; decoding additionally checks constructors.
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
@@ -400,7 +402,17 @@ pub(crate) struct ClassMetadata {
     pub dataclass_eq: bool,
     pub dataclass_repr: bool,
     pub toml_hash: bool,
+    /// Field index for each parameter of a generated, field-only initializer.
+    pub initializer_fields: Option<Vec<usize>>,
     pub fields: Vec<ClassFieldMetadata>,
+}
+
+/// A helper appends one element to its private result for each item of the
+/// iterable parameter. The element stays in the checked append expression.
+pub(crate) struct ListBuild {
+    pub iterable: usize,
+    pub item: usize,
+    pub result: usize,
 }
 
 pub(crate) struct ClassFieldMetadata {
@@ -1939,8 +1951,8 @@ pub(crate) enum Statement {
 
 /// Visits expression trees, including statements embedded in eager expressions.
 /// Analyses must include every checked branch, even when it never executes.
-pub(crate) fn walk_expressions(body: &[Statement], visit: &mut impl FnMut(&Expr)) {
-    fn expression(value: &Expr, visit: &mut impl FnMut(&Expr)) {
+pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
+    fn expression<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
         visit(value);
         match &value.kind {
             ExprKind::List(values)

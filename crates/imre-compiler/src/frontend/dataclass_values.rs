@@ -284,6 +284,17 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
             dataclass_eq: class.dataclass.as_ref().is_some_and(|options| options.eq),
             dataclass_repr: class.dataclass.as_ref().is_some_and(|options| options.repr),
             toml_hash: class.toml_hash,
+            initializer_fields: (class.generated_initializer
+                && !classes.methods[id].contains_key("__post_init__"))
+            .then(|| {
+                let fields = class.fields.iter().enumerate();
+                fields
+                    .clone()
+                    .filter(|(_, f)| !f.kw_only)
+                    .chain(fields.filter(|(_, f)| f.kw_only))
+                    .map(|(index, _)| index)
+                    .collect()
+            }),
             fields: class
                 .fields
                 .iter()
