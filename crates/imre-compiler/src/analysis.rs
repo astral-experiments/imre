@@ -371,7 +371,7 @@ impl Session {
     pub(crate) fn check_scopes(
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
@@ -382,7 +382,7 @@ impl Session {
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -413,22 +413,25 @@ struct CheckedFile<'db> {
     #[returns(copy)]
     file: File,
     skipped: Vec<TextRange>,
-    overloads: Vec<CheckedOverload>,
+    overloads: Vec<CheckedDiagnostic>,
 }
 
-/// The frontend validates context-manager decorators and the exact calls
-/// it lowers with a signature different from typeshed's overloads.
+/// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum CheckedOverload {
+pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
+    Keyword(TextRange),
 }
 
-impl CheckedOverload {
-    fn covers(self, range: TextRange) -> bool {
+impl CheckedDiagnostic {
+    fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
-            Self::Decorator(decorator) => decorator.contains_range(range),
-            Self::Call(call) => call == range,
+            Self::Decorator(decorator) => {
+                diagnostic == "no-matching-overload" && decorator.contains_range(range)
+            }
+            Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
         }
     }
 }
@@ -459,8 +462,9 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                                 diagnostic.id().as_str(),
                                 "too-many-positional-arguments" | "missing-argument"
                             ) && native_partial_call(db, file, range, diagnostic.id().as_str()))
-                            || (diagnostic.id().as_str() == "no-matching-overload"
-                                && overloads.iter().any(|scope| scope.covers(range)))
+                            || overloads
+                                .iter()
+                                .any(|scope| scope.covers(diagnostic.id().as_str(), range))
                     })
         })
         .map(|diagnostic| {
@@ -617,7 +621,7 @@ impl AnalysisCache {
         fresh: &mut Session,
         inputs: &crate::SourceInputs,
         skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedOverload>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         if let Some(cached) = &mut self.diagnostics
             && cached.same_files(fresh, inputs)

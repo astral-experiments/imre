@@ -18,7 +18,7 @@ def show(p: PureWindowsPath) -> None:
 
 for parent in ['', '/', '//', '///', 'C:', 'C:/', 'a/b', r'\\host',
                '//host/share', '//host/share/spam', '//?/UNC/server/share',
-               '//./device', '/?/UNC', './c:s', 'é:/', 'Σ:/', '/.']:
+               '//./device', '//?./share', '//.?/share', '/?/UNC', './c:s', 'é:/', 'Σ:/', '/.']:
     for child in ['', '.', '..', 'a.txt', './c:s', 'C:', 'c:leaf', '/tail',
                   'D:leaf', 'd:/root', '//other/share', 'a///b', '//?/C:']:
         p = PureWindowsPath(parent, child)
@@ -27,6 +27,9 @@ for parent in ['', '/', '//', '///', 'C:', 'C:/', 'a/b', r'\\host',
         show(PureWindowsPath('C:/root', p))
         print(str(PurePosixPath(p)))
         print(str(Path(p)))
+
+for share in [r'\\server\share', '//server/share', '//SERVER/SHARE']:
+    print(PureWindowsPath('//server/share/dir', share).as_posix())
 
 print(PurePath('a/b') == Path('a', 'b'))
 print(PureWindowsPath('a/b') == PurePosixPath('a/b'))

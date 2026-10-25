@@ -21,13 +21,13 @@ fn owned(word: usize, kind: u32) -> OwnedWord {
     unsafe { OwnedWord::from_owned(word, WordKind::new(kind)) }
 }
 
-fn string(s: &str) -> OwnedWord {
+pub(super) fn string(s: &str) -> OwnedWord {
     owned(Rc::into_raw(Rc::new(Str::from(s))) as usize, 3)
 }
 fn integer(n: usize) -> OwnedWord {
     owned(Int::from_usize(n).into_raw(), 2)
 }
-fn float(n: f64) -> OwnedWord {
+pub(super) fn float(n: f64) -> OwnedWord {
     owned(n.to_bits() as usize, 7)
 }
 
@@ -42,7 +42,7 @@ pub(super) fn display(v: &OwnedWord, repr: bool) -> String {
     out
 }
 
-fn tuple_len(v: &OwnedWord) -> Option<usize> {
+pub(super) fn tuple_len(v: &OwnedWord) -> Option<usize> {
     if v.kind.raw() & !NULLABLE != 6 || v.word == 0 {
         return None;
     }
@@ -54,7 +54,7 @@ fn tuple_len(v: &OwnedWord) -> Option<usize> {
         .map(|_| d.length)
 }
 
-fn tuple_item(v: &OwnedWord, index: usize) -> OwnedWord {
+pub(super) fn tuple_item(v: &OwnedWord, index: usize) -> OwnedWord {
     assert!(tuple_len(v).is_some_and(|len| index < len));
     // SAFETY: the live tuple supplies a descriptor and valid slot at this index.
     unsafe {
@@ -64,7 +64,7 @@ fn tuple_item(v: &OwnedWord, index: usize) -> OwnedWord {
     }
 }
 
-fn is_dict(v: &OwnedWord) -> bool {
+pub(super) fn is_dict(v: &OwnedWord) -> bool {
     // SAFETY: a nonzero kind-five word owns an Object, examined without mutation.
     v.kind.raw() & !NULLABLE == 5
         && v.word != 0
@@ -75,7 +75,7 @@ fn is_dict(v: &OwnedWord) -> bool {
         }
 }
 
-fn dict_item(v: &OwnedWord, key: &str) -> Result<OwnedWord> {
+pub(super) fn dict_item(v: &OwnedWord, key: &str) -> Result<OwnedWord> {
     if !is_dict(v) {
         return Err(Error::new(Kind::TypeError, "format requires a mapping"));
     }
@@ -89,7 +89,7 @@ fn dict_item(v: &OwnedWord, key: &str) -> Result<OwnedWord> {
     .ok_or_else(|| Error::key(string(key.as_str())))
 }
 
-fn truth(v: &OwnedWord) -> bool {
+pub(super) fn truth(v: &OwnedWord) -> bool {
     match v.kind.raw() {
         0 => false,
         1 => v.word != 0,
@@ -244,50 +244,56 @@ impl Record {
         if !truth(args) {
             return Ok(msg);
         }
-        let tuple = tuple_len(args);
-        let mut pos = 0;
-        let mut out = String::new();
-        let mut input = msg.as_str();
-        while let Some((literal, rest)) = input.split_once('%') {
-            out.push_str(literal);
-            if let Some(rest) = rest.strip_prefix('%') {
-                out.push('%');
-                input = rest;
-                continue;
-            }
-            let (value, rest) = if let Some(rest) = rest.strip_prefix('(') {
-                let (key, rest) = rest
-                    .split_once(')')
-                    .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format key"))?;
-                (dict_item(args, key)?, rest)
-            } else {
-                if pos >= tuple.unwrap_or(1) {
-                    return Err(Error::new(
-                        Kind::TypeError,
-                        "not enough arguments for format string",
-                    ));
-                }
-                let val = if tuple.is_some() {
-                    tuple_item(args, pos)
-                } else {
-                    args.clone()
-                };
-                pos += 1;
-                (val, rest)
-            };
-            let (piece, tail) = percent_value(rest, &value)?;
-            out.push_str(&piece);
-            input = tail;
-        }
-        if tuple.is_some_and(|n| pos < n) {
-            return Err(Error::new(
-                Kind::TypeError,
-                "not all arguments converted during string formatting",
-            ));
-        }
-        out.push_str(input);
-        Ok(out)
+        format_arguments(&msg, args)
     }
+}
+
+/// Percent formatting is shared by log messages and ordinary string expressions. Callers
+/// decide whether an empty argument tuple bypasses formatting (only LogRecord does that).
+fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
+    let tuple = tuple_len(args);
+    let mut pos = 0;
+    let mut out = String::new();
+    let mut input = msg;
+    while let Some((literal, rest)) = input.split_once('%') {
+        out.push_str(literal);
+        if let Some(rest) = rest.strip_prefix('%') {
+            out.push('%');
+            input = rest;
+            continue;
+        }
+        let (value, rest) = if let Some(rest) = rest.strip_prefix('(') {
+            let (key, rest) = rest
+                .split_once(')')
+                .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format key"))?;
+            (dict_item(args, key)?, rest)
+        } else {
+            if pos >= tuple.unwrap_or(1) {
+                return Err(Error::new(
+                    Kind::TypeError,
+                    "not enough arguments for format string",
+                ));
+            }
+            let val = if tuple.is_some() {
+                tuple_item(args, pos)
+            } else {
+                args.clone()
+            };
+            pos += 1;
+            (val, rest)
+        };
+        let (piece, tail) = percent_value(rest, &value)?;
+        out.push_str(&piece);
+        input = tail;
+    }
+    if !is_dict(args) && pos < tuple.unwrap_or(1) {
+        return Err(Error::new(
+            Kind::TypeError,
+            "not all arguments converted during string formatting",
+        ));
+    }
+    out.push_str(input);
+    Ok(out)
 }
 
 /// Reserve before filling a user-provided field width so it can raise a Python exception.
@@ -453,7 +459,7 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
                 _ => return Err(Error::new(Kind::TypeError, "must be real number")),
             };
             let precision = precision.unwrap_or(6);
-            let spec = format!("%{}.{precision}{c}", flags);
+            let spec = format!("%{flags}{width}.{precision}{c}");
             let pattern = std::ffi::CString::new(spec).unwrap();
             // SAFETY: pattern is assembled from flags, a decimal precision and one double conversion.
             let len = unsafe { libc::snprintf(std::ptr::null_mut(), 0, pattern.as_ptr(), n) };
@@ -668,6 +674,18 @@ pub extern "C" fn imre_logrecord_set_flag(mask: usize, value: bool) {
     } else {
         FLAGS.get() & !mask
     });
+}
+
+/// # Safety
+/// The format and exact integer remain rooted; a successful return transfers an owned string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_percent_int(fmt: *const Str, integer: usize) -> *const Str {
+    // SAFETY: the caller roots both precise input representations for the whole operation.
+    let result = unsafe { format_arguments((&*fmt).as_str(), &WordKind::new(2).acquire(integer)) };
+    finish(
+        result.map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
+        std::ptr::null(),
+    )
 }
 
 #[cfg(test)]

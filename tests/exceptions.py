@@ -9,6 +9,7 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
     "classvar_exception_constructor": """
 from typing import ClassVar
 
@@ -885,6 +886,9 @@ except KeyError:
 }
 
 REJECTED = {
+    "import_error_unsupported_argument": "ImportError([1, 2])",
+    "import_error_expanded_keywords": "ImportError(**{'name': 'pkg'})",
+    "import_error_unnarrowed_field": "def f(e: Exception) -> None:\n    print(e.name)\n",
     "handler_uninitialized": """
 try:
     value = int(input())
