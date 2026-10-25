@@ -5599,6 +5599,31 @@ impl Emitter<'_, '_> {
                 Type::Int,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::FormatCursor { split } => {
+                let (cursor, outer) = if *split {
+                    let fields = self.module.types.fields(returns).unwrap();
+                    let layout = self
+                        .output
+                        .global_ref(format!("layout_{}", record_name(returns)));
+                    (fields[1], Some(layout))
+                } else {
+                    (returns, None)
+                };
+                let row = self.module.types.cursor_element(cursor).unwrap();
+                let row = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(row)));
+                let input = &args[0].value.operand;
+                let operand = match outer {
+                    Some(outer) => self.checked_pointer(format!("call ptr @imre_formatter_field_name_split(ptr {input}, ptr @{outer}, ptr @{row})")),
+                    None => self.instruction(format!("call ptr @imre_formatter_parser(ptr {input}, ptr @{row})")),
+                };
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::Repeat => {
                 let value = &args[0].value;
                 let word = self.word(value);
@@ -7942,6 +7967,8 @@ declare ptr @imre_islice(i32, i64, i64, i64, i64)
 declare ptr @imre_cycle(i32, i64)
 declare i64 @imre_cursor_length_hint(ptr, i64)
 declare ptr @imre_repeat(i32, i64, i64)
+declare ptr @imre_formatter_parser(ptr, ptr)
+declare ptr @imre_formatter_field_name_split(ptr, ptr, ptr)
 declare ptr @imre_str_iter(ptr)
 declare ptr @imre_str_reverse_iter(ptr)
 declare ptr @imre_str_int_list(ptr)
