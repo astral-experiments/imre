@@ -6291,6 +6291,27 @@ declare ptr @imre_async_process_communicate(ptr, ptr)
 declare ptr @imre_environ_copy()
 declare ptr @imre_environ_get(ptr, ptr)
 declare ptr @imre_getcwd()
+declare void @imre_os_close(i64)
+declare i64 @imre_os_open(ptr, i32, i64, i64, i64)
+@imre_os_o_rdonly = external constant i64
+@imre_os_o_wronly = external constant i64
+@imre_os_o_rdwr = external constant i64
+@imre_os_o_append = external constant i64
+@imre_os_o_creat = external constant i64
+@imre_os_o_excl = external constant i64
+@imre_os_o_trunc = external constant i64
+@imre_os_o_cloexec = external constant i64
+@imre_os_o_directory = external constant i64
+@imre_os_o_nofollow = external constant i64
+@imre_os_o_nonblock = external constant i64
+declare i64 @imre_os_dup(i64)
+declare i64 @imre_os_dup2(i64, i64, i64)
+declare void @imre_os_pipe(ptr)
+declare i32 @imre_os_isatty(i64)
+declare i32 @imre_os_get_blocking(i64)
+declare void @imre_os_set_blocking(i64, i64)
+declare i32 @imre_os_get_inheritable(i64)
+declare void @imre_os_set_inheritable(i64, i64)
 declare ptr @imre_shutil_which(ptr, i64, ptr, i32, i32)
 declare ptr @imre_shutil_copyfile(ptr, i32, ptr, i32, i32)
 declare void @imre_subprocess_check(ptr)

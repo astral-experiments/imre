@@ -15,6 +15,7 @@ use crate::watch::FileSystem;
 mod declarations;
 mod empty_keywords;
 mod entry_profile;
+mod os;
 mod reachability;
 mod type_aliases;
 
@@ -256,6 +257,8 @@ pub(crate) enum Intrinsic {
     Environ,
     GetEnv,
     GetCwd,
+    Fd(crate::ir::FdOperation),
+    OpenFlag(&'static str),
     FsPath,
     PosixPath(PosixPathOperation),
     Unquote,
@@ -318,8 +321,13 @@ impl IntrinsicModule {
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
-        if self == Self::Os && name == "path" {
-            return Some(Binding::IntrinsicModule(Self::PosixPath));
+        if self == Self::Os {
+            if name == "path" {
+                return Some(Binding::IntrinsicModule(Self::PosixPath));
+            }
+            if let Some(symbol) = os::descriptor(name) {
+                return Some(Binding::Intrinsic(symbol));
+            }
         }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));

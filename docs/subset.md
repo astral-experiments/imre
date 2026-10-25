@@ -732,6 +732,8 @@ The result exposes read-only `args: list[str]`, `returncode: int`, and the two s
 
 `check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int`, `cmd: list[str]`, and the captured or absent `stdout`, `output`, and `stderr` fields. `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
 
+On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes, or a native `Path`. It and `os.dup` and `os.pipe` return non-inheritable descriptors. `os.dup2` accepts an optional `inheritable` flag (true by default). Use `os.close`, `os.isatty`, `os.get_inheritable` / `os.set_inheritable`, and `os.get_blocking` / `os.set_blocking` directly on integer descriptors. Open flags use the runtime target's values.
+
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
 `shlex.split(text)` returns POSIX shell words with Python’s default quoting,
