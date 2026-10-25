@@ -57,3 +57,18 @@ entry point and the original suite runner on main
 `Lib/_colorize.py`; Imre supplied argparse and the other intrinsic modules.
 All four checks exited 1 with empty stdout and the same unsupported
 `collections.abc.Mapping` export on stderr. No upstream case executed.
+
+On merged numeric main `e3145753e23633a9acbc857e9ac8f363560523db`, the
+[four startup controls](startup-merged-e314575-linux.json) still exit 1 before
+any test executes. Normal compilation stops at the original
+`collections.abc.Mapping` import in `Lib/_colorize.py:4`; reachable-only
+compilation reaches `dataclasses.Field` on the next line. The controls use the
+same pinned files and preserve stderr for both entry points.
+
+Separately, 152 source-defined methods in the numeric-head run stop on
+`Exception.__init__(self, message, stdout, stderr)` in the unchanged
+`ArgumentParserError` fixture. Its separate `error_code` field is not in
+the three-element `.args` tuple. For example, `TestAddSubparsers.test_abbreviation` receives the
+straight-line exception initializer diagnostic at both levels before its
+body can run. The [unittest coordination note](https://github.com/astral-sh/imre/pull/587#issuecomment-6393355465)
+tracks the explicit base initializer. These observations remain blocked.

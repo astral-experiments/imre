@@ -45,6 +45,8 @@ enum Kind {
 #[derive(Deserialize)]
 struct OptionSpec {
     flag: String,
+    dest: String,
+    positional: bool,
     #[serde(default)]
     aliases: Vec<String>,
     enum_default: Option<usize>,
@@ -79,6 +81,9 @@ struct Parser {
     #[serde(default)]
     prog: String,
     raw: bool,
+    prefixes: String,
+    help_flags: Option<[String; 2]>,
+    abbrev: bool,
     options: Vec<OptionSpec>,
     #[serde(default)]
     groups: Vec<ArgumentGroup>,
@@ -106,7 +111,7 @@ enum Token<'a> {
     Ambiguous(Vec<&'a str>),
     Help(Option<&'a str>),
     Option(usize, Option<&'a str>),
-    Cluster(&'a str),
+    Cluster(char, &'a str),
 }
 
 enum Word<'a> {
@@ -181,75 +186,79 @@ impl Parser {
         }
     }
 
+    fn flags(&self) -> impl Iterator<Item = (&str, Option<usize>)> {
+        self.help_flags
+            .iter()
+            .flatten()
+            .map(|flag| (flag.as_str(), None))
+            .chain(
+                self.options
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, o)| !o.positional())
+                    .flat_map(|(i, o)| o.flags().map(move |flag| (flag, Some(i)))),
+            )
+    }
+
+    fn help_name(&self) -> String {
+        self.help_flags.as_ref().expect("help action").join("/")
+    }
+
+    /// Resolve exact spellings first, then enumerate every possible long
+    /// abbreviation and short cluster in declaration order.
     fn token<'a>(&'a self, arg: &'a str) -> Token<'a> {
         if arg == "--" {
             return Token::End;
         }
-        let Some(tail) = arg.strip_prefix('-') else {
+        let mut chars = arg.chars();
+        let Some(prefix) = chars.next().filter(|&c| self.prefixes.contains(c)) else {
             return Token::Value;
         };
-        if tail.is_empty() {
+        let token = |slot, value| match slot {
+            None => Token::Help(value),
+            Some(i) => Token::Option(i, value),
+        };
+        if let Some((_, slot)) = self.flags().find(|(s, _)| *s == arg) {
+            return token(slot, None);
+        }
+        let Some(second) = chars.next() else {
             return Token::Value;
-        }
-        let (flag, explicit) = arg
+        };
+        let (head, explicit) = arg
             .split_once('=')
-            .map_or((arg, None), |(flag, value)| (flag, Some(value)));
-        if matches!(flag, "-h" | "--help") {
-            return Token::Help(explicit);
-        }
-        if let Some(index) = self
-            .options
-            .iter()
-            .position(|option| option.flags().any(|s| s == flag))
+            .map_or((arg, None), |(h, v)| (h, Some(v)));
+        if explicit.is_some()
+            && let Some((_, slot)) = self.flags().find(|(s, _)| *s == head)
         {
-            return Token::Option(index, explicit);
+            return token(slot, explicit);
         }
-        if flag.starts_with("--") || flag == "-" {
-            let mut names: Vec<_> = ["-h", "--help"]
-                .into_iter()
-                .filter(|name| name.starts_with(flag))
-                .collect();
-            let help = !names.is_empty();
-            let matches = self
-                .options
-                .iter()
-                .enumerate()
-                .flat_map(|(index, option)| option.flags().map(move |flag| (index, flag)))
-                .filter(|(_, spelling)| spelling.starts_with(flag));
-            let mut option = None;
-            for (index, matched) in matches {
-                names.push(matched);
-                option = Some(index);
-            }
-            if names.len() > 1 {
-                return Token::Ambiguous(names);
-            }
-            if help {
-                return Token::Help(explicit);
-            }
-            if let Some(index) = option {
-                return Token::Option(index, explicit);
+        let long = self.prefixes.contains(second);
+        let short = &arg[..prefix.len_utf8() + second.len_utf8()];
+        let mut matches = Vec::new();
+        for (flag, slot) in self.flags() {
+            if !long && flag == short {
+                matches.push((flag, Token::Cluster(prefix, &arg[prefix.len_utf8()..])));
+            } else if self.abbrev && flag.starts_with(head) {
+                matches.push((flag, token(slot, explicit)));
             }
         }
-        if let Some(first) = arg.get(..2)
-            && arg.len() > first.len()
-            && (first == "-h"
-                || self
-                    .options
-                    .iter()
-                    .any(|option| option.flags().any(|s| s == first)))
-        {
-            return Token::Cluster(&arg[1..]);
+        if matches.len() > 1 {
+            return Token::Ambiguous(matches.into_iter().map(|(flag, _)| flag).collect());
         }
-        // Python's negative-number matcher starts with -\.?\d.
-        let numeric = tail
-            .strip_prefix('.')
-            .unwrap_or(tail)
-            .chars()
-            .next()
-            .and_then(crate::integer_text::decimal_digit)
-            .is_some();
-        if numeric || arg.contains(' ') {
+        if let Some((_, found)) = matches.pop() {
+            return found;
+        }
+        let numeric = |s: &str| {
+            s.strip_prefix('-').is_some_and(|s| {
+                s.strip_prefix('.')
+                    .unwrap_or(s)
+                    .chars()
+                    .next()
+                    .and_then(crate::integer_text::decimal_digit)
+                    .is_some()
+            })
+        };
+        if (numeric(arg) && !self.flags().any(|(name, _)| numeric(name))) || arg.contains(' ') {
             Token::Value
         } else {
             Token::Unknown
@@ -354,7 +363,8 @@ impl Parser {
                     return Err(Stop::Error(
                         self,
                         format!(
-                            "argument -h/--help: ignored explicit argument {}",
+                            "argument {}: ignored explicit argument {}",
+                            self.help_name(),
                             string_repr(value)
                         ),
                     ));
@@ -370,20 +380,21 @@ impl Parser {
                     extras.push(Cow::Borrowed(arg));
                     continue;
                 }
-                Token::Cluster(mut suffix) => {
+                Token::Cluster(prefix, mut suffix) => {
                     let mut take = None;
                     while !suffix.is_empty() {
-                        let Some((letter, rest)) = suffix.split_at_checked(1) else {
-                            extras.push(Cow::Owned(format!("-{suffix}")));
-                            break;
-                        };
+                        let letter = suffix.chars().next().unwrap();
+                        let rest = &suffix[letter.len_utf8()..];
+                        let spelling = format!("{prefix}{letter}");
                         let option = self.options.iter().enumerate().find(|(_, option)| {
-                            option
-                                .flags()
-                                .any(|flag| flag.strip_prefix('-') == Some(letter))
+                            !option.positional() && option.flags().any(|s| s == spelling)
                         });
-                        if letter != "h" && option.is_none() {
-                            extras.push(Cow::Owned(format!("-{suffix}")));
+                        let help = self
+                            .help_flags
+                            .as_ref()
+                            .is_some_and(|flags| flags[0] == spelling);
+                        if !help && option.is_none() {
+                            extras.push(Cow::Owned(format!("{prefix}{suffix}")));
                             break;
                         }
                         if let Some((slot, option)) = option
@@ -397,9 +408,14 @@ impl Parser {
                         }
                         // argparse resolves the entire cluster (including errors)
                         // before invoking its first action, which may be help.
-                        if rest.starts_with(['-', '=']) {
+                        if rest.starts_with('=')
+                            || rest
+                                .chars()
+                                .next()
+                                .is_some_and(|c| self.prefixes.contains(c))
+                        {
                             let name = option.map_or_else(
-                                || "-h/--help".into(),
+                                || self.help_name(),
                                 |(_, option)| option.error_name(),
                             );
                             return Err(Stop::Error(
@@ -530,7 +546,7 @@ impl OptionSpec {
     }
 
     fn positional(&self) -> bool {
-        !self.flag.starts_with('-')
+        self.positional
     }
 
     fn error_name(&self) -> String {
