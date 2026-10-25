@@ -246,6 +246,10 @@ impl Builtin {
             | Self::JsonEmptyObject
             | Self::WallTime
             | Self::FunctionCache(_)
+            | Self::FunctionCacheProbe(..)
+            | Self::FunctionCacheInsert(..)
+            | Self::FunctionCacheStat(..)
+            | Self::FunctionCacheClear(_)
             | Self::HashStr
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
