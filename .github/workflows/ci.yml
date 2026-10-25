@@ -10,7 +10,7 @@ on:
         description: Additional required native controls
         type: choice
         default: decoder
-        options: [decoder, key-body]
+        options: [decoder, key-body, number-hooks]
 permissions:
   contents: read
 concurrency:
@@ -127,7 +127,7 @@ jobs:
           report = json.load(open(sys.argv[1]))
           assert set(report["levels"]) == {"0", "3"}
           for level, data in report["levels"].items():
-              attempt = data["native-body-attempts"]["typed-string-identity"]
+              attempt = data["native-body-attempts"]["typed-key-assertions"]
               ids = {f"test.test_json.test_decode.Test{backend}Decode.test_keys_reuse" for backend in ["C", "Py"]}
               assert set(attempt.get("passed", [])) == ids and not attempt["failed"] and not attempt["skipped"], (level, attempt)
               for case in ids:
@@ -136,6 +136,51 @@ jobs:
               assert data["native-distinct-owner-control"]["outcome"] == "pass", (level, data["native-distinct-owner-control"])
               print(f"-O{level}: both unchanged methods completed; separate owners were rejected")
           PY
+      - name: Compare the overlapping native shutil callable path
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.audit == 'key-body' }}
+        shell: bash
+        run: |
+          python3 -B - <<'PY'
+          import os, subprocess, sys, tempfile
+          from pathlib import Path
+          sys.path.insert(0, "tests")
+          import paths
+          fixture = Path("tests/fixtures/paths/shutil_callable.py").resolve()
+          results = Path(os.environ["JSON_RESULTS"])
+          with tempfile.TemporaryDirectory() as temp:
+              root = Path(temp)
+              reference = root / "reference"
+              paths.seed(reference)
+              expected = subprocess.run([sys.executable, "-E", "-B", fixture], cwd=reference, capture_output=True, check=True)
+              assert not expected.stderr
+              (results / "shutil-callables-reference.txt").write_bytes(expected.stdout)
+              state = paths.snapshot(reference)
+              for level in ("0", "3"):
+                  binary = root / ("shutil-O" + level)
+                  subprocess.run([os.environ["JSON_IMRE"], "build", fixture, "--no-cache", "--opt-level", level,
+                                  "--runtime", os.environ["JSON_RUNTIME"], "--clang", "/usr/bin/clang-18", "-o", binary], check=True)
+                  work = root / level
+                  paths.seed(work)
+                  actual = subprocess.run([binary], cwd=work, capture_output=True, check=True)
+                  (results / ("shutil-callables-O" + level + ".txt")).write_bytes(actual.stdout)
+                  assert (actual.stdout, actual.stderr, paths.snapshot(work)) == (expected.stdout, b"", state)
+          PY
+      - name: Observe numeric hook order and every feasible original fixture
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.audit == 'number-hooks' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="$PWD/tests/fixtures/json_records/number_hooks.py"
+          export PYTHONPATH="$PWD/.cpython-stdlib-reference/Lib"
+          mkdir -p "$RUNNER_TEMP/numbers"
+          cd "$RUNNER_TEMP/numbers"
+          python3 -I -B "$source" > "$JSON_RESULTS/number-hooks-reference.txt"
+          for opt in 0 3; do
+            "$JSON_IMRE" build "$source" --no-cache --opt-level "$opt" --runtime "$JSON_RUNTIME" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/numbers/driver"
+            "$RUNNER_TEMP/numbers/driver" > "$JSON_RESULTS/number-hooks-O$opt.txt"
+            diff -u "$JSON_RESULTS/number-hooks-reference.txt" "$JSON_RESULTS/number-hooks-O$opt.txt"
+          done
+          python3 -B "$JSON_DIR/native.py" --imre "$JSON_IMRE" --runtime "$JSON_RUNTIME" --clang /usr/bin/clang-18 --result "$JSON_RESULTS/numeric-fixtures-linux.json"
       - name: Execute all available complete-method bodies and fixture operations
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: bash
