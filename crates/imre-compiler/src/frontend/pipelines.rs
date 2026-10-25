@@ -207,8 +207,12 @@ fn not(value: Expr) -> Expr {
 }
 
 /// Handle exhaustion only inside the iterator or generator operation being pulled.
-fn catch_stop_iteration(body: Vec<Statement>, on_stop: Vec<Statement>) -> Vec<Statement> {
-    if !crate::effects::may_raise_locally(&body) {
+fn catch_stop_iteration(
+    body: Vec<Statement>,
+    on_stop: Vec<Statement>,
+    types: &Types,
+) -> Vec<Statement> {
+    if !crate::effects::may_raise_locally(&body, types) {
         return body;
     }
     vec![Statement::Try {
@@ -1902,7 +1906,7 @@ impl Checker<'_> {
             ty: Type::Exception,
             kind: ExprKind::Builtin(Builtin::ExceptionWithCause, vec![error, cause]),
         }));
-        catch_stop_iteration(body, vec![converted])
+        catch_stop_iteration(body, vec![converted], self.types)
     }
 
     /// Captures the callable before its source, then invokes it only after each
@@ -2001,6 +2005,7 @@ impl Checker<'_> {
                     vec![Statement::Clear(input.value)],
                 )],
                 vec![Statement::Clear(input.value), Statement::Break],
+                self.types,
             );
             step.push(Statement::If(
                 self.local(input.ready),
@@ -2045,6 +2050,7 @@ impl Checker<'_> {
             let mut mapped = catch_stop_iteration(
                 vec![Statement::Assign(value, operation)],
                 vec![Statement::Assign(ready, boolean(false))],
+                self.types,
             );
             mapped.push(Statement::Clear(input.value));
             input

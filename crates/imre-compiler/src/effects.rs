@@ -9,6 +9,7 @@
 
 use crate::callables::Targets;
 use crate::ir::{Expr, ExprKind, Module, Statement};
+use crate::types::Types;
 
 pub(crate) struct ExceptionEffects {
     functions: Vec<bool>,
@@ -26,7 +27,7 @@ impl ExceptionEffects {
 #[derive(Clone, Copy)]
 struct Context<'a> {
     calls: &'a Targets,
-    types: &'a crate::types::Types,
+    types: &'a Types,
 }
 
 /// Removes fallibility only after every operation and callee is proved safe.
@@ -54,8 +55,15 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
 }
 
 /// Check a fragment during lowering, when no callee is yet proven infallible.
-pub(crate) fn may_raise_locally(body: &[Statement]) -> bool {
-    block(body, &[], &Targets::default())
+pub(crate) fn may_raise_locally(body: &[Statement], types: &Types) -> bool {
+    block(
+        body,
+        &[],
+        Context {
+            calls: &Targets::default(),
+            types,
+        },
+    )
 }
 
 /// Any potentially failing path is enough; unreachable branches and caught
