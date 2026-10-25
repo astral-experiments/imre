@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::{CopyOperation, PosixPathOperation};
+use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -66,12 +66,14 @@ pub(crate) enum IntrinsicModule {
     Dataclasses,
     Difflib,
     Logging,
+    LoggingConfig,
     LoggingHandlers,
     Datetime,
     Abc,
     Asyncio,
     Contextlib,
     Functools,
+    Fnmatch,
     Time,
     Tomli,
     TomliW,
@@ -121,6 +123,7 @@ pub(crate) enum Intrinsic {
     RawDescriptionHelpFormatter,
     FutureAnnotations,
     ShallowCopy,
+    DeepCopy,
     TypeChecking,
     GetLogger,
     GetLevelName,
@@ -133,6 +136,8 @@ pub(crate) enum Intrinsic {
     ClockConverter(bool),
     LogRecordFlag(u8),
     BasicConfig,
+    DictConfig,
+    FileConfig,
     LogLevel(i64),
     Abc,
     AbstractMethod,
@@ -274,10 +279,12 @@ pub(crate) enum Intrinsic {
     Environ,
     GetEnv,
     GetCwd,
+    Strerror,
     Fd(crate::ir::FdOperation),
     OpenFlag(&'static str),
     FsPath,
     PosixPath(PosixPathOperation),
+    Fnmatch(FnmatchOperation),
     Unquote,
 }
 
@@ -295,12 +302,14 @@ impl IntrinsicModule {
             "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
+            "logging.config" => Some(Self::LoggingConfig),
             "logging.handlers" => Some(Self::LoggingHandlers),
             "datetime" => Some(Self::Datetime),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
+            "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
@@ -352,11 +361,14 @@ impl IntrinsicModule {
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
+        if self == Self::Logging && name == "config" {
+            return Some(Binding::IntrinsicModule(Self::LoggingConfig));
+        }
         if self == Self::Os {
             if name == "path" {
                 return Some(Binding::IntrinsicModule(Self::PosixPath));
             }
-            if let Some(symbol) = os::descriptor(name) {
+            if let Some(symbol) = os::symbol(name) {
                 return Some(Binding::Intrinsic(symbol));
             }
         }
@@ -397,6 +409,8 @@ impl IntrinsicModule {
             (Self::Logging, "_nameToLevel") => Intrinsic::LevelMap { names: true },
             (Self::Logging, "_levelToName") => Intrinsic::LevelMap { names: false },
             (Self::Logging, "basicConfig") => Intrinsic::BasicConfig,
+            (Self::LoggingConfig, "dictConfig") => Intrinsic::DictConfig,
+            (Self::LoggingConfig, "fileConfig") => Intrinsic::FileConfig,
             (Self::Logging, "DEBUG") => Intrinsic::LogLevel(10),
             (Self::Logging, "INFO") => Intrinsic::LogLevel(20),
             (Self::Abc, "ABC") => Intrinsic::Abc,
@@ -422,6 +436,18 @@ impl IntrinsicModule {
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
+            (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
+                Intrinsic::Fnmatch(FnmatchOperation::Match {
+                    normcase: name == "fnmatch",
+                })
+            }
+            (Self::Fnmatch, "filter" | "filterfalse") => {
+                Intrinsic::Fnmatch(FnmatchOperation::Filter {
+                    inverse: name == "filterfalse",
+                })
+            }
+            (Self::Fnmatch, "translate") => Intrinsic::Fnmatch(FnmatchOperation::Translate),
+            (Self::Fnmatch, "_translate") => Intrinsic::Fnmatch(FnmatchOperation::Parts),
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
             (Self::Functools, "partial") => Intrinsic::Partial,
             (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
@@ -511,6 +537,7 @@ impl IntrinsicModule {
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
+            (Self::Copy, "deepcopy") => Intrinsic::DeepCopy,
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
@@ -627,9 +654,7 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
-    checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
-    checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
-    checked_tuple_reads: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -755,7 +780,13 @@ impl SourceGraph {
     /// Record only this call's overload diagnostic. Nested arguments still get
     /// their own diagnostics, including calls with the same method name.
     pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
-        self.checked_calls.borrow_mut()[module].push(call);
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
+    }
+
+    /// Mark the precise call where lowering raises Python's missing-argument TypeError.
+    pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::MissingArgument(call));
     }
 
     pub(crate) fn checked_keywords(
@@ -763,14 +794,16 @@ impl SourceGraph {
         module: ModuleId,
         keywords: impl Iterator<Item = TextRange>,
     ) {
-        self.checked_keywords.borrow_mut()[module].extend(keywords);
+        self.checked_diagnostics.borrow_mut()[module]
+            .extend(keywords.map(CheckedDiagnostic::Keyword));
     }
 
     /// Record the exact list read proved by lowering a fixed-width tuple spread.
     /// Other diagnostics at this index or inside the receiver remain visible.
     pub(crate) fn checked_tuple_list_read(&self, module: ModuleId, read: TextRange) {
         if self.session.has_tuple_spreads(module) {
-            self.checked_tuple_reads.borrow_mut()[module].push(read);
+            self.checked_diagnostics.borrow_mut()[module]
+                .push(CheckedDiagnostic::TupleListRead(read));
         }
     }
 
@@ -808,22 +841,10 @@ impl SourceGraph {
                         .then_some(CheckedDiagnostic::Decorator(decorator.range()))
                     })
                     .chain({
-                        let mut calls = self.checked_calls.borrow()[id].clone();
-                        calls.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        calls.dedup();
-                        calls.into_iter().map(CheckedDiagnostic::Call)
-                    })
-                    .chain({
-                        let mut keywords = self.checked_keywords.borrow()[id].clone();
-                        keywords.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        keywords.dedup();
-                        keywords.into_iter().map(CheckedDiagnostic::Keyword)
-                    })
-                    .chain({
-                        let mut reads = self.checked_tuple_reads.borrow()[id].clone();
-                        reads.sort_unstable_by_key(|range| (range.start(), range.end()));
-                        reads.dedup();
-                        reads.into_iter().map(CheckedDiagnostic::TupleListRead)
+                        let mut diagnostics = self.checked_diagnostics.borrow()[id].clone();
+                        diagnostics.sort_unstable_by_key(|note| note.sort_key());
+                        diagnostics.dedup();
+                        diagnostics
                     })
                     .collect()
             })
@@ -1198,9 +1219,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
-            checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
-            checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
-            checked_tuple_reads: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -1597,18 +1616,16 @@ impl<'a> Loader<'a> {
             }
             return Ok(id);
         }
-        if name == "unittest" {
+        let bundled = match name {
+            "unittest" => Some(include_str!("../stdlib/unittest/__init__.py")),
+            "string" => Some(include_str!("../stdlib/string/__init__.py")),
+            _ => None,
+        };
+        if let Some(source) = bundled {
             self.reject_stdlib_shadow(name)?;
-            // ty resolves this immutable source at its Python import path in the
-            // in-memory project. It is part of the compiler, not a disk input.
-            let path = self.root.join("unittest/__init__.py");
-            let id = self.add(
-                path.clone(),
-                path,
-                name.into(),
-                true,
-                include_str!("../stdlib/unittest/__init__.py"),
-            )?;
+            // ty resolves bundled source at its Python import path in the in-memory project.
+            let path = self.root.join(name).join("__init__.py");
+            let id = self.add(path.clone(), path, name.into(), true, source)?;
             self.modules[id].bundled = true;
             self.scan(id)?;
             return Ok(id);

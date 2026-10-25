@@ -29,6 +29,7 @@ mod documents;
 mod enums;
 mod expansions;
 mod fixed_tuples;
+mod fnmatch;
 mod function_caches;
 mod functools;
 mod hashlib;
@@ -70,6 +71,7 @@ mod truthiness;
 mod unbound_locals;
 mod unions;
 mod unittest;
+mod unittest_equality;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -443,13 +445,18 @@ pub(crate) fn lower_with_owners(
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
-                && !(name == "open"
-                    && matches!(
-                        binding,
+                && !matches!(
+                    (name.as_str(), binding),
+                    (
+                        "open",
                         Binding::Intrinsic(
                             Intrinsic::GzipOpen | Intrinsic::Fd(ir::FdOperation::Open)
                         )
-                    ))
+                    ) | (
+                        "filter",
+                        Binding::Intrinsic(Intrinsic::Fnmatch(ir::FnmatchOperation::Filter { .. }))
+                    )
+                )
             {
                 return Err(module.error(
                     module.parsed.syntax(),
@@ -4088,7 +4095,10 @@ impl<'a> Checker<'a> {
                 expressions
                     .iter()
                     .map(|target| {
-                        if let Some(kind) = self.exception_category(target) {
+                        if let Some(kind) = self
+                            .exception_category(target)
+                            .or_else(|| self.fixed_testcase_failure_kind(target))
+                        {
                             return Ok(kind);
                         }
                         Err(error(
@@ -5001,15 +5011,16 @@ impl<'a> Checker<'a> {
                         },
                     });
                 }
+                let scalar = |ty| match self.types.payload(ty).unwrap_or(ty) {
+                    Type::StrLiteral(_) => Type::Str,
+                    ty => ty,
+                };
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
-                    && [Type::Str, Type::Int].into_iter().any(|ty| {
-                        values
-                            .iter()
-                            .any(|value| self.types.payload(value.ty) == Some(ty))
-                            && values
-                                .iter()
-                                .all(|value| self.types.payload(value.ty).unwrap_or(value.ty) == ty)
-                    })
+                    && let [left, right] = values.as_slice()
+                    && (self.types.payload(left.ty).is_some()
+                        || self.types.payload(right.ty).is_some())
+                    && matches!(scalar(left.ty), Type::Str | Type::Int)
+                    && scalar(left.ty) == scalar(right.ty)
                 {
                     let operation = if *op == ast::CmpOp::Eq {
                         Compare::Equal
@@ -5458,6 +5469,22 @@ impl<'a> Checker<'a> {
                         return Ok(value);
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
+                        name @ ("errno" | "strerror" | "filename" | "filename2") => {
+                            let (index, ty) = match name {
+                                "errno" => (0, Type::Int),
+                                "strerror" => (1, Type::Str),
+                                _ => (
+                                    if name == "filename" { 2 } else { 3 },
+                                    self.types
+                                        .union(&[Type::Str, Type::Bytes, Type::Path])
+                                        .unwrap(),
+                                ),
+                            };
+                            (
+                                self.types.optional(ty),
+                                Builtin::Process(ir::ProcessOperation::OsErrorField(index)),
+                            )
+                        }
                         field @ ("args" | "msg" | "name" | "path" | "name_from")
                             if receiver.ty == Type::ImportException =>
                         {
@@ -5708,6 +5735,12 @@ impl<'a> Checker<'a> {
             return self.call_super_initializer(call);
         }
         if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "most_common"
+            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+        {
+            return self.counter_most_common(call, None);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
             && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
             && matches!(method.attr.as_str(), "subtract" | "update")
             && !calls::starred(call)
@@ -5904,6 +5937,7 @@ impl<'a> Checker<'a> {
                 return self.cursor_length_hint(call);
             }
             Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
+            Some(Binding::Intrinsic(Intrinsic::DeepCopy)) => return self.deep_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
@@ -5918,6 +5952,19 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::Strerror)) => {
+                self.reject_builtin_keywords(call)?;
+                let [code] = call.arguments.args.as_ref() else {
+                    return Err(error(self.source, call, "os.strerror requires one integer"));
+                };
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(
+                        Builtin::Process(ir::ProcessOperation::Strerror),
+                        vec![self.expr_expected(code, Type::Int)?],
+                    ),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
@@ -5959,6 +6006,12 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return self.clock_time(call),
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::DictConfig)) => {
+                return self.logging_dictionary_config(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::FileConfig)) => {
+                return self.logging_file_config(call);
             }
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
@@ -6004,6 +6057,9 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::Fnmatch(operation))) => {
+                return self.fnmatch_call(operation, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexSub)) => return self.sub_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
@@ -6263,10 +6319,14 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
-            if attribute.attr.as_str() == "lower"
+            if matches!(attribute.attr.as_str(), "lower" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.text_method(Self::string_value(receiver), "lower", call);
+                return self.text_method(
+                    Self::string_value(receiver),
+                    attribute.attr.as_str(),
+                    call,
+                );
             }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -6286,6 +6346,7 @@ impl<'a> Checker<'a> {
             }
             if self.types.is_counter(receiver.ty) {
                 match attribute.attr.as_str() {
+                    "most_common" => return self.counter_most_common(call, Some(receiver)),
                     "update" => return self.counter(call, Some(receiver), None),
                     "subtract" => {
                         return self.counter_counts(call, Some(receiver), None, Binary::Subtract);

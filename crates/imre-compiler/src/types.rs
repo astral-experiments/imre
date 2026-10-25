@@ -407,6 +407,17 @@ impl Types {
             {
                 Type::Union(self.intern(Shape::Union(vec![*record, Type::Exception])))
             }
+            choices @ [_, _, ..]
+                if choices
+                    .iter()
+                    .all(|ty| matches!(ty, Type::Str | Type::Bytes | Type::Path)) =>
+            {
+                let ordered = [Type::Str, Type::Bytes, Type::Path]
+                    .into_iter()
+                    .filter(|ty| choices.contains(ty))
+                    .collect();
+                Type::Union(self.intern(Shape::Union(ordered)))
+            }
             _ => return None,
         };
         Some(if nullable { self.optional(ty) } else { ty })

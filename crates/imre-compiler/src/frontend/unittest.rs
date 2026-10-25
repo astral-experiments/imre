@@ -10,7 +10,7 @@ struct Expected {
 }
 
 impl Checker<'_> {
-    fn unittest_case(&self, class: usize) -> bool {
+    pub(super) fn unittest_case(&self, class: usize) -> bool {
         let classes = &self.classes.declarations.definitions;
         std::iter::once(&class)
             .chain(&classes[class].bases)
@@ -19,6 +19,78 @@ impl Checker<'_> {
                 let module = &self.graph.modules[record.definition.module];
                 record.name == "TestCase" && module.bundled && module.name == "unittest"
             })
+    }
+
+    /// Format a case's failure class without constructing an exception. A
+    /// case stored in a base-typed local may select a subclass's replacement.
+    pub(super) fn unittest_failure_repr(
+        &mut self,
+        value: &ast::Expr,
+    ) -> Result<Option<Expr>, String> {
+        let Some(attr) = value.as_attribute_expr() else {
+            return Ok(None);
+        };
+        if attr.attr.as_str() != "failureException" {
+            return Ok(None);
+        }
+        let Some(name) = attr.value.as_name_expr() else {
+            return Ok(None);
+        };
+        let Some(slot) = self.names.get(name.id.as_str()).copied() else {
+            return Ok(None);
+        };
+        let Type::Class(class) = self.read_local(slot).ty else {
+            return Ok(None);
+        };
+        if !self.unittest_case(class) {
+            return Ok(None);
+        }
+        let receiver = self.expr(&attr.value)?;
+        self.dispatch_record(class, receiver, value, |checker, concrete, _| {
+            let (_, _, qualified) = checker
+                .unittest_category(value, Some((name.id.as_str(), concrete)))
+                .ok_or_else(|| {
+                    error(
+                        checker.source,
+                        value,
+                        "cannot identify the case's failureException",
+                    )
+                })?;
+            Ok(unpacking::string(format!("<class '{qualified}'>")))
+        })
+        .map(Some)
+    }
+
+    /// An ordinary except clause has a fixed category only when every concrete
+    /// case of this local type selects the same exception. Otherwise the usual
+    /// diagnostic is safer than catching the wrong sibling.
+    pub(super) fn fixed_testcase_failure_kind(&self, value: &ast::Expr) -> Option<u32> {
+        let attr = value.as_attribute_expr()?;
+        if attr.attr.as_str() != "failureException" {
+            return None;
+        }
+        let name = attr.value.as_name_expr()?.id.as_str();
+        let slot = *self.names.get(name)?;
+        if !self.assigned.contains(&slot) {
+            return None;
+        }
+        let Type::Class(base) = self.read_local(slot).ty else {
+            return None;
+        };
+        if !self.unittest_case(base) {
+            return None;
+        }
+        let mut matched = None;
+        for (id, record) in self.classes.declarations.definitions.iter().enumerate() {
+            if (id == base || record.bases.contains(&base)) && record.abstract_methods.is_empty() {
+                let kind = self.unittest_category(value, Some((name, id)))?.0;
+                if matched.is_some_and(|previous| previous != kind) {
+                    return None;
+                }
+                matched = Some(kind);
+            }
+        }
+        matched
     }
 
     /// Match a source or builtin category by identity. Names are used only to render

@@ -89,7 +89,9 @@ def run_level(args, module, reference, level, directory):
         if row["outcome"] == "failure" and calls.get(row["id"]):
             # A failed assertion prevents the adapter from returning its normal
             # observation. Its counter still proves the native lookup occurred.
-            row["roles"].update(body="cpython", assertions="cpython", operation="imre", fixture="cpython")
+            missing = row["id"].endswith(".test_environ_path_missing")
+            row["roles"].update(body="cpython", assertions="cpython",
+                                operation="mixed" if missing else "imre", fixture="cpython")
             row["evidence"].update(operation="shutil.which", native_calls=calls[row["id"]], opt_level=level,
                                    fixture="original TestWhich environment and os.confstr/os.defpath patches")
     return report

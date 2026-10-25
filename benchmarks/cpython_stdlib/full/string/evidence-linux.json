@@ -1,0 +1,1680 @@
+[
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_string",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 0,
+    "denominator": 54,
+    "distinct_ids": 54,
+    "counts": {
+      "fully-native": 2,
+      "reference-only": 52
+    },
+    "records": [
+      {
+        "id": "test.test_string.test_string.LazyImportTest.test_lazy_import",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_attrs",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "original method, native str assertEqual",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "operation": "compiled test_attrs against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "69f3529678c52cb91fc30d9f22097bc2cbcd1c2a3b053ae3d23436cac8fed730",
+          "source_assertions": 9,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_auto_numbering",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_auto_numbering_lookup",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_auto_numbering_reenterability",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_basic_formatter",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_capwords",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "original method, native str assertEqual",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "operation": "compiled test_capwords against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "4a5d1af2bd8bd5b2bda7320f856f6d73992ae0c5050f988f879649204050f44e",
+          "source_assertions": 9,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_check_unused_args",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_conversion_specifiers",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_format_keyword_arguments",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_index_lookup",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_name_lookup",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_override_convert_field",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_override_format_field",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_override_get_value",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_override_parse",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_vformat_recursion_limit",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_SafeTemplate",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_braced_override",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_braced_override_safe",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_delimiter_override",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_escapes",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_flags_override",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_get_identifiers",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_idpattern_override",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_idpattern_override_inside_outside",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_idpattern_override_inside_outside_invalid_unbraced",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_invalid_placeholders",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_invalid_with_no_lines",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_is_valid",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_keyword_arguments",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_keyword_arguments_safe",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_pattern_override",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_percents",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_regular_templates",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_braces",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_non_letters",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_upper_case",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_stringification",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_tupleargs",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_unicode_values",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TemplateIterTests.test_abc",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TemplateIterTests.test_exhausted",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TemplateIterTests.test_final",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TemplateIterTests.test_iter",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestFunctions.test_convert",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_basic_creation",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_common",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_creation_interleaving",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_final_types",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_interpolation_creation",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_pickle_interpolation",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_pickle_template",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_template_values",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      }
+    ]
+  },
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_string",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 3,
+    "denominator": 54,
+    "distinct_ids": 54,
+    "counts": {
+      "fully-native": 2,
+      "reference-only": 52
+    },
+    "records": [
+      {
+        "id": "test.test_string.test_string.LazyImportTest.test_lazy_import",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_attrs",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "original method, native str assertEqual",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "operation": "compiled test_attrs against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "69f3529678c52cb91fc30d9f22097bc2cbcd1c2a3b053ae3d23436cac8fed730",
+          "source_assertions": 9,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_auto_numbering",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_auto_numbering_lookup",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_auto_numbering_reenterability",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_basic_formatter",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_capwords",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "original method, native str assertEqual",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "operation": "compiled test_capwords against the bundled string module",
+          "fixture": "byte-identical method in a native counted str equality adapter",
+          "method_sha256": "4a5d1af2bd8bd5b2bda7320f856f6d73992ae0c5050f988f879649204050f44e",
+          "source_assertions": 9,
+          "negative_control": "unequal strings"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_check_unused_args",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_conversion_specifiers",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_format_keyword_arguments",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_index_lookup",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_name_lookup",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_override_convert_field",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_override_format_field",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_override_get_value",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_override_parse",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.ModuleTest.test_vformat_recursion_limit",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_SafeTemplate",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_braced_override",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_braced_override_safe",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_delimiter_override",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_escapes",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_flags_override",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_get_identifiers",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_idpattern_override",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_idpattern_override_inside_outside",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_idpattern_override_inside_outside_invalid_unbraced",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_invalid_placeholders",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_invalid_with_no_lines",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_is_valid",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_keyword_arguments",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_keyword_arguments_safe",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_pattern_override",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_percents",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_regular_templates",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_braces",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_non_letters",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_upper_case",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_stringification",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_tupleargs",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_string.TestTemplate.test_unicode_values",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TemplateIterTests.test_abc",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TemplateIterTests.test_exhausted",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TemplateIterTests.test_final",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TemplateIterTests.test_iter",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestFunctions.test_convert",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_basic_creation",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_common",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_creation_interleaving",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_final_types",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_interpolation_creation",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_pickle_interpolation",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_pickle_template",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_string.test_templatelib.TestTemplate.test_template_values",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "upstream discovery",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      }
+    ]
+  }
+]
