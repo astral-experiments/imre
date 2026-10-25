@@ -9,8 +9,8 @@ pub(super) fn backing(value: Expr, id: usize) -> Expr {
     }
 }
 
-// Dictionary comparison and rendering operate on owned native words. Reject
-// layouts with user equality or representation hooks instead of bypassing them.
+// Unboxed floats cannot retain the identity shortcut for a shared NaN in two
+// dictionaries. Other unsupported layouts may invoke user equality or repr.
 fn storable(types: &Types, item: Type) -> bool {
     let mut pending = vec![item];
     let mut seen = HashSet::new();
@@ -21,7 +21,6 @@ fn storable(types: &Types, item: Type) -> bool {
         match item {
             Type::Int
             | Type::Bool
-            | Type::Float
             | Type::Str
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -145,7 +144,7 @@ impl Checker<'_> {
             return Err(error(
                 self.source,
                 call,
-                "this SimpleNamespace value may require a user-defined equality or representation hook",
+                "this SimpleNamespace value cannot preserve Python identity, equality, and representation",
             ));
         }
         let ty = self.types.dict(Type::Str, item);

@@ -40,6 +40,8 @@ BOUNDARIES = (
      "True\n", "expected int, got bool"),
     ("from types import SimpleNamespace\nns = SimpleNamespace([('letter', 17)])\nprint(ns.letter)\n",
      "17\n", "requires an exact string-keyed dictionary"),
+    ("from types import SimpleNamespace\nv = float('nan')\nprint(SimpleNamespace(x=v) == SimpleNamespace(x=v))\n",
+     "True\n", "cannot preserve Python identity, equality, and representation"),
 )
 
 
