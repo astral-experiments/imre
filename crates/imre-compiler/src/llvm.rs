@@ -5697,6 +5697,9 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::CounterElements => {
+                self.call("imre_counter_elements", returns, &[&args[0].value])
+            }
             Builtin::CounterTotal => self.call("imre_counter_total", returns, &[&args[0].value]),
             Builtin::CounterMostCommon => {
                 let pair = self.module.types.element(returns).unwrap();
@@ -7671,6 +7674,7 @@ declare void @imre_counter_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
+declare ptr @imre_counter_elements(ptr)
 declare ptr @imre_counter_most_common(ptr, i64, ptr)
 declare i32 @imre_counter_subset(ptr, ptr, i32)
 declare ptr @imre_key_union(ptr, ptr)
