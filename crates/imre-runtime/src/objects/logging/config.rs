@@ -513,7 +513,14 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             let reason = err.utf8_error();
             super::super::bytes::decode_owned_error(Rc::new(err.into_bytes()), reason)
         })?,
-        "latin-1" | "latin1" | "iso-8859-1" => bytes.iter().map(|&b| char::from(b)).collect(),
+        "latin-1" | "latin1" | "iso-8859-1" => {
+            let capacity = bytes.len() + bytes.iter().filter(|b| !b.is_ascii()).count();
+            let mut text = String::new();
+            text.try_reserve_exact(capacity)
+                .map_err(|_| Error::allocation())?;
+            text.extend(bytes.into_iter().map(char::from));
+            text
+        }
         _ => return Err(unsupported(&format!("file encoding {encoding}"))),
     };
     let source = if source.contains('\r') {
