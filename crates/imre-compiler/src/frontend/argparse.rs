@@ -17,6 +17,7 @@ pub(super) struct Parsers {
     commands: HashMap<usize, (String, HashMap<String, usize>)>,
 }
 
+#[derive(Clone)]
 struct Parser {
     class: usize,
     schema: String,
@@ -659,13 +660,31 @@ fn assigned_call<'a>(
     Some((name, method(&assign.value, receiver, operation)?))
 }
 
-struct ContainsName<'a>(&'a str, bool);
+/// A literal builder may be read repeatedly through its parser operations. Any
+/// other use, including passing the builder as an argument, would escape it.
+struct Uses<'a> {
+    builder: &'a str,
+    operations: Vec<TextSize>,
+    escaped: bool,
+    allow_calls: bool,
+}
 
-impl<'ast> Visitor<'ast> for ContainsName<'_> {
+impl<'ast> Visitor<'ast> for Uses<'_> {
     fn visit_expr(&mut self, node: &'ast ast::Expr) {
-        self.1 |= names(node, self.0);
-        if !self.1 {
-            walk_expr(self, node)
+        if self.allow_calls
+            && let ast::Expr::Call(call) = node
+            && let ast::Expr::Attribute(attr) = &*call.func
+            && names(&attr.value, self.builder)
+            && matches!(
+                attr.attr.as_str(),
+                "parse_args" | "format_help" | "format_usage" | "print_help" | "print_usage"
+            )
+        {
+            self.operations.push(call.start());
+            self.visit_arguments(&call.arguments);
+        } else {
+            self.escaped |= names(node, self.builder);
+            walk_expr(self, node);
         }
     }
 }
@@ -970,23 +989,30 @@ impl Parsers {
                             option: Value::Null,
                         });
                     }
-                    let parse = match function.body.get(index) {
-                        Some(ast::Stmt::Expr(stmt)) => Some(&*stmt.value),
-                        Some(ast::Stmt::Assign(stmt)) if stmt.targets.len() == 1 && stmt.targets[0].as_name_expr().is_some() => Some(&*stmt.value),
-                        Some(ast::Stmt::Return(stmt)) => stmt.value.as_deref(),
-                        _ => None,
-                    }.and_then(|expr| method(expr, builder, "parse_args"))
-                        .ok_or_else(|| module.error(ctor, "literal add_argument declarations must be followed by a parse_args() call"))?;
-                    for builder in builders {
-                        let mut outside = ContainsName(&builder, false);
-                        outside.visit_body(&function.body[..start]);
-                        outside.visit_body(&function.body[index + 1..]);
-                        if outside.1 {
+                    let mut operations = Vec::new();
+                    for declared in &builders {
+                        let mut uses = Uses {
+                            builder: declared,
+                            operations: Vec::new(),
+                            escaped: false,
+                            allow_calls: false,
+                        };
+                        uses.visit_body(&function.body[..start]);
+                        uses.allow_calls = declared == builder;
+                        uses.visit_body(&function.body[index..]);
+                        if uses.escaped {
                             return Err(module.error(
                                 name,
                                 "argparse builder cannot escape its declaration or be rebound",
                             ));
                         }
+                        operations.extend(uses.operations);
+                    }
+                    if operations.is_empty() {
+                        return Err(module.error(
+                            ctor,
+                            "argparse declarations must be followed by a parser operation",
+                        ));
                     }
                     let definition = DefinitionId {
                         module: module_id,
@@ -1028,15 +1054,15 @@ impl Parsers {
                         .map(|field| field.option)
                         .collect::<Vec<_>>();
                     let schema = json!({"prog": prog, "raw": raw, "prefixes": flags.prefixes, "help_flags": flags.help, "abbrev": flags.abbrev, "options": options, "groups": groups, "subcommands": subcommands}).to_string();
-                    parsers.calls.insert(
-                        (module_id, parse.start()),
-                        Parser {
-                            class,
-                            children: child_classes,
-                            schema,
-                            description: description.cloned(),
-                        },
-                    );
+                    let parser = Parser {
+                        class,
+                        children: child_classes,
+                        schema,
+                        description: description.cloned(),
+                    };
+                    for operation in operations {
+                        parsers.calls.insert((module_id, operation), parser.clone());
+                    }
                 }
             }
         }
@@ -1082,6 +1108,54 @@ impl Checker<'_> {
                 kind: ExprKind::Str(String::new()),
             },
         };
+        let schema = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Str(parser.schema.clone()),
+        };
+        let method = call.func.as_attribute_expr().unwrap().attr.as_str();
+        if method != "parse_args" {
+            let print = method.starts_with("print");
+            let file = match (
+                call.arguments.args.as_ref(),
+                call.arguments.keywords.as_ref(),
+            ) {
+                ([], []) => None,
+                ([file], []) if print => Some(file),
+                ([], [kw]) if print && kw.arg.as_ref().is_some_and(|name| name == "file") => {
+                    Some(&kw.value)
+                }
+                _ => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "invalid argparse formatting arguments",
+                    ));
+                }
+            };
+            let mut args = vec![schema, description];
+            let output = match file {
+                _ if !print => ir::ArgparseOutput::Return,
+                None | Some(ast::Expr::NoneLiteral(_)) => ir::ArgparseOutput::Stdout,
+                Some(file) => match self.resolve(file) {
+                    Some(Binding::Intrinsic(Intrinsic::Stdout)) => ir::ArgparseOutput::Stdout,
+                    Some(Binding::Intrinsic(Intrinsic::Stderr)) => ir::ArgparseOutput::Stderr,
+                    _ => {
+                        args.push(self.expr_expected(file, Type::TextIO)?);
+                        ir::ArgparseOutput::File
+                    }
+                },
+            };
+            return Ok(Some(Expr {
+                ty: if print { Type::None } else { Type::Str },
+                kind: ExprKind::Builtin(
+                    Builtin::ArgparseText {
+                        usage: method.ends_with("usage"),
+                        output,
+                    },
+                    args,
+                ),
+            }));
+        }
         let explicit = match (
             call.arguments.args.as_ref(),
             call.arguments.keywords.as_ref(),
@@ -1125,14 +1199,7 @@ impl Checker<'_> {
                     children: parser.children.clone(),
                     process_argv: explicit.is_none(),
                 },
-                vec![
-                    Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str(parser.schema.clone()),
-                    },
-                    description,
-                    argv,
-                ],
+                vec![schema, description, argv],
             ),
         }))
     }

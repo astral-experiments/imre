@@ -34,7 +34,7 @@ impl Drop for Block {
 }
 
 struct Shared {
-    source: Rc<Object>,
+    source: Option<Rc<Object>>,
     pulling: Cell<bool>,
 }
 
@@ -45,6 +45,10 @@ pub(in crate::objects) struct Fork {
 }
 
 impl Fork {
+    pub(super) fn take_source(&mut self) -> Option<Rc<Object>> {
+        Rc::get_mut(&mut self.shared)?.source.take()
+    }
+
     fn copy(&self) -> Self {
         Self {
             shared: self.shared.clone(),
@@ -68,7 +72,7 @@ impl Fork {
         };
         fork.unwrap_or_else(|| Self {
             shared: Rc::new(Shared {
-                source,
+                source: Some(source),
                 pulling: Cell::new(false),
             }),
             block: RefCell::new(Block::new()),
@@ -76,7 +80,7 @@ impl Fork {
         })
     }
 
-    pub(super) fn next(&self) -> Result<Option<OwnedWord>, Error> {
+    pub(super) fn advance(&self, result: Option<ItemResult>) -> Advance {
         let mut block = self.block.borrow().clone();
         let mut index = self.index.get();
         if index == BLOCK_SIZE {
@@ -86,34 +90,40 @@ impl Fork {
             index = 0;
             self.index.set(0);
         }
-        let saved = block.items.borrow().get(index).cloned();
-        let item = if let Some(item) = saved {
+        let item = if let Some(result) = result {
+            self.shared.pulling.set(false);
+            match result {
+                Ok(Some(item)) => {
+                    block.items.borrow_mut().push(item.clone());
+                    item
+                }
+                other => return Advance::Return(other),
+            }
+        } else if let Some(item) = block.items.borrow().get(index).cloned() {
             item
         } else {
             if self.shared.pulling.get() {
-                return Err(Error::new(
+                return Advance::Return(Err(Error::new(
                     Kind::RuntimeError,
                     "cannot re-enter the tee iterator",
-                ));
+                )));
             }
-            if index == 0 {
-                block
+            if index == 0
+                && block
                     .items
                     .borrow_mut()
                     .try_reserve_exact(BLOCK_SIZE)
-                    .map_err(|_| Error::allocation())?;
+                    .is_err()
+            {
+                return Advance::Return(Err(Error::allocation()));
             }
-            // Do not borrow the buffer across the upstream call: reentrant
-            // readers can consume cached items and must see the active pull.
             self.shared.pulling.set(true);
-            let result = next_item(&self.shared.source);
-            self.shared.pulling.set(false);
-            let Some(item) = result? else { return Ok(None) };
-            block.items.borrow_mut().push(item.clone());
-            item
+            return Advance::Pull(Rc::clone(
+                self.shared.source.as_ref().expect("live tee source"),
+            ));
         };
         self.index.set(index + 1);
-        Ok(Some(item))
+        Advance::Return(Ok(Some(item)))
     }
 }
 
@@ -141,5 +151,31 @@ pub unsafe extern "C" fn imre_tee(
                 .write(Rc::into_raw(fork));
         }
         tuple
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn releasing_mixed_forks_keeps_the_other_fork_alive() {
+        let cycle = |source| {
+            adapter(Adapter::Cycle(Cycle {
+                source: RefCell::new(source),
+                saved: RefCell::default(),
+                index: Cell::new(0),
+            }))
+        };
+        let surviving = Fork::from_source(cycle(None));
+        let mut cursor = adapter(Adapter::Tee(surviving.copy()));
+        for _ in 0..16_384 {
+            cursor = adapter(Adapter::Tee(Fork::from_source(cycle(Some(cursor)))));
+        }
+        drop(cursor);
+        assert!(matches!(
+            next_item(&adapter(Adapter::Tee(surviving))),
+            Ok(None)
+        ));
     }
 }

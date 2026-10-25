@@ -11,6 +11,46 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            PathOperation::WithName
+            | PathOperation::WithStem
+            | PathOperation::WithSuffix
+            | PathOperation::RelativeTo => {
+                let path = &args[0].value.operand;
+                let other = self.directory_pointer(&args[1].value);
+                let call = match operation {
+                    PathOperation::WithName => {
+                        format!("call ptr @imre_path_with_name(ptr {path}, ptr {other})")
+                    }
+                    PathOperation::RelativeTo => {
+                        let walk =
+                            self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
+                        format!(
+                            "call ptr @imre_path_relative_to(ptr {path}, ptr {other}, i32 {walk})"
+                        )
+                    }
+                    _ => format!(
+                        "call ptr @imre_path_change_extension(ptr {path}, ptr {other}, i32 {})",
+                        u32::from(matches!(operation, PathOperation::WithStem))
+                    ),
+                };
+                let operand = self.checked_instruction(call);
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            PathOperation::IsRelativeTo => {
+                let answer = self.instruction(format!(
+                    "call i32 @imre_path_is_relative_to(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {answer}, 0")),
+                    small_integer: false,
+                }
+            }
             PathOperation::Drive | PathOperation::Root | PathOperation::Anchor => {
                 let part = match operation {
                     PathOperation::Drive => 0,
@@ -172,30 +212,21 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            PathOperation::Iterdir | PathOperation::Glob => {
-                let pattern = args.get(1).map_or("null", |arg| arg.value.operand.as_str());
-                let call = format!(
-                    "call ptr @imre_path_iter(ptr {}, ptr {pattern})",
-                    args[0].value.operand
-                );
-                // iterdir scans now; validated glob scans only on its first pull.
-                let operand = if matches!(operation, PathOperation::Iterdir) {
-                    self.checked_instruction(call)
+            PathOperation::Iterdir | PathOperation::Glob { .. } => {
+                let path = &args[0].value.operand;
+                let call = if let PathOperation::Glob { recursive } = operation {
+                    let follow =
+                        self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
+                    format!(
+                        "call ptr @imre_path_glob(ptr {path}, ptr {}, i64 {}, i32 {follow}, i32 {})",
+                        args[1].value.operand,
+                        args[2].value.operand,
+                        u32::from(recursive)
+                    )
                 } else {
-                    self.instruction(call)
+                    format!("call ptr @imre_path_iter(ptr {path}, ptr null)")
                 };
-                self.owned(Value {
-                    ty: Type::Iterator,
-                    operand,
-                    small_integer: false,
-                })
-            }
-            PathOperation::Next => {
-                let pointer = self.checked_instruction(format!(
-                    "call ptr @imre_path_next(ptr {})",
-                    args[0].value.operand
-                ));
-                let operand = self.instruction(format!("ptrtoint ptr {pointer} to i64"));
+                let operand = self.checked_instruction(call);
                 self.owned(Value {
                     ty: returns,
                     operand,
@@ -210,11 +241,12 @@ impl Emitter<'_, '_> {
                     PathOperation::Join => "imre_path_join",
                     PathOperation::JoinObject => "imre_path_join_object",
                     PathOperation::AsPosix => "imre_path_as_posix",
-                    PathOperation::WithName => "imre_path_with_name",
                     PathOperation::Text => "imre_path_text",
                     PathOperation::Name => "imre_path_name",
+                    PathOperation::CountPart => "imre_path_count_part",
                     PathOperation::Stem => "imre_path_stem",
                     PathOperation::Suffix => "imre_path_suffix",
+                    PathOperation::Suffixes => "imre_path_suffixes",
                     PathOperation::Parent => "imre_path_parent",
                     PathOperation::ReadBytes => "imre_path_read_bytes",
                     PathOperation::ReadText if args.len() == 1 => "imre_path_read_text",

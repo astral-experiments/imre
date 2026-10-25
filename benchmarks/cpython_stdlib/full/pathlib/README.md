@@ -58,17 +58,40 @@ write, including invalid input, to Imre. The reports preserve those different
 roles. [Lexical assertion counts](lexical-results.json), [file operation counts](file-results.json)
 and the [earlier typed path gate](../../native_paths.py) provide additional detail.
 
+The [traversal runner](native_traversal.py) adds 31 unchanged occurrences. Six
+compile their entire bodies, including the two fixture variants that hold 100
+glob/rglob iterators open and check 3,100 yielded paths each. Sixteen have host
+bodies and assertions that drive native operations. The other nine also use a
+host parser, third-party path conversion, or an iterator type assertion on a
+host proxy; their records identify the specific use. The [glob comparison](glob_matrix.py)
+checks the order, duplicates and errors of 1,920 requests at each level independently
+of the unittest counts. Six additional requests exercise a directory symlink cycle.
+Repeated scans of the same cycle by CPython can stop at different depths on this
+Linux host. The original tests compare paths through the first link and discard
+deeper repetitions; the report retains the actual number of native iterator pulls
+on each run.
+
+The [component runner](native_components.py) measures 36 further occurrences on
+five concrete or pure path classes, including `PureWindowsPath` on Linux. The
+three `test_suffixes` bodies and their list comparisons run natively. The other
+33 run the original body and assertions on the host with each path held by Imre.
+Across those methods 435 `relative_to`, 168 `is_relative_to` and 177 name, stem
+or suffix calls run natively per level, including the upstream invalid inputs.
+
 | Execution at each of O0 and O3 | Occurrences |
 | --- | ---: |
-| Native body, assertions and operation with host fixture | 90 |
-| Host body and assertions, native operation | 3 |
-| Reference only | 885 |
+| Native body, assertions and operation with host fixture | 99 |
+| Host body and assertions, native operation | 52 |
+| Mixed execution | 9 |
+| Reference only | 818 |
 | Upstream reference skip | 391 |
 | **Total** | **1,369** |
 
-This revision records zero fully native fixture lifecycles, mixed passes, extra
+This revision records zero fully native fixture lifecycles, extra
 exclusions, native failures or method blockers. The package startup blocker
-below is independent of those method outcomes.
+below is independent of those method outcomes. Three host-driven occurrences
+also record why their whole body does not yet compile: list `+=` in `test_iterdir`
+and the unannotated `_check` local function in both `test_glob_case_sensitive` fixtures.
 
 [Whole-package startup](whole-suite-startup.json) is tracked separately. On
 `76d74f9` normal imports stopped at the leading name guard in `test.support`.
