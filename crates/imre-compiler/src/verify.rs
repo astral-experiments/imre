@@ -319,7 +319,8 @@ impl Verifier<'_> {
                 | Builtin::JsonDumps(ty)
                 | Builtin::JsonDump(ty)
                 | Builtin::TomlDecode(ty)
-                | Builtin::DictTryGet(ty),
+                | Builtin::DictTryGet(ty)
+                | Builtin::DictTryPop(ty),
                 _,
             ) => self.ty(*ty),
             ExprKind::Builtin(Builtin::IsInstance(kinds), _) => {

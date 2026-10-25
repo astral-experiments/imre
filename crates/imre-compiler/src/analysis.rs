@@ -257,6 +257,47 @@ impl Session {
         )
     }
 
+    /// Bound methods on these sealed native receiver layouts cannot dispatch to a
+    /// first-party class. Source subclasses of those layouts are rejected by the
+    /// fixed-class collector. Unknowns, unions, protocols and first-party
+    /// receivers keep the ordinary conservative name-based roots.
+    pub(crate) fn sealed_native_method(
+        &self,
+        module: usize,
+        attr: &ruff_python_ast::ExprAttribute,
+    ) -> bool {
+        use ty_python_semantic::types::{ProgramEnvironment, Type as Ty};
+        self.used_hints.set(true);
+        let program = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, program);
+        if !matches!(attr.inferred_type(&model), Some(Ty::BoundMethod(_))) {
+            return false;
+        }
+        let Some(receiver @ Ty::NominalInstance(_)) = attr.value.inferred_type(&model) else {
+            return false;
+        };
+        let Some(class) = receiver.definition(&self.db, &ProgramEnvironment::from_file(program))
+        else {
+            return false;
+        };
+        let Some(range) = class.focus_range(&self.db) else {
+            return false;
+        };
+        let Some(path) = range.file().path(&self.db).as_vendored_path() else {
+            return false;
+        };
+        // Use the bundled stdlib source identity, never a user-controlled module name.
+        let module = match path.file_name() {
+            Some("__init__.pyi") => path.parent().and_then(|parent| parent.file_name()),
+            _ if path.extension() == Some("pyi") => path.file_stem(),
+            _ => None,
+        };
+        matches!(
+            module,
+            Some("zipfile" | "io" | "_io" | "pathlib" | "re" | "gzip" | "hashlib" | "_hashlib")
+        )
+    }
+
     /// A nominal instance here, instead of its declared optional union, records
     /// a source-level narrowing. The backend must still guard mutable rereads.
     pub(crate) fn narrowed_instance(&self, module: usize, expression: &Expr) -> bool {
@@ -327,18 +368,18 @@ impl Session {
     pub(crate) fn check_scopes(
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
-        decorators: &[Vec<CheckedScope>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors(skipped, decorators)
+        self.errors(skipped, overloads)
     }
 
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
-        decorators: &[Vec<CheckedScope>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -349,7 +390,7 @@ impl Session {
                     &self.db,
                     file,
                     skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
-                    decorators.get(index).map_or(&[][..], Vec::as_slice),
+                    overloads.get(index).map_or(&[][..], Vec::as_slice),
                 );
                 file_errors(&self.db, checked)
             })
@@ -363,20 +404,33 @@ impl Session {
     }
 }
 
-/// Only diagnostics superseded by a proved native operation may be excluded.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum CheckedScope {
-    Decorator(TextRange),
-    Keyword(TextRange),
-}
-
 /// Reachable-only entry profiles can select different scopes of the same source.
 #[salsa::interned]
 struct CheckedFile<'db> {
     #[returns(copy)]
     file: File,
     skipped: Vec<TextRange>,
-    decorators: Vec<CheckedScope>,
+    overloads: Vec<CheckedDiagnostic>,
+}
+
+/// Only exclude the exact ty diagnostic already checked by native lowering.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum CheckedDiagnostic {
+    Decorator(TextRange),
+    Call(TextRange),
+    Keyword(TextRange),
+}
+
+impl CheckedDiagnostic {
+    fn covers(self, diagnostic: &str, range: TextRange) -> bool {
+        match self {
+            Self::Decorator(decorator) => {
+                diagnostic == "no-matching-overload" && decorator.contains_range(range)
+            }
+            Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
+        }
+    }
 }
 
 /// A per-file result depends on the ty queries it actually read, including any other source
@@ -391,7 +445,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
         }
     });
     let skipped = checked.skipped(db);
-    let decorators = checked.decorators(db);
+    let overloads = checked.overloads(db);
     db.check_file(file)
         .iter()
         .filter(|diagnostic| {
@@ -401,16 +455,9 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || decorators.iter().any(|scope| match *scope {
-                                CheckedScope::Decorator(scope) => {
-                                    diagnostic.id().as_str() == "no-matching-overload"
-                                        && scope.contains_range(range)
-                                }
-                                CheckedScope::Keyword(keyword) => {
-                                    diagnostic.id().as_str() == "unknown-argument"
-                                        && keyword == range
-                                }
-                            })
+                            || overloads
+                                .iter()
+                                .any(|scope| scope.covers(diagnostic.id().as_str(), range))
                     })
         })
         .map(|diagnostic| {
@@ -525,22 +572,22 @@ impl AnalysisCache {
         fresh: &mut Session,
         inputs: &crate::SourceInputs,
         skipped: Option<&[Vec<TextRange>]>,
-        decorators: &[Vec<CheckedScope>],
+        overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
         if let Some(cached) = &mut self.diagnostics
             && cached.same_files(fresh, inputs)
         {
             cached.update(fresh, inputs)?;
-            return cached.session.errors(skipped, decorators);
+            return cached.session.errors(skipped, overloads);
         }
         if self.hints.is_some() {
             // The quiet database must retain its inference with diagnostics disabled.
             let mut session = fresh.diagnostic_copy()?;
-            let result = session.check_scopes(skipped, decorators);
+            let result = session.check_scopes(skipped, overloads);
             self.diagnostics = Some(CachedSession::new(session, inputs));
             result
         } else {
-            let result = fresh.check_scopes(skipped, decorators);
+            let result = fresh.check_scopes(skipped, overloads);
             self.diagnostics = Some(CachedSession::new(fresh.clone(), inputs));
             result
         }
@@ -660,6 +707,8 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
         operators: usize,
         child_depth: usize,
         longest_item: usize,
+        // Replacement fields are siblings in an f-string or template string.
+        interpolated_string: bool,
         // A comma in lambda parameters or a comprehension target does not
         // separate independent expressions at this delimiter level.
         keep_commas: bool,
@@ -668,6 +717,12 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
     impl Group {
         fn depth(&self) -> usize {
             self.longest_item.max(self.operators + self.child_depth)
+        }
+
+        fn next_item(&mut self) {
+            self.longest_item = self.depth();
+            self.operators = 0;
+            self.child_depth = 0;
         }
     }
 
@@ -704,8 +759,12 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
                 statement_start = token == Newline;
             }
             Lpar | Lsqb | Lbrace | FStringStart | TStringStart => {
+                if token == Lbrace && group.interpolated_string {
+                    group.next_item();
+                }
                 group.operators += 1;
                 parents.push(std::mem::take(&mut group));
+                group.interpolated_string = matches!(token, FStringStart | TStringStart);
             }
             Rpar | Rsqb | Rbrace | FStringEnd | TStringEnd => {
                 if let Some(mut parent) = parents.pop() {
@@ -713,11 +772,7 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
                     group = parent;
                 }
             }
-            Comma if !group.keep_commas => {
-                group.longest_item = group.depth();
-                group.operators = 0;
-                group.child_depth = 0;
-            }
+            Comma if !group.keep_commas => group.next_item(),
             Lambda | For => {
                 group.keep_commas = true;
                 group.operators += 1;

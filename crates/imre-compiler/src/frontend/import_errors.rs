@@ -26,17 +26,10 @@ impl Checker<'_> {
     pub(super) fn import_error(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
         // Typeshed omits name_from and treats unknown keywords as static errors;
         // our resolved builtin supplies the CPython constructor or its exact TypeError.
-        self.graph
-            .import_keywords
-            .borrow_mut()
-            .entry(self.module)
-            .or_default()
-            .extend(
-                call.arguments
-                    .keywords
-                    .iter()
-                    .map(|kw| (kw.start(), kw.range())),
-            );
+        self.graph.checked_keywords(
+            self.module,
+            call.arguments.keywords.iter().map(Ranged::range),
+        );
         let mut fields = [None; 3];
         for (index, kw) in call.arguments.keywords.iter().enumerate() {
             let Some(key) = &kw.arg else {
