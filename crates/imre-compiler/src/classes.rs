@@ -11,12 +11,14 @@ use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule
 mod constants;
 mod dataclasses;
 mod enums;
+mod exception_forwarders;
 mod exceptions;
 mod inheritance;
 mod init_hooks;
 mod record_hash;
 pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
+pub(crate) use exception_forwarders::ForwardingInitializer;
 pub(crate) use exceptions::explicit_message_initializer;
 pub(crate) use inheritance::{super_init, super_method};
 
@@ -65,10 +67,26 @@ pub(crate) struct Class {
     pub(crate) dataclass: Option<DataclassOptions>,
     pub(crate) enum_members: Option<enums::Members>,
     pub(crate) exception_aliases: HashMap<String, ExceptionAlias>,
+    pub(crate) forwarder: Option<ForwardingInitializer>,
     pub(crate) static_bindings: HashMap<String, ClassValue>,
     pub(crate) generated_initializer: bool,
     /// Index into `methods`, including the initializer itself.
     pub(crate) initializer: Option<usize>,
+}
+
+impl Class {
+    /// The ABI slot stays in the root layout when a subclass adds Python fields.
+    pub(crate) fn exception_argument_slot(&self) -> usize {
+        self.fields
+            .iter()
+            .position(|field| {
+                matches!(
+                    field.name.as_str(),
+                    EXCEPTION_ARGS_SLOT | "<exception message>"
+                )
+            })
+            .expect("exception storage owns an argument slot")
+    }
 }
 
 #[derive(Clone)]
@@ -127,7 +145,21 @@ impl Classes {
                     if resolved.layouts.contains(&definition) {
                         // Exception inheritance is resolved above; only the additional fixed
                         // fields and methods take part in record layout and initialization.
-                        record.to_mut().arguments = None;
+                        if let Some(parent) = resolved.storage_parent.get(&definition) {
+                            let arguments = record.to_mut().arguments.as_mut().unwrap();
+                            let base = arguments
+                                .args
+                                .iter()
+                                .find(|base| {
+                                    graph.resolve(module_id, base)
+                                        == Some(Binding::Definition(*parent))
+                                })
+                                .unwrap()
+                                .clone();
+                            arguments.args = std::iter::once(base).collect();
+                        } else {
+                            record.to_mut().arguments = None;
+                        }
                     }
                     source_nodes.push((definition, record));
                 }
@@ -137,36 +169,8 @@ impl Classes {
             .iter()
             .map(|(def, node)| (*def, node.as_ref()))
             .collect::<Vec<_>>();
-        let mut definitions = inheritance::resolve(graph, &nodes, &ids, &resolved)?;
-        for def in &resolved.layouts {
-            let c = &mut definitions[ids[def]];
-            // This ABI slot is not a Python identifier, constructor parameter,
-            // dataclass comparison field, or repr field. The frontend gives
-            // the tuple slot its native exception field type during layout.
-            let module = &graph.modules[def.module];
-            let tuple_args = c.methods.iter().filter(|m| matches!(m.name.as_str(), "__init__" | "__post_init__"))
-                .flat_map(|m| &m.body).any(|stmt| matches!(stmt, ast::Stmt::Expr(e)
-                    if matches!(&*e.value, ast::Expr::Call(call) if explicit_message_initializer(module, call).is_some()
-                        || super_init(call) && call.arguments.args.len() != 1)));
-            let annotation = ruff_python_parser::parse_expression("str | None")
-                .expect("static annotation")
-                .expr()
-                .clone();
-            c.fields.push(Field {
-                module: def.module,
-                name: if tuple_args {
-                    EXCEPTION_ARGS_SLOT
-                } else {
-                    "<exception message>"
-                }
-                .into(),
-                annotation,
-                default: None,
-                kw_only: false,
-                repr: false,
-                compare: false,
-            });
-        }
+        let definitions = inheritance::resolve(graph, &nodes, &ids, &resolved)?;
+
         Ok(Self {
             definitions,
             ids,
@@ -250,6 +254,15 @@ fn collect_class(
             == Some(Binding::Intrinsic(Intrinsic::StandardEnum));
     }
     let dataclass = dataclasses::options(graph, definition.module, node)?;
+    let forwarder = exception_layout
+        .then(|| ForwardingInitializer::collect(definition, node, base.map(|(_, c)| c), module))
+        .flatten();
+    if base.is_some_and(|(_, c)| c.forwarder.is_some()) && forwarder.is_none() {
+        return Err(module.error(
+            node,
+            "a subclass of a variadic exception must forward a fixed set of constructor parameters",
+        ));
+    }
     let mut names = HashSet::new();
     let mut class_bindings = HashSet::new();
     let mut abstract_methods = base
@@ -459,6 +472,11 @@ fn collect_class(
                     .first()
                     .or_else(|| method.parameters.args.first());
                 let receiver = match kind {
+                    MethodKind::Instance
+                        if method.name.as_str() == "__init__" && forwarder.is_some() =>
+                    {
+                        forwarder.as_ref().map(|plan| plan.receiver.as_str())
+                    }
                     MethodKind::Instance | MethodKind::Property | MethodKind::PropertySetter => {
                         Some("self")
                     }
@@ -605,6 +623,25 @@ fn collect_class(
         ));
     }
     let inherited_fields = base.map_or(&[][..], |(_, base)| base.fields.as_slice());
+    if let Some(plan) = &forwarder {
+        let annotation = ruff_python_parser::parse_expression("object")
+            .expect("static annotation")
+            .expr()
+            .clone();
+        for (name, _) in &plan.stores {
+            if !fields.iter().any(|field| &field.name == name) {
+                fields.push(Field {
+                    module: definition.module,
+                    name: name.clone(),
+                    annotation: annotation.clone(),
+                    default: None,
+                    kw_only: false,
+                    repr: true,
+                    compare: true,
+                });
+            }
+        }
+    }
     if !is_enum
         && dataclass.is_none()
         && fields.len() == inherited_fields.len()
@@ -696,6 +733,8 @@ fn collect_class(
     }
     if let Some(initializer) = initializer
         && method_origins[initializer] == definition
+        // A proven forwarding exception constructor writes each field through its plan.
+        && forwarder.is_none()
     {
         check_initializer(
             module,
@@ -713,6 +752,7 @@ fn collect_class(
     }
     Ok(Class {
         definition,
+        forwarder,
         name: node.name.as_str().to_owned(),
         init_hooks,
         node: node.clone(),
