@@ -15,7 +15,41 @@ const PATH: u32 = 14;
 const JSON_VIEW: u32 = 15;
 const DOCUMENT: u32 = 16;
 
-type Separator<'a, T> = Result<T, &'a str>;
+#[derive(Clone, Copy)]
+struct InvalidSeparator<'a> {
+    kind: u32,
+    name: &'a str,
+}
+
+impl InvalidSeparator<'_> {
+    fn concatenate(self) -> Error {
+        let message = match self.kind {
+            LIST => "can only concatenate list (not \"str\") to list".to_owned(),
+            TUPLE => "can only concatenate tuple (not \"str\") to tuple".to_owned(),
+            BYTES => "can't concat str to bytes".to_owned(),
+            _ => {
+                let name = &self.name[..self.name.floor_char_boundary(100)];
+                format!("unsupported operand type(s) for +: '{name}' and 'str'")
+            }
+        };
+        Error::new(Kind::TypeError, message)
+    }
+
+    fn argument_name(&self) -> &str {
+        if self.kind == NONE { "None" } else { self.name }
+    }
+
+    fn write(self) -> Error {
+        let name = self.argument_name();
+        let name = &name[..name.floor_char_boundary(50)];
+        Error::new(
+            Kind::TypeError,
+            format!("write() argument must be str, not {name}"),
+        )
+    }
+}
+
+type Separator<'a, T> = Result<T, InvalidSeparator<'a>>;
 type Separators<'a, T> = (Separator<'a, T>, Separator<'a, T>);
 
 #[derive(Clone, Copy)]
@@ -88,18 +122,27 @@ unsafe fn separators(
             // SAFETY: the descriptor identifies a string rooted by the container.
             Ok(unsafe { StrOwner::acquire_word(word) })
         } else {
-            Err(typename(kind))
+            Err(InvalidSeparator {
+                kind,
+                name: typename(kind),
+            })
         }
     }
     fn field(word: usize, schema: &Schema) -> Separator<'_, crate::StrOwner> {
         if schema.kind == OPTIONAL {
             if word == 0 {
-                return Err("NoneType");
+                return Err(InvalidSeparator {
+                    kind: NONE,
+                    name: "NoneType",
+                });
             }
             return field(word, schema.child());
         }
         if schema.kind == RECORD {
-            Err(name(schema))
+            Err(InvalidSeparator {
+                kind: RECORD,
+                name: name(schema),
+            })
         } else {
             part(word, schema.kind)
         }
@@ -196,7 +239,7 @@ struct Encoder<'a> {
     sort_keys: bool,
     separators: Option<Separators<'a, &'a str>>,
     /// A compact list combines the separator with a primitive only after rendering it.
-    pending_item_error: Option<&'a str>,
+    pending_item_error: Option<InvalidSeparator<'a>>,
     /// The first-party schema encoder rejects all non-finite numbers.
     allow_nan: Option<bool>,
     stream: Option<&'a mut FileState>,
@@ -228,7 +271,7 @@ fn plain_ascii(bytes: &[u8]) -> bool {
 impl Encoder<'_> {
     fn emit(&mut self) -> Result<(), Error> {
         if let Some(ty) = self.pending_item_error {
-            return Err(Self::separator_error(ty));
+            return Err(ty.concatenate());
         }
         if let Some(stream) = &mut self.stream
             && !self.output.is_empty()
@@ -406,12 +449,13 @@ impl Encoder<'_> {
         Ok(())
     }
 
-    /// Report a non-text separator once a streaming chunk actually needs it.
-    fn separator_error(ty: &str) -> Error {
-        Error::new(
-            Kind::TypeError,
-            format!("JSON separator must be str, not {ty}"),
-        )
+    /// Iterencode yields a separator by itself before entering a container
+    /// or calling the default handler. A text stream rejects that chunk.
+    fn emit_prefix(&mut self) -> Result<(), Error> {
+        if let Some(invalid) = self.pending_item_error {
+            return Err(invalid.write());
+        }
+        self.emit()
     }
 
     fn separator(&mut self, index: usize, depth: usize, object: bool) -> Result<(), Error> {
@@ -423,9 +467,9 @@ impl Encoder<'_> {
                 if object && index == 0 {
                     self.emit()?;
                 }
-                return Err(Self::separator_error(ty));
+                return Err(ty.concatenate());
             }
-            Err(ty) if index != 0 && object => return Err(Self::separator_error(ty)),
+            Err(ty) if index != 0 && object => return Err(ty.write()),
             Err(ty) if index != 0 => self.pending_item_error = Some(ty),
             _ => {}
         }
@@ -440,7 +484,7 @@ impl Encoder<'_> {
             Ok(key) => self.append(key),
             Err(ty) => {
                 self.emit()?;
-                Err(Self::separator_error(ty))
+                Err(ty.write())
             }
         }
     }
@@ -534,10 +578,13 @@ impl Encoder<'_> {
         let node = &view.nodes[index];
         match node {
             Node::Null => self.append("null"),
-            Node::Datetime(_) => Err(Error::new(
-                Kind::TypeError,
-                "Object of type datetime is not JSON serializable",
-            )),
+            Node::Datetime(_) => {
+                self.emit_prefix()?;
+                Err(Error::new(
+                    Kind::TypeError,
+                    "Object of type datetime is not JSON serializable",
+                ))
+            }
             Node::Bool(value) => self.append(if *value { "true" } else { "false" }),
             Node::String(text) => self.string(text),
             Node::Integer(value) => self.integer(value),
@@ -548,7 +595,7 @@ impl Encoder<'_> {
                 self.document(v, v.index, depth)
             }
             Node::Array(children) => {
-                self.emit()?;
+                self.emit_prefix()?;
                 self.begin('[', depth)?;
                 let nonempty = if index == view.index
                     && let Some(items) = view.nodes.root_items()
@@ -582,7 +629,7 @@ impl Encoder<'_> {
                 self.end(']', nonempty, depth)
             }
             Node::Object(fields) => {
-                self.emit()?;
+                self.emit_prefix()?;
                 self.begin('{', depth)?;
                 let nonempty = self.ordered(
                     readonly::keys(fields),
@@ -614,7 +661,7 @@ impl Encoder<'_> {
                 NONE | BOOLEAN | INTEGER | FLOAT | STRING | OPTIONAL | JSON_VIEW
             )
         {
-            self.emit()?;
+            self.emit_prefix()?;
         }
         // SAFETY: each branch reads only the schema's exact rooted representation.
         unsafe {
@@ -843,7 +890,8 @@ unsafe fn encode(
                 // and decodes the complete diagnostic as UTF-8.
                 let mut message =
                     format!("make_encoder() argument {field} must be str, not ").into_bytes();
-                message.extend_from_slice(&ty.as_bytes()[..ty.len().min(50)]);
+                let name = ty.argument_name();
+                message.extend_from_slice(&name.as_bytes()[..name.len().min(50)]);
                 return Err(match String::from_utf8(message) {
                     Ok(text) => Error::new(Kind::TypeError, text),
                     Err(error) => {
