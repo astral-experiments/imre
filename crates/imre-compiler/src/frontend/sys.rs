@@ -227,6 +227,19 @@ pub(super) fn exit_payload_supported(ty: Type, types: &Types) -> bool {
 }
 
 impl Checker<'_> {
+    /// Expose the thread provider and its optional library version as a native struct sequence.
+    pub(super) fn sys_thread_info(&self) -> Expr {
+        let text = self.types.optional(Type::Str);
+        Expr {
+            ty: self.types.struct_sequence(
+                "sys.thread_info",
+                &["name", "lock", "version"],
+                vec![text, Type::None, text],
+            ),
+            kind: ExprKind::Builtin(Builtin::SysThreadInfo, vec![]),
+        }
+    }
+
     pub(super) fn sys_version_info(&self, implementation: bool) -> Expr {
         Expr {
             ty: self.types.struct_sequence(

@@ -92,7 +92,7 @@ impl Emitter<'_, '_> {
         values: &[Expr],
         singleton: Option<&str>,
     ) -> Value {
-        let cache = if values.iter().all(immutable_literal) {
+        let cache = if singleton.is_some() || values.iter().all(immutable_literal) {
             let unit = if singleton.is_some() {
                 self.output.entry
             } else {
