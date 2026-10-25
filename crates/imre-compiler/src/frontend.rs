@@ -1587,7 +1587,7 @@ fn annotation_with_aliases(
                     .is_some_and(|ty| ty.name == "SelectorKey")
             {
                 return Ok(types.namedtuple_layout(
-                    definition,
+                    crate::types::TupleOrigin::Declaration(definition),
                     vec![Type::Int, Type::Int, Type::Int, Type::ObjectValue],
                 ));
             }
