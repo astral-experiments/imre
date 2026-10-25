@@ -173,6 +173,20 @@ class ContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 build_report(ref, 0, discovered, decisions, exceptions=changed)
 
+    def test_versioned_logging_evidence_includes_record_gate(self):
+        path = Path(__file__).resolve().parent / "full/logging/evidence-linux.json"
+        reports = json.loads(path.read_text())
+        expected = {
+            "test.test_logging.LogRecordTest.test_str_rep": "native-body-host-fixture",
+            "test.test_logging.LogRecordTest.test_optional": "host-driven-native-operation",
+        }
+        for report in reports:
+            records = {row["id"]: row for row in report["records"]}
+            self.assertEqual(
+                {name: records[name]["classification"] for name in expected},
+                expected,
+            )
+
     def test_old_callback_remains_callable_and_is_not_inferred(self):
         class Example(unittest.TestCase):
             def runTest(self):
