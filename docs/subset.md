@@ -600,6 +600,8 @@ A string template can substitute named `str` and `int` arguments, as in `url.for
 
 `textwrap.dedent(text)` removes the common prefix of spaces and tabs on nonblank lines. Each tab counts as a distinct character. Whitespace-only lines become empty as in Python 3.14. Interpolation happens before dedenting, so newlines in field values participate in the common-prefix calculation.
 
+`textwrap.indent(text, prefix, predicate=None)` preserves line endings, including CRLF and Unicode line separators. By default it prefixes lines that contain a non-whitespace character. An optional `Callable[[str], bool]` receives each complete line, including its terminator. Errors raised by the predicate stop iteration.
+
 ## Immutable bytes
 
 `hashlib.sha256(data=b"", *, usedforsecurity=True)` constructs a mutable SHA-256 hash from exact bytes. `update(data)` adds bytes and returns `None`. `digest()` returns 32 bytes and `hexdigest()` returns 64 lowercase hexadecimal digits; neither prevents further updates. An assignment shares the same hash, while `copy()` creates an independent state. The read-only attributes are `name`, `digest_size`, and `block_size`. Both values of the boolean `usedforsecurity` select the same SHA-256 implementation. The named constructor `hashlib.new(name, data=b"", *, usedforsecurity=True)` resolves SHA-256 aliases at runtime. `hashlib.algorithms_available` is a shared mutable set of the provider’s supported canonical names (currently `sha256`); adding a name to the set does not install a new algorithm. Unknown names raise `ValueError`. The immediate `sha256(data).hexdigest()` spelling can hash the bytes directly without allocating a mutable object.
@@ -752,6 +754,8 @@ Use `group = parser.add_argument_group(title, description)` to place arguments i
 A subcommand is optional by default. With `add_subparsers(dest="command")`, the namespace contains `command=None` when omitted. Without `dest`, no command field is added. Use `required=True` or set the group's `required` attribute to require a selection. Each literal `add_parser("name", aliases=["alias"], help="...")` introduces a child parser with its own options. The destination retains the spelling the caller used; child help uses its canonical name. A `match args.command` case or `if args.command == "alias"` branch selects the child's concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
 Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()` or `parse_known_args()`. The latter returns the namespace and a list of unrecognized arguments in order. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested subcommands are outside this grammar.
+
+The `store_true`, `store_false`, and `store_const` actions store a value without consuming the next argument. A `count` action increments once for each occurrence, including each letter in a cluster such as `-vvv`.
 
 ## Standard logging
 

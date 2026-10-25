@@ -43,6 +43,7 @@ mod inspect;
 mod iterables;
 mod itertools;
 mod json;
+mod linecache;
 mod literals;
 mod local_functions;
 mod logging;
@@ -1118,6 +1119,16 @@ fn signature(
             matches!(value, ast::Expr::Subscript(subscript) if graph.resolve(module, &subscript.value) == Some(Binding::Intrinsic(Intrinsic::Sequence))));
         let empty_sequence = sequence
             && matches!(parameter.default.as_deref(), Some(ast::Expr::Tuple(tuple)) if tuple.elts.is_empty());
+        let wrapper_default =
+            parameter
+                .default
+                .as_deref()
+                .and_then(|value| match graph.resolve(module, value) {
+                    Some(Binding::Intrinsic(Intrinsic::WrapperAttributes(fields))) => {
+                        Some(functools::wrapper_attributes(fields, types))
+                    }
+                    _ => None,
+                });
         let ty = if let Some(receiver) = receiver
             && index == 0
         {
@@ -1173,6 +1184,8 @@ fn signature(
                     .map(|value| {
                         if inspect::is_sentinel(graph, module, value) {
                             Ok(Type::PlainObject)
+                        } else if let Some(default) = &wrapper_default {
+                            Ok(default.ty)
                         } else {
                             calls::scalar_literal(value, source).map(|value| value.ty)
                         }
@@ -1202,6 +1215,15 @@ fn signature(
                     })
                 } else if ty == Type::PlainObject && inspect::is_sentinel(graph, module, value) {
                     Ok(inspect::sentinel())
+                } else if let Some(default) = wrapper_default {
+                    if default.ty != ty {
+                        return Err(error(
+                            source,
+                            value,
+                            "wrapper attribute default requires its exact tuple type",
+                        ));
+                    }
+                    Ok(default)
                 } else {
                     calls::scalar_default(value, ty, types, source)
                 }
@@ -4816,7 +4838,13 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::HashAvailable, vec![]),
                     });
                 }
+                Intrinsic::Linecache(ir::LinecacheOperation::Cache) => {
+                    return Ok(self.linecache_mapping());
+                }
                 Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
+                Intrinsic::WrapperAttributes(fields) => {
+                    return Ok(functools::wrapper_attributes(fields, self.types));
+                }
                 Intrinsic::OsDevnull => {
                     return Ok(Expr {
                         ty: Type::Str,
@@ -6349,6 +6377,11 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Linecache(op)))
+                if op != ir::LinecacheOperation::Cache =>
+            {
+                return self.linecache_call(op, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::InspectIsMethodDescriptor)) => {
                 return self.is_method_descriptor(call);
             }
@@ -6406,7 +6439,7 @@ impl<'a> Checker<'a> {
                 return self.system_path_call(intrinsic, call);
             }
             Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
-                return self.text_function(call, "text", ir::TextOperation::Dedent);
+                return self.dedent_call(call);
             }
             Some(Binding::Intrinsic(Intrinsic::UrlsafeB64encode)) => {
                 let args = self.arguments(
