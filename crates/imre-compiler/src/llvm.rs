@@ -3835,6 +3835,7 @@ impl Emitter<'_, '_> {
                     ConfigureName => "imre_log_config_named",
                     Name => "imre_log_name",
                     Parent => "imre_log_parent",
+                    Children => "imre_log_children",
                     Root => "imre_log_root",
                     Level => "imre_log_level",
                     EffectiveLevel => "imre_log_effective_level",
@@ -4034,6 +4035,17 @@ impl Emitter<'_, '_> {
             Builtin::JsonAddFields(a, b) => self.json_add_fields(a, b, &args),
             Builtin::JsonGetReceiver => {
                 self.call("imre_json_get_receiver", returns, &[&args[0].value])
+            }
+            Builtin::JsonEqual => {
+                let equal = self.checked_instruction(format!(
+                    "call i32 @imre_json_equal(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {equal}, 0")),
+                    small_integer: false,
+                }
             }
             Builtin::JsonIsInt => {
                 let bit = self.instruction(format!(
@@ -4577,6 +4589,13 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_import_error_reset", &[&args[0].value, &args[1].value]);
                 none()
             }
+            Builtin::ImportErrorRejectReset => {
+                self.void_call(
+                    "imre_import_error_reject_reset",
+                    &[&args[0].value, &args[1].value, &args.last().unwrap().value],
+                );
+                none()
+            }
             Builtin::ImportErrorField(field) => Value {
                 ty: returns,
                 operand: self.instruction(format!(
@@ -5078,6 +5097,22 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::CounterTotal => self.call("imre_counter_total", returns, &[&args[0].value]),
+            Builtin::CounterMostCommon => {
+                let pair = self.module.types.element(returns).unwrap();
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(pair)));
+                let limit = self.word(&args[1].value);
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_counter_most_common(ptr {}, i64 {limit}, ptr @{layout})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::DefaultListDict => {
                 let (key, list) = self.module.types.mapping(returns).unwrap();
                 let element = self.module.types.element(list).unwrap();
@@ -6502,6 +6537,8 @@ declare ptr @imre_environ_get(ptr, ptr)
 declare ptr @imre_getcwd()
 declare void @imre_os_close(i64)
 declare i64 @imre_os_open(ptr, i32, i64, i64, i64)
+declare i64 @imre_os_error_field(ptr, i32)
+declare ptr @imre_os_strerror(i64)
 @imre_os_o_rdonly = external constant i64
 @imre_os_o_wronly = external constant i64
 @imre_os_o_rdwr = external constant i64
@@ -6521,7 +6558,9 @@ declare i32 @imre_os_get_blocking(i64)
 declare void @imre_os_set_blocking(i64, i64)
 declare i32 @imre_os_get_inheritable(i64)
 declare void @imre_os_set_inheritable(i64, i64)
-declare ptr @imre_shutil_which(ptr, i64, ptr, i32, i32)
+declare ptr @imre_shutil_which(ptr, i64, ptr, i32, i32, ptr, ptr)
+declare ptr @imre_shutil_confstr_cs_path()
+declare ptr @imre_shutil_os_defpath()
 declare i64 @imre_shutil_copy(i32, ptr, i32, ptr, i32, i32)
 declare void @imre_subprocess_check(ptr)
 declare i64 @imre_subprocess_error_field(ptr, i32)
@@ -6530,6 +6569,7 @@ declare ptr @imre_path_new(ptr)
 declare ptr @imre_path_join(ptr, ptr)
 declare ptr @imre_path_text(ptr)
 declare ptr @imre_path_name(ptr)
+declare i64 @imre_path_count_part(ptr, ptr)
 declare ptr @imre_path_with_name(ptr, ptr)
 declare ptr @imre_path_stem(ptr)
 declare ptr @imre_path_suffix(ptr)
@@ -6578,6 +6618,7 @@ declare ptr @imre_path_replace(ptr, ptr)
 declare ptr @imre_tempdir_new(ptr, ptr, ptr)
 declare void @imre_tempdir_cleanup(ptr)
 declare ptr @imre_path_iter(ptr, ptr)
+declare ptr @imre_path_glob(ptr, ptr, i64, i32, i32)
 declare ptr @imre_path_next(ptr)
 declare i64 @imre_float_box(double)
 declare double @imre_float_unbox(i64)
@@ -6674,6 +6715,7 @@ declare ptr @imre_exception_message(ptr)
 declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
 declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
+declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
@@ -6701,6 +6743,7 @@ declare ptr @imre_json_iter(ptr)
 declare i64 @imre_json_len(ptr)
 declare i64 @imre_json_get(ptr, ptr, i64, i32, i32, i64)
 declare ptr @imre_json_add(ptr, ptr)
+declare i32 @imre_json_equal(ptr, ptr)
 declare ptr @imre_json_get_receiver(ptr)
 declare ptr @imre_json_add_fields(ptr, ptr, i64, i64, ptr, i64, i64)
 declare i32 @imre_json_is_int(ptr)
@@ -6790,6 +6833,7 @@ declare void @imre_counter_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
+declare ptr @imre_counter_most_common(ptr, i64, ptr)
 declare i32 @imre_counter_subset(ptr, ptr, i32)
 declare ptr @imre_key_union(ptr, ptr)
 declare ptr @imre_key_difference(ptr, ptr)
@@ -6957,6 +7001,7 @@ declare i64 @imre_log_parent(ptr)
 declare ptr @imre_log_root(ptr)
 declare i64 @imre_log_level(ptr)
 declare i64 @imre_log_effective_level(ptr)
+declare ptr @imre_log_children(ptr)
 declare void @imre_log_set_level(ptr, i64)
 declare i1 @imre_log_enabled(ptr, i64)
 declare void @imre_log_emit(ptr, i64, ptr)

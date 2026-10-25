@@ -34,7 +34,7 @@ impl Drop for Block {
 }
 
 struct Shared {
-    source: Rc<Object>,
+    source: Option<Rc<Object>>,
     pulling: Cell<bool>,
 }
 
@@ -45,6 +45,10 @@ pub(in crate::objects) struct Fork {
 }
 
 impl Fork {
+    pub(super) fn take_source(&mut self) -> Option<Rc<Object>> {
+        Rc::get_mut(&mut self.shared)?.source.take()
+    }
+
     fn copy(&self) -> Self {
         Self {
             shared: self.shared.clone(),
@@ -68,7 +72,7 @@ impl Fork {
         };
         fork.unwrap_or_else(|| Self {
             shared: Rc::new(Shared {
-                source,
+                source: Some(source),
                 pulling: Cell::new(false),
             }),
             block: RefCell::new(Block::new()),
@@ -106,7 +110,7 @@ impl Fork {
             // Do not borrow the buffer across the upstream call: reentrant
             // readers can consume cached items and must see the active pull.
             self.shared.pulling.set(true);
-            let result = next_item(&self.shared.source);
+            let result = next_item(self.shared.source.as_ref().expect("live tee source"));
             self.shared.pulling.set(false);
             let Some(item) = result? else { return Ok(None) };
             block.items.borrow_mut().push(item.clone());
@@ -141,5 +145,28 @@ pub unsafe extern "C" fn imre_tee(
                 .write(Rc::into_raw(fork));
         }
         tuple
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn releasing_mixed_forks_keeps_the_other_fork_alive() {
+        let cycle = |source| {
+            adapter(Adapter::Cycle(Cycle {
+                source: RefCell::new(source),
+                saved: RefCell::default(),
+                index: Cell::new(0),
+            }))
+        };
+        let surviving = Fork::from_source(cycle(None));
+        let mut cursor = adapter(Adapter::Tee(surviving.copy()));
+        for _ in 0..16_384 {
+            cursor = adapter(Adapter::Tee(Fork::from_source(cycle(Some(cursor)))));
+        }
+        drop(cursor);
+        assert!(matches!(surviving.next(), Ok(None)));
     }
 }

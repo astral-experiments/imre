@@ -216,6 +216,7 @@ pub(crate) enum Intrinsic {
     StrEnum,
     EnumAuto,
     DefaultDict,
+    NamedTuple,
     Counter,
     Repeat,
     LengthHint,
@@ -267,6 +268,7 @@ pub(crate) enum Intrinsic {
     Environ,
     GetEnv,
     GetCwd,
+    Strerror,
     Fd(crate::ir::FdOperation),
     OpenFlag(&'static str),
     FsPath,
@@ -345,7 +347,7 @@ impl IntrinsicModule {
             if name == "path" {
                 return Some(Binding::IntrinsicModule(Self::PosixPath));
             }
-            if let Some(symbol) = os::descriptor(name) {
+            if let Some(symbol) = os::symbol(name) {
                 return Some(Binding::Intrinsic(symbol));
             }
         }
@@ -489,6 +491,7 @@ impl IntrinsicModule {
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
@@ -954,7 +957,9 @@ impl SourceGraph {
                 .or_else(|| self.resolve(module, expression)),
             ast::Expr::Attribute(attribute) => match self.resolve_type(module, &attribute.value)? {
                 Binding::Module(target) => self.modules[target].export(attribute.attr.as_str()),
-                Binding::IntrinsicModule(target) => target.symbol(attribute.attr.as_str()),
+                Binding::IntrinsicModule(target) => {
+                    stdlib_symbol(&self.modules, target, attribute.attr.as_str())
+                }
                 _ => None,
             },
             _ => None,
@@ -972,7 +977,9 @@ fn resolve_binding(
         ast::Expr::Attribute(attribute) => {
             match resolve_binding(modules, module, &attribute.value)? {
                 Binding::Module(module) => modules[module].export(attribute.attr.as_str()),
-                Binding::IntrinsicModule(module) => module.symbol(attribute.attr.as_str()),
+                Binding::IntrinsicModule(module) => {
+                    stdlib_symbol(modules, module, attribute.attr.as_str())
+                }
                 Binding::Definition(_)
                 | Binding::Value(_)
                 | Binding::TypeAlias(..)
@@ -981,6 +988,26 @@ fn resolve_binding(
         }
         _ => None,
     }
+}
+
+const LOGGING_CLASSES: &str = "__imre_logging_classes__";
+
+/// Public logging classes can be compiled from Python alongside the module's
+/// native operations. Only local class definitions are exported from the bundle.
+fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
+    module.symbol(name).or_else(|| {
+        if module != IntrinsicModule::Logging || name.starts_with('_') {
+            return None;
+        }
+        let (id, source) = modules
+            .iter()
+            .enumerate()
+            .find(|(_, m)| m.bundled && m.name == LOGGING_CLASSES)?;
+        source.export(name).filter(|b| {
+            matches!(b, Binding::Definition(d) if d.module == id &&
+                matches!(&source.parsed.syntax().body[d.statement], ast::Stmt::ClassDef(_)))
+        })
+    })
 }
 
 struct Loader<'a> {
@@ -1134,7 +1161,13 @@ impl<'a> Loader<'a> {
                                     .copied()
                                     .or_else(|| target.export(alias.name.as_str()))
                             })
-                            .or_else(|| IntrinsicModule::named(&name)?.symbol(alias.name.as_str()));
+                            .or_else(|| {
+                                stdlib_symbol(
+                                    &self.modules,
+                                    IntrinsicModule::named(&name)?,
+                                    alias.name.as_str(),
+                                )
+                            });
                         if let Some(binding) = binding {
                             let local = alias.asname.as_ref().unwrap_or(&alias.name);
                             self.modules[id]
@@ -1272,6 +1305,27 @@ impl<'a> Loader<'a> {
                 }
                 ast::Stmt::Expr(value)
                     if matches!(&*value.value, ast::Expr::StringLiteral(_)) && !executable => {}
+                ast::Stmt::Assign(_)
+                    if value_name(statement).is_some()
+                        && matches!(module_value(statement), Some(ast::Expr::Call(call))
+                        if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::NamedTuple))) =>
+                {
+                    if executable && id == 0 {
+                        return Err(self.modules[id].error(
+                            statement,
+                            "definitions must precede executable module statements",
+                        ));
+                    }
+                    self.bind(
+                        id,
+                        value_name(statement).unwrap(),
+                        Binding::Definition(DefinitionId {
+                            module: id,
+                            statement: index,
+                        }),
+                        statement,
+                    )?;
+                }
                 _ => {
                     let entry_global = id == 0
                         && !executable
@@ -1368,8 +1422,7 @@ impl<'a> Loader<'a> {
                     && let Some(module) = self.intrinsic_module(&name)?
                 {
                     for alias in &import.names {
-                        let binding = module
-                            .symbol(alias.name.as_str())
+                        let binding = stdlib_symbol(&self.modules, module, alias.name.as_str())
                             .filter(|binding| {
                                 self.reachable_only
                                     || !matches!(
@@ -1448,6 +1501,27 @@ impl<'a> Loader<'a> {
         if module.is_some() {
             self.reject_stdlib_shadow(name)?;
         }
+        if name.split('.').next() == Some("logging")
+            && module.is_some()
+            && !self.by_name.contains_key(LOGGING_CLASSES)
+        {
+            let path = self.root.join(format!("{LOGGING_CLASSES}.py"));
+            if self.fs.exists(&path) {
+                return Err(format!(
+                    "standard-library shadowing is unsupported: {LOGGING_CLASSES:?}"
+                ));
+            }
+            self.inputs.missing.push(path.clone());
+            let id = self.add(
+                path.clone(),
+                path,
+                LOGGING_CLASSES.into(),
+                false,
+                include_str!("../stdlib/logging/classes.py"),
+            )?;
+            self.modules[id].bundled = true;
+            self.scan(id)?;
+        }
         Ok(module)
     }
 
@@ -1496,6 +1570,9 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
+        if name == LOGGING_CLASSES {
+            return Err("the private logging implementation is not an importable module".into());
+        }
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {
                 return Err(format!(

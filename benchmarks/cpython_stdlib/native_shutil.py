@@ -82,12 +82,19 @@ def main():
         source.write_text(driver_source())
         subprocess.run([args.imre.resolve(), "build", source, "-o", program, "--no-cache", "--opt-level", "3",
                         "--clang", args.clang.resolve(), "--runtime", args.runtime.resolve()], check=True, timeout=120)
+        if sys.platform == "linux":
+            sys.path.insert(0, str(HERE / "full/shutil"))
+            from which_defaults import paired
+            defaults = paired(args, suite, work)
+        else:
+            defaults = {}
         for cls in (suite.TestWhich, suite.TestWhichBytes):
             for name in unittest.defaultTestLoader.getTestCaseNames(cls):
                 case = cls(name)
-                if name == "test_environ_path_missing":
-                    report["tests"][case.id()] = {"status": "excluded", "native_calls": 0,
-                        "reason": "Python monkeypatches os.confstr and os.defpath inside the host process"}
+                if name == "test_environ_path_missing" and defaults:
+                    report["tests"][case.id()] = {"status": "mixed", "native_calls": 2,
+                        "optimization_levels": {level: rows[case.id()] for level, rows in defaults.items()}}
+                    print("mixed", case.id(), "two native lookups each at -O0 and -O3")
                     continue
                 with mock.patch.object(suite.shutil, "which", side_effect=lambda *a, **kw: invoke(program, *a, **kw)) as calls:
                     result = unittest.TestResult()
