@@ -53,6 +53,11 @@ use super::{
 };
 use num_traits::ToPrimitive;
 use std::rc::Rc;
+
+/// Literal constructors share the same empty and Latin-1 owners as chr and indexing.
+pub(crate) fn literal_string(text: &str) -> Rc<Str> {
+    self::text::owned_string(text)
+}
 use words::{OwnedWord, Words};
 
 // All C ints fit in the immediate representation. Heap integers cannot fit.
