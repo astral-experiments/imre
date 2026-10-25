@@ -4719,20 +4719,33 @@ impl Emitter<'_, '_> {
             Builtin::SystemExitCode => {
                 self.call("imre_system_exit_code", returns, &[&args[0].value])
             }
-            Builtin::SystemExitCodeEqual { reversed } => {
+            Builtin::SystemExitCodeEqual { reversed }
+            | Builtin::ExceptionFieldIdentity { reversed } => {
                 let i = usize::from(*reversed);
                 let other = &args[1 - i].value;
                 // Kind 5 denotes another object view in this ABI.
                 let kind = if self.module.types.mapping(other.ty).is_some() {
                     17
+                } else if matches!(builtin, Builtin::SystemExitCodeEqual { .. })
+                    && matches!(other.ty, Type::List(_))
+                {
+                    18
                 } else {
                     representation_kind(other.ty, &self.module.types)
                 };
                 let word = self.word(other);
-                let bit = self.checked_instruction(format!(
-                    "call i32 @imre_system_exit_code_equal(ptr {}, i32 {kind}, i64 {word})",
+                let function = if matches!(builtin, Builtin::ExceptionFieldIdentity { .. }) {
+                    "imre_exception_field_identity"
+                } else {
+                    "imre_system_exit_code_equal"
+                };
+                let bit = self.instruction(format!(
+                    "call i32 @{function}(ptr {}, i32 {kind}, i64 {word})",
                     args[i].value.operand
                 ));
+                if matches!(builtin, Builtin::SystemExitCodeEqual { .. }) {
+                    self.check_error();
+                }
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
@@ -5265,6 +5278,27 @@ impl Emitter<'_, '_> {
             Builtin::ExceptionTupleView => {
                 self.call("imre_exception_tuple_view", returns, &[&args[0].value])
             }
+            Builtin::ExceptionRecordFields => {
+                let record = self.record(returns);
+                for (i, value) in args.iter().enumerate() {
+                    self.set_field(&record, i, &value.value);
+                }
+                record
+            }
+            Builtin::ExceptionKeywordSuggestion => self.call(
+                "imre_exception_keyword_message",
+                returns,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
+            Builtin::ExceptionFormatterResult(repr) => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @imre_exception_formatter_result(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*repr)
+                )),
+                small_integer: false,
+            },
             Builtin::ExceptionFieldRepr => {
                 self.call("imre_exception_field_repr", returns, &[&args[0].value])
             }
@@ -7774,9 +7808,11 @@ declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_box_value(i32, i64)
 declare ptr @imre_mapping_object_get(ptr, ptr)
 declare ptr @imre_exception_tuple_view(ptr)
+declare ptr @imre_exception_formatter_result(ptr, i32)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
+declare ptr @imre_exception_keyword_message(ptr, ptr, ptr)
 declare ptr @imre_exception_argument(i32, ptr, i64, i32)
 declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)
@@ -8077,6 +8113,7 @@ declare ptr @imre_system_exit_code(ptr)
 declare i32 @imre_system_exit_code_kind(ptr)
 declare ptr @imre_system_exit_code_text(ptr)
 declare i32 @imre_system_exit_code_equal(ptr, i32, i64)
+declare i32 @imre_exception_field_identity(ptr, i32, i64)
 declare i32 @imre_system_exit_code_truth(ptr)
 declare void @imre_args_clear()
 declare void @imre_int_retain(i64)

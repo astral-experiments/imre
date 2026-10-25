@@ -86,9 +86,13 @@ impl Builtin {
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
-            | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
+            | Self::ExceptionFieldIndex
+            | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
             Self::MappingObjectGet => Contract::new(true, PreservesOwners),
             Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
+            Self::ExceptionKeywordSuggestion | Self::ExceptionRecordFields => {
+                Contract::new(false, PreservesOwners)
+            }
             Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
             Self::ExceptionRepr
             | Self::ExceptionMessage
@@ -518,6 +522,7 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::ExceptionFieldIdentity { .. }
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName
@@ -900,6 +905,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_system_exit_code_equal"
                 | "imre_system_exit_code_text"
                 | "imre_exception_field_index"
+                | "imre_exception_formatter_result"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"

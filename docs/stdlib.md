@@ -1,8 +1,8 @@
 # Standard library support
 
-Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) on Linux. Dotted APIs such as `os.path` appear under their parent. Private modules and third-party packages are outside this inventory.
+Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 51 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 25 public modules with recorded suites, 72 complete test executions pass natively at both optimization levels; 9,422 of 9,422 upstream executions have a classification.
+**At a glance:** 54 of 297 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 25 modules with recorded suites, 72 complete test executions pass natively at both optimization levels; 9,422 of 9,422 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -222,6 +222,128 @@ These names are still probed. The reasons come from the [scope inventory](../ben
 | `turtle` | Rejected | Educational desktop graphics |
 | `turtledemo` | Rejected | Interactive turtle demo programs |
 | `winsound` | Rejected | Optional Windows sound playback |
+
+## Names beginning with an underscore
+
+These include documented interfaces such as `__future__` and `_thread`, as well as implementation details. The same import and suite checks apply.
+
+<details>
+<summary>Show 103 module names</summary>
+
+| Module | Import | Native API example or boundary | Native / upstream | CPython fixture | CPython test |
+| --- | --- | --- | ---: | ---: | ---: |
+| `__future__` | Yes | The `annotations` future statement and postponed annotations on supported classes and functions. [Evidence](../tests/fixtures/callables/annotations_future.py) | — | — | — |
+| `_opcode` | Yes | `ENABLE_SPECIALIZATION` and `ENABLE_SPECIALIZATION_FT` are both zero for Imre’s native executables. [Evidence](../tests/fixtures/imports/opcode_flags.py) | — | — | — |
+| `_string` | Yes | `formatter_parser` and `formatter_field_name_split` iterate format fields and their components. [Evidence](../tests/fixtures/text/formatter_ownership.py) | — | — | — |
+
+Both import modes reject the following names. They have no recorded API example or suite measurement.
+
+| Module |
+| --- |
+| `_abc` |
+| `_aix_support` |
+| `_android_support` |
+| `_apple_support` |
+| `_ast` |
+| `_ast_unparse` |
+| `_asyncio` |
+| `_bisect` |
+| `_blake2` |
+| `_bz2` |
+| `_codecs` |
+| `_codecs_cn` |
+| `_codecs_hk` |
+| `_codecs_iso2022` |
+| `_codecs_jp` |
+| `_codecs_kr` |
+| `_codecs_tw` |
+| `_collections` |
+| `_collections_abc` |
+| `_colorize` |
+| `_compat_pickle` |
+| `_contextvars` |
+| `_csv` |
+| `_ctypes` |
+| `_curses` |
+| `_curses_panel` |
+| `_datetime` |
+| `_dbm` |
+| `_decimal` |
+| `_elementtree` |
+| `_frozen_importlib` |
+| `_frozen_importlib_external` |
+| `_functools` |
+| `_gdbm` |
+| `_hashlib` |
+| `_heapq` |
+| `_hmac` |
+| `_imp` |
+| `_interpchannels` |
+| `_interpqueues` |
+| `_interpreters` |
+| `_io` |
+| `_ios_support` |
+| `_json` |
+| `_locale` |
+| `_lsprof` |
+| `_lzma` |
+| `_markupbase` |
+| `_md5` |
+| `_multibytecodec` |
+| `_multiprocessing` |
+| `_opcode_metadata` |
+| `_operator` |
+| `_osx_support` |
+| `_overlapped` |
+| `_pickle` |
+| `_posixshmem` |
+| `_posixsubprocess` |
+| `_py_abc` |
+| `_py_warnings` |
+| `_pydatetime` |
+| `_pydecimal` |
+| `_pyio` |
+| `_pylong` |
+| `_pyrepl` |
+| `_queue` |
+| `_random` |
+| `_remote_debugging` |
+| `_scproxy` |
+| `_sha1` |
+| `_sha2` |
+| `_sha3` |
+| `_signal` |
+| `_sitebuiltins` |
+| `_socket` |
+| `_sqlite3` |
+| `_sre` |
+| `_ssl` |
+| `_stat` |
+| `_statistics` |
+| `_strptime` |
+| `_struct` |
+| `_suggestions` |
+| `_symtable` |
+| `_sysconfig` |
+| `_thread` |
+| `_threading_local` |
+| `_tkinter` |
+| `_tokenize` |
+| `_tracemalloc` |
+| `_types` |
+| `_typing` |
+| `_uuid` |
+| `_warnings` |
+| `_weakref` |
+| `_weakrefset` |
+| `_winapi` |
+| `_wmi` |
+| `_zoneinfo` |
+| `_zstd` |
+
+</details>
+
+The entry environment, `__main__`, is separate from CPython’s module registry. Imre’s `import __main__` probe: **Rejected**. The [entry-point guard](../tests/fixtures/module_values/entry_globals/main.py) uses `if __name__ == '__main__'`.
 
 ## Additional test subjects
 

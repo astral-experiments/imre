@@ -1,5 +1,8 @@
 # Each entry names an exercised operation or an explicit boundary and its repository source.
 # Full-suite counts and import acceptance are generated independently.
+__future__ = ["The `annotations` future statement and postponed annotations on supported classes and functions.","tests/fixtures/callables/annotations_future.py"]
+_opcode = ["`ENABLE_SPECIALIZATION` and `ENABLE_SPECIALIZATION_FT` are both zero for Imre’s native executables.","tests/fixtures/imports/opcode_flags.py"]
+_string = ["`formatter_parser` and `formatter_field_name_split` iterate format fields and their components.","tests/fixtures/text/formatter_ownership.py"]
 abc = ["Abstract bases and `@abstractmethod` on fixed-layout classes.","tests/fixtures/classes/fixed_lineage.py"]
 annotationlib = ["`get_annotations`, `Format` and `type_repr` for supported declarations.","tests/fixtures/callables/annotations.py"]
 argparse = ["`ArgumentParser`, typed options, subcommands and generated help.","benchmarks/cpython_stdlib/full/argparse/README.md"]
