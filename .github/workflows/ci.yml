@@ -1,6 +1,11 @@
 name: Functools merge preflight
 on:
   workflow_dispatch:
+    inputs:
+      candidates:
+        description: 'Exact merge sources: JSON matrix with name, commit and tree for each row'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -12,20 +17,7 @@ jobs:
     timeout-minutes: 70
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: cache
-            commit: 838ba431fa93dc0c16e028052bb4f60e3db885e0
-            tree: 97ff21b657bbec38ff850cfd0bcefc144739fdaf
-          - name: both
-            commit: 2355e4bbcdfadc2762031c7864077779e321bb39
-            tree: 36d9b79b2b0afbf8b0e1646ab96e82b05d2e452e
-          - name: annotation
-            commit: dfe1a34fbfc3541ac281b55045c8fa441022315a
-            tree: 4675fe478428f662e45049792c49a4a0690f1801
-          - name: defaults
-            commit: 2561926a9862525b8d5207acc958dc88467a9005
-            tree: 849e428c9fd97a4c65d30a5422006c3a823a382a
+      matrix: ${{ fromJSON(inputs.candidates) }}
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
