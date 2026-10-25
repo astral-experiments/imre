@@ -190,6 +190,30 @@ pub extern "C" fn imre_warning_reset() {
     filters.displayed.clear();
 }
 
+/// Preserve the runtime ABI used by previously compiled two-argument simplefilter calls.
+///
+/// # Safety
+/// The caller holds an exact action string until this function returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_warning_simplefilter(action: *const Str, category: u32) {
+    let empty = Str::new("");
+    // SAFETY: the caller roots action; all four empty patterns outlive the
+    // call. Zero is an immediate integer and does not own an allocation.
+    unsafe {
+        imre_warning_filter(
+            action,
+            &empty,
+            &empty,
+            &empty,
+            &empty,
+            Int::from_usize(0).into_raw(),
+            0,
+            category,
+            0,
+        );
+    }
+}
+
 /// Report the unreaped handle before the destructor performs its own poll.
 pub(super) fn unobserved_child(pid: libc::pid_t) {
     let mut message = None;
