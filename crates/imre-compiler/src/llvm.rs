@@ -5097,6 +5097,22 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::CounterTotal => self.call("imre_counter_total", returns, &[&args[0].value]),
+            Builtin::CounterMostCommon => {
+                let pair = self.module.types.element(returns).unwrap();
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(pair)));
+                let limit = self.word(&args[1].value);
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_counter_most_common(ptr {}, i64 {limit}, ptr @{layout})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::DefaultListDict => {
                 let (key, list) = self.module.types.mapping(returns).unwrap();
                 let element = self.module.types.element(list).unwrap();
@@ -6815,6 +6831,7 @@ declare void @imre_counter_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
+declare ptr @imre_counter_most_common(ptr, i64, ptr)
 declare i32 @imre_counter_subset(ptr, ptr, i32)
 declare ptr @imre_key_union(ptr, ptr)
 declare ptr @imre_key_difference(ptr, ptr)

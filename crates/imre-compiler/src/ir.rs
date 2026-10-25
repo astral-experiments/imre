@@ -802,6 +802,7 @@ pub(crate) enum Builtin {
     DefaultListDict,
     CounterNew,
     CounterTotal,
+    CounterMostCommon,
     CounterUpdate,
     CounterMath {
         op: CounterOp,

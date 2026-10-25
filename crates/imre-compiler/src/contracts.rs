@@ -452,6 +452,7 @@ impl Builtin {
             | Self::StringReverseIter
             | Self::TextClosed => Contract::new(false, Unknown),
             Self::CounterMath { .. }
+            | Self::CounterMostCommon
             | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::TupleCacheNew
