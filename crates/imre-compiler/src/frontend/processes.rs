@@ -918,7 +918,7 @@ impl Checker<'_> {
             }
         }
         let child_options = params.len();
-        if ["process_group", "umask", "start_new_session"]
+        if ["process_group", "umask", "start_new_session", "pass_fds"]
             .iter()
             .any(|name| keyword(name).is_some())
         {
@@ -937,9 +937,31 @@ impl Checker<'_> {
                 });
             }
         }
+        if keyword("pass_fds").is_some() {
+            streams |= 1 << 19;
+            params.push(Parameter {
+                name: "pass_fds".into(),
+                ty: Type::ListInt,
+                default: None,
+                sign_only: false,
+                kind: ParameterKind::KeywordOnly,
+            });
+        }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             if index >= child_options {
                 let name = params[index].name.as_str();
+                if name == "pass_fds" {
+                    let value = checker.expr(arg)?;
+                    let fd = |ty| matches!(ty, Type::Int | Type::Bool);
+                    if value.ty == Type::None || checker.types.element(value.ty).is_some_and(fd)
+                        || checker.types.set_element(value.ty) == Some(Type::Int)
+                        || checker.types.fields(value.ty).is_some_and(|fields| fields.into_iter().all(fd))
+                    {
+                        return Ok(value);
+                    }
+                    return Err(error(checker.source, arg,
+                        "pass_fds requires a native list, tuple, or set of integer descriptors"));
+                }
                 if name == "start_new_session" {
                     return checker.condition(arg);
                 }

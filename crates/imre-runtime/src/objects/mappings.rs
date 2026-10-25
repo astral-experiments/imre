@@ -1034,6 +1034,14 @@ impl Set {
         Ok(Self { tables })
     }
 
+    /// Borrow these integer keys while the caller copies a child descriptor set.
+    pub(super) fn integers(&self) -> impl Iterator<Item = &Int> {
+        let Tables::Int(table) = &self.tables else {
+            fail("SystemError", "expected a native integer set");
+        };
+        table.entries.iter().flatten().map(|entry| &entry.key.0)
+    }
+
     /// # Safety
     /// Both sets remain rooted and immutable for the entire comparison.
     pub(super) unsafe fn equal(&self, other: &Self) -> bool {

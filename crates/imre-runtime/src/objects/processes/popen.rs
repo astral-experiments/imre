@@ -176,10 +176,19 @@ struct ChildConfig {
     new_session: bool,
 }
 
+/// Bit 19 adds the exact pass_fds collection after the bit-18 prefix.
+#[repr(C)]
+struct PassFdsConfig {
+    child: ChildConfig,
+    keep: usize,
+    kind: u32,
+}
+
 #[derive(Default)]
 struct LaunchExtras {
     redirects: [usize; 3],
     child: Option<(usize, usize, bool)>,
+    keep: Option<(usize, u32)>,
 }
 
 /// # Safety
@@ -211,17 +220,24 @@ impl LaunchConfig {
         // SAFETY: the launch prefix is present for all three ABI layouts.
         let streams = unsafe { (*config).streams };
         if streams & (1 << 18) != 0 {
+            let keep = (streams & (1 << 19) != 0).then(|| {
+                // SAFETY: bit 19 promises the complete pass_fds trailer.
+                let full = unsafe { &*config.cast::<PassFdsConfig>() };
+                (full.keep, full.kind)
+            });
             // SAFETY: bit 18 promises the full child settings layout.
             let config = unsafe { &*config.cast::<ChildConfig>() };
             LaunchExtras {
                 redirects: config.redirect.words,
                 child: Some((config.group, config.mask, config.new_session)),
+                keep,
             }
         } else if Self::has_redirects(streams) {
             LaunchExtras {
                 // SAFETY: a borrowed stream promises the three-word extension.
                 redirects: unsafe { (*config.cast::<RedirectConfig>()).words },
                 child: None,
+                keep: None,
             }
         } else {
             LaunchExtras::default()
@@ -326,7 +342,7 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
     let args = unsafe { WordKind::new(config.arg_kind).acquire(config.args as usize) };
     // SAFETY: the buffer size is a rooted canonical integer.
     let bufsize = unsafe { c_int(config.bufsize) }?;
-    let child = if let Some((group, mask, new_session)) = extras.child {
+    let mut child = if let Some((group, mask, new_session)) = extras.child {
         // SAFETY: the group is a nullable integer (None uses a zero word);
         // the mask is an exact integer. Both owners span the launch.
         let (group, mask) = unsafe { (if group == 0 { -1 } else { c_int(group)? }, c_int(mask)?) };
@@ -334,11 +350,17 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             new_session,
             group,
             mask: (mask >= 0).then_some(mask as libc::mode_t),
+            ..Default::default()
         }
     } else {
         ChildAttributes::default()
     };
-    let streams = config.streams | (u32::from(!config.close_fds) << 17);
+    if let Some((word, kind)) = extras.keep {
+        // SAFETY: this collection and its descriptor words remain rooted.
+        child.keep = unsafe { super::pass_fds::copy(word, kind)? };
+    }
+    let close_fds = config.close_fds || !child.keep.is_empty();
+    let streams = config.streams | (u32::from(!close_fds) << 17);
     if streams & 15 == 5 {
         return Err(Error::new(
             Kind::ValueError,
