@@ -32,6 +32,8 @@ pub(crate) enum MethodKind {
 
 pub(crate) struct Classes {
     pub(crate) definitions: Vec<Class>,
+    /// Data members only need rebindable storage when some source writes that attribute.
+    pub(crate) attribute_writes: HashMap<String, HashSet<Type>>,
     pub(crate) exceptions: HashMap<DefinitionId, u32>,
     pub(crate) exception_declarations: Vec<crate::types::NamedException>,
     pub(crate) ids: HashMap<DefinitionId, usize>,
@@ -165,6 +167,7 @@ impl Classes {
         }
         Ok(Self {
             definitions,
+            attribute_writes: constants::attribute_writes(graph),
             ids,
             exceptions: resolved.ids,
             exception_declarations: resolved.named,
@@ -587,6 +590,13 @@ fn collect_class(
         && let Some(init) = initializer
     {
         inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
+        // A write to inherited or local class data creates an instance shadow.
+        fields.retain(|f| {
+            !matches!(
+                static_bindings.get(&f.name),
+                Some(ClassValue::Runtime { .. })
+            )
+        });
     }
     if fields
         .iter()

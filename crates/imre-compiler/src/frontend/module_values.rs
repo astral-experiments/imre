@@ -10,6 +10,7 @@ type ClassLiteral = (Option<ModuleId>, Rc<[String]>);
 
 #[derive(Default)]
 pub(super) struct ModuleValues {
+    pub(super) class_data: RefCell<class_data::Storage>,
     definitions: RefCell<HashMap<DefinitionId, (usize, Type)>>,
     class_slots: RefCell<HashMap<(DefinitionId, usize), usize>>,
     literal_tuples: RefCell<HashMap<ClassLiteral, usize>>,
@@ -92,10 +93,21 @@ impl ModuleValues {
 
     pub(super) fn class_value(&self, owner: DefinitionId, ordinal: usize) -> Option<Expr> {
         let slot = *self.class_slots.borrow().get(&(owner, ordinal))?;
-        Some(Expr {
+        Some(self.slot_value(slot))
+    }
+
+    pub(super) fn slot_value(&self, slot: usize) -> Expr {
+        Expr {
             ty: self.types.borrow()[slot],
             kind: ExprKind::Builtin(Builtin::GlobalGet(slot), vec![]),
-        })
+        }
+    }
+
+    pub(super) fn reserve(&self, ty: Type) -> usize {
+        let mut slots = self.types.borrow_mut();
+        let next = slots.len();
+        slots.push(ty);
+        next
     }
 
     /// Resolves storage only after the defining initializer has been checked.
@@ -159,7 +171,7 @@ impl Checker<'_> {
             .values()
             .any(|v| matches!(v, ClassValue::Runtime { owner, .. } if *owner == definition))
         {
-            return Ok(());
+            return self.inherit_class_data(class_id, body);
         }
         let mut locals = Vec::new();
         for (ordinal, stmt) in class.node.body.iter().enumerate() {
@@ -203,19 +215,20 @@ impl Checker<'_> {
             let temporary = self.hidden(value.ty);
             body.push(Statement::Assign(temporary, value));
             if matches!(binding, Some(ClassValue::Runtime { .. })) {
-                let mut slots = self.globals.types.borrow_mut();
-                let slot = slots.len();
-                slots.push(self.locals[temporary]);
+                let value = self.class_storage_value(name, self.local(temporary), assign)?;
+                let slot = self.globals.reserve(value.ty);
                 self.globals
                     .class_slots
                     .borrow_mut()
                     .insert((definition, ordinal), slot);
+                self.record_class_cell(class_id, name, slot, value.ty);
                 body.push(Statement::Expr(Expr {
                     ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![self.local(temporary)]),
+                    kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
                 }));
             }
             let previous = self.names.insert(name.to_owned(), temporary);
+            self.class_lexical.insert(name.to_owned());
             self.assigned.insert(temporary);
             locals.push((name.to_owned(), temporary, previous));
             checkpoints.push(Checkpoint {
@@ -227,6 +240,7 @@ impl Checker<'_> {
             });
         }
         for (name, slot, previous) in locals.into_iter().rev() {
+            self.class_lexical.remove(&name);
             if let Some(old) = previous {
                 self.names.insert(name, old);
             } else {
@@ -235,7 +249,7 @@ impl Checker<'_> {
             self.assigned.remove(&slot);
             body.push(Statement::Clear(slot));
         }
-        Ok(())
+        self.inherit_class_data(class_id, body)
     }
 
     fn initialize_global(

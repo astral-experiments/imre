@@ -656,7 +656,11 @@ impl Checker<'_> {
         while let ast::Expr::Attribute(attribute) = root {
             root = &attribute.value;
         }
-        if self.is_class_receiver(root) {
+        if self.is_class_receiver(root)
+            || root
+                .as_name_expr()
+                .is_some_and(|n| self.class_lexical.contains(n.id.as_str()))
+        {
             None
         } else {
             let binding = self.graph.resolve(self.module, expression);
@@ -790,7 +794,7 @@ impl Checker<'_> {
 
     /// Instance access still evaluates the receiver for class/static methods,
     /// even though their native calls have no receiver parameter.
-    fn evaluated_receiver(&self, receiver: Option<Expr>, value: Expr) -> Expr {
+    pub(super) fn evaluated_receiver(&self, receiver: Option<Expr>, value: Expr) -> Expr {
         match receiver {
             None => value,
             Some(receiver) => Expr {
@@ -919,7 +923,7 @@ impl Checker<'_> {
                 "class value is read before its declaration",
             )
         })?;
-        Ok(self.evaluated_receiver(receiver, value))
+        self.data_attribute(class, attribute, receiver, value)
     }
 
     fn direct_class_attribute(

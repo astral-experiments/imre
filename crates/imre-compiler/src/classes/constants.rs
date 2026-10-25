@@ -3,6 +3,49 @@
 use super::*;
 use std::rc::Rc;
 
+pub(super) fn attribute_writes(graph: &SourceGraph) -> HashMap<String, HashSet<Type>> {
+    use ruff_python_ast::visitor::walk_stmt;
+    struct Writes(HashMap<String, HashSet<Type>>);
+    impl<'a> Visitor<'a> for Writes {
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            if let ast::Expr::Attribute(attr) = expr
+                && attr.ctx != ast::ExprContext::Load
+            {
+                self.0.entry(attr.attr.to_string()).or_default();
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if let ast::Stmt::Assign(assign) = stmt {
+                let hint = match &*assign.value {
+                    ast::Expr::NumberLiteral(n) => match &n.value {
+                        ast::Number::Int(_) => Some(Type::Int),
+                        ast::Number::Float(_) => Some(Type::Float),
+                        _ => None,
+                    },
+                    ast::Expr::BooleanLiteral(_) => Some(Type::Bool),
+                    ast::Expr::StringLiteral(_) => Some(Type::Str),
+                    ast::Expr::BytesLiteral(_) => Some(Type::Bytes),
+                    _ => None,
+                };
+                for target in &assign.targets {
+                    if let (Some(ty), ast::Expr::Attribute(attr)) = (hint, target) {
+                        self.0.entry(attr.attr.to_string()).or_default().insert(ty);
+                    }
+                }
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+    let mut writes = Writes(HashMap::new());
+    for module in &graph.modules {
+        for stmt in &module.parsed.syntax().body {
+            writes.visit_stmt(stmt);
+        }
+    }
+    writes.0
+}
+
 #[derive(Clone)]
 pub(crate) enum ClassValue {
     Binding(Binding),

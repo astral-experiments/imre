@@ -243,7 +243,22 @@ impl Checker<'_> {
                         vec![logging::number(mask), value],
                     )));
                 }
+                if let Some(class) = self.class_reference(&attribute.value)
+                    && matches!(
+                        self.classes.declarations.definitions[class]
+                            .static_bindings
+                            .get(attribute.attr.as_str()),
+                        Some(crate::classes::ClassValue::Runtime { .. })
+                    )
+                {
+                    return self.store_class_data(class, attribute, value);
+                }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some(class) =
+                    self.mutable_instance_data(receiver.ty, attribute.attr.as_str())
+                {
+                    return self.store_instance_data(class, attribute, receiver, value);
+                }
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.
