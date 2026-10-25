@@ -28,6 +28,7 @@ mod documents;
 mod enums;
 mod expansions;
 mod fixed_tuples;
+mod fnmatch;
 mod function_caches;
 mod functools;
 mod hashlib;
@@ -69,6 +70,7 @@ mod truthiness;
 mod unbound_locals;
 mod unions;
 mod unittest;
+mod unittest_equality;
 mod unittest_main;
 mod unpacking;
 mod zip_sums;
@@ -442,13 +444,18 @@ pub(crate) fn lower_with_owners(
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
-                && !(name == "open"
-                    && matches!(
-                        binding,
+                && !matches!(
+                    (name.as_str(), binding),
+                    (
+                        "open",
                         Binding::Intrinsic(
                             Intrinsic::GzipOpen | Intrinsic::Fd(ir::FdOperation::Open)
                         )
-                    ))
+                    ) | (
+                        "filter",
+                        Binding::Intrinsic(Intrinsic::Fnmatch(ir::FnmatchOperation::Filter { .. }))
+                    )
+                )
             {
                 return Err(module.error(
                     module.parsed.syntax(),
@@ -4087,7 +4094,10 @@ impl<'a> Checker<'a> {
                 expressions
                     .iter()
                     .map(|target| {
-                        if let Some(kind) = self.exception_category(target) {
+                        if let Some(kind) = self
+                            .exception_category(target)
+                            .or_else(|| self.fixed_testcase_failure_kind(target))
+                        {
                             return Ok(kind);
                         }
                         Err(error(
@@ -5654,6 +5664,12 @@ impl<'a> Checker<'a> {
             return self.call_super_initializer(call);
         }
         if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "most_common"
+            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+        {
+            return self.counter_most_common(call, None);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
             && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
             && matches!(method.attr.as_str(), "subtract" | "update")
             && !calls::starred(call)
@@ -5912,6 +5928,12 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::DictConfig)) => {
+                return self.logging_dictionary_config(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::FileConfig)) => {
+                return self.logging_file_config(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
@@ -5956,6 +5978,9 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::Fnmatch(operation))) => {
+                return self.fnmatch_call(operation, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexSub)) => return self.sub_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
@@ -6238,6 +6263,7 @@ impl<'a> Checker<'a> {
             }
             if self.types.is_counter(receiver.ty) {
                 match attribute.attr.as_str() {
+                    "most_common" => return self.counter_most_common(call, Some(receiver)),
                     "update" => return self.counter(call, Some(receiver), None),
                     "subtract" => {
                         return self.counter_counts(call, Some(receiver), None, Binary::Subtract);
