@@ -26,6 +26,14 @@ calls, per-handler thresholds, shared stream writes, and an empty
 terminator. The eleven-byte output without the newline must fail comparison
 with the twelve-byte result. These controls add no suite IDs.
 
+The unchanged `StreamHandlerTest.test_stream_setting` checks the actual
+`sys.stderr` from [#606](https://github.com/astral-sh/imre/pull/606), the return
+of the previous stream by identity, and the `None` return for an unchanged
+stream. The shared TestCase has no native `assertIs` on this source. The
+adapter verifies the diagnostic points at the original assertion before using
+native `is` and `is None` on its operands. Both levels run the body and all
+three assertions in Imre under the same mixed BaseTest fixture described above.
+
 Reproduce the [Linux receipt](stream-delivery-linux.json) with the pinned interpreter:
 
 ```sh

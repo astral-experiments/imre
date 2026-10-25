@@ -122,7 +122,7 @@ def getHandlerByName(name: str) -> Handler | None:
 
 
 class StreamHandler(Handler):
-    stream: _TextOutput
+    stream: _TextOutput | None
     terminator: str
 
     def __init__(self, stream: _TextOutput | None = None) -> None:
@@ -132,15 +132,21 @@ class StreamHandler(Handler):
 
     def flush(self) -> None:
         with self.lock:
-            self.stream.flush()
+            stream = self.stream
+            if stream is not None:
+                stream.flush()
 
     def emit(self, record: LogRecord | None) -> None:
         if record is None:
             raise AttributeError("'NoneType' object has no attribute 'getMessage'")
-        self.stream.write(self.format(record) + self.terminator)
+        message = self.format(record)
+        stream = self.stream
+        if stream is None:
+            raise AttributeError("'NoneType' object has no attribute 'write'")
+        stream.write(message + self.terminator)
         self.flush()
 
-    def setStream(self, stream: _TextOutput) -> _TextOutput | None:
+    def setStream(self, stream: _TextOutput | None) -> _TextOutput | None:
         if stream is self.stream:
             return None
         with self.lock:

@@ -1,4 +1,4 @@
-"""Run the original CP1251 logging method under its original host lifecycle."""
+"""Run the original CP1251 and stream replacement methods in their host fixtures."""
 import argparse
 import ast
 import hashlib
@@ -15,6 +15,7 @@ sys.path.insert(0, str(STDLIB))
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import NativeCompileError, Toolchain, method_bytes, native_method, run_in_fixtures, testcase_fixture
 CASE = "test.test_logging.EncodingTest.test_encoding_cyrillic_unicode"
+SETTING = "test.test_logging.StreamHandlerTest.test_stream_setting"
 IMPORTS = "import codecs\nimport io\nimport logging\nimport unittest\n"
 ROOT = '''
 def configure_root() -> io.StringIO:
@@ -42,6 +43,32 @@ BYTES = '''
             written.write(first)
 '''
 
+IDENTITY = '''
+    def assertIs(self, first, second: typing.TextIO) -> None:
+        if first is not second:
+            raise AssertionError("different stream objects")
+
+    def assertIsNone(self, value) -> None:
+        if value is not None:
+            raise AssertionError("expected unchanged stream")
+'''
+FIXTURE = ("Original CPython BaseTest setup and teardown; its DEBUG root, formatter "
+           "and StringIO handler are recreated in the native child")
+
+
+def base_fixture(case):
+    root = case.root_logger
+    if (not root.isEnabledFor(10) or root.handlers != [case.root_hdlr]
+            or case.root_hdlr.stream is not case.stream
+            or case.root_hdlr.formatter is not case.root_formatter
+            or case.root_formatter._style._fmt != case.log_format):
+        raise AssertionError("the original BaseTest root fixture differs from the native setup")
+    return IMPORTS + ROOT.replace("FORMAT", repr(case.log_format)) + "\n"
+
+
+def stock_case():
+    return testcase_fixture() + SETUP.replace("self.root_stream =", "super().__init__()\n        self.root_stream =")
+
 
 def encoding_case(toolchain, work):
     """Try native TestCase first, preserving the host setup in either case."""
@@ -52,16 +79,10 @@ def encoding_case(toolchain, work):
     operation = ("imre", "Native logger dispatch, StreamHandler terminator, CP1251 writer and BytesIO contents")
 
     def execute(case, method):
-        root = case.root_logger
-        if (not root.isEnabledFor(10) or root.handlers != [case.root_hdlr]
-                or case.root_hdlr.stream is not case.stream
-                or case.root_hdlr.formatter is not case.root_formatter
-                or case.root_formatter._style._fmt != case.log_format):
-            raise AssertionError("the original BaseTest root fixture differs from the native setup")
-        imports = IMPORTS + ROOT.replace("FORMAT", repr(case.log_format)) + "\n"
+        imports = base_fixture(case)
         try:
             call = native_method(toolchain, work, SOURCE, "EncodingTest", CASE,
-                                 imports + testcase_fixture() + SETUP.replace("self.root_stream =", "super().__init__()\n        self.root_stream ="),
+                                 imports + stock_case(),
                                  operation=operation)
         except NativeCompileError as exc:
             diagnostic = "expected int, got bytes; annotations are enforced contracts"
@@ -79,7 +100,38 @@ def encoding_case(toolchain, work):
             result = call(case, method)
             details = {"assertion": "Native unittest.TestCase.assertEqual"}
         result["observation"]["evidence"].update(details, expected_bytes_hex=expected.hex(),
-            fixture="Original CPython BaseTest setup and teardown; its DEBUG root, formatter and StringIO handler are recreated in the native child")
+            fixture=FIXTURE)
+        return result
+    return execute
+
+
+
+def stream_setting_case(toolchain, work):
+    """Exercise all three calls and the original identity checks under BaseTest."""
+    operation = ("imre", "Default sys.stderr, StreamHandler replacement and unchanged-stream identity")
+
+    def execute(case, method):
+        prefix = "import sys\nimport typing\n" + base_fixture(case)
+        try:
+            call = native_method(toolchain, work, SOURCE, "StreamHandlerTest", SETTING,
+                                 prefix + stock_case(), operation=operation)
+        except NativeCompileError as exc:
+            # Fall back only at this original assertion, never on a handler operation.
+            lines = (work / "case.py").read_text().splitlines()
+            (line, column), = [(i, s.index("self.") + 1) for i, s in enumerate(lines, 1)
+                               if s.lstrip().startswith("self.assertIs(old, sys.stderr)")]
+            error = f"case.py:{line}:{column}: Imre: unknown class method"
+            if error not in str(exc):
+                raise
+            fixture = prefix + "\nclass NativeCase:\n" + SETUP + IDENTITY
+            call = native_method(toolchain, work, SOURCE, "StreamHandlerTest", SETTING,
+                                 fixture, operation=operation)
+            details = {"assertion": "Native object identity and None checks on the original operands",
+                       "shared_assertion_blocker": "unittest.TestCase.assertIs: unknown class method"}
+        else:
+            details = {"assertion": "Native unittest.TestCase identity assertions"}
+        result = call(case, method)
+        result["observation"]["evidence"].update(details, fixture=FIXTURE)
         return result
     return execute
 
@@ -112,14 +164,16 @@ def main():
             control = subprocess.run([binary], capture_output=True, timeout=60, check=True)
             if (control.stdout, control.stderr) != (expected.stdout, expected.stderr):
                 raise AssertionError((level, control, expected))
-            results, failures, skips = run_in_fixtures(suite, {CASE: encoding_case(tools, work)})
-            if failures or skips or set(results) != {CASE} or len(results[CASE]) != 1:
+            cases_run = {CASE: encoding_case(tools, work), SETTING: stream_setting_case(tools, work)}
+            results, failures, skips = run_in_fixtures(suite, cases_run)
+            if failures or skips or set(results) != set(cases_run) or any(len(v) != 1 for v in results.values()):
                 raise AssertionError((failures, skips, results))
             report["levels"][str(level)] = {"test_id": CASE, "observed": results[CASE][0]["observation"],
+                "stream_setting": results[SETTING][0]["observation"],
                 "control_stdout_sha256": hashlib.sha256(control.stdout).hexdigest(),
                 "control_observations": len(control.stdout.splitlines())}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
-    print("Original CP1251 logging method passed at O0 and O3 under its CPython fixture.")
+    print("Both original StreamHandler methods passed at O0 and O3 under their CPython fixtures.")
 
 
 if __name__ == "__main__":

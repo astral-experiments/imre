@@ -2,6 +2,7 @@
 import codecs
 import io
 import logging
+import sys
 
 
 def handle_result(handler: logging.Handler, record: logging.LogRecord) -> None:
@@ -72,6 +73,21 @@ def exercise() -> None:
     parent.removeHandler(second)
     first.close()
     second.close()
+
+    handler = logging.StreamHandler()
+    one = io.StringIO()
+    two = io.StringIO()
+    original = handler.setStream(one)
+    print(original is sys.stderr)
+    previous = handler.setStream(two)
+    print(previous is one)
+    print(previous is two)
+    print(handler.setStream(two) is None)
+    previous = handler.setStream(None)
+    print(previous is two)
+    handler.flush()
+    print(handler.setStream(original) is None)
+    handler.close()
 
 
 exercise()
