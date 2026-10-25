@@ -14,6 +14,21 @@ Mapping class base, and the copy protocols exercised by 16 original cases.
 The [branch verification runs](runs/README.md) retain full historical reports
 for individual compiler trees. Each report has its own O0 and O3 denominator.
 
+On [repaired main `e328ca3`](runs/e328ca39a14d/README.md), both levels recorded **8 fully native / 659**, eight native bodies using CPython fixtures, 14 CPython-driven operations, four cases without a collections operation, three reference skips and 622 blockers. The eighth is `TestBasic.test_init`; this is the only [classification change](runs/e328ca39a14d/role-changes.json) from the seven-method report below. The supplementary `dict.fromkeys` case remains outside this denominator.
+
+On [canonical main `03c8d84`](runs/03c8d84fa4c1/README.md), both levels recorded
+**7 fully native / 659**, eight native bodies with host fixtures, 14 host-driven
+native operations, four cases without a collections operation, three reference
+skips and 623 blockers. The separate [dict.fromkeys dependency](fromkeys/)
+does not add an occurrence to this total.
+
+Run [measure.py](measure.py) with a pinned CPython and explicit Imre artifacts
+to reproduce the ledger. The [run instructions](runs/03c8d84fa4c1/README.md) show the arguments.
+
+The [docs stack rerun](runs/3da09720e93c/verified-defaults.json) matched all seven original controls and 28 native executions. Its [source and artifact hashes](runs/3da09720e93c/source.json) identify the compiled source and the separate [table check](runs/3da09720e93c/independent-82d6826-table.json).
+
+The [published-docs verification](runs/c2f397dbe55d/verified-defaults.json) repeats the seven CPython controls and 28 native runs on main at c7b1dca. The [receipt](runs/c2f397dbe55d/source.json) identifies the binaries and generated support table.
+
 | Suite | IDs |
 | --- | ---: |
 | test_collections (containers, ABCs and doctests) | 116 |

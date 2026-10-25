@@ -94,31 +94,9 @@
           }
         }
       }
-    ],
-    "test.test_deque.TestBasic.test_setitem": [
-      {
-        "execution": "native-body",
-        "body": "Imre",
-        "assertions": "Imre",
-        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
-        "method_sha256": "0188874927ab22b4df386ccf4975e3527b89c120ab8f5be5b5297e4573a197a0",
-        "observation": {
-          "roles": {
-            "body": "imre",
-            "assertions": "imre",
-            "operation": "imre",
-            "fixture": "mixed"
-          },
-          "evidence": {
-            "operation": "Construct, index-assign, and iterate a native deque",
-            "fixture": "CPython module/class/instance hooks; native instance in child",
-            "opt_level": 0,
-            "method_sha256": "0188874927ab22b4df386ccf4975e3527b89c120ab8f5be5b5297e4573a197a0"
-          }
-        }
-      }
     ]
   },
   "failures": [],
-  "skips": []
+  "skips": [],
+  "compiler_revision": "8bed1fe034374b90860cfde5fe7f6324dfebb4de"
 }

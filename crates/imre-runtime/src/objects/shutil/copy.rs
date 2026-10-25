@@ -1,23 +1,23 @@
 //! Copy file contents without copying permissions or truncating an alias of the source.
 
+use crate::StrOwner;
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, symlink};
 use std::path::Path;
-use std::rc::Rc;
 
 use super::super::exceptions::{Error, Filename, Kind, finish, push_string_repr};
 use super::super::files::{close_file, errno_error, errno_with_filenames};
-use super::super::{Bytes, Object, Str, acquire_rc, bytes, paths};
+use super::super::{Bytes, Object, Str, bytes, paths};
 
 type Result<T> = std::result::Result<T, Error>;
 
 enum Name {
-    Text(Rc<Str>),
-    Bytes(Rc<Bytes>),
-    Path(Rc<Str>),
+    Text(StrOwner),
+    Bytes(crate::BytesOwner),
+    Path(StrOwner),
 }
 
 impl Name {
@@ -26,9 +26,9 @@ impl Name {
         // SAFETY: the compiler supplies the tag for the exact live allocation.
         unsafe {
             match tag {
-                0 => Self::Text(acquire_rc(value as usize)),
-                1 => Self::Bytes(acquire_rc(value as usize)),
-                2 => Self::Path(Rc::from_raw(paths::imre_path_text(value.cast()))),
+                0 => Self::Text(crate::StrOwner::acquire_word(value as usize)),
+                1 => Self::Bytes(crate::acquire_bytes(value as usize)),
+                2 => Self::Path(StrOwner::from_raw(paths::imre_path_text(value.cast()))),
                 _ => unreachable!(),
             }
         }
@@ -73,8 +73,8 @@ impl Name {
 
     fn filename(&self) -> Filename {
         match self {
-            Self::Text(s) | Self::Path(s) => Filename::Str(Rc::clone(s)),
-            Self::Bytes(b) => Filename::Bytes(Rc::clone(b)),
+            Self::Text(s) | Self::Path(s) => Filename::Str(StrOwner::clone(s)),
+            Self::Bytes(b) => Filename::Bytes(crate::BytesOwner::clone(b)),
         }
     }
 
@@ -145,7 +145,7 @@ fn copy_link(src: &Name, dst: &Name) -> Result<()> {
     let target = fs::read_link(src.path()).map_err(|e| src.error(e))?;
     symlink(&target, dst.path()).map_err(|e| {
         let target = if matches!(src, Name::Bytes(_)) {
-            Filename::Bytes(Rc::new(target.into_os_string().into_vec()))
+            Filename::Bytes(crate::BytesOwner::new(target.into_os_string().into_vec()))
         } else {
             Filename::from_fs_text(target.into_os_string())
         };
@@ -174,10 +174,12 @@ fn destination(src: &Name, dst: &Name) -> Result<std::path::PathBuf> {
 impl Name {
     fn joined(&self, path: &Path) -> Result<Name> {
         if matches!(self, Name::Bytes(_)) {
-            Ok(Name::Bytes(Rc::new(path.as_os_str().as_bytes().to_vec())))
+            Ok(Name::Bytes(crate::BytesOwner::new(
+                path.as_os_str().as_bytes().to_vec(),
+            )))
         } else {
             path.to_str()
-                .map(|s| Name::Text(Rc::new(Str::from(s))))
+                .map(|s| Name::Text(StrOwner::new(Str::from(s))))
                 .ok_or_else(|| {
                     Error::new(
                         Kind::UnicodeDecodeError,
@@ -232,9 +234,9 @@ unsafe fn retain_handle(value: *const (), tag: u32) -> usize {
     // SAFETY: the compiler roots the live str, bytes, or Path with this tag.
     unsafe {
         match tag {
-            0 => Rc::increment_strong_count(value.cast::<Str>()),
-            1 => Rc::increment_strong_count(value.cast::<Bytes>()),
-            2 => Rc::increment_strong_count(value.cast::<Object>()),
+            0 => StrOwner::increment_strong_count(value.cast::<Str>()),
+            1 => crate::retain_bytes(value.cast::<Bytes>()),
+            2 => crate::ObjectOwner::increment_strong_count(value.cast::<Object>()),
             _ => unreachable!(),
         }
     }
@@ -271,9 +273,10 @@ pub unsafe extern "C" fn imre_shutil_copy(
             if let Some(joined) = joined {
                 let value = joined.into_os_string();
                 return Ok(if dst_tag == 1 {
-                    Rc::into_raw(Rc::new(value.into_vec())) as usize
+                    crate::BytesOwner::into_raw(crate::BytesOwner::new(value.into_vec())) as usize
                 } else {
-                    Rc::into_raw(Rc::new(super::super::paths::path_utf8(value)?)) as usize
+                    StrOwner::into_raw(StrOwner::new(super::super::paths::path_utf8(value)?))
+                        as usize
                 });
             }
             // SAFETY: return exactly one new reference of the original destination's type.
@@ -296,29 +299,31 @@ mod tests {
     fn copy_errors_retain_the_original_bytes_filenames() {
         let dir = std::env::temp_dir().join(format!("imre-shutil-{}", getrandom::u64().unwrap()));
         fs::create_dir(&dir).unwrap();
-        let source = Rc::new(dir.join("missing").into_os_string().into_vec());
-        let destination = Rc::new(dir.join("existing").into_os_string().into_vec());
+        let source = crate::BytesOwner::new(dir.join("missing").into_os_string().into_vec());
+        let destination = crate::BytesOwner::new(dir.join("existing").into_os_string().into_vec());
         fs::write(dir.join("existing"), []).unwrap();
         symlink("missing", dir.join("link")).unwrap();
         let missing = copyfile(
-            &Name::Bytes(Rc::clone(&source)),
-            &Name::Bytes(Rc::clone(&destination)),
+            &Name::Bytes(crate::BytesOwner::clone(&source)),
+            &Name::Bytes(crate::BytesOwner::clone(&destination)),
             true,
         )
         .unwrap_err();
         let exists = copyfile(
-            &Name::Bytes(Rc::new(dir.join("link").into_os_string().into_vec())),
-            &Name::Bytes(Rc::clone(&destination)),
+            &Name::Bytes(crate::BytesOwner::new(
+                dir.join("link").into_os_string().into_vec(),
+            )),
+            &Name::Bytes(crate::BytesOwner::clone(&destination)),
             false,
         )
         .unwrap_err();
         fs::remove_dir_all(dir).unwrap();
         // The calls' temporary Name handles have dropped. Only the exceptions'
         // filename and filename2 fields can retain these two original objects.
-        assert_eq!(Rc::strong_count(&source), 2);
-        assert_eq!(Rc::strong_count(&destination), 2);
+        assert_eq!(crate::BytesOwner::strong_count(&source), 2);
+        assert_eq!(crate::BytesOwner::strong_count(&destination), 2);
         drop((missing, exists));
-        assert_eq!(Rc::strong_count(&source), 1);
-        assert_eq!(Rc::strong_count(&destination), 1);
+        assert_eq!(crate::BytesOwner::strong_count(&source), 1);
+        assert_eq!(crate::BytesOwner::strong_count(&destination), 1);
     }
 }
