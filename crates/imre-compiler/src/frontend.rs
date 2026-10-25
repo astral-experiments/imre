@@ -7861,6 +7861,7 @@ impl<'a> Checker<'a> {
                         | Type::ForwardRef(_)
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)
+                        | Type::Tuple(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
