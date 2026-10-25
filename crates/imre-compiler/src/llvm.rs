@@ -63,6 +63,9 @@ impl Type {
             | Self::Set(_)
             | Self::Deque(_)
             | Self::StringKeys
+            | Self::NativeModule
+            | Self::ModuleNamespace
+            | Self::ModuleMember
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
@@ -129,6 +132,9 @@ impl Type {
             | Self::Set(_)
             | Self::Deque(_)
             | Self::StringKeys
+            | Self::NativeModule
+            | Self::ModuleNamespace
+            | Self::ModuleMember
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
@@ -751,6 +757,9 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
+            | Type::ModuleMember
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -3412,6 +3421,9 @@ impl Emitter<'_, '_> {
                 | Type::Semaphore
                 | Type::Popen(..)
                 | Type::AsyncProcess(_)
+                | Type::NativeModule
+                | Type::ModuleNamespace
+                | Type::ModuleMember
                 | Type::LogFormatter
                 | Type::LogRecord
                 | Type::Logger
@@ -5741,6 +5753,100 @@ impl Emitter<'_, '_> {
                 }
                 value
             }
+            Builtin::FreezeStrings => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_frozenset_strings(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::Errno(op) => {
+                use crate::ir::ErrnoOperation as Op;
+                let call = match op {
+                    Op::BoxValue => {
+                        let value = &args[0].value;
+                        let kind = representation_kind(value.ty, &self.module.types);
+                        let word = self.word(value);
+                        format!("call ptr @imre_module_value(i32 {kind}, i64 {word})")
+                    }
+                    Op::Module => "call ptr @imre_errno_module()".to_string(),
+                    Op::Namespace | Op::Keys | Op::Errorcode => {
+                        let f = match op {
+                            Op::Namespace => "namespace",
+                            Op::Keys => "keys",
+                            _ => "errorcode",
+                        };
+                        format!("call ptr @imre_errno_{f}(ptr {})", args[0].value.operand)
+                    }
+                    Op::Number | Op::Text | Op::Has => {
+                        let (ty, f) = match op {
+                            Op::Number => ("i64", "number"),
+                            Op::Text => ("ptr", "text"),
+                            _ => ("i32", "has"),
+                        };
+                        format!(
+                            "call {ty} @imre_errno_{f}(ptr {}, ptr {})",
+                            args[0].value.operand, args[1].value.operand
+                        )
+                    }
+                    Op::DefaultLookup => format!(
+                        "call ptr @imre_errno_lookup_default(ptr {}, ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand, args[2].value.operand
+                    ),
+                    Op::Lookup | Op::Items => format!(
+                        "call ptr @imre_errno_lookup(ptr {}, ptr {}, i32 {})",
+                        args[0].value.operand,
+                        args[1].value.operand,
+                        u32::from(matches!(op, Op::Items))
+                    ),
+                    Op::ItemRepr | Op::ItemText => format!(
+                        "call ptr @imre_errno_member_text(ptr {}, i32 {})",
+                        args[0].value.operand,
+                        u32::from(matches!(op, Op::ItemRepr))
+                    ),
+                    Op::MemberContains => format!(
+                        "call i32 @imre_errno_member_contains(ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand
+                    ),
+                    Op::ItemEq => {
+                        let i = usize::from(args[0].value.ty != Type::ModuleMember);
+                        let other = &args[1 - i].value;
+                        let kind = if other.ty == Type::ModuleMember {
+                            16
+                        } else {
+                            representation_kind(other.ty, &self.module.types)
+                        };
+                        let word = self.word(other);
+                        format!(
+                            "call i32 @imre_errno_member_equal(ptr {}, i32 {kind}, i64 {word})",
+                            args[i].value.operand
+                        )
+                    }
+                };
+                let raw = if matches!(
+                    op,
+                    Op::Module
+                        | Op::Number
+                        | Op::Lookup
+                        | Op::DefaultLookup
+                        | Op::Items
+                        | Op::MemberContains
+                ) {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
+                Value {
+                    ty: returns,
+                    operand: if returns == Type::Bool {
+                        self.instruction(format!("icmp ne i32 {raw}, 0"))
+                    } else {
+                        raw
+                    },
+                    small_integer: false,
+                }
+            }
             Builtin::DictContains | Builtin::SetContains => {
                 let key = self.key_word(&args[0].value);
                 let family = if matches!(builtin, Builtin::SetContains) {
@@ -5883,6 +5989,13 @@ impl Emitter<'_, '_> {
             Builtin::IsNone => Value {
                 ty: Type::Bool,
                 operand: match args[0].value.ty {
+                    Type::ModuleMember => {
+                        let kind = self.instruction(format!(
+                            "call i32 @imre_module_value_kind(ptr {})",
+                            args[0].value.operand
+                        ));
+                        self.instruction(format!("icmp eq i32 {kind}, 0"))
+                    }
                     Type::JsonRoot | Type::JsonValue => {
                         let bit = self.instruction(format!(
                             "call i32 @imre_json_null(ptr {})",
@@ -5964,6 +6077,9 @@ impl Emitter<'_, '_> {
                     | Type::Semaphore
                     | Type::Popen(..)
                     | Type::AsyncProcess(_)
+                    | Type::NativeModule
+                    | Type::ModuleNamespace
+                    | Type::ModuleMember
                     | Type::LogFormatter
                     | Type::LogRecord
                     | Type::Logger
@@ -6218,6 +6334,9 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
+            | Type::ModuleMember
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -6298,6 +6417,9 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
+            | Type::ModuleMember
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
@@ -6891,6 +7013,9 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Semaphore
         | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::NativeModule
+        | Type::ModuleNamespace
+        | Type::ModuleMember
         | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
@@ -7560,6 +7685,23 @@ declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
+declare ptr @imre_frozenset_strings(ptr)
+declare i32 @imre_str_is_upper(ptr)
+declare ptr @imre_module_value(i32, i64)
+declare i32 @imre_module_value_truth(ptr)
+declare i32 @imre_module_value_kind(ptr)
+declare ptr @imre_errno_module()
+declare ptr @imre_errno_namespace(ptr)
+declare ptr @imre_errno_keys(ptr)
+declare ptr @imre_errno_errorcode(ptr)
+declare i64 @imre_errno_number(ptr,ptr)
+declare ptr @imre_errno_text(ptr,ptr)
+declare i32 @imre_errno_has(ptr,ptr)
+declare ptr @imre_errno_lookup(ptr,ptr,i32)
+declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
+declare ptr @imre_errno_member_text(ptr,i32)
+declare i32 @imre_errno_member_contains(ptr,ptr)
+declare i32 @imre_errno_member_equal(ptr,i32,i64)
 declare ptr @imre_os_name()
 declare void @imre_doctest_capture_start()
 declare ptr @imre_doctest_capture_take()

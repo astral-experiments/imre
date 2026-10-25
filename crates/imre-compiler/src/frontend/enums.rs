@@ -275,6 +275,8 @@ impl Checker<'_> {
                         | Type::None
                 )
             })
+            || types == [Type::NativeModule; 2]
+            || types == [Type::ModuleNamespace; 2]
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::ForwardRef(_) | Type::Callable(_)))

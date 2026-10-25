@@ -79,6 +79,9 @@ pub(crate) enum Type {
     Semaphore,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
+    NativeModule,
+    ModuleNamespace,
+    ModuleMember,
     LogRecord,
     LogFormatter,
     Logger,
@@ -223,6 +226,9 @@ impl std::fmt::Display for Type {
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::NativeModule => "builtin module",
+            Self::ModuleNamespace => "module namespace",
+            Self::ModuleMember => "module attribute",
             Self::LogFormatter => "logging.Formatter",
             Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
@@ -907,6 +913,7 @@ pub(crate) enum Builtin {
     JsonDump(Type),
     Path(PathOperation),
     PosixPath(PosixPathOperation),
+    Errno(ErrnoOperation),
     Fnmatch(FnmatchOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
@@ -1008,6 +1015,7 @@ pub(crate) enum Builtin {
     SetAdd,
     SetDiscard,
     SetIter,
+    FreezeStrings,
     ExceptionMessage,
     JsonErrorField(u32),
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
@@ -1127,6 +1135,7 @@ impl StrDescriptor {
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
     IsSpace,
+    IsUpper,
     SplitLineEnds,
     ExpandTabs,
     Lower,
@@ -1374,6 +1383,25 @@ pub(crate) enum CopyOperation {
 }
 
 /// Synchronous process operations cannot invoke language callbacks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ErrnoOperation {
+    BoxValue,
+    DefaultLookup,
+    Module,
+    Namespace,
+    Keys,
+    Errorcode,
+    Number,
+    Text,
+    Lookup,
+    Has,
+    Items,
+    ItemRepr,
+    ItemText,
+    ItemEq,
+    MemberContains,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
     Executable,

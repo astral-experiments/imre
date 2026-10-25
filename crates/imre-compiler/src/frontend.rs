@@ -30,6 +30,7 @@ mod dispatch;
 mod doctest;
 mod documents;
 mod enums;
+mod errno;
 mod expandtabs;
 mod expansions;
 mod fixed_tuples;
@@ -1472,6 +1473,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
+        Some(Binding::Intrinsic(Intrinsic::ModuleType)) => return Ok(Type::NativeModule),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
@@ -1495,6 +1497,7 @@ fn annotation_with_aliases(
     };
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
+            "object" => Ok(Type::ModuleMember),
             "int" => Ok(Type::Int),
             "float" => Ok(Type::Float),
             "bool" => Ok(Type::Bool),
@@ -2133,6 +2136,18 @@ impl<'a> Checker<'a> {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
             });
+        }
+        if expected == Type::ModuleMember
+            && matches!(
+                value.ty,
+                Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_) | Type::Bytes
+            )
+        {
+            return Ok(errno::op(
+                crate::ir::ErrnoOperation::BoxValue,
+                expected,
+                vec![value],
+            ));
         }
         if let (Some(source), Some(destination)) = (
             self.types.directory_value(value.ty),
@@ -3843,6 +3858,8 @@ impl<'a> Checker<'a> {
                         )
                     })?;
                     let key = self.expr_expected(&target.slice, key)?;
+                    self.graph
+                        .checked_dict_deletion(self.module, target.range());
                     statements.push(Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::DictDelete, vec![receiver, key]),
@@ -4624,6 +4641,18 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
+        if binary.op == ast::Operator::Mod
+            && let ExprKind::Str(pattern) = &left.kind
+            && matches!(right.ty, Type::Str | Type::StrLiteral(_))
+        {
+            return self.percent_string(pattern, right).ok_or_else(|| {
+                error(
+                    self.source,
+                    binary,
+                    "literal percent formatting supports one %s field and %% escapes",
+                )
+            });
+        }
         if binary.op == ast::Operator::Add
             && left.ty == Type::JsonValue
             && right.ty == Type::JsonValue
@@ -4770,6 +4799,7 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
@@ -4793,11 +4823,15 @@ impl<'a> Checker<'a> {
                 &format!("no native implementation for {symbol}"),
             ));
         }
-        if let Some(target @ (Binding::Module(_) | Binding::IntrinsicModule(_))) =
-            self.resolve(expression)
-            && let Some(module) = self.module_docs(target, expression)?
-        {
-            return Ok(module);
+        if let Some(target) = self.resolve(expression) {
+            if matches!(target, Binding::Module(_) | Binding::IntrinsicModule(_))
+                && let Some(module) = self.module_docs(target, expression)?
+            {
+                return Ok(module);
+            }
+            if let Some(value) = self.errno_value(target, expression) {
+                return Ok(value);
+            }
         }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
@@ -5002,7 +5036,9 @@ impl<'a> Checker<'a> {
                         .into_owned(),
                 ),
             ),
-            ast::Expr::Name(name) if name.id == "__name__" => {
+            ast::Expr::Name(name)
+                if name.id == "__name__" && !self.names.contains_key("__name__") =>
+            {
                 let name = if self.module == self.graph.entry {
                     "__main__"
                 } else {
@@ -5175,9 +5211,18 @@ impl<'a> Checker<'a> {
                     if let Some(fields) = self.types.fields(receiver.ty) {
                         return self.tuple_contains(key, receiver, &fields, compare);
                     }
+                    let receiver = if receiver.ty == Type::ModuleNamespace {
+                        errno::op(ir::ErrnoOperation::Keys, Type::StringKeys, vec![receiver])
+                    } else {
+                        receiver
+                    };
                     let (key_type, builtin) =
-                        if let Some((key, _)) = self.types.mapping(receiver.ty) {
-                            (key, Builtin::DictContains)
+                        if let Some((target_key, _)) = self.types.mapping(receiver.ty) {
+                            if target_key == Type::Int && key.ty == Type::ModuleMember {
+                                (key.ty, Builtin::Errno(ir::ErrnoOperation::MemberContains))
+                            } else {
+                                (target_key, Builtin::DictContains)
+                            }
                         } else if receiver.ty == Type::Str {
                             (Type::Str, Builtin::StringContains)
                         } else if let Some(element) = self
@@ -5362,6 +5407,38 @@ impl<'a> Checker<'a> {
                         compare.ops[0] == ast::CmpOp::NotEq,
                     ));
                 }
+                if values.iter().any(|v| v.ty == Type::ModuleMember) {
+                    if values.len() != 2
+                        || !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+                        || !values.iter().all(|v| {
+                            matches!(
+                                v.ty,
+                                Type::ModuleMember
+                                    | Type::None
+                                    | Type::Bool
+                                    | Type::Int
+                                    | Type::Str
+                                    | Type::StrLiteral(_)
+                                    | Type::Bytes
+                            ) || self.types.mapping(v.ty) == Some((Type::Int, Type::Str))
+                        })
+                    {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "dynamic module values support equality with concrete scalars and integer-to-string dictionaries",
+                        ));
+                    }
+                    let answer = errno::op(ir::ErrnoOperation::ItemEq, Type::Bool, values);
+                    return Ok(if compare.ops[0] == ast::CmpOp::NotEq {
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Not(Box::new(answer)),
+                        }
+                    } else {
+                        answer
+                    });
+                }
                 if values.iter().any(|value| value.ty == Type::ExceptionField) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                         || !values.iter().all(|v| {
@@ -5484,6 +5561,14 @@ impl<'a> Checker<'a> {
                         self.source,
                         subscript,
                         "runtime generic aliases of builtin classes are unsupported",
+                    ));
+                }
+                if list.ty == Type::ModuleNamespace {
+                    let key = self.expr_expected(&subscript.slice, Type::Str)?;
+                    return Ok(errno::op(
+                        ir::ErrnoOperation::Items,
+                        Type::ModuleMember,
+                        vec![list, key],
                     ));
                 }
                 if list.ty == Type::ExceptionField {
@@ -5765,6 +5850,9 @@ impl<'a> Checker<'a> {
                         }
                         _ => return self.class_attribute(attribute, class, Some(receiver), None),
                     }
+                }
+                if receiver.ty == Type::NativeModule {
+                    return Ok(self.errno_attribute(receiver, attribute.attr.as_str()));
                 }
                 if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
                     return self.zip_attribute(receiver, attribute);
@@ -6765,6 +6853,16 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if receiver.ty == Type::ModuleNamespace
+                && attribute.attr.as_str() == "keys"
+                && call.arguments.is_empty()
+            {
+                return Ok(errno::op(
+                    ir::ErrnoOperation::Keys,
+                    Type::StringKeys,
+                    vec![receiver],
+                ));
+            }
             if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
                 return self.import_error(call, 41, Some(receiver));
             }
@@ -6876,10 +6974,12 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
-            if matches!(attribute.attr.as_str(), "splitlines" | "isspace")
-                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            if matches!(
+                attribute.attr.as_str(),
+                "splitlines" | "isspace" | "isupper"
+            ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.line_method(
+                return self.splitlines_or_predicate(
                     Self::string_value(receiver),
                     attribute.attr.as_str(),
                     call,
@@ -7411,6 +7511,37 @@ impl<'a> Checker<'a> {
                 },
             });
         }
+        if args.len() == 1
+            && args[0].ty == Type::ModuleMember
+            && matches!(name.id.as_str(), "str" | "repr" | "print")
+        {
+            let text = errno::op(
+                if name.id == "repr" {
+                    ir::ErrnoOperation::ItemRepr
+                } else {
+                    ir::ErrnoOperation::ItemText
+                },
+                Type::Str,
+                args,
+            );
+            return Ok(if name.id == "print" {
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
+                }
+            } else {
+                text
+            });
+        }
+        if name.id == "frozenset"
+            && args.len() == 1
+            && self.types.element(args[0].ty) == Some(Type::Str)
+        {
+            return Ok(Expr {
+                ty: Type::StringKeys,
+                kind: ExprKind::Builtin(Builtin::FreezeStrings, args),
+            });
+        }
         if name.id == "divmod" && args.len() == 2 {
             let mut body = Vec::with_capacity(2);
             let mut slots = Vec::with_capacity(2);
@@ -7543,6 +7674,13 @@ impl<'a> Checker<'a> {
             } else {
                 rendered
             });
+        }
+        if matches!(name.id.as_str(), "getattr" | "hasattr" | "vars")
+            && args.first().is_some_and(|arg| arg.ty == Type::NativeModule)
+            && self.resolve(&call.func).is_none()
+            && !self.names.contains_key(name.id.as_str())
+        {
+            return self.errno_builtin(name.id.as_str(), call, &args);
         }
         if name.id == "vars"
             && let [receiver] = args.as_slice()

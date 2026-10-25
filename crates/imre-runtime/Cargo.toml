@@ -37,6 +37,9 @@ smallvec = { version = "=1.16.3", features = ["union"] }
 sha2 = { version = "=0.11.1", default-features = false }
 unicode-case-mapping = "=1.0.0"
 
+[build-dependencies]
+cc = "=1.7.0"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 linux-raw-sys = "=0.12.1"
 
