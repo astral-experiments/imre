@@ -853,7 +853,7 @@ print(Token().clean())
             assert!(
                 reachable(&source.replace(before, after))
                     .unwrap_err()
-                    .contains("variadic parameters")
+                    .contains("a variadic positional parameter requires an exact element annotation")
             );
         }
     }
