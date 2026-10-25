@@ -11,6 +11,35 @@ def rebind_while_evaluating_argument() -> list[str]:
     return ["🐍", "é"]
 
 
+def rebind_while_evaluating_source() -> list[str]:
+    builtins.len = functools.lru_cache(1)(len)
+    return ["again", "again"]
+
+
+def pipeline() -> None:
+    words = ["éé", "x", "éé"]
+    print(list(map(len, words)))
+    print(list(map(len, [b"", b"cd"])))
+    original = builtins.len
+    wrapper = functools.lru_cache(2)(original)
+    try:
+        builtins.len = wrapper
+        print(list(map(len, words)))
+        print(wrapper.cache_info() == (1, 2, 2, 2))
+        print(list(filter(len, ["x", "", "x"])))
+        print(wrapper.cache_info() == (3, 3, 2, 2))
+        try:
+            print(list(map(len, [[1], [2]])))
+        except TypeError as error:
+            print(str(error))
+        print(wrapper.cache_info() == (3, 3, 2, 2))
+        print(list(map(len, rebind_while_evaluating_source())))
+        print(wrapper.cache_info() == (4, 4, 2, 2))
+    finally:
+        builtins.len = original
+    print(builtins.len is original)
+
+
 def exercise() -> None:
     original = builtins.len
     print(original is len)
@@ -60,3 +89,4 @@ def exercise() -> None:
 
 
 exercise()
+pipeline()

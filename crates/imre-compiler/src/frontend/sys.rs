@@ -33,6 +33,15 @@ impl Checker<'_> {
     /// Keep the actual argument alive through the cached or original function call.
     pub(super) fn pack_len_argument(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         let value = self.expr(expression)?;
+        self.pack_len_value(value, expression)
+    }
+
+    /// Pack the concrete item when a direct call or iterator invokes len.
+    pub(super) fn pack_len_value(
+        &mut self,
+        value: Expr,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
         let ty = self.types.len_argument();
         if value.ty == ty {
             return Ok(value);
@@ -40,7 +49,7 @@ impl Checker<'_> {
         let (class, unhashable) = len_argument_class(self.types, value.ty).ok_or_else(|| {
             error(
                 self.source,
-                expression,
+                node,
                 "this live len call requires a supported builtin argument layout",
             )
         })?;
