@@ -30,6 +30,16 @@ EQUALITY_BLOCKERS = {
     "testAssertEqual_diffThreshold": (1036, "14:9: Imre: unknown class method"),
     "testAssertEqual_shorten": (1067, "9:9: Imre: unknown class method"),
 }
+MOCK_BLOCKERS = {
+    "test_assert_called_once_message_not_called": (1858, "10:9: Imre: unknown class method"),
+    "test_reset_mock": (337, '9:35: Imre: unexpected keyword argument "parent"'),
+    "test_reset_mock_recursion": (377, "8:9: Imre: properties are read-only"),
+    "test_reset_sideeffect": (1890, '7:18: Imre: unexpected keyword argument "return_value"'),
+}
+CALLABLE_BLOCKERS = {
+    "testAssertRaisesCallable": (1457, "6:9: Imre: unsupported statement in the Imre subset"),
+    "test_assertRaises": (61, "6:9: Imre: local functions require annotated parameters and return types"),
+}
 
 
 def check_assertion(binary, operation, level):
@@ -86,7 +96,8 @@ def run(args, level, root):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["equality_protocol", *("context_" + family for family in families)]:
+    for name in ["equality_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
+                 "callable_binding", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
         program = HERE / (name + ".py")
@@ -109,29 +120,45 @@ def run(args, level, root):
         ("test_result", "Test_TestResult", "test_stop", "unittest.TestResult.stop"),
         ("test_result", "Test_TestResult", "test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun"),
         ("test_case", "Test_TestCase", "testAssertRaisesNoExceptionType", "unittest.TestCase.assertRaises"),
+        ("test_case", "Test_TestCase", "testAssertRaisesCallable", "unittest.TestCase.assertRaises"),
+        ("test_assertions", "Test_Assertions", "test_assertRaises", "unittest.TestCase.assertRaises"),
         *(("test_case", "Test_TestCase", method, "unittest.TestCase string equality and failure messages")
           for method in ("testAssertEqualSingleLine", "testAssertEqualwithEmptyString",
                          "testAssertEqualMultipleLinesMissingNewlineTerminator",
                          "testAssertEqualMultipleLinesMismatchedNewlinesTerminators",
                          "testAssertMultiLineEqual", *EQUALITY_BLOCKERS)),
+        ("testmock.testmock", "MockTest", "test_assert_not_called", "unittest.mock.Mock.assert_not_called"),
+        ("testmock.testmock", "MockTest", "test_assert_called", "unittest.mock.Mock.assert_called"),
+        ("testmock.testmock", "MockTest", "test_assert_called_once", "unittest.mock.Mock.assert_called_once"),
+        ("testmock.testmock", "MockTest", "test_ordered_call_signature", "unittest.mock.Mock.call_args and its representation"),
+        *(("testmock.testmock", "MockTest", method, "unittest.TestCase.assertRaises and unittest.mock.Mock." + assertion)
+          for method, assertion in (("test_assert_any_call", "assert_any_call"),
+                                    ("test_assert_called_with", "assert_called_with"),
+                                    ("test_assert_called_once_with", "assert_called_once_with"))),
+        *(("testmock.testmock", "MockTest", method, "unittest.mock recording, reset, and call assertions")
+          for method in MOCK_BLOCKERS),
     ):
-        path = HERE / f"upstream/Lib/test/test_unittest/{module}.py"
+        path = HERE / "upstream/Lib/test/test_unittest" / (module.replace(".", "/") + ".py")
         case_id = PREFIX + f"{module}.{owner}.{method}"
         directory = root / method
         directory.mkdir()
         fixture = testcase_fixture("bool" if method == "test_stop" else None)
+        if module == "testmock.testmock":
+            fixture = "from unittest.mock import Mock\n" + fixture
         try:
             executions[case_id] = native_method(lang, directory, path, owner, case_id, fixture,
                                                 operation=("imre", operation))
         except NativeCompileError as exc:
             observation = compile_blocker(exc)
             observation["reason"] = str(exc).strip().replace(str(directory) + "/", "<case>/")
-            if method in EQUALITY_BLOCKERS:
-                line, diagnostic = EQUALITY_BLOCKERS[method]
+            expected = (MOCK_BLOCKERS.get(method) if module == "testmock.testmock"
+                        else EQUALITY_BLOCKERS.get(method) or CALLABLE_BLOCKERS.get(method))
+            if expected:
+                line, diagnostic = expected
                 if observation["reason"].endswith("<case>/case.py:" + diagnostic):
                     measured_blockers.add(case_id)
                 observation["evidence"].update(
-                    original_source=f"Lib/test/test_unittest/{module}.py:{line}",
+                    original_source=f"{path.relative_to(HERE / 'upstream')}:{line}",
                     method_sha256=hashlib.sha256(method_bytes(path, owner, method)).hexdigest(),
                 )
             blocked[case_id, 1] = observation

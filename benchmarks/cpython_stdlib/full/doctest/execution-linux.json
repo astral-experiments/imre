@@ -1,0 +1,78 @@
+[
+  {
+    "opt_level": 0,
+    "controls": [
+      "discovery",
+      "execute"
+    ],
+    "modules": {
+      "itertools": {
+        "ids": [
+          "itertools.batched"
+        ],
+        "examples": 1,
+        "outcome": "blocked",
+        "diagnostic": "Compiling <entry>/case.py (-O0)\ndoctest itertools.batched: <entry>/_imre_compiled_doctest_0.py:3:1: Imre: unsupported sealed standard-library export itertools.batched"
+      },
+      "json": {
+        "ids": [
+          "json"
+        ],
+        "examples": 32,
+        "outcome": "blocked",
+        "diagnostic": "Compiling <entry>/case.py (-O0)\ndoctest json, example 7: unsupported sealed standard-library export io.StringIO"
+      },
+      "json.encoder": {
+        "ids": [
+          "json.encoder.JSONEncoder.encode"
+        ],
+        "examples": 2,
+        "outcome": "blocked",
+        "diagnostic": "Compiling <entry>/case.py (-O0)\ndoctest json.encoder.JSONEncoder.encode, example 1: unsupported sealed standard-library export json.encoder.JSONEncoder"
+      },
+      "json.decoder": {
+        "ids": [],
+        "examples": 0,
+        "outcome": "empty-suite"
+      }
+    }
+  },
+  {
+    "opt_level": 3,
+    "controls": [
+      "discovery",
+      "execute"
+    ],
+    "modules": {
+      "itertools": {
+        "ids": [
+          "itertools.batched"
+        ],
+        "examples": 1,
+        "outcome": "blocked",
+        "diagnostic": "Compiling <entry>/case.py (-O3)\ndoctest itertools.batched: <entry>/_imre_compiled_doctest_0.py:3:1: Imre: unsupported sealed standard-library export itertools.batched"
+      },
+      "json": {
+        "ids": [
+          "json"
+        ],
+        "examples": 32,
+        "outcome": "blocked",
+        "diagnostic": "Compiling <entry>/case.py (-O3)\ndoctest json, example 7: unsupported sealed standard-library export io.StringIO"
+      },
+      "json.encoder": {
+        "ids": [
+          "json.encoder.JSONEncoder.encode"
+        ],
+        "examples": 2,
+        "outcome": "blocked",
+        "diagnostic": "Compiling <entry>/case.py (-O3)\ndoctest json.encoder.JSONEncoder.encode, example 1: unsupported sealed standard-library export json.encoder.JSONEncoder"
+      },
+      "json.decoder": {
+        "ids": [],
+        "examples": 0,
+        "outcome": "empty-suite"
+      }
+    }
+  }
+]

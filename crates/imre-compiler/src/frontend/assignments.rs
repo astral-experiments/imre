@@ -547,6 +547,13 @@ impl Checker<'_> {
                 {
                     return Some(self.types.list(Type::Dict(id)));
                 }
+                if let Some(class) = self.writable_property(receiver.ty, attribute) {
+                    let setter = &self.classes.setters[class][attribute.attr.as_str()];
+                    return match self.inference {
+                        Some(inference) => inference.parameter(setter.id, 1),
+                        None => Some(setter.params[1].ty),
+                    };
+                }
                 probe
                     .writable_field_value(attribute, receiver)
                     .ok()
