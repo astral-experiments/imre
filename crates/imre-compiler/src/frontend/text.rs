@@ -78,7 +78,12 @@ impl Checker<'_> {
             let value = self.expr(source)?;
             self.shlex_quote_value(value, call)
         } else {
-            self.join_parts(unpacking::string(" "), source, call, true)
+            self.join_parts(
+                unpacking::string(" "),
+                source,
+                call,
+                stdlib::JoinStyle::Shell,
+            )
         }
     }
 

@@ -706,6 +706,18 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
+            ProcessOperation::QuoteCommandArgument => {
+                let word = self.word(&args[0].value);
+                let kind = representation_kind(args[0].value.ty, &self.module.types);
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_subprocess_quote_argument(i64 {word}, i32 {kind})"
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             ProcessOperation::Strerror => {
                 let operand = self.checked_instruction(format!(
                     "call ptr @imre_os_strerror(i64 {})",

@@ -50,7 +50,12 @@ impl Checker<'_> {
             }
         };
         let value = self.expr(path)?;
-        self.fspath_protocol(value, path, None, None)
+        self.fspath(value, path)
+    }
+
+    /// Resolve one path-like value, preserving the return type and any user exception.
+    pub(super) fn fspath(&mut self, value: Expr, at: &ast::Expr) -> Result<Expr, String> {
+        self.fspath_protocol(value, at, None, None)
     }
 
     /// OS path converters name the operation and parameter if the protocol is missing.
