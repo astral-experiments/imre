@@ -1722,6 +1722,7 @@ impl Emitter<'_, '_> {
                 "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
             ));
             self.line("call void @imre_record_error_init()");
+            self.line("call void @imre_stdio_init()");
             self.line("call void @imre_init_literals()");
         }
         if entry && self.uses_linecache {
@@ -7131,6 +7132,7 @@ declare void @imre_exception_raise(ptr)
 declare void @imre_exception_reraise()
 declare i32 @imre_finish_stdio()
 declare void @imre_record_error_init()
+declare void @imre_stdio_init()
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
