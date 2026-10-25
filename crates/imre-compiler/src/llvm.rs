@@ -5782,9 +5782,11 @@ impl Emitter<'_, '_> {
                     ))
                 } else {
                     let default = default.unwrap();
-                    self.instruction(format!(
+                    let word = self.instruction(format!(
                         "call i64 @imre_dict_get_default(ptr {receiver}, i64 {key}, i64 {default})"
-                    ))
+                    ));
+                    self.check_key_comparison(args[1].value.ty);
+                    word
                 };
                 if self
                     .module
@@ -5893,6 +5895,7 @@ impl Emitter<'_, '_> {
                     "call i32 @imre_{family}_contains(ptr {}, i64 {key})",
                     args[1].value.operand
                 ));
+                self.check_key_comparison(args[0].value.ty);
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
@@ -6216,6 +6219,7 @@ impl Emitter<'_, '_> {
             "call i32 @imre_dict_try_{op}(ptr {}, i64 {key}, ptr %mapping_key_word)",
             args[0].value.operand
         ));
+        self.check_key_comparison(args[1].value.ty);
         let found = self.instruction(format!("icmp ne i32 {byte}, 0"));
         let (present, absent, end) = (self.label(), self.label(), self.label());
         self.branch(&found, &present, &absent);
@@ -6305,6 +6309,12 @@ impl Emitter<'_, '_> {
 
     /// Converts a typed value to the runtime's word representation without
     /// changing ownership. The slot's representation tag controls reclamation.
+    fn check_key_comparison(&mut self, key: Type) {
+        if matches!(key, Type::Tuple(_) | Type::Class(_)) {
+            self.check_error();
+        }
+    }
+
     fn key_word(&mut self, value: &Value) -> String {
         if self.module.types.fallible_key(value.ty) {
             self.checked_line(format!(
@@ -6660,6 +6670,8 @@ impl Emitter<'_, '_> {
         ));
         if insert {
             self.check_error();
+        } else {
+            self.check_key_comparison(value.ty);
         }
     }
 
@@ -8560,6 +8572,48 @@ mod tests {
                     .unwrap()
                     .contains("call i32 @imre_error_pending()"),
                 "{symbol}"
+            );
+        }
+    }
+
+    #[test]
+    fn tuple_key_lookup_errors_precede_use_of_the_result() {
+        let body = function_body(
+            r#"
+def check(a: str, b: str) -> None:
+    left = ((a, 0), 0)
+    right = ((b, 0), 0)
+    values = {left: 1}
+    members = {left}
+    print(right in values)
+    print(right in members)
+    print(values.get(right, 7))
+    found = values.get(right)
+    if found is not None:
+        print(found)
+    removed = values.pop(right, None)
+    if removed is not None:
+        print(removed)
+    members.discard(right)
+
+check("a", "a")
+"#,
+        );
+        for call in [
+            "imre_dict_contains",
+            "imre_set_contains",
+            "imre_dict_get_default",
+            "imre_dict_try_get",
+            "imre_dict_try_pop",
+            "imre_set_discard",
+        ] {
+            let (_, result) = body.split_once(&format!("@{call}(")).unwrap();
+            assert!(
+                result
+                    .lines()
+                    .take(2)
+                    .any(|line| line.contains("@imre_error_pending()")),
+                "{call} must propagate a failed tuple-key comparison"
             );
         }
     }
