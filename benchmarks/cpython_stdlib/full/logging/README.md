@@ -25,17 +25,17 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The [replay of `f3c66db`](https://github.com/astral-sh/imre/actions/runs/40175425797)
+The [replay of `28236a9`](https://github.com/astral-sh/imre/actions/runs/40181624264)
 includes logger hierarchy and handler propagation, the level registry, timed
-file handlers, records, single and batch formatters, filters and configuration.
+file handlers, records, formatters, filters, configuration and the base Handler.
 Both levels have the same counts:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
 | Imre | Imre | Imre | CPython hooks and native child | 10 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
-| CPython | CPython | Imre | CPython | 34 |
-| Blocked before execution | | | | 221 |
+| CPython | CPython | Imre | CPython | 35 |
+| Blocked before execution | | | | 220 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -43,8 +43,11 @@ identity, immediate child membership, stopped handler propagation, level-name ma
 rollover with an explicit time, record representation, formatter precision,
 an empty name filter, and the default and custom buffering formatters.
 Four bodies verify native stderr with the original
-CPython output helper. The 34 host-driven methods exercise the registry, timed
-files, record flags, [formatters](formatters.md), or [configuration](config.md).
+CPython output helper. The 35 host-driven methods exercise the registry, timed
+files, record flags, [formatters](formatters.md), [configuration](config.md),
+or [Handler naming](handlers.md). In `HandlerTest.test_name`, the original
+body reads and writes one native handler's name and checks the exception from
+calling `emit(None)` on that instance.
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
 compiler or adapter blockers, and the three pinned skip conditions. It
 does not treat a compiled source or a passing CPython reference as a native pass.
