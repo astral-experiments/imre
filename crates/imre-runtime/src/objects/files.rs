@@ -24,6 +24,8 @@ use buffered::{Input, Output};
 
 pub(super) struct FileState {
     fd: Option<RawFd>,
+    // Closing a stream releases its descriptor, not its original I/O class.
+    raw: bool,
     stream: Option<Stream>,
     pub(super) name: Option<StrOwner>,
     // Preserve access mode after close: binary wrong-direction errors take precedence.
@@ -146,6 +148,7 @@ impl FileState {
         };
         Rc::new(Object(StorageCell::new(Storage::File(Box::new(Self {
             fd: Some(fd),
+            raw: !text && capacity == 0,
             name: None,
             stream: Some(stream),
             kind,
@@ -493,6 +496,7 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     };
     Ok(FileState {
         fd: Some(fd),
+        raw: false,
         stream: Some(stream),
         name: Some(StrOwner::new(Str::new(path))),
         kind: match (binary, mode) {
@@ -780,6 +784,18 @@ pub unsafe extern "C" fn imre_text_flush(value: *const Object) -> u32 {
 }
 
 /// # Safety
+/// The caller roots the binary file. Only the immutable class flag is read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_file_is_raw(value: *const Object) -> u32 {
+    // SAFETY: no language callbacks or file operations are needed for isinstance.
+    unsafe {
+        object(value)
+            .0
+            .with(|storage| u32::from(storage.file().raw))
+    }
+}
+
+/// # Safety
 /// The file stays rooted throughout this descriptor query.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_file_fileno(value: *const Object) -> usize {
@@ -951,6 +967,7 @@ mod tests {
         Rc::new(Object(StorageCell::new(Storage::File(Box::new(
             FileState {
                 fd: Some(file.as_raw_fd()),
+                raw: false,
                 stream: Some(Stream::Write(Output::new(file, 8192, false))),
                 kind: FileKind::Text,
                 name: None,
