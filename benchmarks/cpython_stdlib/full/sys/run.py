@@ -17,6 +17,7 @@ from suite_inventory import cases, load_suite, verify_files, verify_interpreter_
 from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures
 from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
+import argv_case
 import locale_case
 
 MODULE = "test.test_sys"
@@ -125,6 +126,8 @@ def select(toolchain, work, source, module):
     for method in ("test_getdefaultencoding", "test_getfilesystemencoding"):
         executions[SYS + method] = encoding_case
 
+    executions[argv_case.CASE_ID] = argv_case.observer(
+        module, toolchain, work / "argv-controls", pinned_methods["SysModuleTest", "test_orig_argv"])
     executions[locale_case.CASE_ID] = locale_case.observer(
         module, toolchain, work / "nonascii-child", pinned_methods["SysModuleTest", "test_ioencoding_nonascii"])
     return executions

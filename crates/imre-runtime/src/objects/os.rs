@@ -136,7 +136,8 @@ unsafe fn directory_fd(fd: usize) -> Result<libc::c_int> {
     })
 }
 
-fn c_int(word: usize) -> Result<libc::c_int> {
+// All C ints fit in the immediate representation. Heap integers cannot fit.
+pub(super) fn c_int(word: usize) -> Result<libc::c_int> {
     (word & 1 != 0)
         .then_some((word as i64) >> 1)
         .and_then(|n| libc::c_int::try_from(n).ok())

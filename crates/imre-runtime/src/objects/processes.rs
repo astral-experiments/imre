@@ -1032,7 +1032,7 @@ pub extern "C" fn imre_environ_copy() -> *const Object {
 ///
 /// # Safety
 /// Root an exact list[str], nullable UTF-8 cwd, and nullable dict[str, str]. `check`
-/// is 0 or 1. `descriptor` is immutable static metadata with a string-list field, an integer, and two None/str/bytes stream fields.
+/// is 0 or 1. `descriptor` is immutable static metadata with the original command field, an integer, and two None/str/bytes stream fields.
 /// Enter with pending clear. Success transfers one fully initialized record owner;
 /// null means pending must be checked before using the result. Inputs are borrowed.
 #[unsafe(no_mangle)]
@@ -1381,6 +1381,19 @@ unsafe fn run_process(
         });
         return std::ptr::null_mut();
     }
+    // SAFETY: the call site's descriptor matches the prepared arguments and streams.
+    unsafe { completed_record(descriptor, args, returncode, stdout, stderr) }
+}
+
+/// Transfer the exact original command and completed streams to an owned result.
+/// The caller guarantees that all four field owners match the static descriptor.
+unsafe fn completed_record(
+    descriptor: *const RecordDescriptor,
+    args: OwnedWord,
+    returncode: i32,
+    stdout: OwnedWord,
+    stderr: OwnedWord,
+) -> *mut usize {
     // SAFETY: static metadata describes these four exact fields. No fallible work
     // remains; typed stores preserve reference provenance and transfer each owner.
     unsafe {
@@ -1407,7 +1420,7 @@ unsafe fn run_process(
 ///
 /// # Safety
 /// `record` is a rooted, fully initialized sealed CompletedProcess record with
-/// a string-list field, an integer, and two None/str/bytes stream fields. Enter with pending clear and check it immediately afterward.
+/// the original command field, an integer, and two None/str/bytes stream fields. Enter with pending clear and check it immediately afterward.
 /// Neither the record nor any field owner is consumed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_subprocess_check(record: *const usize) {
