@@ -442,6 +442,7 @@ impl Builtin {
             | Self::StrEnumValue
             | Self::EnumString
             | Self::StringListContains
+            | Self::StructListContains
             | Self::StringContains
             | Self::BytesContains
             | Self::UnionInject
