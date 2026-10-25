@@ -60,6 +60,7 @@ enum Storage {
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),
+    ZipInfo(Rc<zipfile::Info>),
     AsyncProcess(Box<processes::AsyncProcess>),
     AsyncTask(Rc<asyncio::Task>),
     GeneratorContext(Rc<contexts::Manager>),
