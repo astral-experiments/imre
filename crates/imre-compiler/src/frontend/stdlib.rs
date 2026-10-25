@@ -452,6 +452,12 @@ impl Checker<'_> {
                 "str.join requires one string iterable",
             ));
         };
+        if self.joined_lines.finishes_buffer(call.range()) {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::JoinBufferFinish, vec![self.expr(source)?]),
+            });
+        }
         self.join_parts(receiver, source, call, JoinStyle::Plain)
     }
 
