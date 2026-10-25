@@ -18,10 +18,12 @@ def check_cache_values(toolchain, directory):
     source = HERE / "cache_values.py"
     native = toolchain.build(source.read_bytes(), directory)
     def output(command):
-        result = subprocess.run(command, capture_output=True, timeout=30, check=True)
-        return result.stdout, result.stderr
-    if output([native]) != output([sys.executable, "-I", "-B", source]):
-        raise AssertionError("logging.disable, cache aliases, or invalidation differs from CPython")
+        result = subprocess.run(command, capture_output=True, timeout=30)
+        return result.returncode, result.stdout, result.stderr
+    expected = output([sys.executable, "-I", "-B", source])
+    actual = output([native])
+    if expected[0] or actual != expected:
+        raise AssertionError(f"cache control: native {actual!r}; CPython {expected!r}")
 
 
 def cache_assertion_blocker(exc, directory):

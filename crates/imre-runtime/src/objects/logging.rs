@@ -15,13 +15,14 @@ use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::exceptions::Result;
+use super::mappings::IntKey;
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object};
 
 struct Entry {
     handle: Rc<Object>,
     level: Int,
     creation_order: usize,
-    enabled: Rc<Object>,
+    enabled: cache::EnabledCache,
 }
 
 impl Entry {
@@ -32,7 +33,7 @@ impl Entry {
             ))))),
             level: Int::small(level).unwrap(),
             creation_order,
-            enabled: cache::new(),
+            enabled: cache::EnabledCache::new(),
         }
     }
 }
@@ -51,6 +52,19 @@ impl Registry {
             entries: HashMap::from([("root".into(), Entry::new("root", 30, 0))]),
             format: None,
             datefmt: None,
+        }
+    }
+
+    fn set_level(&mut self, name: &str, value: &Int) {
+        self.entries.get_mut(name).unwrap().level = value.clone();
+        self.clear_enabled();
+    }
+
+    /// Previously returned caches stay live when a level or the manager limit changes.
+    fn clear_enabled(&self) {
+        // Manager._clear_cache invalidates every logger, even when the level is unchanged.
+        for entry in self.entries.values() {
+            entry.enabled.clear();
         }
     }
 
@@ -267,8 +281,8 @@ pub unsafe extern "C" fn imre_log_config(level: usize, fmt: usize, datefmt: usiz
         let datefmt = datefmt.map(ToString::to_string);
         if level != 0 {
             // SAFETY: obtain an independent owner of the supplied integer.
-            logs.entries.get_mut("root").unwrap().level = (*unsafe { Int::borrow(level) }).clone();
-            logs.clear_enabled();
+            let level = unsafe { Int::borrow(level) };
+            logs.set_level("root", &level);
         }
         logs.format = Some(format);
         logs.datefmt = datefmt;
@@ -328,10 +342,7 @@ pub unsafe extern "C" fn imre_log_effective_level(logger: *const Object) -> usiz
 pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize) {
     // SAFETY: both arguments are rooted by the caller.
     let (name, value) = unsafe { (name(logger), Int::borrow(level)) };
-    LOGGERS.with_borrow_mut(|logs| {
-        logs.entries.get_mut(name.as_str()).unwrap().level = (*value).clone();
-        logs.clear_enabled();
-    });
+    LOGGERS.with_borrow_mut(|logs| logs.set_level(&name, &value));
 }
 
 /// # Safety
@@ -340,10 +351,24 @@ pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize)
 pub unsafe extern "C" fn imre_log_enabled(logger: *const Object, level: usize) -> bool {
     // SAFETY: both arguments are rooted by the caller.
     let (name, value) = unsafe { (name(logger), Int::borrow(level)) };
-    finish(
-        LOGGERS.with_borrow(|logs| logs.enabled(&name, &value)),
-        false,
-    )
+    let result = LOGGERS.with_borrow(|logs| {
+        let key = IntKey((*value).clone());
+        if let Some(enabled) = logs.entries[name.as_str()].enabled.get(&key) {
+            return Ok(enabled);
+        }
+        let threshold = logs.effective(&name);
+        let enabled = match (
+            value.as_small(),
+            logs.disable.as_small(),
+            threshold.as_small(),
+        ) {
+            (Some(level), Some(disable), Some(threshold)) => level > disable && level >= threshold,
+            _ => value.big() > logs.disable.big() && value.big() >= threshold.big(),
+        };
+        logs.entries[name.as_str()].enabled.insert(key, enabled)?;
+        Ok(enabled)
+    });
+    finish(result, false)
 }
 
 /// # Safety

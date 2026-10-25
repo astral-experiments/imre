@@ -1,5 +1,9 @@
 # Logger enablement caches
 
+The cache population and `setLevel` invalidation come from [#420](https://github.com/astral-sh/imre/pull/420).
+The public `_cache` exposes that store in insertion order, and `logging.disable()`
+updates the manager limit and invalidates the same dictionaries.
+
 `LoggerTest.test_caching` checks that child loggers inherit levels, retain both
 true and false cache entries, and invalidate all registered loggers on `setLevel`
 and `logging.disable()`. The original `LoggerTest` and `BaseTest` hooks remain
