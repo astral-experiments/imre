@@ -41,6 +41,11 @@ impl WordKind {
         self.raw() & !NULLABLE
     }
 
+    /// Nonnullable handles whose LLVM record field is a pointer.
+    fn is_pointer_field(self) -> bool {
+        matches!(self.0, 3..=6 | 8 | 11 | 12)
+    }
+
     /// Reads the compiler's concrete field storage without reinterpreting pointer
     /// bytes as an integer. Nonnullable reference fields use LLVM pointer stores;
     /// the explicit cast exposes their provenance before word-based reclamation.
@@ -50,7 +55,7 @@ impl WordKind {
     /// `field` is an aligned, readable record slot stored using this descriptor's
     /// LLVM representation, or its initial all-zero state.
     pub(super) unsafe fn read_record_field(self, field: *const usize) -> usize {
-        if matches!(self.0, 3..=6 | 8 | 11 | 12) {
+        if self.is_pointer_field() {
             // SAFETY: this exact descriptor denotes a pointer-typed field.
             unsafe { field.cast::<*const ()>().read() as usize }
         } else if self.0 == 7 {
@@ -154,14 +159,16 @@ impl OwnedWord {
     /// # Safety
     /// The destination is an uninitialized slot of this exact descriptor.
     pub(super) unsafe fn initialize_record_field(self, field: *mut usize) {
-        let kind = self.kind.raw();
+        let kind = self.kind;
         let word = self.into_word();
         // SAFETY: this is the inverse of WordKind::read_record_field.
         unsafe {
-            match kind {
-                3..=6 | 8 => field.cast::<*const ()>().write(word as *const ()),
-                7 => field.cast::<f64>().write(f64::from_bits(word as u64)),
-                _ => field.write(word),
+            if kind.is_pointer_field() {
+                field.cast::<*const ()>().write(word as *const ());
+            } else if kind.raw() == 7 {
+                field.cast::<f64>().write(f64::from_bits(word as u64));
+            } else {
+                field.write(word);
             }
         }
     }

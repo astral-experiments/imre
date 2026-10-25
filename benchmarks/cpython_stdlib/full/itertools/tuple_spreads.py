@@ -1,4 +1,5 @@
 """Exercise the argument display in threading_helper.run_concurrently."""
+from annotationlib import ForwardRef
 from itertools import islice
 from typing import Callable
 
@@ -92,6 +93,22 @@ def wide(args: list[int]) -> None:
         print(str(exc))
 
 
+def pointer_fields() -> None:
+    classes = [bool, int, str]
+    packed_classes = (*classes,)
+    classes.clear()
+    for i in range(len(packed_classes)):
+        print(issubclass(packed_classes[i], int))
+
+    refs = [ForwardRef("First", owner=int), ForwardRef("Second", owner=int)]
+    first = refs[0]
+    packed_refs = (*refs,)
+    refs.clear()
+    print(packed_refs[0] is first)
+    print(packed_refs[-1].__forward_arg__)
+    print(packed_refs[-1].__owner__ is int)
+
+
 items = [3, 4]
 print(captures(items))
 print(items)
@@ -109,3 +126,4 @@ nested([[1], [2]])
 wide(list(range(1025)))
 shared = [4, 6]
 print(repr(shared_capture(shared)))
+pointer_fields()
