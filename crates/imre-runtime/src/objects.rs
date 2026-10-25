@@ -453,7 +453,12 @@ pub unsafe extern "C" fn imre_str_concat(a: *const Str, b: *const Str) -> *const
     };
     result.push_str(left);
     result.push_str(right);
-    StrOwner::into_raw(StrOwner::new(result))
+    finish(
+        StrOwner::try_new(result)
+            .map(StrOwner::into_raw)
+            .map_err(|_| Error::allocation()),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety
@@ -708,7 +713,7 @@ pub unsafe extern "C" fn imre_str_concat_parts_owned(
         // SAFETY: all inputs, including self-borrows, remain rooted and unchanged.
         result.push_str(unsafe { part.as_str() });
     }
-    StrOwner::into_raw(StrOwner::new(result))
+    finish_shared_append(owner, StrOwner::try_new(result))
 }
 
 /// Appends a compiler-pooled literal, retaining its root for an empty prefix.
@@ -829,7 +834,17 @@ unsafe fn append_utf8_slow(mut owner: StrOwner, data: *const u8, length: usize) 
         };
         result.push_str(&owner);
         result.push_str(suffix);
-        StrOwner::into_raw(StrOwner::new(result))
+        finish_shared_append(owner, StrOwner::try_new(result))
+    }
+}
+
+fn finish_shared_append(
+    owner: StrOwner,
+    result: Result<StrOwner, allocator_api2::alloc::AllocError>,
+) -> *const Str {
+    match result {
+        Ok(result) => StrOwner::into_raw(result),
+        Err(_) => failed_append(owner),
     }
 }
 
@@ -889,7 +904,7 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<StrOwne
         return Ok(shared);
     }
     if length == 0 {
-        return Ok(text::owned_string(""));
+        return text::try_owned_string("");
     }
     let mut result = Str::try_with_capacity(length).map_err(|_| Error::allocation())?;
     {
@@ -915,7 +930,7 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<StrOwne
     // SAFETY: exactly `length` bytes were initialized within capacity; joining
     // complete UTF-8 fragments preserves UTF-8, including the full-inline case.
     unsafe { result.set_len(length) };
-    Ok(StrOwner::new(result))
+    StrOwner::try_new(result).map_err(|_| Error::allocation())
 }
 
 /// Python also treats the four ASCII information separators as whitespace.
@@ -1570,6 +1585,26 @@ mod tests {
             "capacity grew {growths} times for 1024 appends"
         );
         assert_eq!(source.as_str(), "é\0".repeat(1024));
+    }
+
+    #[test]
+    fn refused_shared_append_owner_restores_the_original_handle() {
+        let alias = StrOwner::new(Str::new("shared"));
+        let original = StrOwner::into_raw(alias.clone());
+        // SAFETY: the call consumes the slot's owner and restores it on failure.
+        let result = finish_shared_append(
+            unsafe { StrOwner::from_raw(original) },
+            Err(allocator_api2::alloc::AllocError),
+        );
+        assert!(result.is_null());
+        assert_eq!(exceptions::imre_error_pending(), 1);
+        // SAFETY: the slot still owns one reference and take transfers the exception.
+        unsafe {
+            let restored = StrOwner::from_raw(original);
+            assert!(StrOwner::ptr_eq(&restored, &alias));
+            imre_object_release(exceptions::imre_error_take());
+        }
+        assert_eq!(StrOwner::strong_count(&alias), 1);
     }
 
     #[test]
