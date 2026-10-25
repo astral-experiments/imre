@@ -746,6 +746,8 @@ pub(crate) enum Builtin {
         empty_list: bool,
     },
     JsonAdd,
+    /// Compare two parsed values, observing mutations to an original root list.
+    JsonEqual,
     /// Both lookups borrow the same local JSON document and use literal integer defaults.
     JsonAddFields(String, String),
     JsonIsInt,

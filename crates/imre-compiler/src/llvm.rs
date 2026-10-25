@@ -4035,6 +4035,17 @@ impl Emitter<'_, '_> {
             Builtin::JsonGetReceiver => {
                 self.call("imre_json_get_receiver", returns, &[&args[0].value])
             }
+            Builtin::JsonEqual => {
+                let equal = self.checked_instruction(format!(
+                    "call i32 @imre_json_equal(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {equal}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::JsonIsInt => {
                 let bit = self.instruction(format!(
                     "call i32 @imre_json_is_int(ptr {})",
@@ -6701,6 +6712,7 @@ declare ptr @imre_json_iter(ptr)
 declare i64 @imre_json_len(ptr)
 declare i64 @imre_json_get(ptr, ptr, i64, i32, i32, i64)
 declare ptr @imre_json_add(ptr, ptr)
+declare i32 @imre_json_equal(ptr, ptr)
 declare ptr @imre_json_get_receiver(ptr)
 declare ptr @imre_json_add_fields(ptr, ptr, i64, i64, ptr, i64, i64)
 declare i32 @imre_json_is_int(ptr)

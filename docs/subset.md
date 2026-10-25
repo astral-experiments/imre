@@ -201,7 +201,9 @@ scalars. `json.loads` accepts strings and bytes; `json.load` reads a text or
 binary stream from its current position. Binary input detects UTF-8, UTF-16,
 and UTF-32 with or without a byte order mark. A document supports literal string keys, integer indices, length,
 truth tests, and iteration. Array iteration yields values and object iteration
-yields keys in insertion order. Select a value into a concrete scalar or
+yields keys in insertion order. Two parsed values support `==` and `!=`:
+list order matters, dictionary key order does not, and numbers compare by value.
+Select a value into a concrete scalar or
 `dict[str, Any]` at a checked boundary. The latter is a read-only JSON view,
 with literal-key `.get()`, scalar or empty-list defaults, and nested iteration.
 Original array roots keep their mutable list identity. Malformed JSON raises

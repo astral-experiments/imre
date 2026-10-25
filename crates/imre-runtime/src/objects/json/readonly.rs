@@ -28,6 +28,8 @@ pub(super) enum Node {
     Bool(bool),
     Integer(Int),
     Float(f64),
+    /// The default decoder reuses a single NaN object, observable in container equality.
+    ConstantNan,
     String(Rc<Str>),
     Datetime(Str),
     Array(Vec<usize>),
@@ -39,7 +41,7 @@ impl Node {
     fn truth(&self) -> bool {
         match self {
             Self::Null => false,
-            Self::Datetime(_) => true,
+            Self::Datetime(_) | Self::ConstantNan => true,
             Self::Bool(value) => *value,
             Self::Array(items) => !items.is_empty(),
             Self::Deferred(array) => array.truth(),
@@ -56,7 +58,7 @@ impl Node {
             Self::Datetime(_) => "datetime",
             Self::Bool(_) => "bool",
             Self::Integer(_) => "int",
-            Self::Float(_) => "float",
+            Self::Float(_) | Self::ConstantNan => "float",
             Self::String(_) => "str",
             Self::Array(_) | Self::Deferred(_) => "list",
             Self::Object(_) => "dict",
@@ -259,6 +261,7 @@ impl View {
         };
         let float = |node: &Node| match node {
             Node::Float(v) => Some(Ok(*v)),
+            Node::ConstantNan => Some(Ok(f64::NAN)),
             _ => integer(node).map(|v| crate::floats::int_to_float(&v)),
         };
         let node = if let (Some(a), Some(b)) = (integer(left), integer(right)) {
@@ -357,11 +360,17 @@ impl View {
                 Self::children(&self.nodes, children)
             } as usize),
             (7, Node::Bool(value)) => Ok(usize::from(*value) + usize::from(optional)),
-            (8, Node::Float(value)) => Ok(if optional {
-                Rc::into_raw(Rc::new(*value)) as usize
-            } else {
-                value.to_bits() as usize
-            }),
+            (8, Node::Float(_) | Node::ConstantNan) => {
+                let value = match node {
+                    Node::Float(v) => *v,
+                    _ => f64::NAN,
+                };
+                Ok(if optional {
+                    Rc::into_raw(Rc::new(value)) as usize
+                } else {
+                    value.to_bits() as usize
+                })
+            }
             (1..=3 | 5..=8, _) => {
                 let expected = [
                     "", "dict", "str", "int", "", "list", "list", "bool", "float",
@@ -414,15 +423,12 @@ fn push_node(
         b't' => Node::Bool(true),
         b'f' => Node::Bool(false),
         b'n' => Node::Null,
-        _ if raw.contains(['.', 'e', 'E']) => {
-            let value = match source.token(raw) {
-                "NaN" => f64::NAN,
-                "Infinity" => f64::INFINITY,
-                "-Infinity" => f64::NEG_INFINITY,
-                _ => raw.parse().expect("validated JSON float"),
-            };
-            Node::Float(value)
-        }
+        _ if raw.contains(['.', 'e', 'E']) => match source.token(raw) {
+            "NaN" => Node::ConstantNan,
+            "Infinity" => Node::Float(f64::INFINITY),
+            "-Infinity" => Node::Float(f64::NEG_INFINITY),
+            _ => Node::Float(raw.parse().expect("validated JSON float")),
+        },
         _ => Node::Integer(
             raw.parse::<i64>()
                 .ok()
@@ -702,6 +708,18 @@ pub unsafe extern "C" fn imre_json_add(a: *const Object, b: *const Object) -> *c
     // SAFETY: both simultaneous storage borrows are immutable, including on alias.
     let result = unsafe { with_view(a, |left| with_view(b, |right| left.add(right))) };
     finish(result.map(View::into_handle), std::ptr::null())
+}
+
+/// # Safety
+/// The compiler roots both JSON operands for the duration of the comparison.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_json_equal(left: *const Object, right: *const Object) -> u32 {
+    // SAFETY: both views admit simultaneous immutable borrows, including on alias.
+    unsafe {
+        with_view(left, |a| {
+            with_view(right, |b| u32::from(a.equal_operand(b)))
+        })
+    }
 }
 
 /// # Safety

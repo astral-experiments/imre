@@ -285,6 +285,7 @@ impl Builtin {
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
             | Self::JsonAdd
+            | Self::JsonEqual
             | Self::JsonAddFields(_, _)
             | Self::JsonDumps(_)
             | Self::JsonDump(_)
