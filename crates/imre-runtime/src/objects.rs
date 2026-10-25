@@ -448,6 +448,20 @@ pub unsafe extern "C" fn imre_seq_clear(value: *const Object) {
     drop(previous);
 }
 
+/// Reverse the owned slots in place without acquiring or releasing them.
+///
+/// # Safety
+/// The caller roots the mutable list for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_reverse(value: *const Object) {
+    // SAFETY: resolving the native sequence and swapping slots cannot invoke Python.
+    unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| storage.sequence_mut().values.reverse())
+    };
+}
+
 /// # Safety
 /// The sequence is rooted. Success transfers its removed owner's exact word;
 /// check pending before interpreting zero, which may also be a valid element.

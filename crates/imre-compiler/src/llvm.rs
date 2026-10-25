@@ -5948,11 +5948,12 @@ impl Emitter<'_, '_> {
                 self.release_operand(&args[0]);
                 return none();
             }
-            Builtin::ListClear => {
-                let symbol = if args[0].value.ty == Type::ListInt {
-                    "imre_list_clear"
-                } else {
-                    "imre_seq_clear"
+            Builtin::ListClear | Builtin::ListReverse => {
+                let symbol = match (builtin, args[0].value.ty) {
+                    (Builtin::ListClear, Type::ListInt) => "imre_list_clear",
+                    (Builtin::ListClear, _) => "imre_seq_clear",
+                    (_, Type::ListInt) => "imre_list_reverse",
+                    _ => "imre_seq_reverse",
                 };
                 self.void_call(symbol, &[&args[0].value]);
                 none()
@@ -7563,6 +7564,8 @@ declare i32 @imre_seq_append(ptr, i64, i32)
 declare i64 @imre_seq_pop(ptr)
 declare void @imre_list_clear(ptr)
 declare void @imre_seq_clear(ptr)
+declare void @imre_list_reverse(ptr)
+declare void @imre_seq_reverse(ptr)
 declare i64 @imre_seq_len(ptr) nounwind
 declare i32 @imre_seq_resolve_header(ptr) nounwind
 ; The entry bootstrap can wait for imre run before it returns the layout.

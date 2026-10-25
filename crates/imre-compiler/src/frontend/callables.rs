@@ -102,6 +102,53 @@ pub(super) fn targets(
 }
 
 impl Checker<'_> {
+    /// Capture a native receiver once and give a saved method its positional signature.
+    pub(super) fn bound_builtin(
+        &mut self,
+        node: &impl Ranged,
+        receiver: Expr,
+        builtin: Builtin,
+        parameters: Vec<Type>,
+        returns: Type,
+    ) -> Expr {
+        let mut locals = vec![receiver.ty];
+        locals.extend(&parameters);
+        let arguments = locals
+            .iter()
+            .enumerate()
+            .map(|(slot, &ty)| Expr {
+                ty,
+                kind: ExprKind::Local(slot),
+            })
+            .collect();
+        let id = self.helpers.reserve();
+        self.helpers.finish(
+            id,
+            comprehensions::Helper {
+                module: self.module,
+                function: ir::Function {
+                    params: (0..locals.len()).collect(),
+                    returns,
+                    locals,
+                    body: vec![Statement::Return(Expr {
+                        ty: returns,
+                        kind: ExprKind::Builtin(builtin, arguments),
+                    })],
+                },
+                calls: HashSet::new(),
+                class_reads: HashSet::new(),
+                recursion_error: error(self.source, node, "recursive native method adapter"),
+            },
+        );
+        Expr {
+            ty: self.types.callable(parameters, returns),
+            kind: ExprKind::Callable {
+                function: id,
+                receiver: Some(Box::new(receiver)),
+            },
+        }
+    }
+
     /// Expose str.join or a bound string's join as an exact native callback.
     pub(super) fn string_join_value(&mut self, receiver: Option<Expr>, site: &impl Ranged) -> Expr {
         let list = self.types.list(Type::Str);

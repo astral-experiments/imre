@@ -520,6 +520,7 @@ impl Builtin {
             | Self::DictAsBase
             | Self::DictClear
             | Self::ListClear
+            | Self::ListReverse
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)

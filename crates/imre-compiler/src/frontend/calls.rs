@@ -227,7 +227,33 @@ pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(),
     Ok(())
 }
 
+/// Evaluate operands before raising a catchable native TypeError.
+pub(super) fn type_error(ty: Type, mut values: Vec<Expr>, message: String) -> Expr {
+    values.push(Expr {
+        ty: Type::Exception,
+        kind: ExprKind::Exception {
+            kind: exception_kind("TypeError").unwrap(),
+            message: Some(Box::new(unpacking::string(message))),
+        },
+    });
+    Expr {
+        ty,
+        kind: ExprKind::Builtin(Builtin::RaiseException, values),
+    }
+}
+
 impl Checker<'_> {
+    /// Empty containers still have to be evaluated when a call rejects their type.
+    pub(super) fn evaluated_argument(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
+        match arg {
+            ast::Expr::List(list) if list.elts.is_empty() => self.expr_expected(arg, Type::ListInt),
+            ast::Expr::Dict(dict) if dict.items.is_empty() => {
+                self.expr_expected(arg, self.types.dict(Type::Int, Type::Int))
+            }
+            _ => self.expr(arg),
+        }
+    }
+
     /// The receiver and supplied expressions stay in source order. The separate
     /// permutation binds each parameter only after every supplied value exists.
     /// Literal defaults follow supplied expressions and cannot run user code.

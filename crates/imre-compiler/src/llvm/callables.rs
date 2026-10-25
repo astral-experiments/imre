@@ -16,6 +16,7 @@ pub(super) fn adapters(
     let mut invoked = false;
     let mut enum_receiver = false;
     let mut object_receiver = false;
+    let mut int_list_receiver = false;
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Callable { function, receiver } = &value.kind {
@@ -30,7 +31,8 @@ pub(super) fn adapters(
                     .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
                 object_receiver |= receiver
                     .as_ref()
-                    .is_some_and(|r| matches!(r.ty, Type::Deque(_)));
+                    .is_some_and(|r| matches!(r.ty, Type::Deque(_) | Type::List(_)));
+                int_list_receiver |= receiver.as_ref().is_some_and(|r| r.ty == Type::ListInt);
             }
             invoked |= matches!(value.kind, ExprKind::Invoke { .. });
         });
@@ -46,6 +48,7 @@ pub(super) fn adapters(
         .into_iter()
         .chain(enum_receiver.then_some(("callable_enum", "i32 0, i32 10", 2)))
         .chain(object_receiver.then_some(("callable_object", "i32 0, i32 5", 2)))
+        .chain(int_list_receiver.then_some(("callable_list", "i32 0, i32 4", 2)))
         .chain(cached.then_some(("cache_callable", "i32 0, i32 6, i32 0, i32 0", 4)))
     {
         writeln!(
@@ -160,9 +163,11 @@ impl Emitter<'_, '_> {
             "callable_enum"
         } else if receiver
             .as_ref()
-            .is_some_and(|r| matches!(r.ty, Type::Deque(_)))
+            .is_some_and(|r| matches!(r.ty, Type::Deque(_) | Type::List(_)))
         {
             "callable_object"
+        } else if receiver.as_ref().is_some_and(|r| r.ty == Type::ListInt) {
+            "callable_list"
         } else {
             "callable"
         };
