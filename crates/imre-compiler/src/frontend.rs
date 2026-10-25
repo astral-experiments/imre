@@ -32,6 +32,7 @@ mod copying;
 mod counter;
 mod csv;
 mod dataclass_values;
+mod defaultdict;
 mod defaultdict_factory;
 mod deque;
 mod dispatch;
@@ -90,6 +91,7 @@ mod regex;
 mod sequences;
 mod shutil;
 mod sign_parameters;
+mod single_dispatch;
 mod socket;
 mod sorted_rows;
 mod stdlib;
@@ -1576,6 +1578,19 @@ fn annotation_with_aliases(
     }
     match graph.resolve_type(module, expression) {
         Some(Binding::Definition(definition)) => {
+            // The integer-fd selector keeps its immutable key in both the mapping
+            // and the ready list. The data field contains a boxed Python value.
+            let owner = &graph.modules[definition.module];
+            if owner.is_bundled("selectors")
+                && types
+                    .namedtuple(definition)
+                    .is_some_and(|ty| ty.name == "SelectorKey")
+            {
+                return Ok(types.namedtuple_layout(
+                    definition,
+                    vec![Type::Int, Type::Int, Type::Int, Type::ObjectValue],
+                ));
+            }
             if classes.exceptions.contains_key(&definition) {
                 return Ok(classes
                     .ids
@@ -4420,11 +4435,20 @@ impl<'a> Checker<'a> {
         let archive = manager.ty == Type::ZipFile;
         let socket = manager.ty == Type::Socket;
         let popen = matches!(manager.ty, Type::Popen(..));
+        let selector_close = if let Type::Class(class) = manager.ty {
+            let owner = &self.classes.declarations.definitions[class];
+            (self.graph.modules[owner.definition.module].is_bundled("selectors")
+                && owner.name == "PollSelector")
+                .then(|| self.classes.methods[class]["close"].id)
+        } else {
+            None
+        };
         if temporary.is_none()
             && stored.is_none()
             && !archive
             && !socket
             && !popen
+            && selector_close.is_none()
             && !matches!(manager.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
         {
             return Err(error(
@@ -4457,7 +4481,13 @@ impl<'a> Checker<'a> {
         let (nested, falls) = self.with_items(remaining, body)?;
         protected.extend(nested);
         let mut statements = vec![Statement::Assign(captured, manager)];
-        if temporary.is_none() && stored.is_none() && !archive && !socket && !popen {
+        if temporary.is_none()
+            && stored.is_none()
+            && !archive
+            && !socket
+            && !popen
+            && selector_close.is_none()
+        {
             statements.push(Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
@@ -4476,13 +4506,19 @@ impl<'a> Checker<'a> {
         } else {
             Builtin::TextClose
         };
+        let cleanup = if let Some(id) = selector_close {
+            self.calls.insert(id);
+            ExprKind::Call(id, ir::CallArgs::positional(vec![self.local(captured)]))
+        } else {
+            ExprKind::Builtin(cleanup, vec![self.local(captured)])
+        };
         statements.push(Statement::Try {
             body: protected,
             handlers: Vec::new(),
             orelse: Vec::new(),
             finalbody: vec![Statement::Expr(Expr {
                 ty: Type::None,
-                kind: ExprKind::Builtin(cleanup, vec![self.local(captured)]),
+                kind: cleanup,
             })],
         });
         Ok((
@@ -6396,6 +6432,11 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if attribute.attr.as_str() == "__wrapped__"
+                    && let Some(layout) = self.types.dispatcher(receiver.ty)
+                {
+                    return Ok(single_dispatch::original(receiver, layout));
+                }
                 if matches!(receiver.ty, Type::AnnotationValue(_)) {
                     return self.annotation_attribute(receiver, attribute);
                 }
@@ -6419,6 +6460,11 @@ impl<'a> Checker<'a> {
                             vec![receiver],
                         ),
                     });
+                }
+                if attribute.attr.as_str() == "default_factory"
+                    && self.types.is_default_list_dict(receiver.ty)
+                {
+                    return self.default_factory(receiver, attribute);
                 }
                 if let Type::ForwardRef(layout) = receiver.ty {
                     return self.forward_ref_attribute(layout, receiver, attribute);
@@ -6998,6 +7044,20 @@ impl<'a> Checker<'a> {
             return Ok(expr);
         }
         if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "__missing__"
+            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
+        {
+            let Some((owner, rest)) = call.arguments.args.split_first() else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "defaultdict.__missing__ requires a receiver",
+                ));
+            };
+            let receiver = self.expr(owner)?;
+            return self.defaultdict_missing(call, receiver, rest);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "most_common"
             && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
         {
@@ -7259,6 +7319,9 @@ impl<'a> Checker<'a> {
                 return self.typed_expr(value);
             }
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::SingleDispatch)) => {
+                return self.single_dispatch(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
@@ -7710,6 +7773,9 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if let Some(layout) = self.types.dispatcher(receiver.ty) {
+                return self.single_dispatch_method(call, attribute, receiver, layout);
+            }
             if receiver.ty == Type::ModuleNamespace
                 && attribute.attr.as_str() == "keys"
                 && call.arguments.is_empty()
@@ -7893,6 +7959,11 @@ impl<'a> Checker<'a> {
                     }
                     _ => {}
                 }
+            }
+            if attribute.attr.as_str() == "__missing__"
+                && self.types.is_default_list_dict(receiver.ty)
+            {
+                return self.defaultdict_missing(call, receiver, &call.arguments.args);
             }
             if self.types.is_counter(receiver.ty) {
                 match attribute.attr.as_str() {

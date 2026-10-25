@@ -591,18 +591,23 @@ impl<K: ScalarKey> Table<K, usize> {
             }
             Missing::List(element) => element,
         };
-        let list = if element.raw() == 2 {
-            crate::imre_list_new() as usize
-        } else {
-            super::imre_seq_new(element.raw()) as usize
-        };
-        // SAFETY: the factory transfers one fresh list owner. Keep it guarded
-        // until reservation succeeds and the table owns its word.
-        let list = unsafe { OwnedWord::from_owned(list, kind) };
+        let list = default_list(element);
+        debug_assert_eq!(list.kind, kind);
         self.insert_absent(hash, (*key).clone(), list.word)?;
         // SAFETY: the table now roots the published value.
         Ok(Some(unsafe { kind.acquire(list.into_word()) }))
     }
+}
+
+/// Allocate the list factory's result before transferring any owner to a table.
+fn default_list(element: WordKind) -> OwnedWord {
+    let (word, kind) = if element.raw() == 2 {
+        (crate::imre_list_new() as usize, 4)
+    } else {
+        (super::imre_seq_new(element.raw()) as usize, 5)
+    };
+    // SAFETY: both constructors return a fresh strong owner of the selected kind.
+    unsafe { OwnedWord::from_owned(word, WordKind::new(kind)) }
 }
 
 enum Tables<V> {
@@ -2035,6 +2040,70 @@ pub extern "C" fn imre_default_list_dict_new(key_kind: u32, element_kind: u32) -
         TableOwner::new(mapping),
     )))))
 }
+
+/// # Safety
+/// The caller roots a closed list-valued defaultdict.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_defaultdict_has_factory(value: *const Object) -> u32 {
+    // SAFETY: only a flag leaves this immutable storage borrow.
+    u32::from(unsafe {
+        object(value)
+            .0
+            .with(|s| matches!(s.dictionary().missing, Missing::List(_)))
+    })
+}
+
+/// # Safety
+/// The caller roots a defaultdict with the given list element kind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_defaultdict_set_factory(
+    value: *const Object,
+    element: u32,
+    enabled: u32,
+) {
+    let policy = if enabled == 0 {
+        Missing::NoFactory
+    } else {
+        Missing::List(WordKind::new(element))
+    };
+    // SAFETY: a factory change preserves both the table's representations and its entries.
+    unsafe {
+        object(value)
+            .0
+            .with_mut(|s| s.dictionary_mut().missing = policy)
+    };
+}
+
+/// An explicit call runs the factory before checking the table, even for an existing key.
+///
+/// # Safety
+/// The caller roots the mapping and a key of its exact representation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_defaultdict_missing(value: *const Object, key: usize) -> usize {
+    // SAFETY: only copied factory metadata escapes the borrow.
+    let policy = unsafe { object(value).0.with(|s| s.dictionary().missing) };
+    match policy {
+        Missing::NoFactory => {
+            // SAFETY: the key remains rooted until the exception owns it.
+            unsafe { missing_key(value, key) }.returning(0)
+        }
+        Missing::List(element) => {
+            let list = default_list(element);
+            // SAFETY: the rooted default matches the table's values. On a hit
+            // the unused factory result drops after the stored value is retained.
+            unsafe { imre_dict_setdefault(value, key, list.word) }
+        }
+        Missing::Raise | Missing::Zero => {
+            let class = if matches!(policy, Missing::Zero) {
+                "Counter"
+            } else {
+                "dict"
+            };
+            Error::new(Kind::TypeError, format!("descriptor '__missing__' for 'collections.defaultdict' objects doesn't apply to a '{class}' object")).returning(0)
+        }
+    }
+}
+
 /// # Safety
 /// `value` is a rooted dictionary.
 #[unsafe(no_mangle)]

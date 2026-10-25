@@ -417,6 +417,7 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
+            | Self::DefaultFactoryEnabled
             | Self::EnumLookup(_)
             | Self::DictSumValues
             | Self::Encode
@@ -520,6 +521,7 @@ impl Builtin {
             | Self::ChainMapGet(_)
             | Self::DictPop
             | Self::DictSetDefault
+            | Self::DefaultDictMissing
             | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
@@ -594,6 +596,7 @@ impl Builtin {
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
             | Self::OrderedDict
@@ -692,7 +695,8 @@ impl Builtin {
                 args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
             }
             Self::CallableContext => {
-                matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+                matches!(args, [callable] if types.cached_function(callable.ty).map(|c| c.frame)
+                    .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame)) == Some(result))
             }
             Self::CacheParameter(_) => {
                 matches!(args, [wrapper] if types.cached_function(wrapper.ty).is_some())

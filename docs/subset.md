@@ -905,6 +905,16 @@ Closed descriptors raise `OSError(EBADF)`; descriptors outside the target's `FD_
 The native poller is not subject to the select fd-set limit. Objects with a dynamic `fileno()` and Python signal
 callbacks are outside this integer-fd interface.
 
+`selectors.DefaultSelector` uses `selectors.PollSelector`, the most capable backend
+exposed by this build. Both support integer descriptors, `register`, `modify`,
+`unregister`, `select`, `get_key`, `close`, and `with`. The key is an immutable
+`SelectorKey(fileobj, fd, events, data)` namedtuple. Ready results pair that same
+key with `EVENT_READ` and/or `EVENT_WRITE` restricted to its registered interests.
+Timeouts are seconds; a nonpositive timeout checks immediately. Opaque data can
+use the compiler's boxed values (`None`, booleans, integers, strings, bytes and
+supported tuples). `get_map`, arbitrary data objects and automatic `fileno()`
+conversion are outside this selector subset. Pass a socket's integer `fileno()`.
+
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
 `shlex.split(s, comments=False, posix=True)` accepts a string or `None`
@@ -1211,6 +1221,11 @@ retains the concrete mapping type and shares its values. Changing keys during
 iteration raises `RuntimeError` if another key remained to be yielded.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
+
+Its `default_factory` can be read and set to `list` or `None` through a typed
+defaultdict. An explicit `__missing__(key)` call runs the list factory, then
+returns the stored object if the key already exists. With no factory it raises
+`KeyError` for any key of the declared type, even one present in the mapping.
 
 `collections.ChainMap[K, V]` accepts dictionaries with matching key and value
 types and exposes them in its mutable `maps` list. A no-argument constructor
