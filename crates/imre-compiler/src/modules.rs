@@ -1752,17 +1752,37 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
-            "unittest" => Some(include_str!("../stdlib/unittest/__init__.py")),
-            "string" => Some(include_str!("../stdlib/string/__init__.py")),
+            "string" => Some((
+                "string/__init__.py",
+                include_str!("../stdlib/string/__init__.py"),
+                true,
+            )),
+            "unittest" => Some((
+                "unittest/__init__.py",
+                include_str!("../stdlib/unittest/__init__.py"),
+                true,
+            )),
+            "unittest.mock" => Some((
+                "unittest/mock.py",
+                include_str!("../stdlib/unittest/mock.py"),
+                false,
+            )),
             _ => None,
         };
-        if let Some(source) = bundled {
+        if let Some((relative, source, package)) = bundled {
             self.reject_stdlib_shadow(name)?;
-            // ty resolves bundled source at its Python import path in the in-memory project.
-            let path = self.root.join(name).join("__init__.py");
-            let id = self.add(path.clone(), path, name.into(), true, source)?;
+            let parent = if let Some((parent, child)) = name.rsplit_once('.') {
+                Some((self.load_module(parent)?, child))
+            } else {
+                None
+            };
+            // ty resolves this immutable source at its Python import path in the
+            // in-memory project. It is part of the compiler, not a disk input.
+            let path = self.root.join(relative);
+            let id = self.add(path.clone(), path, name.into(), package, source)?;
             self.modules[id].bundled = true;
             self.scan(id)?;
+            self.bind_child(name, id, parent)?;
             return Ok(id);
         }
         if name == "stat" {
@@ -1922,6 +1942,16 @@ impl<'a> Loader<'a> {
         self.modules[id].root_index = root_index;
         self.modules[id].archive = archive;
         self.scan(id)?;
+        self.bind_child(name, id, parent)?;
+        Ok(id)
+    }
+
+    fn bind_child(
+        &mut self,
+        name: &str,
+        id: ModuleId,
+        parent: Option<(ModuleId, &str)>,
+    ) -> Result<(), String> {
         if let Some((parent, child)) = parent {
             let binding = Binding::Module(id);
             if let Some(previous) = self.modules[parent].bindings.get(child)
@@ -1935,7 +1965,7 @@ impl<'a> Loader<'a> {
                 .bindings
                 .insert(child.to_owned(), binding);
         }
-        Ok(id)
+        Ok(())
     }
 }
 
