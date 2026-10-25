@@ -39,6 +39,7 @@ mod os;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
+mod readiness;
 pub(crate) mod records;
 mod regexes;
 mod sequences;
@@ -107,6 +108,7 @@ enum Storage {
     ByteOutput(bytes::ByteOutput),
     SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
+    Poll(Box<readiness::Poll>),
     NativeModule(errno::Module),
     ModuleNamespace(Rc<errno::Registry>),
     ModuleMember(errno::Member),

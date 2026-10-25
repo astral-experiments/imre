@@ -105,6 +105,7 @@ impl Type {
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
+            | Self::Poll
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -179,6 +180,7 @@ impl Type {
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
+            | Self::Poll
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -814,6 +816,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::Poll
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -3518,6 +3521,7 @@ impl Emitter<'_, '_> {
                 | Type::StrDescriptor(_)
                 | Type::PlainObject
                 | Type::PathInfo
+                | Type::Poll
                 | Type::Sha256
                 | Type::JsonDecoder
                 | Type::ZipFile
@@ -6665,6 +6669,7 @@ impl Emitter<'_, '_> {
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
                     | Type::PathInfo
+                    | Type::Poll
                     | Type::Sha256
                     | Type::JsonDecoder
                     | Type::ZipFile
@@ -6939,6 +6944,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::Poll
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -7027,6 +7033,7 @@ impl Emitter<'_, '_> {
             | Type::PlainObject
             | Type::SimpleNamespace(_)
             | Type::PathInfo
+            | Type::Poll
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -7634,6 +7641,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::PlainObject
         | Type::SimpleNamespace(_)
         | Type::PathInfo
+        | Type::Poll
         | Type::Sha256
         | Type::JsonDecoder
         | Type::ZipFile
@@ -7869,6 +7877,16 @@ declare ptr @imre_subprocess_quote_argument(i64, i32)
 declare i64 @imre_os_lseek(i64, i64, i64)
 declare i64 @imre_os_dup(i64)
 declare i64 @imre_os_dup2(i64, i64, i64)
+@imre_os_pollin = external constant i64
+@imre_os_pollpri = external constant i64
+@imre_os_pollout = external constant i64
+@imre_os_pollerr = external constant i64
+@imre_os_pollhup = external constant i64
+@imre_os_pollnval = external constant i64
+declare ptr @imre_poll_new()
+declare void @imre_poll_update(ptr, i32, i64, i64)
+declare ptr @imre_poll_wait(ptr, i32, i64, ptr)
+declare void @imre_select_wait(ptr, ptr, ptr, i32, i64, ptr)
 declare void @imre_os_pipe(ptr)
 declare void @imre_os_pipe2(ptr, i64)
 declare i32 @imre_os_isatty(i64)

@@ -103,6 +103,7 @@ pub(crate) enum Type {
     /// Nominal ModuleSpec backed by a record whose loader and state keep their exact types.
     ModuleSpec(usize),
     Sha256,
+    Poll,
     JsonDecoder,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -250,6 +251,7 @@ impl std::fmt::Display for Type {
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
+            Self::Poll => "select.poll",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -1502,6 +1504,17 @@ pub(crate) enum LogOperation {
     Emit,
 }
 
+/// Kernel readiness for exact integer descriptors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Readiness {
+    New,
+    Register,
+    Modify,
+    Unregister,
+    Poll,
+    Select,
+}
+
 /// POSIX descriptor calls use the target's C int and file descriptor flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
@@ -1645,6 +1658,7 @@ pub(crate) enum ProcessOperation {
     CredentialId {
         group: bool,
     },
+    Readiness(Readiness),
     OsErrorField(u32),
     Strerror,
     QuoteCommandArgument,

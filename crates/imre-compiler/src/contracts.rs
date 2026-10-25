@@ -295,6 +295,7 @@ impl Builtin {
                 | ProcessOperation::Fd(_)
                 | ProcessOperation::Credential(_)
                 | ProcessOperation::CredentialId { .. }
+                | ProcessOperation::Readiness(_)
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::QuoteCommandArgument
