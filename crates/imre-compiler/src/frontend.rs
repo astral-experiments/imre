@@ -82,6 +82,7 @@ mod unittest;
 mod unittest_equality;
 mod unittest_main;
 mod unpacking;
+mod warnings;
 mod zip_sums;
 mod zipfile;
 use assignments::LocalState;
@@ -6353,39 +6354,14 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::CsvReader)) => return self.csv_reader(call),
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
-            Some(Binding::Intrinsic(Intrinsic::WarningFilter)) => {
-                let positional = call.arguments.args.as_ref();
-                let (action, category) = match (positional, call.arguments.keywords.as_slice()) {
-                    ([action], []) => (action, None),
-                    ([action, category], []) => (action, Some(category)),
-                    ([action], [kw])
-                        if kw.arg.as_ref().is_some_and(|k| k.as_str() == "category") =>
-                    {
-                        (action, Some(&kw.value))
-                    }
-                    _ => {
-                        return Err(error(
-                            self.source,
-                            call,
-                            "simplefilter requires an action and an optional static warning category",
-                        ));
-                    }
-                };
-                let category = match category {
-                    None => 0,
-                    Some(expr) if self.unshadowed_builtin(expr, "Warning") => 0,
-                    Some(expr) if self.unshadowed_builtin(expr, "ResourceWarning") => 1,
-                    Some(expr) if self.unshadowed_builtin(expr, "RuntimeWarning") => 2,
-                    Some(expr) => {
-                        return Err(error(self.source, expr, "unsupported warning category"));
-                    }
-                };
+            Some(Binding::Intrinsic(Intrinsic::WarningFilter { simple })) => {
+                return self.warning_filter(call, simple);
+            }
+            Some(Binding::Intrinsic(Intrinsic::WarningReset)) => {
+                self.arguments(call, &[], None)?;
                 return Ok(Expr {
                     ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::WarningFilter(category),
-                        vec![self.expr_expected(action, Type::Str)?],
-                    ),
+                    kind: ExprKind::Builtin(Builtin::WarningReset, vec![]),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
