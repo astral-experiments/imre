@@ -67,7 +67,7 @@ def select(toolchain, work, source, module):
                                              source, cls, case_id, fixture, operation=("imre", operation))
 
     # Process regressions use the real hooks and retained objects; none adds a test ID.
-    for filename in ("active_exception.py", "display_values.py", "codec_lookup.py"):
+    for filename in ("active_exception.py", "display_values.py", "codec_lookup.py", "codec_cp1251.py"):
         exercise = HERE / filename
         ref = subprocess.run([sys.executable, exercise], capture_output=True, check=True, timeout=15)
         binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))

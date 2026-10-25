@@ -1,5 +1,7 @@
 //! Native text codecs shared by the registry and text files.
 
+mod cp1251;
+
 use super::bytes::decode_error;
 use super::exceptions::Result;
 use super::{Bytes, Error, Kind, Object, Rc, Storage, StorageCell, Str, finish, object};
@@ -9,7 +11,7 @@ use std::collections::HashMap;
 
 thread_local! {
     static REGISTRY: RefCell<HashMap<String, Rc<Object>>> = RefCell::default();
-    static NAMES: [Rc<Str>; 4] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig"].map(|s| Rc::new(Str::new(s)));
+    static NAMES: [Rc<Str>; 5] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig", "cp1251"].map(|s| Rc::new(Str::new(s)));
 }
 
 /// Collapse non-ASCII-alphanumeric separators, retaining dots in codec names.
@@ -77,6 +79,7 @@ pub unsafe extern "C" fn imre_codec_name(info: *const Object) -> *const Str {
         Codec::Latin1 => 1,
         Codec::Utf8 { signature: false } => 2,
         Codec::Utf8 { signature: true } => 3,
+        Codec::Cp1251 => 4,
     };
     NAMES.with(|names| Rc::into_raw(names[index].clone()))
 }
@@ -118,6 +121,7 @@ pub(super) enum Codec {
     Utf8 { signature: bool },
     Latin1,
     Ascii,
+    Cp1251,
 }
 
 impl Codec {
@@ -131,6 +135,7 @@ impl Codec {
                 Ok(Self::Utf8 { signature: false })
             }
             "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
+            "cp1251" | "1251" | "windows_1251" => Ok(Self::Cp1251),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
                 Ok(Self::Latin1)
@@ -148,17 +153,23 @@ impl Codec {
     pub(super) fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
         match self {
             Self::Latin1 => Ok(data.iter().copied().map(char::from).collect()),
-            Self::Ascii => {
+            Self::Ascii | Self::Cp1251 => {
                 let mut text = String::with_capacity(data.len());
                 for (index, &byte) in data.iter().enumerate() {
-                    if byte.is_ascii() {
-                        text.push(char::from(byte));
+                    let mapped = match self {
+                        Self::Ascii => byte.is_ascii().then(|| char::from(byte)),
+                        Self::Cp1251 => cp1251::decode(byte),
+                        _ => unreachable!(),
+                    };
+                    if let Some(ch) = mapped {
+                        text.push(ch);
                     } else {
                         decoding_error(&mut text, errors, &[byte], || {
+                            let (codec, reason) = self.mapping_error();
                             Error::new(
                                 Kind::UnicodeDecodeError,
                                 format!(
-                                    "'ascii' codec can't decode byte 0x{byte:02x} in position {index}: ordinal not in range(128)"
+                                    "'{codec}' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"
                                 ),
                             )
                         })?;
@@ -196,19 +207,18 @@ impl Codec {
     }
 
     pub(super) fn encode<'a>(self, text: &'a str, errors: Option<&str>) -> Result<Cow<'a, [u8]>> {
-        let (codec, limit) = match self {
+        match self {
             Self::Utf8 { signature: false } => return Ok(Cow::Borrowed(text.as_bytes())),
             Self::Utf8 { signature: true } => {
                 return Ok(Cow::Owned([b"\xef\xbb\xbf", text.as_bytes()].concat()));
             }
-            Self::Ascii => ("ascii", 128),
-            Self::Latin1 => ("latin-1", 256),
-        };
+            Self::Ascii | Self::Latin1 | Self::Cp1251 => (),
+        }
         let mut out = Vec::with_capacity(text.len());
         let mut chars = text.chars().enumerate().peekable();
         while let Some((start, ch)) = chars.next() {
-            if u32::from(ch) < limit {
-                out.push(ch as u8);
+            if let Some(byte) = self.encode_byte(ch) {
+                out.push(byte);
                 continue;
             }
             match errors.unwrap_or("strict") {
@@ -218,7 +228,8 @@ impl Codec {
                 "xmlcharrefreplace" => out.extend(format!("&#{};", u32::from(ch)).as_bytes()),
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
-                    while let Some((i, _)) = chars.next_if(|(_, c)| u32::from(*c) >= limit) {
+                    while let Some((i, _)) = chars.next_if(|(_, c)| self.encode_byte(*c).is_none())
+                    {
                         end = i;
                     }
                     let at = if start == end {
@@ -226,15 +237,34 @@ impl Codec {
                     } else {
                         format!("characters in position {start}-{end}")
                     };
+                    let (codec, reason) = self.mapping_error();
                     return Err(Error::new(
                         Kind::UnicodeEncodeError,
-                        format!("'{codec}' codec can't encode {at}: ordinal not in range({limit})"),
+                        format!("'{codec}' codec can't encode {at}: {reason}"),
                     ));
                 }
                 name => return Err(unknown_handler(name)),
             }
         }
         Ok(Cow::Owned(out))
+    }
+
+    fn encode_byte(self, ch: char) -> Option<u8> {
+        match self {
+            Self::Ascii => ch.is_ascii().then_some(ch as u8),
+            Self::Latin1 => u8::try_from(ch).ok(),
+            Self::Cp1251 => cp1251::encode(ch),
+            Self::Utf8 { .. } => unreachable!(),
+        }
+    }
+
+    fn mapping_error(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Ascii => ("ascii", "ordinal not in range(128)"),
+            Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
+            Self::Cp1251 => ("charmap", "character maps to <undefined>"),
+            Self::Utf8 { .. } => unreachable!(),
+        }
     }
 }
 
@@ -264,6 +294,12 @@ fn decoding_error(
         "strict" | "surrogatepass" => return Err(strict()),
         "replace" => text.push('\u{fffd}'),
         "ignore" => (),
+        "xmlcharrefreplace" | "namereplace" => {
+            return Err(Error::new(
+                Kind::TypeError,
+                "don't know how to handle UnicodeDecodeError in error callback",
+            ));
+        }
         "backslashreplace" => {
             for byte in bytes {
                 use std::fmt::Write;

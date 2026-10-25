@@ -39,14 +39,18 @@ line 1650. The filesystem helper now calls native lookup; `charmap_build` remain
 The [native codec fixture](codec_lookup.py) compares aliases and cache identity, canonical
 names, exact encoded/decoded results and consumed lengths, errors, and the five fixed
 UTF byte-order marks with pinned Python. The stateless registry supports ASCII, Latin-1,
-UTF-8 and UTF-8 with signature. Search-function registration, stream codecs, other
+UTF-8, UTF-8 with signature and Windows-1251. Search-function registration, stream codecs, other
 encodings, mutable CodecInfo attributes, and surrogate-preserving text need further work.
 
 The pinned os and logging suites use different parts of this registry. In
 `test.test_os.DeviceEncodingTests.test_device_encoding` (`test_os.py:3554`),
 the original assertion calls `codecs.lookup` with the encoding of file
 descriptor 0. Its decorator requires a terminal; the registry fixture alone
-does not run that case. In `test_logging.py:2306`, `test_encoding_cyrillic_unicode`
+does not run that case. In `test.test_logging.EncodingTest.test_encoding_cyrillic_unicode`
+(`test_logging.py:2306`), the original method
 obtains `codecs.getwriter('cp1251')`, sets its class encoding, and logs into a
-wrapped `io.BytesIO`. A stateless UTF-8 or Latin-1 codec cannot implement that
-writer. These consumer occurrences stay with their respective suite reports.
+wrapped `io.BytesIO`. A [separate codec control](codec_cp1251.py) compares all
+255 defined bytes with pinned CPython, checks the undefined byte and error
+handlers, and encodes the exact Cyrillic message and newline. The original
+method still needs a mutable writer class, stream delivery and its logging
+fixture. These consumer occurrences stay with their respective suite reports.
