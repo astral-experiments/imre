@@ -1,4 +1,5 @@
 import subprocess
+import warnings
 from sys import argv, platform
 
 # The child only queries the three file descriptors supplied by the parent.
@@ -65,4 +66,21 @@ except TypeError as exc:
     assert str(exc) == 'pipesize must be an integer'
 else:
     raise AssertionError('invalid pipesize did not raise')
+# stdout is validated before pipesize; pipesize is validated before the descriptor warning.
+warnings.simplefilter('error', RuntimeWarning)
+try:
+    subprocess.Popen(['/nonexistent-before-pipesize-warning'], pipesize='invalid',
+                     pass_fds=(1,), close_fds=False)
+except TypeError as exc:
+    assert str(exc) == 'pipesize must be an integer'
+else:
+    raise AssertionError('invalid pipesize did not precede the descriptor warning')
+try:
+    subprocess.Popen(['/nonexistent-before-pipesize-stdout'], pipesize='invalid',
+                     stdout=subprocess.STDOUT)
+except ValueError as exc:
+    assert str(exc) == 'STDOUT can only be used for stderr'
+else:
+    raise AssertionError('invalid stdout did not precede pipesize validation')
+
 print('checked kernel pipe capacities and data on all three streams')

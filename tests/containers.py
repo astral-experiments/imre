@@ -8,6 +8,9 @@ import tempfile
 from pathlib import Path
 from textwrap import dedent
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import comparison_allocation
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "containers"
 ITEM = """
 class Item:
@@ -19,6 +22,7 @@ class Item:
 # Projection-only tuple locals may be scalarized. These cases protect snapshot
 # ownership, evaluation order, control-flow rebinding, and boxed escape paths.
 ACCEPTED = {
+    "dict_copy_constructor": 'original = {"one": 1}\nvalues: dict[str, int] = dict(original)\n',
     "set_literal_expansion": "values = {1}\nexpanded = {*values}\nexpanded.add(2)\nprint(len(values))\nprint(1 in expanded)\nprint(2 in expanded)\n",
     "dict_literal_expansion": 'values = {"one": 1}\ncopy = {**values}\ncopy["one"] = 2\nprint(values["one"])\nprint(copy["one"])\n',
     "dict_values_iteration": """
@@ -386,7 +390,6 @@ REJECTED = {
     """,
     "dict_empty_without_context": "values = {}\n",
     "dict_empty_constructor_without_context": "values = dict()\n",
-    "dict_copy_constructor": 'original = {"one": 1}\nvalues: dict[str, int] = dict(original)\n',
     "dict_bool_key_annotation": "values: dict[bool, int] = {}\n",
     "dict_list_key_annotation": "values: dict[list[int], int] = {}\n",
     "dict_mutable_tuple_key_annotation": "values: dict[tuple[int, list[int]], int] = {}\n",
@@ -966,6 +969,20 @@ def run(command: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def check_join_under_memory_limit(command: list[str]) -> None:
+    import resource
+
+    def limit() -> None:
+        resource.setrlimit(resource.RLIMIT_AS, (96 << 20, 96 << 20))
+
+    # The private list holds repeated references to one string. Building the
+    # 256 MiB result must fail at the join, after the user's print has run.
+    result = subprocess.run(
+        [*command, "bounded"], capture_output=True, check=True, timeout=30, preexec_fn=limit
+    )
+    assert result.stdout == b"finished collecting\njoin raised MemoryError\n", result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -987,6 +1004,9 @@ def main() -> None:
     passed = 0
     with tempfile.TemporaryDirectory(prefix="imre-containers-") as directory:
         temporary = Path(directory)
+        # GNU ld's allocator wrappers run on the native Linux host; ASan supplies its own allocator.
+        if sys.platform.startswith("linux") and args.target is None and not args.sanitize:
+            passed += comparison_allocation.check(args, temporary)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"
             path.write_text(dedent(source), encoding="utf-8")
@@ -1061,6 +1081,9 @@ def main() -> None:
                     level,
                     actual.stderr,
                 )
+                if name == "private_join_memory" and sys.platform == "linux" and not args.sanitize:
+                    check_join_under_memory_limit([sys.executable, str(path)])
+                    check_join_under_memory_limit([str(binary)])
                 passed += 1
     print(
         f"Passed {passed} container checks ({len(REJECTED)} rejected programs; optimization levels {args.opt_levels}; ASan={args.sanitize})"

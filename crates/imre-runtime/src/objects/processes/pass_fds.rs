@@ -14,6 +14,29 @@ fn push(output: &mut Vec<RawFd>, number: &Int) -> Result<()> {
     Ok(())
 }
 
+/// Test the keep collection before converting its elements or inspecting redirected files.
+///
+/// # Safety
+/// The caller roots the collection and provides its exact storage kind.
+pub(super) unsafe fn nonempty(word: usize, kind: u32) -> bool {
+    // SAFETY: each branch borrows the storage identified by kind.
+    unsafe {
+        match kind {
+            0 => false,
+            4 => (&*(word as *const crate::List))
+                .0
+                .with(|values| !values.is_empty()),
+            5 => object(word as *const Object).0.with(|s| match s {
+                Storage::Sequence(list) => !list.values.is_empty(),
+                Storage::Set(set) => set.integers().next().is_some(),
+                _ => fail("SystemError", "unexpected pass_fds collection"),
+            }),
+            6 => descriptor(word as *const usize).length != 0,
+            _ => fail("SystemError", "unexpected pass_fds representation"),
+        }
+    }
+}
+
 /// # Safety
 /// The native list, set, tuple or None and its elements must be rooted.
 pub(super) unsafe fn copy(word: usize, kind: u32) -> Result<Vec<RawFd>> {

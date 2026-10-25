@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -73,3 +74,43 @@ for large in [1099511627776, 1267650600228229401496703205376]:
         subprocess.run(identity, umask=large)
     except OverflowError as exc:
         print(str(exc))
+
+# A direct launch can ignore even an unbounded negative umask. Looking up a
+# bare command or starting a new session forces conversion in fork/exec.
+true_path = shutil.which("true")
+assert true_path is not None
+for program in [true_path, "true"]:
+    try:
+        print(subprocess.call([program], umask=-(2**90), close_fds=False))
+    except OverflowError as exc:
+        print(str(exc))
+for session in [False, True]:
+    try:
+        subprocess.call([true_path + "\x00"], stdin=1237940039285380274899124224, start_new_session=session, close_fds=False)
+    except ValueError:
+        print("invalid executable first")
+    except OverflowError:
+        print("invalid descriptor first")
+    empty: list[str] = []
+    try:
+        print(subprocess.call(empty, executable=true_path, start_new_session=session, close_fds=False))
+    except ValueError as exc:
+        print(str(exc))
+
+# The parent resolves stream handles before fork converts the child attributes.
+try:
+    subprocess.Popen(identity, stdout=report, process_group=2**65)
+except ValueError as exc:
+    print(str(exc))
+try:
+    subprocess.Popen(identity, stdout=subprocess.STDOUT, umask=2**65)
+except ValueError as exc:
+    print(str(exc))
+try:
+    subprocess.Popen(identity, env={"invalid=name": "val"}, umask=2**65)
+except ValueError as exc:
+    print(str(exc))
+try:
+    subprocess.Popen(["bad\x00program"], process_group=2**65)
+except OverflowError as exc:
+    print(str(exc))

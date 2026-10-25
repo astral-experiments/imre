@@ -1,0 +1,31 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_revision": "e328ca39a14d8f0243f0b50b106a17d32b1e0a2f",
+  "reference": "pass",
+  "discovered_in_test_dict": 120,
+  "selected_denominator": 1,
+  "id": "test.test_dict.DictTest.test_fromkeys",
+  "method_sha256": "148efb6c533eb6e153506a612e21047a14951a16dcb970b8f83489a16c12e390",
+  "levels": {
+    "0": {
+      "outcome": "blocked",
+      "diagnostic": " Compiling <work>/case.py (-O0)\n<work>/case.py:7:26: Imre: expected int, got dict[str, None]; annotations are enforced contracts\n",
+      "roles": {
+        "body": "unobserved",
+        "assertions": "unobserved",
+        "operation": "unobserved",
+        "fixture": "unobserved"
+      }
+    },
+    "3": {
+      "outcome": "blocked",
+      "diagnostic": " Compiling <work>/case.py (-O3)\n<work>/case.py:7:26: Imre: expected int, got dict[str, None]; annotations are enforced contracts\n",
+      "roles": {
+        "body": "unobserved",
+        "assertions": "unobserved",
+        "operation": "unobserved",
+        "fixture": "unobserved"
+      }
+    }
+  }
+}
