@@ -26,7 +26,7 @@ ASSERTIONS = {
 # These CPython passes still fail at native compilation. Keep their first
 # precise source diagnostic in the report; a different failure stops the gate.
 EQUALITY_BLOCKERS = {
-    "testAssertMultiLineEqualTruncates": (1016, "6:34: Imre: too many positional arguments"),
+    "testAssertMultiLineEqualTruncates": (1017, "7:9: Imre: local functions require annotated parameters and return types"),
     "testAssertEqual_diffThreshold": (1036, "14:9: Imre: unknown class method"),
     "testAssertEqual_shorten": (1067, "9:9: Imre: unknown class method"),
 }
