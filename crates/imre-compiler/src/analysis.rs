@@ -298,6 +298,19 @@ impl Session {
         )
     }
 
+    /// A nominal instance here, instead of its declared optional union, records
+    /// a source-level narrowing. The backend must still guard mutable rereads.
+    pub(crate) fn narrowed_instance(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+        self.used_hints.set(true);
+        let program = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, program);
+        let Some(ty @ Ty::NominalInstance(_)) = expression.inferred_type(&model) else {
+            return false;
+        };
+        ty != KnownClass::NoneType.to_instance(&self.db, &ProgramEnvironment::from_file(program))
+    }
+
     /// Get a scalar layout hint for an append operand in its own lexical scope.
     pub(crate) fn scalar_type(
         &self,
@@ -355,18 +368,18 @@ impl Session {
     pub(crate) fn check_scopes(
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
-        decorators: &[Vec<TextRange>],
+        overloads: &[Vec<CheckedOverload>],
     ) -> Result<(), String> {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors(skipped, decorators)
+        self.errors(skipped, overloads)
     }
 
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
-        decorators: &[Vec<TextRange>],
+        overloads: &[Vec<CheckedOverload>],
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -377,7 +390,7 @@ impl Session {
                     &self.db,
                     file,
                     skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
-                    decorators.get(index).map_or(&[][..], Vec::as_slice),
+                    overloads.get(index).map_or(&[][..], Vec::as_slice),
                 );
                 file_errors(&self.db, checked)
             })
@@ -397,7 +410,24 @@ struct CheckedFile<'db> {
     #[returns(copy)]
     file: File,
     skipped: Vec<TextRange>,
-    decorators: Vec<TextRange>,
+    overloads: Vec<CheckedOverload>,
+}
+
+/// The frontend validates context-manager decorators and the exact calls
+/// it lowers with a signature different from typeshed's overloads.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum CheckedOverload {
+    Decorator(TextRange),
+    Call(TextRange),
+}
+
+impl CheckedOverload {
+    fn covers(self, range: TextRange) -> bool {
+        match self {
+            Self::Decorator(decorator) => decorator.contains_range(range),
+            Self::Call(call) => call == range,
+        }
+    }
 }
 
 /// A per-file result depends on the ty queries it actually read, including any other source
@@ -412,7 +442,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
         }
     });
     let skipped = checked.skipped(db);
-    let decorators = checked.decorators(db);
+    let overloads = checked.overloads(db);
     db.check_file(file)
         .iter()
         .filter(|diagnostic| {
@@ -423,9 +453,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
                             || (diagnostic.id().as_str() == "no-matching-overload"
-                                && decorators
-                                    .iter()
-                                    .any(|decorator| decorator.contains_range(range)))
+                                && overloads.iter().any(|scope| scope.covers(range)))
                     })
         })
         .map(|diagnostic| {
@@ -540,22 +568,22 @@ impl AnalysisCache {
         fresh: &mut Session,
         inputs: &crate::SourceInputs,
         skipped: Option<&[Vec<TextRange>]>,
-        decorators: &[Vec<TextRange>],
+        overloads: &[Vec<CheckedOverload>],
     ) -> Result<(), String> {
         if let Some(cached) = &mut self.diagnostics
             && cached.same_files(fresh, inputs)
         {
             cached.update(fresh, inputs)?;
-            return cached.session.errors(skipped, decorators);
+            return cached.session.errors(skipped, overloads);
         }
         if self.hints.is_some() {
             // The quiet database must retain its inference with diagnostics disabled.
             let mut session = fresh.diagnostic_copy()?;
-            let result = session.check_scopes(skipped, decorators);
+            let result = session.check_scopes(skipped, overloads);
             self.diagnostics = Some(CachedSession::new(session, inputs));
             result
         } else {
-            let result = fresh.check_scopes(skipped, decorators);
+            let result = fresh.check_scopes(skipped, overloads);
             self.diagnostics = Some(CachedSession::new(fresh.clone(), inputs));
             result
         }
@@ -675,6 +703,8 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
         operators: usize,
         child_depth: usize,
         longest_item: usize,
+        // Replacement fields are siblings in an f-string or template string.
+        interpolated_string: bool,
         // A comma in lambda parameters or a comprehension target does not
         // separate independent expressions at this delimiter level.
         keep_commas: bool,
@@ -683,6 +713,12 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
     impl Group {
         fn depth(&self) -> usize {
             self.longest_item.max(self.operators + self.child_depth)
+        }
+
+        fn next_item(&mut self) {
+            self.longest_item = self.depth();
+            self.operators = 0;
+            self.child_depth = 0;
         }
     }
 
@@ -719,8 +755,12 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
                 statement_start = token == Newline;
             }
             Lpar | Lsqb | Lbrace | FStringStart | TStringStart => {
+                if token == Lbrace && group.interpolated_string {
+                    group.next_item();
+                }
                 group.operators += 1;
                 parents.push(std::mem::take(&mut group));
+                group.interpolated_string = matches!(token, FStringStart | TStringStart);
             }
             Rpar | Rsqb | Rbrace | FStringEnd | TStringEnd => {
                 if let Some(mut parent) = parents.pop() {
@@ -728,11 +768,7 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
                     group = parent;
                 }
             }
-            Comma if !group.keep_commas => {
-                group.longest_item = group.depth();
-                group.operators = 0;
-                group.child_depth = 0;
-            }
+            Comma if !group.keep_commas => group.next_item(),
             Lambda | For => {
                 group.keep_commas = true;
                 group.operators += 1;

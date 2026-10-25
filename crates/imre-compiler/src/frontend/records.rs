@@ -494,7 +494,69 @@ pub(super) fn record_factories(
     Ok(())
 }
 
+/// The next initializer in the lexical class lineage, independent of the
+/// concrete receiver used for inherited method specialization.
+#[derive(Clone, Copy)]
+pub(super) enum BaseInitializer {
+    Object,
+    Record(usize),
+}
+
 impl Checker<'_> {
+    /// A checked type for a mutable field can become stale through an alias.
+    /// Load the field once per attribute access and raise Python's AttributeError
+    /// if an intervening effect cleared it.
+    pub(super) fn checked_record_receiver(
+        &mut self,
+        receiver: Expr,
+        attr: &ast::ExprAttribute,
+    ) -> Expr {
+        let Some(payload @ Type::Class(_)) = self.types.payload(receiver.ty) else {
+            return receiver;
+        };
+        if !matches!(&*attr.value, ast::Expr::Attribute(_))
+            || !self
+                .graph
+                .session
+                .narrowed_instance(self.module, &attr.value)
+        {
+            return receiver;
+        }
+        let slot = self.hidden(receiver.ty);
+        let local = self.local(slot);
+        let missing = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),
+        };
+        let error = Statement::Raise(Some(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("AttributeError").unwrap(),
+                message: Some(Box::new(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str(format!(
+                        "'NoneType' object has no attribute '{}'",
+                        attr.attr
+                    )),
+                })),
+            },
+        }));
+        Expr {
+            ty: payload,
+            kind: ExprKind::Scope {
+                body: vec![
+                    Statement::Assign(slot, receiver),
+                    Statement::If(missing, vec![error], vec![]),
+                ],
+                value: Box::new(Expr {
+                    ty: payload,
+                    kind: ExprKind::Unwrap(Box::new(local)),
+                }),
+                clear: vec![slot],
+            },
+        }
+    }
+
     pub(super) fn iteration_expression(
         &mut self,
         expr: &ast::Expr,
@@ -503,7 +565,16 @@ impl Checker<'_> {
         let previous = self.iterator_source.replace(expr.range());
         let result = self.boolean_operand(expr, hint);
         self.iterator_source = previous;
-        result.map(|value| self.document_iteration(value))
+        result.map(|value| {
+            if value.ty == Type::StringIterable {
+                Expr {
+                    ty: self.types.list(Type::Str),
+                    kind: ExprKind::Builtin(Builtin::StringIterationList, vec![value]),
+                }
+            } else {
+                self.document_iteration(value)
+            }
+        })
     }
 
     pub(super) fn record_generator(&self, context: MethodContext) -> bool {
@@ -532,10 +603,13 @@ impl Checker<'_> {
                 return None;
             }
             let owner = self.classes.declarations.ids[&record.method_origins[context.index]];
-            self.classes.declarations.definitions[owner]
-                .bases
-                .first()
-                .copied()
+            Some(
+                self.classes.declarations.definitions[owner]
+                    .bases
+                    .first()
+                    .copied()
+                    .map_or(BaseInitializer::Object, BaseInitializer::Record),
+            )
         });
         self.class_receiver = context.and_then(|context| {
             let declaration = &self.classes.declarations.definitions[context.class];
@@ -762,6 +836,13 @@ impl Checker<'_> {
                         .map_err(|message| error(self.source, attribute, message))?;
                 }
                 self.calls.insert(signature.id);
+                if let Some(&(ready, value)) = self
+                    .classes
+                    .cached_properties
+                    .get(&(class, signature.method.unwrap().index))
+                {
+                    return Ok(self.cached_property(receiver, &signature, ready, value));
+                }
                 Ok(Expr {
                     ty: signature.returns,
                     kind: ExprKind::Call(signature.id, ir::CallArgs::positional(vec![receiver])),
@@ -1041,8 +1122,26 @@ impl Checker<'_> {
                 },
             });
         }
+        // An initializer defined at the root of a checked record lineage finds
+        // object.__init__, including when that initializer runs on a subclass.
+        if matches!(self.super_initializer, Some(BaseInitializer::Object))
+            && !self.names.contains_key("super")
+            && !self.graph.modules[self.module]
+                .bindings
+                .contains_key("super")
+            && call.arguments.is_empty()
+        {
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            });
+        }
         let base = self
             .super_initializer
+            .and_then(|base| match base {
+                BaseInitializer::Record(base) => Some(base),
+                BaseInitializer::Object => None,
+            })
             .filter(|_| {
                 !self.names.contains_key("super")
                     && !self.graph.modules[self.module]

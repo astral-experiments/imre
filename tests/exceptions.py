@@ -181,6 +181,7 @@ def run() -> None:
             print(str(rendering))
 run()
 """,
+    "checked_unbound_local": (Path(__file__).parent / "fixtures/exceptions/unbound_local.py").read_text(),
     "nominal_exception_hierarchy": """
 class ParseError(ValueError):
     "A failure while reading input."
