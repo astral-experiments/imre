@@ -2250,7 +2250,7 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
-        if self.types.cache_signature(value.ty) == Some(expected) {
+        if self.types.wrapper_signature(value.ty) == Some(expected) {
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
@@ -2963,6 +2963,14 @@ impl<'a> Checker<'a> {
             ExprKind::Present(value) => value.as_ref(),
             _ => value,
         };
+        if let ExprKind::Builtin(Builtin::RecordView, args) = &value.kind
+            && self
+                .types
+                .partial_function(args[0].ty)
+                .is_some_and(|p| p.callable == self.locals[slot])
+        {
+            self.narrowed.insert_mut(slot, args[0].ty);
+        }
         if self.locals[slot] == documents::ANY
             && let ExprKind::Builtin(Builtin::RecordView, args) = &value.kind
             && matches!(args[0].ty, documents::LIST | documents::MAP)
@@ -4843,6 +4851,9 @@ impl<'a> Checker<'a> {
         };
         let value = if let Some(&slot) = self.names.get(name.id.as_str()) {
             self.coerce(value, self.locals[slot], target)?
+        } else if let Some(partial) = self.types.partial_function(value.ty) {
+            // Different partials can share a call signature without sharing a capture frame.
+            self.coerce(value, partial.callable, target)?
         } else if let Some(&nullable) = self.nullable_assignments.get(name.id.as_str())
             && self.types.payload(nullable) == Some(value.ty)
         {
@@ -6024,6 +6035,9 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return Ok(wrapped);
+                }
+                if let Some(field) = self.partial_attribute(&receiver, attribute.attr.as_str()) {
+                    return Ok(field);
                 }
                 if let Type::Placeholder(kind) = receiver.ty {
                     let result = match (kind, attribute.attr.as_str()) {
@@ -7245,6 +7259,11 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if attribute.attr.as_str() == "func"
+                && let Some(func) = self.partial_attribute(&receiver, "func")
+            {
+                return self.invoke(call, func);
+            }
             if receiver.ty == Type::ModuleNamespace
                 && attribute.attr.as_str() == "keys"
                 && call.arguments.is_empty()

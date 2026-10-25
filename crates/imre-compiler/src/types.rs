@@ -30,6 +30,7 @@ enum Shape {
     NamedTuple(TupleOrigin, Vec<Type>),
     PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
+    PartialCallable(PartialFunction),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
     Awaitable(Type),
@@ -37,6 +38,14 @@ enum Shape {
     ProcessArgs(Type),
     Optional(Type),
     Union(Vec<Type>),
+}
+
+/// A partial's adapter keeps its original callable and, when representable, its public args tuple.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct PartialFunction {
+    pub callable: Type,
+    pub frame: Type,
+    pub func_slot: usize,
 }
 
 /// The callable ABI stays unchanged; the frame owns both the wrappee and its cache.
@@ -130,7 +139,12 @@ impl Types {
             }
             Type::Callable(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Callable(..) | Shape::DeclaredCache(..) | Shape::CachedCallable(_))
+                Some(
+                    Shape::Callable(..)
+                        | Shape::DeclaredCache(..)
+                        | Shape::CachedCallable(_)
+                        | Shape::PartialCallable(_)
+                )
             ),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
@@ -225,6 +239,7 @@ impl Types {
                 | Shape::PartialFrame(fields)
                 | Shape::Union(fields) => fields.clone(),
                 Shape::DeclaredCache(callable, _) => vec![*callable],
+                Shape::PartialCallable(p) => vec![p.callable, p.frame],
                 Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
@@ -831,14 +846,15 @@ impl Types {
         }
     }
 
-    /// The public positional ABI of a wrapper, including nested applied caches.
-    pub(crate) fn cache_signature(&self, ty: Type) -> Option<Type> {
+    /// The positional ABI that a partial or cache exposes through a plain Callable.
+    pub(crate) fn wrapper_signature(&self, ty: Type) -> Option<Type> {
         let shapes = self.0.borrow();
         let mut current = ty;
         while let Type::Callable(id) = current {
             current = match shapes.shapes.get(id)? {
                 Shape::DeclaredCache(underlying, _) => *underlying,
                 Shape::CachedCallable(cache) => cache.callable,
+                Shape::PartialCallable(p) => p.callable,
                 Shape::Callable(..) => return (current != ty).then_some(current),
                 _ => return None,
             };
@@ -864,12 +880,25 @@ impl Types {
         }
     }
 
+    pub(crate) fn partial_callable(&self, layout: PartialFunction) -> Type {
+        Type::Callable(self.intern(Shape::PartialCallable(layout)))
+    }
+
+    pub(crate) fn partial_function(&self, ty: Type) -> Option<PartialFunction> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes[id] {
+            Shape::PartialCallable(layout) => Some(layout),
+            _ => None,
+        }
+    }
+
     pub(crate) fn signature(&self, ty: Type) -> Option<(Vec<Type>, Type)> {
         let Type::Callable(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
             Shape::DeclaredCache(callable, _) => self.signature(*callable),
             Shape::CachedCallable(c) => self.signature(c.callable),
+            Shape::PartialCallable(p) => self.signature(p.callable),
             _ => unreachable!("callable type identity has a callable shape"),
         }
     }
@@ -1172,6 +1201,7 @@ impl TypeDescription<'_> {
             }
             Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
             Shape::CachedCallable(c) => return self.write_type(c.callable),
+            Shape::PartialCallable(p) => return self.write_type(p.callable),
             Shape::Callable(params, returns) => {
                 self.write_str("Callable[[")?;
                 self.write_types(params, ", ")?;

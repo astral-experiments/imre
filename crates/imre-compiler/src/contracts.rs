@@ -634,7 +634,8 @@ impl Builtin {
                 args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
             }
             Self::CallableContext => {
-                matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+                matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result)
+                    || types.partial_function(callable.ty).is_some_and(|partial| partial.frame == result))
             }
             Self::EmptyPartial => {
                 matches!(args, [target] if matches!(result, Type::Callable(_)) && target.ty == result)
