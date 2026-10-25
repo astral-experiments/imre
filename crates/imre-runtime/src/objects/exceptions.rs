@@ -1170,20 +1170,6 @@ pub unsafe extern "C" fn imre_json_error_field(value: *const Object, field: u32)
     finish(result, 0)
 }
 
-fn exit_text(code: Option<&OwnedWord>, missing: &str) -> Rc<Str> {
-    let Some(code) = code else {
-        return Rc::new(Str::new(missing));
-    };
-    if code.kind == WordKind::new(3) {
-        // SAFETY: the exit payload roots this string.
-        return unsafe { acquire_rc(code.word) };
-    }
-    let mut text = String::new();
-    // SAFETY: the payload owns a scalar with this exact word kind.
-    unsafe { super::values::write_repr(&mut text, code.word, code.kind) };
-    Rc::new(Str::from(text))
-}
-
 /// Construct SystemExit with its original code. Kind 4 denotes an omitted
 /// argument; 0, 1, 2, 3 and 6 represent None, bool, int, str and tuple.
 ///
@@ -1811,7 +1797,7 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
                     let integer = crate::Int::borrow(code.word);
                     (integer.big().to_i64().unwrap_or(-1) as i32, None)
                 }
-                Some(code) => (1, Some(exit_text(Some(code), ""))),
+                Some(code) => (1, Some(imports::word_text(code.kind, code.word, false))),
             };
             Some((status, message))
         })
@@ -1819,7 +1805,9 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
     if let Some((status, message)) = exit {
         let _ = crate::flush_stdout();
         let _ = crate::sys::flush_stderr();
-        if let Some(text) = message {
+        if let Some(message) = message {
+            // A failed diagnostic still emits a newline and preserves the exit status.
+            let text = message.as_deref().map_or("", Str::as_str);
             let _ = writeln!(io::stderr().lock(), "{text}");
         }
         return status;
