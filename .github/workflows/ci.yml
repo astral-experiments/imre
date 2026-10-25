@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties]
+        options: [logging, removal, properties, text-stream]
         required: true
 permissions:
   contents: read
@@ -77,6 +77,9 @@ jobs:
               done
               python3 -B tests/paths.py "${ordinary[@]}"
               python3 -B tests/processes.py "${ordinary[@]}"
+              ;;
+            text-stream)
+              python3 -B tests/files.py "${ordinary[@]}"
               ;;
             properties)
               python3 -B tests/classes.py "${ordinary[@]}"
