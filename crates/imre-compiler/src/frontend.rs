@@ -50,6 +50,7 @@ mod logging;
 mod logging_formatters;
 mod logging_records;
 mod matching;
+mod module_specs;
 mod module_values;
 mod namedtuples;
 mod namespaces;
@@ -72,6 +73,7 @@ mod shutil;
 mod sign_parameters;
 mod sorted_rows;
 mod stdlib;
+mod string_io;
 mod string_lists;
 mod sys;
 mod text;
@@ -1443,6 +1445,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::StringIo)) => return Ok(Type::StringIO),
         Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return Ok(Type::LogFormatter),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
@@ -1986,6 +1989,10 @@ impl<'a> Checker<'a> {
         receiver: Expr,
     ) -> Result<(Expr, usize, Type), String> {
         let receiver = Self::exception_record(receiver);
+        if let Type::ModuleSpec(id) = receiver.ty {
+            let (field, ty) = self.module_spec_field(id, attribute)?;
+            return Ok((receiver, field, ty));
+        }
         if let Type::Class(class) = receiver.ty {
             let declaration = &self.classes.declarations.definitions[class];
             if self.classes.parsers.namespace(class) {
@@ -2061,6 +2068,15 @@ impl<'a> Checker<'a> {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             });
+        }
+        if value.ty == Type::StringIO
+            && self.types.payload(expected).unwrap_or(expected) == Type::TextIO
+        {
+            let stream = Expr {
+                ty: Type::TextIO,
+                kind: ExprKind::Builtin(Builtin::TextStreamView, vec![value]),
+            };
+            return self.coerce(stream, expected, node);
         }
         if expected == Type::StringIterable
             && (self.types.element(value.ty) == Some(Type::Str)
@@ -3080,7 +3096,10 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("range iteration returned above")
         };
-        if matches!(iterable.ty, Type::TextIO | Type::BinaryIO | Type::CsvReader) {
+        if matches!(
+            iterable.ty,
+            Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
+        ) {
             let input = if iterable.ty == Type::CsvReader {
                 self.prepare_csv_reader(iterable)
             } else {
@@ -3968,7 +3987,7 @@ impl<'a> Checker<'a> {
             && stored.is_none()
             && !archive
             && !popen
-            && !matches!(manager.ty, Type::TextIO | Type::BinaryIO)
+            && !matches!(manager.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
         {
             return Err(error(
                 self.source,
@@ -5291,6 +5310,14 @@ impl<'a> Checker<'a> {
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
+                    if self.types.contains_module_spec(ty) || self.types.contains_module_spec(right)
+                    {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "ModuleSpec rich comparison requires dynamic attribute protocol support",
+                        ));
+                    }
                     if let Some(order) = counter::comparison(self.types, ty, right, op) {
                         ops.push(order);
                         continue;
@@ -5527,6 +5554,19 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "machinery"
+                    && self.resolve(&attribute.value)
+                        == Some(Binding::IntrinsicModule(
+                            crate::modules::IntrinsicModule::Importlib,
+                        ))
+                    && self.resolve(expression).is_none()
+                {
+                    return Err(error(
+                        self.source,
+                        attribute,
+                        "import importlib.machinery before reading the machinery attribute",
+                    ));
+                }
                 if let Some(flag) = self.command_flag(attribute)? {
                     return Ok(flag);
                 }
@@ -5652,6 +5692,9 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
                     return self.zip_attribute(receiver, attribute);
                 }
+                if let Type::ModuleSpec(id) = receiver.ty {
+                    return self.module_spec_attribute(receiver, id, attribute);
+                }
                 if let Type::SimpleNamespace(id) = receiver.ty {
                     return self.namespace_attribute(receiver, id, attribute);
                 }
@@ -5772,7 +5815,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(builtin, vec![receiver]),
                     });
                 }
-                if matches!(receiver.ty, Type::TextIO | Type::BinaryIO)
+                if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
                     && attribute.attr.as_str() == "closed"
                 {
                     return Ok(Expr {
@@ -6108,6 +6151,9 @@ impl<'a> Checker<'a> {
                 "argument unpacking requires a source-defined function or method",
             ));
         }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) {
+            return self.module_spec(call);
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) {
             return self.simple_namespace(call);
         }
@@ -6238,6 +6284,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
                 return self.sha256_constructor(call, op == Intrinsic::HashNew);
             }
+            Some(Binding::Intrinsic(Intrinsic::StringIo)) => return self.string_io(call),
             Some(Binding::Intrinsic(Intrinsic::BytesIo)) => {
                 let args = self.arguments(
                     call,
@@ -6789,8 +6836,16 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::KeyUnion, vec![receiver, other]),
                 });
             }
+            if receiver.ty == Type::StringIO
+                && matches!(
+                    attribute.attr.as_str(),
+                    "getvalue" | "read" | "readline" | "seek" | "tell" | "truncate"
+                )
+            {
+                return self.string_io_method(receiver, attribute.attr.as_str(), call);
+            }
             self.reject_builtin_keywords(call)?;
-            if matches!(receiver.ty, Type::TextIO | Type::BinaryIO) {
+            if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
                 let binary = receiver.ty == Type::BinaryIO;
                 let data_type = if binary { Type::Bytes } else { Type::Str };
                 if binary
@@ -7374,6 +7429,7 @@ impl<'a> Checker<'a> {
                     args[0].ty,
                     Type::Class(_)
                         | Type::CompletedProcess(..)
+                        | Type::ModuleSpec(_)
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)
                         | Type::StringIterable

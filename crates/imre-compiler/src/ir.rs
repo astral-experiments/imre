@@ -52,6 +52,7 @@ pub(crate) enum Type {
     TimeoutExpired,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
     TextIO,
+    StringIO,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
@@ -86,6 +87,8 @@ pub(crate) enum Type {
     StrDescriptor(StrDescriptor),
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
     SimpleNamespace(usize),
+    /// Nominal ModuleSpec backed by a record whose loader and state keep their exact types.
+    ModuleSpec(usize),
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -196,6 +199,7 @@ impl std::fmt::Display for Type {
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
+            Self::StringIO => "io.StringIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
             Self::PathInfo => "pathlib.types.PathInfo",
@@ -223,6 +227,7 @@ impl std::fmt::Display for Type {
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
+            Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -576,6 +581,7 @@ pub(crate) enum Builtin {
     Tee,
     Cycle,
     DirectoryContextView,
+    TextStreamView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
     ExtensionImport(String),
@@ -774,6 +780,7 @@ pub(crate) enum Builtin {
     },
     Sha256Copy,
     BytesIo,
+    StringIo(StringIoOperation),
     BinarySeek,
     BinaryTell,
     ZipOpenFile,
@@ -918,6 +925,8 @@ pub(crate) enum Builtin {
     FileFileno,
     DictGet,
     DictCopy,
+    ModuleParentPrefix,
+    ModuleCacheFromOrigin,
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,
@@ -994,6 +1003,16 @@ impl Builtin {
 }
 
 pub(crate) const TUPLE_PROBE_ARITY: std::ops::RangeInclusive<usize> = 1..=16;
+
+/// Operations specific to Unicode text held in native memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StringIoOperation {
+    New,
+    Value,
+    Read,
+    Seek,
+    Position,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum DocumentShape {
@@ -1428,6 +1447,7 @@ pub(crate) enum ProcessOperation {
 pub(crate) enum InstanceType {
     Exact(Type),
     SimpleNamespace,
+    ModuleSpec,
     StrEnum,
     List,
     Dict,
@@ -1451,6 +1471,7 @@ impl InstanceType {
             Self::Set => matches!(ty, Type::Set(_)),
             Self::Tuple => matches!(ty, Type::Tuple(_)),
             Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
+            Self::ModuleSpec => matches!(ty, Type::ModuleSpec(_)),
             Self::Exception(_) => matches!(
                 ty,
                 Type::Exception

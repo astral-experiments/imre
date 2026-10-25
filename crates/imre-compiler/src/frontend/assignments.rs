@@ -549,6 +549,11 @@ impl Checker<'_> {
                         None => Some(setter.params[1].ty),
                     };
                 }
+                if matches!(receiver.ty, Type::ModuleSpec(_))
+                    && attribute.attr.as_str() == "has_location"
+                {
+                    return None; // its descriptor applies bool() to the original RHS.
+                }
                 probe
                     .writable_field_value(attribute, receiver)
                     .ok()
