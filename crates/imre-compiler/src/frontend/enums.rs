@@ -177,12 +177,17 @@ impl Checker<'_> {
             || types.iter().all(|ty| {
                 matches!(
                     ty,
-                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_) | Type::None
+                    Type::Exception
+                        | Type::ImportException
+                        | Type::TimeoutExpired
+                        | Type::NamedException(_)
+                        | Type::None
                 )
             })
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::ForwardRef(_) | Type::Callable(_)))
+            || types == [Type::LogRecord; 2]
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]

@@ -373,8 +373,19 @@ pub struct SequenceLayout {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_seq_layout() -> SequenceLayout {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    crate::run_start::wait_for_cleanup();
+    let _ = crate::run_start::wait_for_cleanup(false);
+    sequence_layout()
+}
 
+/// Request the launcher's unmodified OS arguments before releasing its socket.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_seq_layout_with_orig_argv() -> SequenceLayout {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    super::args::save_launcher_arguments(crate::run_start::wait_for_cleanup(true));
+    sequence_layout()
+}
+
+fn sequence_layout() -> SequenceLayout {
     let mut sample = Words::new(0);
     sample.values.push(0);
     // One non-owning word fits inline and needs no destructor.

@@ -301,7 +301,11 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Document(left), Storage::Document(right)) => {
-                    Comparison::Done(left.view().equal(&right.view()))
+                    let result = left.view().and_then(|left| Ok(left.equal(&right.view()?)));
+                    Comparison::Done(result.unwrap_or_else(|error| {
+                        error.raise();
+                        false
+                    }))
                 }
                 (
                     left @ (Storage::Path { .. } | Storage::PurePath(_)),
@@ -323,6 +327,9 @@ pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
     let mut output = String::new();
     // SAFETY: the caller supplies the exact checked representation and root.
     unsafe { write_repr(&mut output, word, WordKind::new(kind)) };
+    if super::exceptions::imre_error_pending() != 0 {
+        return std::ptr::null();
+    }
     Rc::into_raw(Rc::new(Str::from(output)))
 }
 
@@ -399,7 +406,10 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                             None
                         }
                         Storage::Document(value) => {
-                            value.view().write_repr(output);
+                            match value.view() {
+                                Ok(view) => view.write_repr(output),
+                                Err(error) => error.raise(),
+                            }
                             None
                         }
                         Storage::PurePath(path) => {

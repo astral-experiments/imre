@@ -19,8 +19,9 @@ use super::files::{decode_utf8_text, os_error};
 use super::mappings::{StringPairs, imre_dict_contains, imre_dict_new};
 use super::records::{RecordDescriptor, imre_record_new};
 use super::words::{OwnedWord, WordKind};
-use super::{Bytes, Int, Object, Storage, Str, acquire_rc, fail, object};
+use super::{Bytes, Int, Object, Storage, Str, fail, object};
 
+mod argv;
 mod asynchronous;
 mod popen;
 pub(super) use asynchronous::AsyncProcess;
@@ -35,7 +36,7 @@ unsafe extern "C" {
 /// Its sealed string and path elements cannot point back to the exception.
 #[derive(Clone)]
 pub(super) struct ProcessError {
-    cmd: Rc<Object>,
+    cmd: OwnedWord,
     returncode: i32,
     stdout: OwnedWord,
     stderr: OwnedWord,
@@ -44,7 +45,7 @@ pub(super) struct ProcessError {
 impl ProcessError {
     pub(super) fn field(&self, field: u32, tagged: bool) -> usize {
         match field {
-            0 => Rc::into_raw(self.cmd.clone()) as usize,
+            0 => self.cmd.clone().into_word(),
             1 => exit_word(self.returncode),
             2..=4 => {
                 let output = if field == 3 {
@@ -65,11 +66,7 @@ impl ProcessError {
     }
 
     pub(super) fn message(&self) -> Str {
-        let mut cmd = String::new();
-        // SAFETY: this owner roots the original acyclic argv list during repr.
-        unsafe {
-            super::values::write_repr(&mut cmd, Rc::as_ptr(&self.cmd) as usize, WordKind::new(5));
-        }
+        let cmd = argv::display(&self.cmd);
         if self.returncode < 0 {
             let signal = -self.returncode;
             if let Some(name) = signal_name(signal) {
@@ -123,7 +120,7 @@ impl Deadline {
 /// Empty streams distinguish an observed EOF from no data observed before expiry.
 #[derive(Clone)]
 pub(super) struct TimeoutError {
-    cmd: Rc<Object>,
+    cmd: OwnedWord,
     timeout: Deadline,
     stdout: Option<Rc<Bytes>>,
     stderr: Option<Rc<Bytes>>,
@@ -133,7 +130,7 @@ impl TimeoutError {
     /// The compiler proves the numeric field's exact kind at every read.
     pub(super) fn field(&self, field: u32) -> usize {
         match field {
-            0 => Rc::into_raw(self.cmd.clone()) as usize,
+            0 => self.cmd.clone().into_word(),
             1 => match &self.timeout {
                 Deadline::Integer(seconds) => seconds.clone().into_raw(),
                 Deadline::Float(seconds) => seconds.to_bits() as usize,
@@ -152,11 +149,7 @@ impl TimeoutError {
 
     /// Formatting observes later mutations of the same rooted argv list.
     pub(super) fn message(&self) -> Str {
-        let mut cmd = String::new();
-        // SAFETY: this owner roots an exact acyclic list[str] during repr.
-        unsafe {
-            super::values::write_repr(&mut cmd, Rc::as_ptr(&self.cmd) as usize, WordKind::new(5));
-        }
+        let cmd = argv::display(&self.cmd);
         let seconds = match &self.timeout {
             Deadline::Integer(seconds) => Str::from(seconds.big().to_string()),
             Deadline::Float(seconds) => crate::floats::render(*seconds),
@@ -463,7 +456,7 @@ impl Launch {
     /// Call only from Command::pre_exec after stdio and cwd setup. Every referenced
     /// buffer was allocated in the parent; only async-signal-safe libc operations
     /// and allocation-free OS-error construction are allowed until exec or _exit.
-    unsafe fn exec_child(&mut self) -> io::Result<()> {
+    unsafe fn exec_child(&mut self, close_fds: bool) -> io::Result<()> {
         for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
             // SAFETY: restore_signals resets dispositions Python ignores; signal
             // is async-signal-safe and both arguments are valid signal constants.
@@ -472,7 +465,10 @@ impl Launch {
             }
         }
         // SAFETY: this is the forked child after Command's stdio setup.
-        unsafe { self.descriptors.apply()? };
+        if close_fds {
+            // SAFETY: the forked child owns its descriptor table.
+            unsafe { self.descriptors.apply()? };
+        }
         let mut saved_error = None;
         let mut last_error = libc::ENOENT;
         let mut attempt = |executable| {
@@ -523,7 +519,7 @@ impl Launch {
         let mut command = Command::new(OsStr::from_bytes(self.argv.strings[0].as_bytes()));
         let stderr = (streams >> 4) & 15;
         command
-            .stdin(Stdio::inherit())
+            .stdin(output((streams >> 12) & 15)?)
             .stdout(output(streams & 15)?)
             .stderr(output(stderr)?);
         if let Some(cwd) = cwd {
@@ -537,7 +533,7 @@ impl Launch {
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                self.exec_child()
+                self.exec_child(streams & (1 << 17) == 0)
             })
         };
         command.spawn()
@@ -602,6 +598,34 @@ enum Captured {
     TimedOut(Option<Vec<u8>>, Option<Vec<u8>>),
 }
 
+fn poll_milliseconds(timeout: f64) -> Result<i32> {
+    if timeout.is_nan() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "cannot convert float NaN to integer",
+        ));
+    }
+    if timeout == f64::INFINITY {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "cannot convert float infinity to integer",
+        ));
+    }
+    // Python's poll first converts milliseconds to its signed nanosecond clock,
+    // then bounds the millisecond argument to the platform's signed C int.
+    let milliseconds = (timeout * 1000.0).ceil();
+    if milliseconds >= 9_223_372_036_855.0 {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "timestamp too large to convert to C PyTime_t",
+        ));
+    }
+    if milliseconds > f64::from(i32::MAX) {
+        return Err(Error::new(Kind::OverflowError, "timeout is too large"));
+    }
+    Ok(milliseconds as i32)
+}
+
 /// Matches POSIX communicate: poll fairly, snapshot before post-deadline reads,
 /// then kill/reap the direct child without an unbounded post-timeout pipe drain.
 fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
@@ -625,30 +649,7 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
     for fd in fds.into_iter().filter(|&fd| fd >= 0) {
         nonblocking(fd).map_err(os_error)?;
     }
-    if timeout.is_nan() {
-        return Err(Error::new(
-            Kind::ValueError,
-            "cannot convert float NaN to integer",
-        ));
-    }
-    if timeout == f64::INFINITY {
-        return Err(Error::new(
-            Kind::OverflowError,
-            "cannot convert float infinity to integer",
-        ));
-    }
-    // Python's poll first converts milliseconds to its signed nanosecond clock,
-    // then bounds the millisecond argument to the platform's signed C int.
-    let milliseconds = ((timeout - started.elapsed().as_secs_f64()) * 1000.0).ceil();
-    if milliseconds >= 9_223_372_036_855.0 {
-        return Err(Error::new(
-            Kind::OverflowError,
-            "timestamp too large to convert to C PyTime_t",
-        ));
-    }
-    if milliseconds > f64::from(i32::MAX) {
-        return Err(Error::new(Kind::OverflowError, "timeout is too large"));
-    }
+    poll_milliseconds(timeout - started.elapsed().as_secs_f64())?;
     let duration = if timeout > 0.0 {
         Duration::from_secs_f64(timeout)
     } else {
@@ -1096,29 +1097,9 @@ unsafe fn native_argv(args: *const Object) -> Result<Vec<CString>> {
 /// The caller roots an exact list of strings, Paths, or their closed union.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *const Str {
-    // SAFETY: inspect only the exact runtime representations admitted by this call.
-    let argv = unsafe {
-        object(args).0.with(|storage| -> Result<Vec<CString>> {
-            let list = storage.sequence();
-            copy_argv(&list.values, |word| {
-                let (word, ty) = if list.kind.raw() == 9 {
-                    super::unions::member(word)
-                } else {
-                    (word, list.kind)
-                };
-                match ty.raw() {
-                    3 => cstring((&*(word as *const Str)).as_bytes()),
-                    5 => object(word as *const Object)
-                        .0
-                        .with(|storage| match storage {
-                            Storage::Path { .. } => cstring(storage.path().as_bytes()),
-                            _ => fail("SystemError", "expected a subprocess Path argument"),
-                        }),
-                    _ => fail("SystemError", "invalid subprocess argument kind"),
-                }
-            })
-        })
-    };
+    // SAFETY: the caller roots the exact list for the duration of this operation.
+    let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
+    let argv = argv::copy(&cmd);
     let run = argv.and_then(|argv| {
         if argv.is_empty() {
             return Err(Error::new(Kind::IndexError, "list index out of range"));
@@ -1132,7 +1113,7 @@ pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *c
         Ok((status, stdout)) => {
             raise_process(ProcessError {
                 // SAFETY: the exception acquires the original rooted argv.
-                cmd: unsafe { acquire_rc(args as usize) },
+                cmd: unsafe { WordKind::new(5).acquire(args as usize) },
                 returncode: status
                     .code()
                     .unwrap_or_else(|| -status.signal().unwrap_or(0)),
@@ -1179,7 +1160,7 @@ pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u
     match run() {
         Ok(status) if check != 0 && !status.success() => raise_process(ProcessError {
             // SAFETY: the original list remains rooted while acquiring our owner.
-            cmd: unsafe { acquire_rc(args as usize) },
+            cmd: unsafe { WordKind::new(5).acquire(args as usize) },
             returncode: status
                 .code()
                 .unwrap_or_else(|| -status.signal().unwrap_or(0)),
@@ -1197,14 +1178,22 @@ unsafe fn prepare_process(
     cwd: *const Str,
     env: *const Object,
 ) -> Result<(Launch, Option<CString>)> {
+    // SAFETY: existing run and asynchronous ABIs accept an exact list.
+    unsafe { prepare_command(&WordKind::new(5).acquire(args as usize), cwd, env) }
+}
+
+/// # Safety
+/// The exact optional directory and environment stay rooted across conversion.
+unsafe fn prepare_command(
+    cmd: &OwnedWord,
+    cwd: *const Str,
+    env: *const Object,
+) -> Result<(Launch, Option<CString>)> {
     // SAFETY: the caller roots the exact argv, optional directory and environment.
     unsafe {
         // Python selects args[0], validates every environment name, then
         // converts native strings. Preserve that order for mixed failures.
-        if object(args)
-            .0
-            .with(|storage| storage.sequence().values.is_empty())
-        {
+        if argv::empty(cmd) {
             return Err(Error::new(Kind::IndexError, "list index out of range"));
         }
         let env = if env.is_null() {
@@ -1226,7 +1215,7 @@ unsafe fn prepare_process(
                 "illegal environment variable name",
             ));
         }
-        let argv = native_argv(args)?;
+        let argv = argv::copy(cmd)?;
         let cwd = (!cwd.is_null())
             .then(|| cstring((&*cwd).as_bytes()))
             .transpose()?;
@@ -1314,7 +1303,7 @@ unsafe fn run_process(
         Ok(Captured::TimedOut(stdout, stderr)) => {
             raise_timeout(TimeoutError {
                 // SAFETY: the original argv stays rooted across launch and capture.
-                cmd: unsafe { acquire_rc(args as usize) },
+                cmd: unsafe { WordKind::new(5).acquire(args as usize) },
                 timeout: timeout.expect("only a deadline produces a timeout"),
                 stdout: stdout.map(Rc::new),
                 stderr: stderr.map(Rc::new),
@@ -1342,7 +1331,7 @@ unsafe fn run_process(
     };
     // SAFETY: the caller retains the original list through this operation. Keeping
     // that exact owner preserves CompletedProcess.args and CalledProcessError.cmd.
-    let args = unsafe { acquire_rc(args as usize) };
+    let args = unsafe { WordKind::new(5).acquire(args as usize) };
     if check != 0 && returncode != 0 {
         raise_process(ProcessError {
             cmd: args,
@@ -1356,7 +1345,9 @@ unsafe fn run_process(
     // remains; typed stores preserve reference provenance and transfer each owner.
     unsafe {
         let result = imre_record_new(descriptor);
-        result.cast::<*const Object>().write(Rc::into_raw(args));
+        result
+            .cast::<*const ()>()
+            .write(args.into_word() as *const ());
         result.add(1).write(exit_word(returncode));
         for (index, stream) in [stdout, stderr].into_iter().enumerate() {
             let field = result.add(index + 2);
@@ -1393,7 +1384,7 @@ pub unsafe extern "C" fn imre_subprocess_check(record: *const usize) {
             kind.acquire(kind.read_record_field(record.add(index)))
         };
         ProcessError {
-            cmd: acquire_rc(record.cast::<*const Object>().read() as usize),
+            cmd: acquire_stream(0),
             returncode,
             stdout: acquire_stream(2),
             stderr: acquire_stream(3),
