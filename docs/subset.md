@@ -9,7 +9,10 @@ Module functions with annotated results can use `functools.cache` or
 positional arguments with immutable key types. Bounded caches evict the least
 recently used key; zero disables storage, and `None` keeps all results.
 `cache_clear()` resets entries and counters. `cache_info()` supports unpacking
-and indexing the four snapshot fields.
+and indexing the four snapshot fields. `cache_parameters()` returns a fresh
+dictionary containing `maxsize` and `typed`. Applying a second cache to a
+cached callable copies its public parameters; the outer wrapper still uses
+its own capacity for eviction and for `cache_info()`.
 
 `functools.partial` retains positional arguments for a synchronous callable with
 a fixed signature. Calls fill positional `functools.Placeholder` slots first.
