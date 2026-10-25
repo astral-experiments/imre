@@ -33,6 +33,7 @@ mod expandtabs;
 mod expansions;
 mod fixed_tuples;
 mod fnmatch;
+mod fromkeys;
 mod fspath;
 mod function_caches;
 mod functools;
@@ -2240,6 +2241,12 @@ impl<'a> Checker<'a> {
         }
         self.reject_class_receiver_value(expression)?;
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
+        if let ast::Expr::Call(call) = expression
+            && let Some(shape) = self.types.mapping(concrete)
+            && let Some(result) = self.fromkeys_call(call, Some(shape))?
+        {
+            return self.coerce(result, expected, expression);
+        }
         if concrete == Type::StringIterable && matches!(expression, ast::Expr::List(_)) {
             concrete = self.types.list(Type::Str);
         }
@@ -5961,6 +5968,11 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if receiver.is_none()
+            && let Some(result) = self.fromkeys_call(call, None)?
+        {
+            return Ok(result);
+        }
         if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
             return Ok(self.materialize_fixed_tuple(tuple));
         }
@@ -6157,13 +6169,21 @@ impl<'a> Checker<'a> {
             return self.simple_namespace(call);
         }
         calls::reject_unpacking(call, self.source)?;
-        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
+        if self.unshadowed_builtin(&call.func, "set")
             && let [input] = call.arguments.args.as_ref()
             && call.arguments.keywords.is_empty()
         {
+            if pipelines::is_pipeline_expression(self, input)
+                || matches!(input, ast::Expr::Call(producer) if self.unshadowed_builtin(&producer.func, "range"))
+            {
+                let iterable = self.expansion_input(input, None)?;
+                let source = self.prepare_iteration(iterable, input, false)?;
+                return self.collect_set(source, input);
+            }
             let (source, key) = self.union_operand(input)?;
             if let Some(element) = self.types.cursor_element(source.ty) {
-                return self.collect_cursor_set(source, element, input);
+                let cursor = self.prepare_cursor(source, element);
+                return self.collect_set(cursor, input);
             }
             let key = key.ok_or_else(|| {
                 error(
@@ -6933,6 +6953,9 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
+                if attribute.attr.as_str() == "fromkeys" {
+                    return self.dict_fromkeys(call, None, Some(receiver));
+                }
                 if attribute.attr.as_str() == "clear"
                     && call.arguments.args.is_empty()
                     && call.arguments.keywords.is_empty()

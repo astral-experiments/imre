@@ -1008,13 +1008,19 @@ methods `Counter.clear(mapping)` and `defaultdict.clear(mapping)` do the same.
 
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
 
+`dict.fromkeys(iterable, value)` builds a fresh dictionary in first-key order.
+It evaluates the value once, defaults it to `None`, and shares that object
+among all keys. A bound call uses the receiver's class without copying its
+entries. A native defaultdict produces a new mapping with no default factory;
+a native Counter raises `NotImplementedError`.
+
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
 
 Direct `mapping.keys()` operands and sets of the same key type support `|`, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set. Stored key-view objects and arbitrary iterables as union operands are outside the supported subset.
 
 `set[T]` accepts the same exact scalar or immutable fixed-tuple shapes as dictionary keys, with the same value equality. Nonempty literals infer their element type and evaluate every element from left to right, including duplicates. Empty `set()` requires a concrete contextual type. `add(value)` inserts an element, `discard(value)` removes it when present, and both return `None`. Adding a duplicate or discarding a missing element is a no-op. `len`, single `in`/`not in` comparisons, direct iteration, and loop-head `enumerate` are supported. Set iteration and display order are unspecified. Iteration checks size changes and owns each yielded element before the body can remove it.
 
-`set(cursor)` consumes a native iterator from its current position and owns each distinct element. An empty `set()` in a conditional can take its element type from the other branch.
+`set(cursor)` consumes a native iterator from its current position and owns each distinct element. `set` can also consume ranges, generator expressions and typed iterator pipelines directly. An empty `set()` in a conditional can take its element type from the other branch.
 
 Sets with the same checked element type support equality, inequality and f-string display. Union (`|`), intersection (`&`) and difference (`-`) on sets or dictionary key views return a fresh set. Symmetric difference, subset/superset comparisons, `remove`, `pop`, and `clear` are unsupported.
 

@@ -308,6 +308,7 @@ impl Builtin {
             | Self::NamespaceDict
             | Self::NamespaceGet
             | Self::DictCopy
+            | Self::DictFromKeysTarget
             | Self::DeepCopy
             | Self::RecordCopy
             | Self::JsonDecode(_)
@@ -919,6 +920,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_list_copy"
                 | "imre_record_shallow_copy"
                 | "imre_dict_copy"
+                | "imre_dict_fromkeys_target"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
