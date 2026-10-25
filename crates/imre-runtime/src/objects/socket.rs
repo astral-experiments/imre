@@ -286,23 +286,26 @@ fn connect(fd: RawFd, addr: &libc::sockaddr_in, blocking: bool) -> io::Result<()
     };
     // SAFETY: poll writes one live pollfd in place.
     retry(|| checked(unsafe { libc::poll(&raw mut pfd, 1, -1) }))?;
-    let mut error: i32 = 0;
-    let mut len = size_of_val(&error) as libc::socklen_t;
-    // SAFETY: SO_ERROR fills one int and its initialized capacity.
-    checked(unsafe {
-        libc::getsockopt(
-            fd,
-            libc::SOL_SOCKET,
-            libc::SO_ERROR,
-            (&raw mut error).cast(),
-            &raw mut len,
-        )
-    })?;
-    if error == 0 || error == libc::EISCONN {
-        Ok(())
-    } else {
-        Err(io::Error::from_raw_os_error(error))
-    }
+    // Retry the completion check itself on EINTR, without reconnecting.
+    retry(|| {
+        let mut error: i32 = 0;
+        let mut len = size_of_val(&error) as libc::socklen_t;
+        // SAFETY: SO_ERROR fills one int and its initialized capacity.
+        checked(unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_ERROR,
+                (&raw mut error).cast(),
+                &raw mut len,
+            )
+        })?;
+        if error == 0 || error == libc::EISCONN {
+            Ok(())
+        } else {
+            Err(io::Error::from_raw_os_error(error))
+        }
+    })
 }
 
 /// # Safety
