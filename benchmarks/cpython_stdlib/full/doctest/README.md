@@ -34,6 +34,13 @@ and calls its `debug()` method. CPython supplies the comparison transcript;
 it never evaluates an example for the native executable. A matching empty
 suite contributes zero test cases.
 
+CPython’s unchanged [skip sample](upstream/Lib/test/test_doctest/sample_doctest_skip.py)
+has six cases and nine examples. [The control](controls/skip.py) calls both
+`runTest()` and `debug()` on every case. Normal execution reports two passes,
+two intentional mismatches, and two `unittest.SkipTest` exceptions with the
+message `all examples were skipped`. Debug execution returns normally for the
+all-skipped cases. These controls add no IDs to the itertools or JSON suites.
+
 The [Linux execution report](execution-linux.json) was reproduced on repaired
 main `fce4734` with this doctest implementation. There,
 the complete native `json` case blocks on example 7 (`from io import
@@ -46,7 +53,19 @@ With `annotationlib` from #586, all eight [untouched import and runner
 probes](startup-linux.json) advance to `Lib/test/support/__init__.py:9` and
 stop at `import inspect`. Staging the original files from the pinned CPython
 Git checkout or the repository’s offline fixtures gives identical diagnostics.
-Neither run executes a test case.
+Neither run executes a test case. After inspect #784 landed, the same eight
+[checks on the prospective merge](startup-inspect-linux.json) reach `import
+_opcode` at line 11 of `test.support`. The pinned support module refers to
+`ENABLE_SPECIALIZATION` and `ENABLE_SPECIALIZATION_FT` in its specialization
+decorators. Both fixture sources give the same diagnostics after replacing
+the randomly generated staging directory with `<staged>`. When #800 supplied
+those flags, [the same eight checks](startup-specialization-linux.json) reached
+`import types` at line 19. That result predates `types.SimpleNamespace` (#828).
+With #828, [all eight probes](startup-types-linux.json) get past `types`.
+Normal checking stops at `import warnings` in `test.support` for both suites.
+With `--reachable-only`, itertools reaches a starred tuple in
+`test/support/threading_helper.py:277`, while JSON reaches `import _imp` in
+`test/support/import_helper.py:2`. Both fixture sources agree; no test body ran.
 
 ```sh
 dir=benchmarks/cpython_stdlib/full/doctest

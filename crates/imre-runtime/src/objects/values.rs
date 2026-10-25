@@ -251,6 +251,7 @@ unsafe fn scalar_equal(left: usize, right: usize, kind: WordKind) -> bool {
     // SAFETY: the shared kind selects the exact scalar or rooted allocation.
     unsafe {
         match raw & !NULLABLE {
+            12 => super::annotations::equal(left, right),
             0 | 1 | 10 => left == right,
             2 => integer_equal(left, right),
             3 | 11 => *(left as *const Str) == *(right as *const Str),
@@ -318,10 +319,16 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
+                    super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
+                ),
                 (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
                     object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)
                 }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
+                    left.compare_entry(right, position)
+                }
+                (Storage::Deque(left), Storage::Deque(right)) => {
                     left.compare_entry(right, position)
                 }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
@@ -385,6 +392,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
@@ -526,6 +534,7 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
         match raw & !NULLABLE {
             0 => output.push_str("None"),
             10 => super::string_enums::write_repr(output, word),
+            12 => super::annotations::write_repr(output, word),
             11 => write!(output, "<class '{}'>", *(word as *const Str)).unwrap(),
             1 => {
                 let value = if raw & NULLABLE != 0 { word - 1 } else { word };

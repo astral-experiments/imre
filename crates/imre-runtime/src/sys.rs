@@ -7,7 +7,11 @@ use std::io::{self, Write};
 
 static STDERR: LazyLock<Mutex<Output<io::Stderr>>> = LazyLock::new(|| {
     initialize_io();
-    Mutex::new(Output::with_stream(io::stderr(), true))
+    Mutex::new(Output::with_stream(
+        io::stderr(),
+        super::STDIO_SETTINGS.stderr_capacity,
+        true,
+    ))
 });
 
 fn write_stream<W: Write>(stream: &Mutex<Output<W>>, text: &str, newline: bool) -> io::Result<()> {
@@ -16,14 +20,15 @@ fn write_stream<W: Write>(stream: &Mutex<Output<W>>, text: &str, newline: bool) 
     if newline {
         stream.write_all(b"\n")?;
     }
-    if stream.line_buffered && (newline || text.contains(['\r', '\n'])) {
-        stream.flush()?;
-    }
     Ok(())
 }
 
 pub(super) fn write_stderr(text: &str, newline: bool) -> io::Result<()> {
     write_stream(&STDERR, text, newline)
+}
+
+pub(super) fn stderr_writer() -> std::sync::MutexGuard<'static, Output<io::Stderr>> {
+    STDERR.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
 pub(super) fn flush_stderr() -> io::Result<()> {
