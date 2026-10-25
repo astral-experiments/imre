@@ -181,7 +181,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::TimeSleep | Self::PercentScalar | Self::WarningFilter(_) => {
+            Self::TimeSleep | Self::PercentFormat | Self::WarningFilter(_) => {
                 Contract::new(true, PreservesLists)
             }
             Self::Formatter(_) => Contract::new(true, PreservesLists),
@@ -566,6 +566,9 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::PercentFormat => {
+                matches!(args, [fmt, rhs] if fmt.ty == Type::Str && types.percent_operand(rhs.ty) && result == Type::Str)
+            }
             Self::WrapperAttributes(fields) => {
                 args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
             }

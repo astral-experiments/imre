@@ -637,7 +637,7 @@ pub(crate) enum Builtin {
     WallTime,
     TimeSleep,
     WarningFilter(u32),
-    PercentScalar,
+    PercentFormat,
     Logging(LogOperation),
     Timed(TimedOperation),
     LogRecord(LogRecordOperation),

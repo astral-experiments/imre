@@ -4594,13 +4594,11 @@ impl<'a> Checker<'a> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        if op == ast::Operator::Mod
-            && left.ty == Type::Str
-            && matches!(right.ty, Type::Int | Type::Str)
+        if op == ast::Operator::Mod && left.ty == Type::Str && self.types.percent_operand(right.ty)
         {
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::PercentScalar, vec![left, right]),
+                kind: ExprKind::Builtin(Builtin::PercentFormat, vec![left, right]),
             });
         }
         if op == ast::Operator::Pow {
