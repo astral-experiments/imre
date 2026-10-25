@@ -1,17 +1,6 @@
-name: Shutil prospective merge evidence
+name: Verify the current StringIO merge source
 
-on:
-  workflow_dispatch:
-    inputs:
-      follow:
-        description: Retest new merge sources until all public PR checks pass
-        type: boolean
-        default: false
-
-env:
-  SHUTIL_BRANCH: codex/shutil-move-native
-  SHUTIL_PR: '902'
-
+on: workflow_dispatch
 permissions:
   contents: read
   pull-requests: read
@@ -24,80 +13,23 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: main
           fetch-depth: 0
-      - name: Prepare the actual merge source
-        run: |
-          mkdir "$RUNNER_TEMP/shutil"
-          base=$(git rev-parse HEAD)
-          git fetch --no-tags origin "refs/heads/$SHUTIL_BRANCH"
-          head=$(git rev-parse FETCH_HEAD)
-          git -c user.name='Imre CI' -c user.email='ci@localhost' merge --no-ff --no-commit "$head"
-          tree=$(git write-tree)
-          jq -n --arg base "$base" --arg head "$head" --arg tree "$tree" '{base:$base,head:$head,tree:$tree}' | tee "$RUNNER_TEMP/shutil/source.json"
-          git diff --exit-code
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          repository: python/cpython
-          ref: 5607950ef232dad16d75c0cf53101d9649d89115
-          path: .cpython-stdlib-reference
-          sparse-checkout: Lib/test
-          persist-credentials: false
-      - name: Build combined compiler and runtime
+      - name: Prepare the reference and compiler tools
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-18 lld-18
-          cargo build --release --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
-          sha256sum target/release/{imre,libimre_runtime.a} | tee "$RUNNER_TEMP/shutil/binaries.sha256"
-      - name: Attempt every unchanged eligible CPython method at O0 and O3
-        run: |
-          export PYTHONPATH="$GITHUB_WORKSPACE/.cpython-stdlib-reference/Lib"
-          python3 -B benchmarks/cpython_stdlib/full/shutil/attempt_methods.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --compiler-tree "$(jq -r .tree "$RUNNER_TEMP/shutil/source.json")" --result "$RUNNER_TEMP/shutil/method-attempts-linux.json"
-      - name: Run the full 223-occurrence evidence at both optimization levels
-        run: |
-          mod=benchmarks/cpython_stdlib/full/shutil
-          opts=(--imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference)
-          python3 -B "$mod/evidence.py" "${opts[@]}" --method-attempts "$RUNNER_TEMP/shutil/method-attempts-linux.json" --result "$RUNNER_TEMP/shutil/evidence-linux.json"
-          python3 -B benchmarks/cpython_stdlib/suite_evidence.py "$mod/reference-linux.json" "$RUNNER_TEMP/shutil/evidence-linux.json"
-          python3 -B - <<'PY'
-          from pathlib import Path
-          import json, os
-          results = json.loads((Path(os.environ["RUNNER_TEMP"]) / "shutil/evidence-linux.json").read_text())
-          assert {row["opt_level"] for row in results} == {0, 3}
-          for level in results:
-              assert len(level["records"]) == level["denominator"] == 223
-              for cls in ("TestWhich", "TestWhichBytes"):
-                  occurrence, = (r for r in level["records"] if r["id"].endswith(cls + ".test_environ_path_missing"))
-                  assert occurrence["classification"] == "mixed" and occurrence["evidence"]["native_calls"] == 2
-                  assert occurrence["evidence"]["native_environment"] == {"PATH":"absent","processes":2}
-          PY
-      - name: Check original filesystem classes plus crossed exceptions
-        if: ${{ !cancelled() && hashFiles('target/release/imre') != '' }}
-        run: |
-          mod=benchmarks/cpython_stdlib/full/shutil
-          opts=(--imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18)
-          for helper in check_csv_handlers copy_error_controls move_cross_device; do
-            python3 -B "$mod/$helper.py" "${opts[@]}"
-          done
-          for helper in copyfile native_copy native_rmtree tree_ops move_ops; do
-            python3 -B "$mod/$helper.py" "${opts[@]}" --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/shutil/$helper-linux.json"
-          done
-          python3 -B tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-levels 0 3
-      - name: Verify newer prospective sources until the PR checks finish
-        if: inputs.follow
+          cp .github/verify-stringio-869.sh "$RUNNER_TEMP/verify-stringio-869.sh"
+      - name: Build and compare the actual merge source until the public checks finish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          git fetch --no-tags origin "$GITHUB_SHA"
-          git show "$GITHUB_SHA:.github/shutil-verify-current.sh" > "$RUNNER_TEMP/shutil-verify-current.sh"
-          bash "$RUNNER_TEMP/shutil-verify-current.sh"
+        run: bash "$RUNNER_TEMP/verify-stringio-869.sh"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: shutil-prospective-linux
-          path: ${{ runner.temp }}/shutil
+          name: stringio-869-integration
+          path: ${{ runner.temp }}/stringio-869
           if-no-files-found: error
           retention-days: 7
