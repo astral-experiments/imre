@@ -471,11 +471,9 @@ fn option(
     let converter = kw
         .get("type")
         .map(|_| if element == Type::Path { "Path" } else { kind });
-    let float_literal = |name| {
-        element == Type::Float
-            && kw
-                .get(name)
-                .is_some_and(|v| numeric_literal(v, element).is_some())
+    let numeric_kw = |name, ty| {
+        kw.get(name)
+            .is_some_and(|v| numeric_literal(v, ty).is_some())
     };
     let optional = (!required && default.is_none() && !(positional && nargs == "zero_or_more"))
         || (!positional && nargs == "optional" && constant.is_none());
@@ -511,7 +509,10 @@ fn option(
         annotation: flag.clone(),
         ty: if optional { types.optional(ty) } else { ty },
         option: json!({ "flag": flag_name, "aliases": aliases, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
-            "choices": choices, "range":range, "has_choices": kw.contains_key("choices"), "int_default": int_default, "int_constant": int_constant, "float_default":float_literal("default"), "float_constant":float_literal("const"), "converter": converter, "default": default, "path_default": path_default, "help": help, "optional": optional }),
+            "choices": choices, "range":range, "has_choices": kw.contains_key("choices"), "int_default": int_default || element == Type::Int && numeric_kw("default", element),
+            "int_constant": int_constant || element == Type::Int && numeric_kw("const", element),
+            "float_default": element == Type::Float && numeric_kw("default", element),
+            "float_constant": element == Type::Float && numeric_kw("const", element), "converter": converter, "default": default, "path_default": path_default, "help": help, "optional": optional }),
     })
 }
 

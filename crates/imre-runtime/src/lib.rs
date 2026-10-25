@@ -549,7 +549,21 @@ pub unsafe extern "C" fn imre_int_release(value: usize) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_int_literal(data: *const u8, length: usize) -> usize {
     // SAFETY: the caller owns the compiler-generated literal span.
-    let literal = unsafe { text(data, length) }.replace('_', "");
+    let literal = unsafe { text(data, length) };
+    Int::new(
+        parse_integer_literal(literal)
+            .unwrap_or_else(|| fail("ValueError", "invalid integer literal")),
+    )
+    .into_raw()
+}
+
+/// Parse the spelling of a source integer, including signed literals stored in
+/// an argparse schema. Runtime conversion of a string argument stays decimal.
+fn parse_integer_literal(literal: &str) -> Option<BigInt> {
+    let literal = literal.replace('_', "");
+    let (literal, negative) = literal
+        .strip_prefix('-')
+        .map_or((literal.as_str(), false), |s| (s, true));
     let (digits, radix) = if literal.starts_with("0x") || literal.starts_with("0X") {
         (&literal[2..], 16)
     } else if literal.starts_with("0o") || literal.starts_with("0O") {
@@ -557,13 +571,9 @@ pub unsafe extern "C" fn imre_int_literal(data: *const u8, length: usize) -> usi
     } else if literal.starts_with("0b") || literal.starts_with("0B") {
         (&literal[2..], 2)
     } else {
-        (literal.as_str(), 10)
+        (literal, 10)
     };
-    Int::new(
-        BigInt::parse_bytes(digits.as_bytes(), radix)
-            .unwrap_or_else(|| fail("ValueError", "invalid integer literal")),
-    )
-    .into_raw()
+    BigInt::parse_bytes(digits.as_bytes(), radix).map(|value| if negative { -value } else { value })
 }
 
 /// # Safety

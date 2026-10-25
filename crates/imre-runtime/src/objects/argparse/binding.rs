@@ -12,15 +12,14 @@ use crate::{Int, List, floats, parse_decimal_int};
 
 #[derive(Deserialize)]
 pub(super) struct IntegerRange(
-    #[serde(deserialize_with = "decimal")] BigInt,
-    #[serde(deserialize_with = "decimal")] BigInt,
-    #[serde(deserialize_with = "decimal")] BigInt,
+    #[serde(deserialize_with = "source_integer")] BigInt,
+    #[serde(deserialize_with = "source_integer")] BigInt,
+    #[serde(deserialize_with = "source_integer")] BigInt,
 );
 
-fn decimal<'de, D: Deserializer<'de>>(input: D) -> Result<BigInt, D::Error> {
-    String::deserialize(input)?
-        .parse()
-        .map_err(serde::de::Error::custom)
+fn source_integer<'de, D: Deserializer<'de>>(input: D) -> Result<BigInt, D::Error> {
+    crate::parse_integer_literal(&String::deserialize(input)?)
+        .ok_or_else(|| serde::de::Error::custom("invalid integer literal"))
 }
 
 impl IntegerRange {

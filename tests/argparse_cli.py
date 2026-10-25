@@ -107,7 +107,8 @@ CASES = {
     "method_args": [[]],
     "numeric_defaults": [[], ["--help"], ["word"], ["--amount", "2"], ["--amount=2", "word"],
                          ["--amount", "bad", "--help"], ["--help", "--amount", "bad"],
-                         ["range", "--big", "4999", "100000000000000000001"]],
+                         ["range", "--big", "4999", "100000000000000000001"],
+                         ["radix", str(2**80)], ["radix", str(2**80 + 3)], ["radix", "--help"]],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
 }
 REJECTED = {
@@ -196,6 +197,25 @@ def main():
                             (name, arguments, width, color, expected, actual)
                         )
                     checks += 1
+        # An integer written in the source is already a value. A large hex
+        # default/const remains usable even when decimal argv conversion is limited.
+        source = Path(directory) / "literal_default.py"
+        literal = "0x" + "f" * 560
+        source.write_text(
+            "import argparse\ndef read():\n    parser = argparse.ArgumentParser()\n"
+            f"    parser.add_argument('-n', nargs='?', type=int, default={literal}, const={literal})\n"
+            f"    return parser.parse_args()\nprint(read().n == {literal})\n"
+        )
+        native = source.with_suffix("")
+        env = {**os.environ, "PYTHONINTMAXSTRDIGITS": "640", "PYTHON_COLORS": "0"}
+        for level in args.opt_levels:
+            subprocess.run([args.compiler, "build", source, "-o", native, "--opt-level", level, *compile_flags], check=True)
+            for arguments in ([], ["-n"], ["-n", "1" + "0" * 650]):
+                expected = result([args.python, source, *arguments], env)
+                actual = result([native, *arguments], env)
+                if actual != expected:
+                    raise AssertionError(("literal_default", arguments, level, expected, actual))
+                checks += 1
         for name, declaration in REJECTED.items():
             source = Path(directory) / (name + ".py")
             source.write_text(

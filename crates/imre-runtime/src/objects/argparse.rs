@@ -129,6 +129,31 @@ enum Stop<'a> {
 impl Parser {
     fn normalize_numbers(&mut self) {
         for option in &mut self.options {
+            let integer = |text: &mut String| {
+                if !text
+                    .strip_prefix('-')
+                    .unwrap_or(text)
+                    .bytes()
+                    .all(|ch| ch.is_ascii_digit())
+                {
+                    *text = crate::parse_integer_literal(text)
+                        .expect("integer literal from schema")
+                        .to_string();
+                }
+            };
+            if option.kind == Kind::Int {
+                option.choices.iter_mut().for_each(integer);
+            }
+            if option.int_default
+                && let Some(default) = &mut option.default
+            {
+                integer(default);
+            }
+            if option.int_constant
+                && let Some(constant) = &mut option.constant
+            {
+                integer(constant);
+            }
             if option.kind != Kind::Float {
                 continue;
             }

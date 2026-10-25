@@ -16,7 +16,16 @@ def ranged(words: list[str]):
     return parser.parse_args(words)
 
 
-if len(sys.argv) > 1 and sys.argv[1] == "range":
+def radix(words: list[str]):
+    parser = ArgumentParser(prog="radix")
+    parser.add_argument("value", type=int, choices=range(0x1_0000_0000_0000_0000_0000, 0x1_0000_0000_0000_0000_0004, 2))
+    parser.add_argument("--flag", type=int, choices=(0x1_0000_0000_0000_0000_0000, -0x1_0000_0000_0000_0000_0000), default=-0x1_0000_0000_0000_0000_0000)
+    return parser.parse_args(words)
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "radix":
+    print(repr(radix(sys.argv[2:])))
+elif len(sys.argv) > 1 and sys.argv[1] == "range":
     print(repr(ranged(sys.argv[2:])))
 else:
     print(repr(read()))
