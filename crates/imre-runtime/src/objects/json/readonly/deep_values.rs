@@ -36,11 +36,11 @@ pub(super) fn copy(view: &View, root: usize, output: &mut Vec<Node>) -> usize {
 }
 
 /// Compare a child at a time; a wide array needs only one pending frame.
-pub(super) fn equal(left: &View, right: &View) -> bool {
+pub(super) fn equal(left: &View, right: &View) -> Result<bool, Error> {
     let mut stack = vec![(left, left.index, right, right.index, 0)];
     while let Some((a, i, b, j, mut next)) = stack.pop() {
-        let (a, i) = a.resolved(i);
-        let (b, j) = b.resolved(j);
+        let (a, i) = a.try_resolved(i)?;
+        let (b, j) = b.try_resolved(j)?;
         let (l, r) = (&a.nodes[i], &b.nodes[j]);
         if std::ptr::eq(l, r) {
             continue;
@@ -48,20 +48,20 @@ pub(super) fn equal(left: &View, right: &View) -> bool {
         let children = match (l, r) {
             (Node::Array(ls), Node::Array(rs)) => {
                 if ls.len() != rs.len() {
-                    return false;
+                    return Ok(false);
                 }
                 ls.get(next).map(|child| (*child, rs[next]))
             }
             (Node::Object(ls), Node::Object(rs)) => {
                 if next == 0 && rs.iter().any(|(key, _)| l.lookup(key).is_none()) {
-                    return false;
+                    return Ok(false);
                 }
                 while next < ls.len() && ls.is_shadowed(next) {
                     next += 1;
                 }
                 if let Some((key, value)) = ls.get(next) {
                     let Some(target) = r.lookup(key) else {
-                        return false;
+                        return Ok(false);
                     };
                     Some((*value, target))
                 } else {
@@ -69,23 +69,24 @@ pub(super) fn equal(left: &View, right: &View) -> bool {
                 }
             }
             (Node::Array(_) | Node::Object(_), _) | (_, Node::Array(_) | Node::Object(_)) => {
-                return false;
+                return Ok(false);
             }
-            _ if !a.equal_at(i, b, j) => return false,
+            _ if !a.equal_at(i, b, j)? => return Ok(false),
             _ => None,
         };
         if let Some((ai, bj)) = children {
+            stack.try_reserve(2).map_err(|_| Error::allocation())?;
             stack.push((a, i, b, j, next + 1));
             stack.push((a, ai, b, bj, 0));
         }
     }
-    true
+    Ok(true)
 }
 
-pub(super) fn write_repr(view: &View, out: &mut String) {
+pub(super) fn write_repr(view: &View, out: &mut String) -> Result<(), Error> {
     let mut stack = vec![(view, view.index, 0)];
     while let Some((view, index, next)) = stack.pop() {
-        let (view, index) = view.resolved(index);
+        let (view, index) = view.try_resolved(index)?;
         let node = &view.nodes[index];
         let (offset, child) = match node {
             Node::Array(items) => {
@@ -125,13 +126,15 @@ pub(super) fn write_repr(view: &View, out: &mut String) {
                 (offset, node.lookup(key).unwrap())
             }
             _ => {
-                view.write_at(index, out);
+                view.write_at(index, out)?;
                 continue;
             }
         };
+        stack.try_reserve(2).map_err(|_| Error::allocation())?;
         stack.push((view, index, offset + 1));
         stack.push((view, child, 0));
     }
+    Ok(())
 }
 
 /// TOML's recursive writer retains its own nesting limit. Check the selected
@@ -139,7 +142,7 @@ pub(super) fn write_repr(view: &View, out: &mut String) {
 pub(super) fn check_toml_depth(view: &View) -> Result<(), Error> {
     let mut stack = vec![(view, view.index, 0)];
     while let Some((view, index, depth)) = stack.pop() {
-        let (view, index) = view.resolved(index);
+        let (view, index) = view.try_resolved(index)?;
         match &view.nodes[index] {
             Node::Array(_) | Node::Object(_) if depth >= super::super::MAX_DEPTH => {
                 return Err(Error::new(

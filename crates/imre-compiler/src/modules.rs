@@ -167,6 +167,7 @@ pub(crate) enum Intrinsic {
     TypeChecking,
     GetLogger,
     GetLevelName,
+    LoggingDisable,
     AddLevelName,
     LevelNamesMapping,
     HandlerRename,
@@ -206,6 +207,7 @@ pub(crate) enum Intrinsic {
     LruCache,
     SingleDispatch,
     UpdateWrapper,
+    Wraps,
     CachedProperty,
     NewType,
     Partial,
@@ -559,6 +561,7 @@ impl IntrinsicModule {
             (Self::Logging, "raiseExceptions") => Intrinsic::LogRecordFlag(16),
             (Self::Logging, "makeLogRecord") => Intrinsic::MakeLogRecord,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
+            (Self::Logging, "disable") => Intrinsic::LoggingDisable,
             (Self::Logging, "getLevelName") => Intrinsic::GetLevelName,
             (Self::Logging, "addLevelName") => Intrinsic::AddLevelName,
             (Self::Logging, "getLevelNamesMapping") => Intrinsic::LevelNamesMapping,
@@ -635,6 +638,7 @@ impl IntrinsicModule {
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Functools, "singledispatch") => Intrinsic::SingleDispatch,
             (Self::Functools, "update_wrapper") => Intrinsic::UpdateWrapper,
+            (Self::Functools, "wraps") => Intrinsic::Wraps,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
                     normcase: name == "fnmatch",

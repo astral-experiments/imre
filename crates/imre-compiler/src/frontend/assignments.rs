@@ -593,7 +593,7 @@ impl Checker<'_> {
                 self.types
                     .mapping(receiver.ty)
                     .map(|(_, value)| value)
-                    .or_else(|| self.types.element(receiver.ty))
+                    .or_else(|| self.types.indexed_element(receiver.ty))
             }
             _ => None,
         }
