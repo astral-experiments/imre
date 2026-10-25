@@ -15,6 +15,7 @@ use crate::watch::FileSystem;
 mod declarations;
 mod empty_keywords;
 mod entry_profile;
+mod namedtuple_fields;
 mod os;
 mod reachability;
 mod type_aliases;
@@ -261,6 +262,7 @@ pub(crate) enum Intrinsic {
     PurePath(crate::ir::PathFlavor),
     Which,
     Copy(CopyOperation),
+    RmTree,
     ShutilError,
     SameFileError,
     SpecialFileError,
@@ -566,6 +568,7 @@ impl IntrinsicModule {
             (Self::Pathlib, "PureWindowsPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
+            (Self::Shutil, "rmtree") => Intrinsic::RmTree,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
             (Self::Shutil, "copymode") => Intrinsic::Copy(CopyOperation::Mode),
@@ -1247,6 +1250,7 @@ impl<'a> Loader<'a> {
         });
         let mut executable = false;
         let mut segment = 0;
+        let mut field_separators = Vec::new();
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
             if self.modules[id].archive.is_some() && !native_declaration(statement) {
                 return Err(self.modules[id].error(statement,
@@ -1343,6 +1347,15 @@ impl<'a> Loader<'a> {
                         && matches!(module_value(statement), Some(ast::Expr::Call(call))
                         if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::NamedTuple))) =>
                 {
+                    if let Some(ast::Expr::Call(call)) = module_value(statement)
+                        && let [_, fields] = call.arguments.args.as_ref()
+                    {
+                        namedtuple_fields::separators(
+                            fields,
+                            &self.modules[id].source,
+                            &mut field_separators,
+                        );
+                    }
                     if executable && id == 0 {
                         return Err(self.modules[id].error(
                             statement,
@@ -1388,6 +1401,15 @@ impl<'a> Loader<'a> {
                     self.modules[id].executable.push(index);
                 }
             }
+        }
+        if !field_separators.is_empty() {
+            let module = &mut self.modules[id];
+            let mut source = module.source.clone();
+            for range in field_separators {
+                let spaces = " ".repeat(range.len());
+                source.replace_range(range, &spaces);
+            }
+            module.parsed = self.session.replace_source(id, source);
         }
         self.loading.remove(&id);
         self.initialization
