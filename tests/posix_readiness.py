@@ -195,6 +195,8 @@ def main():
                 print(f"O{level} {case}: passed; control detected", flush=True)
             source = HERE / "selector_operations.py"
             assert require([build(source, level)]) == require([sys.executable, source]) == "selector passed\n"
+            sockets = HERE / "selector_sockets.py"
+            assert require([build(sockets, level)]) == require([sys.executable, sockets]) == "independent socket readiness passed\n"
             observations.update(selector_methods.exercise(HERE, work, level, build, require, run))
             if args.evidence_dir:
                 record_level(reports, observations, level)

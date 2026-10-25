@@ -58,6 +58,7 @@ struct CoroutineFrame {
 pub(super) struct Task {
     frame: Rc<CoroutineFrame>,
     ready: RefCell<Option<Ready>>,
+    context: RefCell<Option<Rc<super::contextvars::State>>>,
     outcome: RefCell<Option<Outcome>>,
     scheduled: Cell<bool>,
     cancelled: Cell<bool>,
@@ -108,6 +109,7 @@ impl Task {
         Rc::new(Self {
             frame,
             ready: RefCell::new(None),
+            context: RefCell::new(None),
             outcome: RefCell::new(None),
             scheduled: Cell::new(false),
             cancelled: Cell::new(false),
@@ -122,6 +124,7 @@ impl Task {
         if self.scheduled.replace(true) {
             return;
         }
+        *self.context.borrow_mut() = super::contextvars::capture();
         if let Some(call) = self.frame.call.take() {
             *self.frame.fiber.borrow_mut() = Some(Coroutine::new(
                 move |yielder, cancellation: Option<Cancellation>| {
@@ -150,6 +153,7 @@ impl Task {
         if !self.cancelled.get() && self.ready.borrow().as_ref().is_some_and(|ready| !ready()) {
             return false;
         }
+        super::contextvars::swap_task(&mut self.context.borrow_mut());
         let waiting = self.ready.take().is_some();
         let cancellation = self.cancelled.replace(false).then_some(if waiting {
             Cancellation::Waiter
@@ -168,6 +172,7 @@ impl Task {
         };
         CURRENT_TASK.take();
         swap_active(&mut self.frame.active.borrow_mut());
+        super::contextvars::swap_task(&mut self.context.borrow_mut());
         match step {
             CoroutineResult::Yield(ready) => {
                 *self.ready.borrow_mut() = Some(ready);

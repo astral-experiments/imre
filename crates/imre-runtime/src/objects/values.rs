@@ -458,6 +458,12 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
                         Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
+                        Storage::Context(_)
+                        | Storage::ContextVar(_)
+                        | Storage::ContextToken(_)
+                        | Storage::TokenMissing => Some(ReprTask::Context(
+                            super::contextvars::repr_view(owner, storage),
+                        )),
                         Storage::Calendar(value) => {
                             super::calendar::write_repr(value, output);
                             None
@@ -619,6 +625,10 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                         _ => fail("SystemError", "unsupported resource representation"),
                     })
                 }
+                ReprTask::Context(view) => {
+                    view.write(output);
+                    None
+                }
                 ReprTask::Exception(owner) => {
                     // A custom repr can remove its own reference or a pending container.
                     // Retain the cursors outside every StorageCell borrow. Formatting
@@ -662,6 +672,7 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
 }
 
 enum ReprTask {
+    Context(super::contextvars::ReprView),
     Stop,
     Word(usize, WordKind),
     Object(*const Object, usize),
@@ -673,6 +684,7 @@ enum ReprTask {
 impl ReprTask {
     fn root(&self) -> Option<(usize, WordKind)> {
         match *self {
+            Self::Context(ref view) => view.owner().map(|owner| (owner as usize, WordKind::new(5))),
             Self::Word(word, kind) => Some((word, kind)),
             Self::Object(owner, _) | Self::Exception(owner) => {
                 Some((owner as usize, WordKind::new(5)))
