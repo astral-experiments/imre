@@ -11,6 +11,46 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            PathOperation::WithName
+            | PathOperation::WithStem
+            | PathOperation::WithSuffix
+            | PathOperation::RelativeTo => {
+                let path = &args[0].value.operand;
+                let other = self.directory_pointer(&args[1].value);
+                let call = match operation {
+                    PathOperation::WithName => {
+                        format!("call ptr @imre_path_with_name(ptr {path}, ptr {other})")
+                    }
+                    PathOperation::RelativeTo => {
+                        let walk =
+                            self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
+                        format!(
+                            "call ptr @imre_path_relative_to(ptr {path}, ptr {other}, i32 {walk})"
+                        )
+                    }
+                    _ => format!(
+                        "call ptr @imre_path_change_extension(ptr {path}, ptr {other}, i32 {})",
+                        u32::from(matches!(operation, PathOperation::WithStem))
+                    ),
+                };
+                let operand = self.checked_instruction(call);
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            PathOperation::IsRelativeTo => {
+                let answer = self.instruction(format!(
+                    "call i32 @imre_path_is_relative_to(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {answer}, 0")),
+                    small_integer: false,
+                }
+            }
             PathOperation::Drive | PathOperation::Root | PathOperation::Anchor => {
                 let part = match operation {
                     PathOperation::Drive => 0,
@@ -201,12 +241,12 @@ impl Emitter<'_, '_> {
                     PathOperation::Join => "imre_path_join",
                     PathOperation::JoinObject => "imre_path_join_object",
                     PathOperation::AsPosix => "imre_path_as_posix",
-                    PathOperation::WithName => "imre_path_with_name",
                     PathOperation::Text => "imre_path_text",
                     PathOperation::Name => "imre_path_name",
                     PathOperation::CountPart => "imre_path_count_part",
                     PathOperation::Stem => "imre_path_stem",
                     PathOperation::Suffix => "imre_path_suffix",
+                    PathOperation::Suffixes => "imre_path_suffixes",
                     PathOperation::Parent => "imre_path_parent",
                     PathOperation::ReadBytes => "imre_path_read_bytes",
                     PathOperation::ReadText if args.len() == 1 => "imre_path_read_text",

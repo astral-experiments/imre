@@ -112,7 +112,8 @@ pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Ex
             || checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
             || checker.is_builtin_iter(call)
             || matches!(&*call.func, ast::Expr::Name(name)
-                if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
+                if checker.resolve(&call.func).is_none()
+                    && matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
             || matches!(&*call.func, ast::Expr::Attribute(attribute)
                 if matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob")))
 }
