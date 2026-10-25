@@ -4,6 +4,19 @@ import subprocess
 import sys
 
 
+def report_filename(error: Exception, original: Path) -> None:
+    assert isinstance(error, OSError)
+    name = error.filename
+    if isinstance(name, Path):
+        print(name is original)
+        print(str(name))
+    elif isinstance(name, str):
+        print(False)
+        print(name)
+    else:
+        raise AssertionError("launch error lost the executable filename")
+
+
 # Query only the supplied fds, so the observation works on Linux and macOS.
 probe = """import os, sys
 for arg in sys.argv[1:]:
@@ -31,11 +44,11 @@ try:
     try:
         subprocess.Popen([missing], pass_fds=(second,))
     except FileNotFoundError as exc:
-        print(exc.filename is missing, str(exc.filename))
+        report_filename(exc, missing)
     try:
         subprocess.Popen([missing], pass_fds=())
     except FileNotFoundError as exc:
-        print(exc.filename is missing, str(exc.filename))
+        report_filename(exc, missing)
 finally:
     os.close(first)
     os.close(second)

@@ -129,6 +129,7 @@ impl FileState {
         let stream = if read {
             Stream::Read(Input::pipe(file, !text, capacity))
         } else {
+            crate::initialize_io();
             Stream::Write(Output::pipe(file, capacity, text && bufsize == 1))
         };
         let kind = if text {
@@ -362,15 +363,6 @@ pub(super) fn errno_with_filenames(
 ) -> Error {
     with_errno_description(error, |kind, errno, description| {
         Error::from_errno(kind, errno, description, first, second)
-    })
-}
-
-/// A caller which supplies a printable suffix retains the same errno and args.
-pub(super) fn errno_with_paths(error: io::Error, paths: impl FnOnce(&mut String)) -> Error {
-    with_errno_description(error, |kind, errno, description| {
-        let mut message = format!("[Errno {errno}] {description}");
-        paths(&mut message);
-        Error::from_errno_message(kind, errno, description, message)
     })
 }
 
