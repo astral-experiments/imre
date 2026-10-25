@@ -60,6 +60,7 @@ pub(crate) enum Binding {
 pub(crate) enum IntrinsicModule {
     Importlib,
     ImportlibMachinery,
+    ImportlibUtil,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -133,6 +134,7 @@ pub(crate) enum IntrinsicModule {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
     ModuleSpec,
+    CachePath { reverse: bool },
     GetAnnotations,
     ForwardRef,
     AnnotationTypeRepr,
@@ -216,6 +218,8 @@ pub(crate) enum Intrinsic {
     SysExecutable,
     SysFlags,
     SysDontWriteBytecode,
+    SysImplementation,
+    SysPycachePrefix,
     SysPlatform,
     SysVersionInfo,
     SysVersion,
@@ -424,6 +428,7 @@ impl IntrinsicModule {
             "urllib.parse" => Some(Self::UrllibParse),
             "importlib" => Some(Self::Importlib),
             "importlib.machinery" => Some(Self::ImportlibMachinery),
+            "importlib.util" => Some(Self::ImportlibUtil),
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
             "copy" => Some(Self::Copy),
@@ -503,6 +508,8 @@ impl IntrinsicModule {
             (Self::AnnotationFormat, "FORWARDREF") => Intrinsic::AnnotationFormat(3),
             (Self::AnnotationFormat, "STRING") => Intrinsic::AnnotationFormat(4),
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
+            (Self::ImportlibUtil, "cache_from_source") => Intrinsic::CachePath { reverse: false },
+            (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
@@ -615,6 +622,8 @@ impl IntrinsicModule {
             (Self::Sys, "intern") => Intrinsic::SysIntern { query: false },
             (Self::Sys, "_is_interned") => Intrinsic::SysIntern { query: true },
             (Self::Sys, "flags") => Intrinsic::SysFlags,
+            (Self::Sys, "implementation") => Intrinsic::SysImplementation,
+            (Self::Sys, "pycache_prefix") => Intrinsic::SysPycachePrefix,
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
             (Self::Sys, "version_info") => Intrinsic::SysVersionInfo,
             (Self::Sys, "version") => Intrinsic::SysVersion,
@@ -819,7 +828,7 @@ pub(crate) struct SourceModule {
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
     /// Only an executed explicit submodule import populates the bare importlib namespace.
-    machinery_import: Option<TextSize>,
+    importlib_children: HashMap<&'static str, TextSize>,
     pub(crate) aliases: Vec<TypeAlias>,
     pub(crate) type_guards: Vec<usize>,
     /// Fixed pattern declarations in the entry module precede ordinary executable statements.
@@ -1015,6 +1024,10 @@ impl SourceGraph {
     pub(crate) fn checked_positional_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
+    }
+
+    pub(crate) fn deferred_name(&self, module: ModuleId, name: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DeferredName(name));
     }
 
     /// The native binder raises because this keyword's parameter was already bound.
@@ -1317,6 +1330,22 @@ impl SourceGraph {
     }
 }
 
+fn importlib_child(name: &str) -> Option<IntrinsicModule> {
+    match name {
+        "machinery" => Some(IntrinsicModule::ImportlibMachinery),
+        "util" => Some(IntrinsicModule::ImportlibUtil),
+        _ => None,
+    }
+}
+
+fn importlib_child_name(module: IntrinsicModule) -> Option<&'static str> {
+    match module {
+        IntrinsicModule::ImportlibMachinery => Some("machinery"),
+        IntrinsicModule::ImportlibUtil => Some("util"),
+        _ => None,
+    }
+}
+
 fn stdlib_attribute(
     modules: &[SourceModule],
     owner: ModuleId,
@@ -1324,14 +1353,13 @@ fn stdlib_attribute(
     attr: &ast::ExprAttribute,
 ) -> Option<Binding> {
     if target == IntrinsicModule::Importlib
-        && attr.attr.as_str() == "machinery"
         && modules[owner]
-            .machinery_import
-            .is_some_and(|at| at <= attr.start())
+            .importlib_children
+            .get(attr.attr.as_str())
+            .is_some_and(|at| *at <= attr.start())
+        && let Some(child) = importlib_child(attr.attr.as_str())
     {
-        return Some(Binding::IntrinsicModule(
-            IntrinsicModule::ImportlibMachinery,
-        ));
+        return Some(Binding::IntrinsicModule(child));
     }
     stdlib_symbol(modules, target, attr.attr.as_str())
 }
@@ -1507,7 +1535,7 @@ impl<'a> Loader<'a> {
             archive: None,
             bindings: HashMap::new(),
             type_bindings: HashMap::new(),
-            machinery_import: None,
+            importlib_children: HashMap::new(),
             aliases: Vec::new(),
             type_guards: Vec::new(),
             entry_globals: Vec::new(),
@@ -1857,10 +1885,11 @@ impl<'a> Loader<'a> {
                 for alias in &import.names {
                     let name = alias.name.as_str();
                     if let Some(module) = self.intrinsic_module(name, None)? {
-                        if module == IntrinsicModule::ImportlibMachinery {
+                        if let Some(child) = importlib_child_name(module) {
                             self.modules[id]
-                                .machinery_import
-                                .get_or_insert(statement.end());
+                                .importlib_children
+                                .entry(child)
+                                .or_insert(statement.end());
                         }
                         if alias.asname.is_none()
                             && let Some((local, _)) = name.split_once('.')
@@ -1920,16 +1949,11 @@ impl<'a> Loader<'a> {
                 if import.level == 0
                     && let Some(module) = self.intrinsic_module(&name, Some(&import.names))?
                 {
-                    if module == IntrinsicModule::ImportlibMachinery
-                        || module == IntrinsicModule::Importlib
-                            && import
-                                .names
-                                .iter()
-                                .any(|alias| alias.name.as_str() == "machinery")
-                    {
+                    if let Some(child) = importlib_child_name(module) {
                         self.modules[id]
-                            .machinery_import
-                            .get_or_insert(statement.end());
+                            .importlib_children
+                            .entry(child)
+                            .or_insert(statement.end());
                     }
                     for alias in &import.names {
                         if module == IntrinsicModule::Logging && alias.name.as_str() == "handlers" {
@@ -1937,11 +1961,12 @@ impl<'a> Loader<'a> {
                         }
                         // A from-import loads the child before reading the package attribute.
                         let binding = if module == IntrinsicModule::Importlib
-                            && alias.name.as_str() == "machinery"
+                            && let Some(child) = importlib_child(alias.name.as_str())
                         {
-                            Some(Binding::IntrinsicModule(
-                                IntrinsicModule::ImportlibMachinery,
-                            ))
+                            self.modules[id].importlib_children.entry(importlib_child_name(child).unwrap()).or_insert(statement.end());
+                            Some(Binding::IntrinsicModule(child))
+                        } else if module == IntrinsicModule::Sys && alias.name.as_str() == "pycache_prefix" {
+                            return Err("from-importing mutable sys.pycache_prefix is unsupported; use qualified access".into());
                         } else {
                             stdlib_symbol(&self.modules, module, alias.name.as_str())
                         }

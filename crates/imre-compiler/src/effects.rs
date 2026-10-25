@@ -357,6 +357,7 @@ mod tests {
             kind: ExprKind::Local(0),
         };
         let mut module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
             class_metadata: Vec::new(),
@@ -415,6 +416,7 @@ mod tests {
     #[test]
     fn transitive_calls_converge_and_uncertain_cycles_stay_fallible() {
         let module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
             class_metadata: Vec::new(),
@@ -471,6 +473,7 @@ def conversion(values: list[str]) -> bool:
             },
         };
         let module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
             class_metadata: Vec::new(),

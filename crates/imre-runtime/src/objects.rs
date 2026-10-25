@@ -13,6 +13,7 @@ mod asyncio;
 mod boxed_values;
 mod builtins;
 mod bytes;
+mod cache_paths;
 mod calendar;
 mod chainmap;
 mod contexts;

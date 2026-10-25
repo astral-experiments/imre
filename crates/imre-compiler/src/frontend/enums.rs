@@ -276,6 +276,37 @@ impl Checker<'_> {
                 "imre.struct values have no observable identity; compare them with ==",
             ));
         }
+        if let Some(&ty) = types.iter().find(|t| matches!(t, Type::AnnotationValue(_)))
+            && types.iter().all(|t| {
+                matches!(
+                    t,
+                    Type::AnnotationValue(_)
+                        | Type::ForwardRef(_)
+                        | Type::BuiltinClass
+                        | Type::None
+                        | Type::Str
+                )
+            })
+        {
+            let expr = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::AnnotationIs,
+                    vec![
+                        self.box_annotation(left, ty),
+                        self.box_annotation(right, ty),
+                    ],
+                ),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(expr)),
+                }
+            } else {
+                expr
+            });
+        }
         let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
             && [&left, &right].iter().any(|value| {
                 matches!(
