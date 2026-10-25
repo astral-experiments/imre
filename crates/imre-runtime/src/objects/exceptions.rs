@@ -922,10 +922,10 @@ fn exit_text(code: Option<&OwnedWord>, missing: &str) -> Rc<Str> {
 }
 
 /// Construct SystemExit with its original code. Kind 4 denotes an omitted
-/// argument; 0, 1, 2 and 3 represent None, bool, int and str respectively.
+/// argument; 0, 1, 2, 3 and 6 represent None, bool, int, str and tuple.
 ///
 /// # Safety
-/// The caller roots the scalar or immutable string described by `kind`.
+/// The caller roots the scalar, string or tuple described by `kind`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_new(kind: u32, word: usize) -> *const Object {
     let code = (kind != 4).then(|| {
@@ -992,11 +992,11 @@ pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *co
     }
 }
 
-/// Compare the original exit code against a scalar or a second code view.
+/// Compare the original exit code against a scalar, tuple or a second code view.
 ///
 /// # Safety
 /// `value` is a rooted code view. `word` is rooted with kind 0 (None), 1
-/// (bool), 2 (int), 3 (str), or 5 (another code view).
+/// (bool), 2 (int), 3 (str), 5 (another code view) or 6 (tuple).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_equal(
     value: *const Object,
