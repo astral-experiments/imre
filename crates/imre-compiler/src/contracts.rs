@@ -124,6 +124,9 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::DictContains | Self::DictGetDefault | Self::DictTryGet(_) | Self::SetContains => {
+                Contract::new(true, PreservesLists)
+            }
             Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
@@ -149,6 +152,8 @@ impl Builtin {
                     | PathOperation::WriteUnion { .. }
                     | PathOperation::WriteTypeError
                     | PathOperation::WriteBytes
+                    | PathOperation::Stat { .. }
+                    | PathOperation::CheckStatPath
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
                     | PathOperation::Rmdir
@@ -177,6 +182,8 @@ impl Builtin {
                     | PathOperation::Info
                     | PathOperation::InfoRepr
                     | PathOperation::Query(_) => false,
+                    PathOperation::StatTime(index) => *index == 3,
+                    PathOperation::StatExtraInt(index) => (6..=8).contains(index),
                 },
                 PreservesLists,
             ),
@@ -314,6 +321,7 @@ impl Builtin {
             | Self::SplitLines
             | Self::FreezeStrings
             | Self::SetAdd
+            | Self::SetDiscard
             | Self::CounterUpdate
             | Self::KeySet
             | Self::KeyUnion
@@ -358,6 +366,7 @@ impl Builtin {
             | Self::Slice
             | Self::StringFormat
             | Self::RegexSub(_)
+            | Self::UnittestCompilePattern
             | Self::StringIterationList
             | Self::StringJoin
             | Self::StringReplace
@@ -366,11 +375,8 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
-            | Self::DictContains
-            | Self::DictGetDefault
             | Self::EnumLookup(_)
             | Self::DictSumValues
-            | Self::DictTryGet(_)
             | Self::Encode
             | Self::CsvLineNumber
             | Self::Sha256Hex
@@ -415,11 +421,11 @@ impl Builtin {
             | Self::TextStreamView
             | Self::LiteralStringView
             | Self::RStrip
-            | Self::RegexCompile(_)
+            | Self::RegexCompile { .. }
+            | Self::RegexSpelling
             | Self::RegexSearch
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds
-            | Self::SetContains
             | Self::Split
             | Self::StringListFilter(_)
             | Self::StringListNonempty
@@ -477,6 +483,7 @@ impl Builtin {
             | Self::ZipNamelist
             | Self::ZipClose
             | Self::Input
+            | Self::LengthResult
             | Self::ParseArgs { .. }
             | Self::ArgparseText { .. }
             | Self::DequeAppend { .. }
@@ -485,6 +492,11 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
+            | Self::BuiltinsLast
+            | Self::BuiltinsHasLast
+            | Self::BuiltinsSetLast
+            | Self::BuiltinsDeleteLast
+            | Self::SysDisplayHook
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
             | Self::RaiseException
@@ -531,7 +543,6 @@ impl Builtin {
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::DequeClear
-            | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
             | Self::SplitLinesIter
@@ -860,6 +871,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_translate"
                 | "imre_mapping_object_get"
                 | "imre_exception_field_repr"
+                | "imre_system_exit_code_equal"
                 | "imre_system_exit_code_text"
                 | "imre_exception_field_index"
                 | "imre_exception_field_len"
@@ -880,6 +892,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bool"
                 | "imre_print_none"
                 | "imre_input"
+                | "imre_builtins_last"
+                | "imre_builtins_del_last"
+                | "imre_sys_displayhook"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
                 | "imre_path_as_posix"

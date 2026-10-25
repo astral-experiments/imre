@@ -16,8 +16,8 @@ pub(super) enum Source {
 }
 
 impl Source {
-    /// A member offset is relative to the adjusted archive origin and may be negative.
-    pub(super) fn header_offset(&self, offset: i128) -> Result<u64> {
+    /// Resolve an absolute archive position using the backing stream's seek rules.
+    pub(super) fn absolute_offset(&self, offset: i128) -> Result<u64> {
         match self {
             Self::Owned(file) => (&**file)
                 .seek(SeekFrom::Start(files::disk_offset(offset)?))

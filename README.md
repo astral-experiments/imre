@@ -181,6 +181,15 @@ For ThinLTO, select the allocator with `--runtime`. [ThinLTO build instructions]
 Imre removes unused code when linking executables. Pass `--no-gc-sections` to keep it,
 or `--verbose-link` to see the Clang command. [Link options and environment variables](docs/subset.md#link-options)
 
+## Running CI
+
+CI runs automatically on pull requests. Add the `ci:macos` label to run the Apple Silicon tests
+on a PR and its subsequent pushes, or select **macOS → Run workflow** to run them on a branch.
+Packaging changes build the Linux archives and installer by default;
+runtime and code generation changes also run the full AddressSanitizer suites.
+To run the full release and Linux checks on a branch (including `main`), select **CI → Run workflow** and enable
+`release_artifacts`, `full_asan`, and `full_thinlto`. Each can also be selected independently.
+
 ## Releasing
 
 Run **Prepare release** on `main` to open the version and changelog PR. Approve its CI and merge it.
