@@ -91,6 +91,13 @@ def verify_sources(source=None):
         raise ValueError("run with test-enabled CPython 3.14.5")
     if source:
         sys.path.insert(0, str(source.resolve() / "Lib"))
+    # test_os probes ACLs, links and extended attributes while importing.
+    # Separate concurrent runs even before unittest starts its first fixture.
+    with tempfile.TemporaryDirectory() as work, chdir(work):
+        return import_sources()
+
+
+def import_sources():
     import test
 
     modules = {}
