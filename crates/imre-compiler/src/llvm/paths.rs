@@ -71,7 +71,7 @@ impl Emitter<'_, '_> {
             | PathOperation::WithSuffix
             | PathOperation::RelativeTo => {
                 let path = &args[0].value.operand;
-                let other = self.directory_pointer(&args[1].value);
+                let other = self.optional_object_pointer(&args[1].value);
                 let call = match operation {
                     PathOperation::WithName => {
                         format!("call ptr @imre_path_with_name(ptr {path}, ptr {other})")

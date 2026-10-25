@@ -1,0 +1,216 @@
+{
+  "schema": "imre.pathlib.pure-fixture-boundaries/v1",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "source": {
+    "commit": "d7fc14f2004fd6b3c494c4e46c9eae2b2354066b",
+    "tree": "7f44e9157fa54901dce67402e4c8aaa6a6078b81",
+    "files": {
+      "libimre_runtime.a": "b690262f13ec54fd2074cf528d753a8cf88c223865cac0716e39386e1d8a4dcd",
+      "imre": "42c229cbc6ab20f6a65c773d22b502e488651083c718ef3e253c2d6fa35913bb"
+    }
+  },
+  "setup_sha256": "5fedd98cf27c6791770cbda71065e322c608ad5089da0a297d6398a0ec8d76b0",
+  "control_method": "PurePathTest.test_str_common",
+  "control_method_sha256": "ea7fc3ceef80874d2c627df4a447a4aab2b989d836decab880ed1af2aabb9763",
+  "attempts": {
+    "original_package": {
+      "scope": "original registration entry",
+      "source_sha256": "c413a75573e40fb032f04edf1d5df4932d10016f6a03932d759a019ae534dc44",
+      "results": [
+        {
+          "level": 0,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "level": 3,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+        },
+        {
+          "level": 0,
+          "reachable_only": true,
+          "build_exit": 1,
+          "diagnostic": "<source>/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "level": 3,
+          "reachable_only": true,
+          "build_exit": 1,
+          "diagnostic": "<source>/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ]
+    },
+    "original_pure_classes": {
+      "scope": "original registration entry",
+      "source_sha256": "8d430ffc519596fb44d0396802301c375187b9e5e729d85bf11ace34caddadc3",
+      "results": [
+        {
+          "level": 0,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:1:1: Imre: <source>/test/test_pathlib/test_pathlib.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"ntpath\""
+        },
+        {
+          "level": 3,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:1:1: Imre: <source>/test/test_pathlib/test_pathlib.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"ntpath\""
+        },
+        {
+          "level": 0,
+          "reachable_only": true,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:1:1: Imre: <source>/test/test_pathlib/test_pathlib.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"ntpath\""
+        },
+        {
+          "level": 3,
+          "reachable_only": true,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:1:1: Imre: <source>/test/test_pathlib/test_pathlib.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"ntpath\""
+        }
+      ]
+    },
+    "original_setup_first_expression": {
+      "scope": "diagnostic only",
+      "source_sha256": "419caba29051e5bc9547be4f3ad5e58a5e396ad13b739662f6c1cf51ba6e0a12",
+      "results": [
+        {
+          "level": 0,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:6:16: Imre: unknown class method"
+        },
+        {
+          "level": 3,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:6:16: Imre: unknown class method"
+        }
+      ]
+    },
+    "original_class_factory_and_setup": {
+      "scope": "diagnostic only",
+      "source_sha256": "e8b7fbbcf76df0fb87c6abead748c930aa29d4fa0574eb6de34da3deb9ee67ca",
+      "results": [
+        {
+          "level": 0,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        {
+          "level": 3,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:5:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        }
+      ]
+    },
+    "registered_id": {
+      "scope": "diagnostic only",
+      "source_sha256": "7fcd61c4c1c8b68e7deba25ee5a03d4e907e7c8aed5bcf49f047fd57e219ce62",
+      "results": [
+        {
+          "level": 0,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:4:15: Imre: unknown class method"
+        },
+        {
+          "level": 3,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:4:15: Imre: unknown class method"
+        }
+      ]
+    },
+    "class_parser_identity": {
+      "scope": "diagnostic only",
+      "source_sha256": "ba85db23e80b78940a344f6f13cf8bd79f52cfe958f093b438bb660bd0e6e6ce",
+      "results": [
+        {
+          "level": 0,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:3:7: Imre: name is not a local value; globals and first-class functions are unsupported"
+        },
+        {
+          "level": 3,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:3:7: Imre: name is not a local value; globals and first-class functions are unsupported"
+        }
+      ]
+    },
+    "instance_parser": {
+      "scope": "diagnostic only",
+      "source_sha256": "e063bd102a5bf947fcd77a44ef8cf27c047fb02367c10723a1ddec3fc528d8dd",
+      "results": [
+        {
+          "level": 0,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:3:7: Imre: unsupported native path attribute"
+        },
+        {
+          "level": 3,
+          "reachable_only": false,
+          "build_exit": 1,
+          "diagnostic": "<source>/probe.py:3:7: Imre: unsupported native path attribute"
+        }
+      ]
+    },
+    "skip_POSIX": {
+      "scope": "diagnostic only",
+      "source_sha256": "66d2a6048f5a1614b247ff59f2b40a43ecff8f5b284e2deef833af2bb7423bac",
+      "results": [
+        {
+          "level": 0,
+          "reachable_only": false,
+          "build_exit": 0,
+          "diagnostic": "",
+          "exit": 0,
+          "stdout": "",
+          "stderr": "test_registered (__main__.Gate.test_registered) ... skipped 'requires POSIX-flavoured path class'\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK (skipped=1)\n"
+        },
+        {
+          "level": 3,
+          "reachable_only": false,
+          "build_exit": 0,
+          "diagnostic": "",
+          "exit": 0,
+          "stdout": "",
+          "stderr": "test_registered (__main__.Gate.test_registered) ... skipped 'requires POSIX-flavoured path class'\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK (skipped=1)\n"
+        }
+      ]
+    },
+    "skip_Windows": {
+      "scope": "diagnostic only",
+      "source_sha256": "0f559f65e1e9cb4a47850b2773a4b3830ad76d25b7e83903d9a905116eef8312",
+      "results": [
+        {
+          "level": 0,
+          "reachable_only": false,
+          "build_exit": 0,
+          "diagnostic": "",
+          "exit": 0,
+          "stdout": "",
+          "stderr": "test_registered (__main__.Gate.test_registered) ... skipped 'requires Windows-flavoured path class'\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK (skipped=1)\n"
+        },
+        {
+          "level": 3,
+          "reachable_only": false,
+          "build_exit": 0,
+          "diagnostic": "",
+          "exit": 0,
+          "stdout": "",
+          "stderr": "test_registered (__main__.Gate.test_registered) ... skipped 'requires Windows-flavoured path class'\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK (skipped=1)\n"
+        }
+      ]
+    }
+  },
+  "fully_native_original_cases_observed": 0
+}

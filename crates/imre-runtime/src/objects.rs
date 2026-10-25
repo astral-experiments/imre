@@ -13,6 +13,7 @@ mod asyncio;
 mod boxed_values;
 mod builtins;
 mod bytes;
+mod cache_paths;
 mod chainmap;
 mod contexts;
 mod copying;
@@ -32,6 +33,7 @@ mod json;
 mod linecache;
 mod logging;
 mod mappings;
+mod module_specs;
 mod namespaces;
 mod os;
 mod paths;
@@ -46,6 +48,7 @@ mod string_enums;
 mod structs;
 mod tempdirs;
 mod text;
+pub(crate) use text::short_string;
 mod unions;
 mod values;
 mod warnings;
@@ -131,6 +134,7 @@ enum Storage {
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
     Logger(Rc<Str>),
+    HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
     LogRecord(Box<logging::record::Record>),
@@ -202,7 +206,15 @@ pub unsafe extern "C" fn imre_object_retain(value: *const Object) {
 pub unsafe extern "C" fn imre_object_release(value: *const Object) {
     if !value.is_null() {
         // SAFETY: the caller transfers one live strong reference.
-        unsafe { Rc::decrement_strong_count(value) };
+        release_object_owner(unsafe { Rc::from_raw(value) });
+    }
+}
+
+/// Give a live Popen's final language owner to subprocess._active before its
+/// allocation is destroyed. All other object owners follow the usual Rc drop.
+fn release_object_owner(owner: Rc<Object>) {
+    if Rc::strong_count(&owner) == 1 {
+        processes::retain_live_owner(&owner);
     }
 }
 
@@ -580,6 +592,24 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
         result.map(|values| Rc::into_raw(values.into_object())),
         std::ptr::null(),
     )
+}
+
+/// Concatenate two Python strings after both optional operands have been evaluated.
+///
+/// # Safety
+/// Nonzero words are rooted, immutable strings. Zero represents Python None.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_optional_str_concat(left: usize, right: usize) -> *const Str {
+    let reason = match (left == 0, right == 0) {
+        (true, true) => "unsupported operand type(s) for +: 'NoneType' and 'NoneType'",
+        (true, false) => "unsupported operand type(s) for +: 'NoneType' and 'str'",
+        (false, true) => "can only concatenate str (not \"NoneType\") to str",
+        (false, false) => {
+            // SAFETY: both non-null string owners are retained by the caller.
+            return unsafe { imre_str_concat(left as *const Str, right as *const Str) };
+        }
+    };
+    Error::new(Kind::TypeError, reason).returning(std::ptr::null())
 }
 
 /// # Safety

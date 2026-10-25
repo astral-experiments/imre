@@ -1,14 +1,14 @@
 //! Conservative escaping-error summaries over the final, rewritten typed IR.
 //!
-//! Allocation failure remains fatal under the current runtime contract. Fixed
-//! fields cannot raise: the checker fixes their indices, prevents partially
+//! Some runtime operations report allocation failure. Fixed fields cannot raise:
+//! the checker fixes their indices, prevents partially
 //! initialized objects from escaping, and proves optional payloads present.
 //! Container bounds, I/O, conversion, explicit raises and uncertain operations
 //! remain fallible. Catching an error does not make its containing function
 //! infallible here; every handler, else and finally body is included.
 
 use crate::callables::Targets;
-use crate::ir::{Expr, ExprKind, Module, Statement};
+use crate::ir::{Expr, ExprKind, Module, Statement, Type};
 
 pub(crate) struct ExceptionEffects {
     functions: Vec<bool>,
@@ -147,11 +147,27 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         {
             true
         }
-        ExprKind::List(values) | ExprKind::Compare(values, _) | ExprKind::Boolean(_, values) => {
-            values
+        ExprKind::Compare(values, _) => {
+            // A structural comparison may allocate a traversal stack, including
+            // when a set or Counter looks up an equal record key.
+            values.windows(2).any(|pair| {
+                matches!(
+                    pair[0].ty,
+                    Type::Class(_)
+                        | Type::Tuple(_)
+                        | Type::List(_)
+                        | Type::Dict(_)
+                        | Type::Set(_)
+                        | Type::Deque(_)
+                        | Type::SimpleNamespace(_)
+                )
+            }) || values
                 .iter()
                 .any(|value| expression(value, functions, targets))
         }
+        ExprKind::List(values) | ExprKind::Boolean(_, values) => values
+            .iter()
+            .any(|value| expression(value, functions, targets)),
         ExprKind::Dict { entries, .. } => !entries.is_empty(),
         ExprKind::Set { values, .. } => !values.is_empty(),
         ExprKind::Scope { body, value, .. } => {
@@ -329,6 +345,7 @@ mod tests {
             kind: ExprKind::Local(0),
         };
         let mut module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
             class_metadata: Vec::new(),
@@ -387,6 +404,7 @@ mod tests {
     #[test]
     fn transitive_calls_converge_and_uncertain_cycles_stay_fallible() {
         let module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
             class_metadata: Vec::new(),
@@ -443,6 +461,7 @@ def conversion(values: list[str]) -> bool:
             },
         };
         let module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
             class_metadata: Vec::new(),

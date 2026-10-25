@@ -48,9 +48,18 @@ impl Emitter<'_, '_> {
                 ));
                 return none();
             }
-            FdOperation::Pipe => {
+            FdOperation::Pipe | FdOperation::Pipe2 => {
                 let tuple = self.record(returns);
-                self.checked_line(format!("call void @imre_os_pipe(ptr {})", tuple.operand));
+                match args {
+                    [] => {
+                        self.checked_line(format!("call void @imre_os_pipe(ptr {})", tuple.operand))
+                    }
+                    [flags] => self.checked_line(format!(
+                        "call void @imre_os_pipe2(ptr {}, i64 {})",
+                        tuple.operand, flags.value.operand
+                    )),
+                    _ => unreachable!(),
+                }
                 return tuple;
             }
             FdOperation::Close => "close",

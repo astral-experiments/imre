@@ -39,23 +39,31 @@ includes all seven child suites; adding their counts again would duplicate them.
 All 391 skips name their fixture, original reason and pinned source condition.
 There are no additional exclusions.
 
-The original constructor report replays all cohorts on `e6fda91`, with the
+The original constructor report replays the cohorts available on `e6fda91`, with the
 [whole-method probe from that compiler](body-probes-segments-linux.json)
-accounting for the remaining occurrences. The current report replaces its seven
-constructor observations with measurements from `4375dae` after #995.
-Reproduce the two steps with their respective native binaries:
+accounting for the remaining occurrences. Seven constructor observations were
+updated on `4375dae` after #995, then two samefile observations on `66ff119`.
+Reproduce the report with the binary and runtime from each revision:
 
 ```sh
 python -B -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
     --imre-commit e6fda919601a5ea86386d231388162e7a39be706 \
     --body-report benchmarks/cpython_stdlib/full/pathlib/body-probes-segments-linux.json \
+    --cohort lexical --cohort files --cohort traversal --cohort components --cohort walk \
+    --cohort basics --cohort metadata --cohort stat --cohort segments \
     --result /tmp/pathlib-constructors.json
 python -B -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py \
     --imre /path/to/4375dae/imre --runtime /path/to/4375dae/libimre_runtime.a --clang /path/to/clang \
     --imre-commit 4375dae659c1d6e00f3ee8c452b7d33e1f21fca1 --cohort segments --result /tmp/pathlib-segments.json
 python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --segments /tmp/pathlib-segments.json \
     --baseline /tmp/pathlib-constructors.json --imre-commit 4375dae659c1d6e00f3ee8c452b7d33e1f21fca1 \
+    --result /tmp/pathlib-before-samefile.json
+python -B -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py \
+    --imre /path/to/66ff119/imre --runtime /path/to/66ff119/libimre_runtime.a --clang /path/to/clang \
+    --imre-commit 66ff11995e158d982b1a69fbf9e3156f0372c12a --cohort samefile --result /tmp/pathlib-samefile.json
+python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --samefile /tmp/pathlib-samefile.json \
+    --baseline /tmp/pathlib-before-samefile.json --imre-commit 66ff11995e158d982b1a69fbf9e3156f0372c12a \
     --result /tmp/pathlib-current.json
 ```
 
@@ -139,6 +147,22 @@ contexts landed in #995, compiling the complete body reaches `P(b'a')`;
 the indirect call still cannot omit its optional second argument. Verify the roles and
 call counts with `metadata_receipt.py --segments /tmp/pathlib-segments.json`.
 
+In both original `test_samefile` occurrences, CPython runs the body, ten
+assertions and filesystem fixture. Imre performs three joins, four path
+constructions and all ten samefile calls per method: two return true, two
+return false and six raise `FileNotFoundError`. The adapter rejects any
+host pathlib call, samefile comparison or stat during those bodies. A complete
+native body still stops when it passes a bound path method to `assertRaises`.
+
+The [supplemental program](../../../../tests/fixtures/paths/samefile/cases.py)
+checks argument and descriptor evaluation, conversion and inode comparison
+order. The [entry report](samefile-entry-linux.json) records 35 matching output
+lines and matching filesystem effects when the program is imported at both
+levels. As a direct script it still stops at the function definition on line
+106, after executable statements. [samefile_entry.py](samefile_entry.py) reproduces both modes;
+neither contributes an upstream occurrence. [Earlier measurements](observations/265e053/samefile-entry-linux.json)
+preserve the same outcomes on `265e053`.
+
 The [link](../../../../tests/fixtures/paths/links.py) and
 [protocol](../../../../tests/fixtures/paths/link_protocols.py) fixtures separately
 compare string and byte error filenames, NUL validation order, stored relative
@@ -220,9 +244,9 @@ python3 benchmarks/cpython_stdlib/full/pathlib/body_report.py --work /tmp/pathli
 | Execution at each of O0 and O3 | Occurrences |
 | --- | ---: |
 | Native body and operation, native assertions if present, host fixture | 136 |
-| Host body and assertions, native operation | 61 |
+| Host body and assertions, native operation | 63 |
 | Mixed execution | 11 |
-| Blocked: diagnostic in the original body | 362 |
+| Blocked: diagnostic in the original body | 360 |
 | Blocked: fixture or dependency diagnostic | 369 |
 | Blocked: original fixture wrapper | 39 |
 | Upstream reference skip | 391 |
@@ -231,7 +255,7 @@ python3 benchmarks/cpython_stdlib/full/pathlib/body_report.py --work /tmp/pathli
 There are no fully native fixture lifecycles, extra exclusions, or native execution
 failures in this run. Some methods that the general probe could not compile have
 a more specific native or host-driven adapter. Those occurrences keep the observed
-execution roles; the 770 blocked rows above have no successful adapter. The
+execution roles; the 768 blocked rows above have no successful adapter. The
 per-ID records give the original source location, diagnostic or wrapper, and any
 missing fixture behavior. A blocked row is an outstanding failure to run the method.
 
