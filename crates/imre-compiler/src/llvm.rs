@@ -3990,8 +3990,12 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_time_sleep", &[&args[0].value]);
                 none()
             }
-            Builtin::PercentInteger => self.call(
-                "imre_str_percent_int",
+            Builtin::PercentScalar => self.call(
+                if args[1].value.ty == Type::Str {
+                    "imre_str_percent_text"
+                } else {
+                    "imre_str_percent_int"
+                },
                 Type::Str,
                 &[&args[0].value, &args[1].value],
             ),
@@ -6606,6 +6610,7 @@ declare i32 @imre_async_cancel(ptr)
 declare double @imre_wall_time()
 declare void @imre_time_sleep(double)
 declare ptr @imre_str_percent_int(ptr,i64)
+declare ptr @imre_str_percent_text(ptr,ptr)
 declare ptr @imre_async_group()
 declare void @imre_async_group_enter(ptr)
 declare ptr @imre_async_create_task(ptr, ptr)
