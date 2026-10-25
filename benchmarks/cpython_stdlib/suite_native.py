@@ -30,6 +30,7 @@ class Toolchain:
     runtime: Path
     clang: Path
     level: int
+    reachable_only: bool = False
 
     def build(self, source, directory):
         entry = directory / "case.py"
@@ -38,6 +39,8 @@ class Toolchain:
         command = [self.imre.resolve(), "build", entry, "-o", binary, "--no-cache",
                    "--opt-level", str(self.level), "--runtime", self.runtime.resolve(),
                    "--clang", self.clang.resolve()]
+        if self.reachable_only:
+            command.append("--reachable-only")
         try:
             result = subprocess.run(command, cwd=directory, capture_output=True, text=True, timeout=180)
         except subprocess.TimeoutExpired as exc:

@@ -80,3 +80,25 @@ UnicodeEncodeError and shutil's OSError subclasses. The default gate also checks
 the identity, name and path of [structured import errors](https://github.com/astral-sh/imre/pull/590)
 and [csv.Error](https://github.com/astral-sh/imre/pull/468) against unrelated handlers.
 These controls must compile, run, and match the reference; they contribute no upstream IDs.
+
+### The regrtest failure fixture
+
+[support_exception.py](support_exception.py) checks the original `test.support`
+exception classes against the way regrtest constructs them. It verifies three
+CPython blobs, then compares the installed classes with byte-for-byte copies
+of their declarations. Both controls pass mutable lists of `(test, traceback)`
+pairs. One leaves `stats` as `None`; the other passes regrtest's own `TestStats`.
+They check parent and child catches, sibling rejection, argument order, and
+whether mutations are visible through the exception's attributes and `args`.
+
+```sh
+"$CPYTHON" -B benchmarks/cpython_stdlib/full/unittest/support_exception.py \
+    --cpython-source "$CPYTHON_SOURCE" --result /tmp/support-exception.json
+```
+
+Add `--imre "$IMRE"` for ordinary and reachable-only compiler diagnostics.
+For execution, also supply `--runtime "$IMRE_RUNTIME" --clang "$CLANG"`:
+the helper compares stdout, stderr and exit status at O0 and O3 in both
+modes and exits unsuccessfully on a blocker or mismatch. These are fixture
+controls, so none changes the 1,090-test denominator. A successful isolated
+control does not establish that a complete module imports or runs.
