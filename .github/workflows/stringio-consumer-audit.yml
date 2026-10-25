@@ -1,0 +1,74 @@
+name: Verify native shared StringIO with its original CPython consumers
+on:
+  push:
+    branches: [codex/stringio-unified-hosted-audit]
+permissions:
+  contents: read
+jobs:
+  fixture-audit:
+    runs-on: github-ubuntu-24.04-x86_64-4
+    timeout-minutes: 35
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify tested source matches the intended feature tree
+        run: |
+          git rev-parse HEAD^ HEAD
+          git diff --exit-code HEAD^ HEAD -- crates Cargo.lock Cargo.toml
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14.5'
+      - name: Install Clang 18
+        run: sudo apt-get update && sudo apt-get install -y clang-18
+      - name: Build the combined compiler and runtime
+        id: build
+        run: |
+          cargo fmt --all -- --check
+          cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-stdlib-reference
+          sparse-checkout: Lib
+          persist-credentials: false
+      - name: Reproduce the logging foundation transcript
+        run: |
+          python3 -B - <<'PY'
+          from pathlib import Path
+          import subprocess,sys,tempfile
+          sys.path.insert(0,'benchmarks/cpython_stdlib')
+          from suite_native import Toolchain
+          source=Path('tests/fixtures/files/string_io.py')
+          expected=subprocess.run([sys.executable,'-B',source],capture_output=True,check=True)
+          for level in (0,3):
+              with tempfile.TemporaryDirectory() as d:
+                  binary=Toolchain(Path('target/debug/imre'),Path('target/debug/libimre_runtime.a'),Path('/usr/bin/clang-18'),level).build(source.read_bytes(),Path(d))
+                  actual=subprocess.run([binary],capture_output=True,check=True)
+                  assert (actual.stdout,actual.stderr)==(expected.stdout,expected.stderr),(level,actual,expected)
+                  print(f'O{level}: {len(actual.stdout.splitlines())} logging foundation lines match CPython')
+          PY
+      - name: Exercise complete original StringIO methods with the native stream
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          suite=benchmarks/cpython_stdlib/full/doctest/stringio
+          python3 -B "$suite/native.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/stringio-native.json"
+          python3 -c 'import json,sys;print("STRINGIO_UNIFIED_RECEIPT="+json.dumps(json.load(open(sys.argv[1])),sort_keys=True,separators=(",",":")))' "$RUNNER_TEMP/stringio-native.json"
+      - name: Check twelve unmodified import and runner entries with both fixture sources
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: python3 -B benchmarks/cpython_stdlib/full/doctest/stringio/consumer_startup.py --imre target/debug/imre --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/stringio-startup.json"
+      - name: Check doctest discovery, failure controls and complete module cases
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          python3 -B benchmarks/cpython_stdlib/full/doctest/native.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/doctest.json"
+          python3 -c 'import json,sys;print("UNIFIED_DOCTEST="+json.dumps(json.load(open(sys.argv[1])),sort_keys=True,separators=(",",":")))' "$RUNNER_TEMP/doctest.json"
+      - name: Check compiler and runtime tests and warnings
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          cargo test --locked -j 2 -p imre-compiler -p imre-runtime --lib
+          cargo clippy --locked -j 2 -p imre-compiler -p imre-runtime --all-targets -- -D warnings
