@@ -33,7 +33,13 @@ Of the 55 mixed methods, 17 use original syscall mocks or a host stream copy dur
 
 The 19 blocked methods include 4 zero-copy cases whose syscall mocks raise a Python `ZeroDivisionError`, 4 stream open/close methods, 4 terminal-size methods, 2 miscellaneous methods, 3 deletion methods, 1 tree-copy method and 1 public API inventory method. The 50 skips retain their original CPython reasons.
 
+The [open/close fixture trace](open-fixtures.md) records the original calls, exception objects, and suppression behavior for the four blocked `TestCopyFile` cases.
+
 The aggregate and method reports use stream tree `ae033111d2a0f77991b345c7e57fa50fa96b674d` (commit `cf00a19`). [All four stream IDs](stream-linux.json) are included: three host-driven native operations, each copying 2 MiB through the same open file descriptions, and the original Windows skip.
+
+The [stream consumer receipt](streams-945-linux.json) checks logging’s [BytesIO.getvalue implementation](https://github.com/astral-sh/imre/pull/945) at its published head. On combined tree `b4b04898`, the StringIO and binary stream fixtures matched CPython 3.14.5 at O0 and O3, including every output file. The scalar-print and codec-writer controls passed on the same binaries. These supplemental fixtures add no upstream IDs.
+
+The [first hosted ownership and capacity run](capacity-431cb36-linux.json) keeps an observed `TestMisc.test_chown` failure at both levels: the native handler could render an `OSError`, but compiling `error.args` failed. The [original run](https://github.com/astral-sh/imre/actions/runs/40205208059) paired its own Linux reference (174 pass, 49 skips) with all 223 native observations. The [report reader](hosted_capacity_report.py) verifies those occurrence keys, both binary hashes and the compiled source tree.
 
 The separate startup and import probes use compiler tree `303a34eca6d143d907ab8ae9c5b8891c1ed0396c` (commit `7f0dee8`, including random, archive, and fast-copy work on main `cb99ce6`). [All four unchanged suite startup modes](archive-fastcopy-startup-linux.json) reach `Lib/test/test_shutil.py:31` and stop there; none executes a test. [The import trace](import-sequence-linux.json) shows the real Linux `posix` module binding at line 27, then the `test.support` imports at lines 31–33. On the same Imre tree, an available module, a genuinely absent module and a module raising `ImportError` during initialization all hit the same import-order restriction. The [probe](import_sequence.py) records its CPython controls separately from module operations.
 

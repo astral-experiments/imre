@@ -1,0 +1,43 @@
+{
+  "format_version": 1,
+  "purpose": "Supplemental native stream controls; no original shutil case classification changes.",
+  "cpython": "3.14.5",
+  "provider": {
+    "pull_request": 945,
+    "head": "c3a63465bcd9cb19fb95bcd50e02fcf82ccc5dd3"
+  },
+  "consumer": {
+    "commit": "2e3f5c4f0bfe70b92fc4ba064eb22212e7ae8aeb",
+    "tree": "b4b04898a9d4b22c9ea4e5123a0405f75f37735b"
+  },
+  "platform": "linux",
+  "workflow_run": "https://github.com/astral-sh/imre/actions/runs/40203253888",
+  "binary_sha256": {
+    "imre": "0a466e5d1071484110a642bbc5ee6181c0778017bcdd967e6efbe61979d72f5f",
+    "libimre_runtime.a": "8589bda8ddde359a2e7336068c19c5663f3294b20e139646f502a137104d5d83"
+  },
+  "matched_stdout_lines": {
+    "shutil_stringio": {
+      "O0": 17,
+      "O3": 17
+    },
+    "shutil_streams": {
+      "O0": 23,
+      "O3": 23
+    },
+    "print_scalar_arguments": {
+      "O0": 6,
+      "O3": 6
+    },
+    "codec_writer": {
+      "O0": 23,
+      "O3": 23
+    }
+  },
+  "compared": [
+    "exit status",
+    "stdout",
+    "stderr",
+    "every temporary fixture file"
+  ]
+}

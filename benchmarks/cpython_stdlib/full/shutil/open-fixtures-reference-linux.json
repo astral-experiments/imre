@@ -1,0 +1,635 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "blobs": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_shutil.py": "fb1a7d876a617e17bcecbb8d8b654a2a87dafe48",
+    "Lib/shutil.py": "b7608f7edfc93c5d300c2a91fdfa38969df0ded0"
+  },
+  "platform": "linux",
+  "execution": "CPython reference only; no native assertion or operation",
+  "cases": {
+    "test.test_shutil.TestCopyFile.test_w_dest_close_fails": {
+      "execution": "CPython reference only",
+      "events": [
+        {
+          "function": "copyfile",
+          "event": "call"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 1,
+            "type": "FileNotFoundError",
+            "args": "(2, 'No such file or directory')"
+          }
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 2,
+            "type": "FileNotFoundError",
+            "args": "(2, 'No such file or directory')"
+          }
+        },
+        {
+          "function": "_open",
+          "event": "call",
+          "path": "srcfile",
+          "mode": "rb"
+        },
+        {
+          "function": "_open",
+          "event": "return",
+          "result": {
+            "stream": "srcfile"
+          }
+        },
+        {
+          "function": "Faux.__enter__",
+          "event": "call",
+          "stream": "srcfile"
+        },
+        {
+          "function": "Faux.__enter__",
+          "event": "return",
+          "stream": "srcfile",
+          "result": "None"
+        },
+        {
+          "function": "_open",
+          "event": "call",
+          "path": "destfile",
+          "mode": "wb"
+        },
+        {
+          "function": "_open",
+          "event": "return",
+          "result": {
+            "stream": "destfile"
+          }
+        },
+        {
+          "function": "Faux.__enter__",
+          "event": "call",
+          "stream": "destfile"
+        },
+        {
+          "function": "Faux.__enter__",
+          "event": "return",
+          "stream": "destfile",
+          "result": "None"
+        },
+        {
+          "function": "_fastcopy_copy_file_range",
+          "event": "call"
+        },
+        {
+          "function": "_fastcopy_copy_file_range",
+          "event": "exception",
+          "error": {
+            "object": 3,
+            "type": "AttributeError",
+            "args": "(\"'NoneType' object has no attribute 'fileno'\",)"
+          }
+        },
+        {
+          "function": "_fastcopy_copy_file_range",
+          "event": "exception",
+          "error": {
+            "object": 4,
+            "type": "_GiveupOnFastCopy",
+            "args": "(AttributeError(\"'NoneType' object has no attribute 'fileno'\"),)"
+          }
+        },
+        {
+          "function": "_fastcopy_copy_file_range",
+          "event": "return",
+          "result": "None"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 4,
+            "type": "_GiveupOnFastCopy",
+            "args": "(AttributeError(\"'NoneType' object has no attribute 'fileno'\"),)"
+          }
+        },
+        {
+          "function": "_fastcopy_sendfile",
+          "event": "call"
+        },
+        {
+          "function": "_fastcopy_sendfile",
+          "event": "exception",
+          "error": {
+            "object": 5,
+            "type": "AttributeError",
+            "args": "(\"'NoneType' object has no attribute 'fileno'\",)"
+          }
+        },
+        {
+          "function": "_fastcopy_sendfile",
+          "event": "exception",
+          "error": {
+            "object": 6,
+            "type": "_GiveupOnFastCopy",
+            "args": "(AttributeError(\"'NoneType' object has no attribute 'fileno'\"),)"
+          }
+        },
+        {
+          "function": "_fastcopy_sendfile",
+          "event": "return",
+          "result": "None"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 6,
+            "type": "_GiveupOnFastCopy",
+            "args": "(AttributeError(\"'NoneType' object has no attribute 'fileno'\"),)"
+          }
+        },
+        {
+          "function": "copyfileobj",
+          "event": "call"
+        },
+        {
+          "function": "copyfileobj",
+          "event": "exception",
+          "error": {
+            "object": 7,
+            "type": "AttributeError",
+            "args": "(\"'NoneType' object has no attribute 'read'\",)"
+          }
+        },
+        {
+          "function": "copyfileobj",
+          "event": "return",
+          "result": "None"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 7,
+            "type": "AttributeError",
+            "args": "(\"'NoneType' object has no attribute 'read'\",)"
+          }
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "call",
+          "stream": "destfile",
+          "error": {
+            "object": 7,
+            "type": "AttributeError",
+            "args": "(\"'NoneType' object has no attribute 'read'\",)"
+          },
+          "traceback": true
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "exception",
+          "stream": "destfile",
+          "error": {
+            "object": 8,
+            "type": "OSError",
+            "args": "('Cannot close',)"
+          }
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "return",
+          "stream": "destfile",
+          "result": "None"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 8,
+            "type": "OSError",
+            "args": "('Cannot close',)"
+          }
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "call",
+          "stream": "srcfile",
+          "error": {
+            "object": 8,
+            "type": "OSError",
+            "args": "('Cannot close',)"
+          },
+          "traceback": true
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "return",
+          "stream": "srcfile",
+          "result": "True"
+        },
+        {
+          "function": "copyfile",
+          "event": "return",
+          "result": "'destfile'"
+        }
+      ]
+    },
+    "test.test_shutil.TestCopyFile.test_w_dest_open_fails": {
+      "execution": "CPython reference only",
+      "events": [
+        {
+          "function": "copyfile",
+          "event": "call"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 1,
+            "type": "FileNotFoundError",
+            "args": "(2, 'No such file or directory')"
+          }
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 2,
+            "type": "FileNotFoundError",
+            "args": "(2, 'No such file or directory')"
+          }
+        },
+        {
+          "function": "_open",
+          "event": "call",
+          "path": "srcfile",
+          "mode": "rb"
+        },
+        {
+          "function": "_open",
+          "event": "return",
+          "result": {
+            "stream": "srcfile"
+          }
+        },
+        {
+          "function": "Faux.__enter__",
+          "event": "call",
+          "stream": "srcfile"
+        },
+        {
+          "function": "Faux.__enter__",
+          "event": "return",
+          "stream": "srcfile",
+          "result": "None"
+        },
+        {
+          "function": "_open",
+          "event": "call",
+          "path": "destfile",
+          "mode": "wb"
+        },
+        {
+          "function": "_open",
+          "event": "exception",
+          "error": {
+            "object": 3,
+            "type": "OSError",
+            "args": "('Cannot open \"destfile\"',)"
+          }
+        },
+        {
+          "function": "_open",
+          "event": "return",
+          "result": "None"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 3,
+            "type": "OSError",
+            "args": "('Cannot open \"destfile\"',)"
+          }
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "call",
+          "stream": "srcfile",
+          "error": {
+            "object": 3,
+            "type": "OSError",
+            "args": "('Cannot open \"destfile\"',)"
+          },
+          "traceback": true
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "return",
+          "stream": "srcfile",
+          "result": "True"
+        },
+        {
+          "function": "copyfile",
+          "event": "return",
+          "result": "'destfile'"
+        }
+      ]
+    },
+    "test.test_shutil.TestCopyFile.test_w_source_close_fails": {
+      "execution": "CPython reference only",
+      "events": [
+        {
+          "function": "copyfile",
+          "event": "call"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 1,
+            "type": "FileNotFoundError",
+            "args": "(2, 'No such file or directory')"
+          }
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 2,
+            "type": "FileNotFoundError",
+            "args": "(2, 'No such file or directory')"
+          }
+        },
+        {
+          "function": "_open",
+          "event": "call",
+          "path": "srcfile",
+          "mode": "rb"
+        },
+        {
+          "function": "_open",
+          "event": "return",
+          "result": {
+            "stream": "srcfile"
+          }
+        },
+        {
+          "function": "Faux.__enter__",
+          "event": "call",
+          "stream": "srcfile"
+        },
+        {
+          "function": "Faux.__enter__",
+          "event": "return",
+          "stream": "srcfile",
+          "result": "None"
+        },
+        {
+          "function": "_open",
+          "event": "call",
+          "path": "destfile",
+          "mode": "wb"
+        },
+        {
+          "function": "_open",
+          "event": "return",
+          "result": {
+            "stream": "destfile"
+          }
+        },
+        {
+          "function": "Faux.__enter__",
+          "event": "call",
+          "stream": "destfile"
+        },
+        {
+          "function": "Faux.__enter__",
+          "event": "return",
+          "stream": "destfile",
+          "result": "None"
+        },
+        {
+          "function": "_fastcopy_copy_file_range",
+          "event": "call"
+        },
+        {
+          "function": "_fastcopy_copy_file_range",
+          "event": "exception",
+          "error": {
+            "object": 3,
+            "type": "AttributeError",
+            "args": "(\"'NoneType' object has no attribute 'fileno'\",)"
+          }
+        },
+        {
+          "function": "_fastcopy_copy_file_range",
+          "event": "exception",
+          "error": {
+            "object": 4,
+            "type": "_GiveupOnFastCopy",
+            "args": "(AttributeError(\"'NoneType' object has no attribute 'fileno'\"),)"
+          }
+        },
+        {
+          "function": "_fastcopy_copy_file_range",
+          "event": "return",
+          "result": "None"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 4,
+            "type": "_GiveupOnFastCopy",
+            "args": "(AttributeError(\"'NoneType' object has no attribute 'fileno'\"),)"
+          }
+        },
+        {
+          "function": "_fastcopy_sendfile",
+          "event": "call"
+        },
+        {
+          "function": "_fastcopy_sendfile",
+          "event": "exception",
+          "error": {
+            "object": 5,
+            "type": "AttributeError",
+            "args": "(\"'NoneType' object has no attribute 'fileno'\",)"
+          }
+        },
+        {
+          "function": "_fastcopy_sendfile",
+          "event": "exception",
+          "error": {
+            "object": 6,
+            "type": "_GiveupOnFastCopy",
+            "args": "(AttributeError(\"'NoneType' object has no attribute 'fileno'\"),)"
+          }
+        },
+        {
+          "function": "_fastcopy_sendfile",
+          "event": "return",
+          "result": "None"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 6,
+            "type": "_GiveupOnFastCopy",
+            "args": "(AttributeError(\"'NoneType' object has no attribute 'fileno'\"),)"
+          }
+        },
+        {
+          "function": "copyfileobj",
+          "event": "call"
+        },
+        {
+          "function": "copyfileobj",
+          "event": "exception",
+          "error": {
+            "object": 7,
+            "type": "AttributeError",
+            "args": "(\"'NoneType' object has no attribute 'read'\",)"
+          }
+        },
+        {
+          "function": "copyfileobj",
+          "event": "return",
+          "result": "None"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 7,
+            "type": "AttributeError",
+            "args": "(\"'NoneType' object has no attribute 'read'\",)"
+          }
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "call",
+          "stream": "destfile",
+          "error": {
+            "object": 7,
+            "type": "AttributeError",
+            "args": "(\"'NoneType' object has no attribute 'read'\",)"
+          },
+          "traceback": true
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "return",
+          "stream": "destfile",
+          "result": "True"
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "call",
+          "stream": "srcfile",
+          "error": null,
+          "traceback": false
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "exception",
+          "stream": "srcfile",
+          "error": {
+            "object": 8,
+            "type": "OSError",
+            "args": "('Cannot close',)"
+          }
+        },
+        {
+          "function": "Faux.__exit__",
+          "event": "return",
+          "stream": "srcfile",
+          "result": "None"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 8,
+            "type": "OSError",
+            "args": "('Cannot close',)"
+          }
+        },
+        {
+          "function": "copyfile",
+          "event": "return",
+          "result": "None"
+        }
+      ]
+    },
+    "test.test_shutil.TestCopyFile.test_w_source_open_fails": {
+      "execution": "CPython reference only",
+      "events": [
+        {
+          "function": "copyfile",
+          "event": "call"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 1,
+            "type": "FileNotFoundError",
+            "args": "(2, 'No such file or directory')"
+          }
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 2,
+            "type": "FileNotFoundError",
+            "args": "(2, 'No such file or directory')"
+          }
+        },
+        {
+          "function": "_open",
+          "event": "call",
+          "path": "srcfile",
+          "mode": "rb"
+        },
+        {
+          "function": "_open",
+          "event": "exception",
+          "error": {
+            "object": 3,
+            "type": "OSError",
+            "args": "('Cannot open \"srcfile\"',)"
+          }
+        },
+        {
+          "function": "_open",
+          "event": "return",
+          "result": "None"
+        },
+        {
+          "function": "copyfile",
+          "event": "exception",
+          "error": {
+            "object": 3,
+            "type": "OSError",
+            "args": "('Cannot open \"srcfile\"',)"
+          }
+        },
+        {
+          "function": "copyfile",
+          "event": "return",
+          "result": "None"
+        }
+      ]
+    }
+  }
+}

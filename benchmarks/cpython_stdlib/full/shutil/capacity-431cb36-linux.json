@@ -1,0 +1,218 @@
+{
+  "schema": "imre.shutil.hosted-capacity/v1",
+  "run": "https://github.com/astral-sh/imre/actions/runs/40205208059",
+  "source_commit": "431cb3638c7072b9bff461b4f36fa00d97b5db7a",
+  "source_tree": "440781ce18bbdcd0fb1ddd924a19c56953499ea6",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 223,
+  "reference": {
+    "pass": 174,
+    "skipped": 49
+  },
+  "optimization_levels": {
+    "0": {
+      "all_223": {
+        "blocked": 13,
+        "failed": 1,
+        "host-driven-native-operation": 87,
+        "mixed": 57,
+        "native-body-host-fixture": 16,
+        "reference-skip": 49
+      },
+      "ownership_disk_terminal": {
+        "test.test_shutil.TestGetTerminalSize.test_bad_environ": {
+          "classification": "host-driven-native-operation",
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "cpython"
+          }
+        },
+        "test.test_shutil.TestGetTerminalSize.test_does_not_crash": {
+          "classification": "native-body-host-fixture",
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          }
+        },
+        "test.test_shutil.TestGetTerminalSize.test_fallback": {
+          "classification": "mixed",
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "mixed",
+            "fixture": "cpython"
+          }
+        },
+        "test.test_shutil.TestGetTerminalSize.test_os_environ_first": {
+          "classification": "host-driven-native-operation",
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "cpython"
+          }
+        },
+        "test.test_shutil.TestGetTerminalSize.test_stty_match": {
+          "classification": "reference-skip",
+          "roles": {
+            "body": "unobserved",
+            "assertions": "unobserved",
+            "operation": "unobserved",
+            "fixture": "cpython"
+          },
+          "reason": "not on tty"
+        },
+        "test.test_shutil.TestMisc.test_chown": {
+          "classification": "failed",
+          "roles": {
+            "body": "unknown",
+            "assertions": "unknown",
+            "operation": "unknown",
+            "fixture": "unknown"
+          },
+          "reason": "/tmp/tmppzoaaofy/misc/chown-0/case.py:10:16: Imre: unsupported exception attribute"
+        },
+        "test.test_shutil.TestMisc.test_disk_usage": {
+          "classification": "host-driven-native-operation",
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "cpython"
+          }
+        }
+      }
+    },
+    "3": {
+      "all_223": {
+        "blocked": 13,
+        "failed": 1,
+        "host-driven-native-operation": 87,
+        "mixed": 57,
+        "native-body-host-fixture": 16,
+        "reference-skip": 49
+      },
+      "ownership_disk_terminal": {
+        "test.test_shutil.TestGetTerminalSize.test_bad_environ": {
+          "classification": "host-driven-native-operation",
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "cpython"
+          }
+        },
+        "test.test_shutil.TestGetTerminalSize.test_does_not_crash": {
+          "classification": "native-body-host-fixture",
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          }
+        },
+        "test.test_shutil.TestGetTerminalSize.test_fallback": {
+          "classification": "mixed",
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "mixed",
+            "fixture": "cpython"
+          }
+        },
+        "test.test_shutil.TestGetTerminalSize.test_os_environ_first": {
+          "classification": "host-driven-native-operation",
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "cpython"
+          }
+        },
+        "test.test_shutil.TestGetTerminalSize.test_stty_match": {
+          "classification": "reference-skip",
+          "roles": {
+            "body": "unobserved",
+            "assertions": "unobserved",
+            "operation": "unobserved",
+            "fixture": "cpython"
+          },
+          "reason": "not on tty"
+        },
+        "test.test_shutil.TestMisc.test_chown": {
+          "classification": "failed",
+          "roles": {
+            "body": "unknown",
+            "assertions": "unknown",
+            "operation": "unknown",
+            "fixture": "unknown"
+          },
+          "reason": "/tmp/tmppw_c0muk/misc/chown-0/case.py:10:16: Imre: unsupported exception attribute"
+        },
+        "test.test_shutil.TestMisc.test_disk_usage": {
+          "classification": "host-driven-native-operation",
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "cpython"
+          }
+        }
+      }
+    }
+  },
+  "independent_controls": {
+    "ownership-O0": {
+      "status": "failed",
+      "reason": " Compiling /tmp/tmp8s3onu5_/chown-0/case.py (-O0)\n/tmp/tmp8s3onu5_/chown-0/case.py:10:16: Imre: unsupported exception attribute\n"
+    },
+    "capacity-O0": {
+      "status": "failed",
+      "reason": " Compiling /tmp/tmpis9y7ont/capacity-controls/case.py (-O0)\n/tmp/tmpis9y7ont/capacity-controls/case.py:16:65: Imre: unsupported exception attribute\n"
+    },
+    "ownership-O3": {
+      "status": "failed",
+      "reason": " Compiling /tmp/tmpm5bk884a/chown-0/case.py (-O3)\n/tmp/tmpm5bk884a/chown-0/case.py:10:16: Imre: unsupported exception attribute\n"
+    },
+    "capacity-O3": {
+      "status": "failed",
+      "reason": " Compiling /tmp/tmpxivf6u8x/capacity-controls/case.py (-O3)\n/tmp/tmpxivf6u8x/capacity-controls/case.py:16:65: Imre: unsupported exception attribute\n"
+    }
+  },
+  "handler_controls": {
+    "archive_handler_controls.log": [
+      "-O0: 13 crossed exception handlers matched CPython",
+      "-O3: 13 crossed exception handlers matched CPython"
+    ],
+    "check_csv_handlers.log": [
+      "-O0: seven crossed exception handlers matched CPython",
+      "-O3: seven crossed exception handlers matched CPython"
+    ],
+    "copy_error_controls.log": [
+      "-O0: all eight failing symlink copies matched CPython",
+      "-O3: all eight failing symlink copies matched CPython"
+    ],
+    "fastcopy_controls.log": [
+      "O0 9 transfer, offset, fallback and crossed exception controls matched",
+      "O3 9 transfer, offset, fallback and crossed exception controls matched"
+    ]
+  },
+  "artifact_files_sha256": {
+    "archive_handler_controls.log": "0112fb1c21742f33458d9b055cf95c341dff4b9fe4c5f6e70628c7f5f886b434",
+    "binaries.sha256": "e2b01b87fa035c2e85da8bd8e108a26131a3f9511c4a8533d57b9aad4ef56ee7",
+    "check_csv_handlers.log": "420d2951b46851c9812bd3625d80ecffef7be01889209caafdd29a10f8bbf738",
+    "copy_error_controls.log": "b008971816a2237f68e515519edd9ebfd6292e80198cfca15408afe1d7d4effc",
+    "evidence-linux.json": "8b4165d730025edf54d0a424beb8ad6bf23df53f3fc284cc837475f01412e285",
+    "fastcopy_controls.log": "6eaf2245aaff02683227fb4c5303766917dab22ee7a94df1a3df68147c838688",
+    "method-attempts-linux.json": "31296279bb60813176f056662e4c5b1d163d9bc3b5de439ba2db07376381ec08",
+    "misc-controls.json": "64b90e571d6891883d11ffe3e86b35a0038d88e0222e7ffbb50ff40f8862ae84",
+    "misc-linux.json": "3f1768d9c2186fe2bbae1570c335e19338219ba9d216ad5c9f106cf18ad75278",
+    "reference-linux.json": "9312cef909518e6b5cd7ca38219e6a0a68d28bbb7adb77cd28ff2b10f9ea8775",
+    "source.txt": "7f23b52b47e721b4ee306ba14f4f975161bf8ce1986c779e5e5acfff01d36a02"
+  }
+}
