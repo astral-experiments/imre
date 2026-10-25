@@ -1,4 +1,4 @@
-"""Force native dictionary and plain record copies to return a pending MemoryError on Linux."""
+"""Force native shallow and deep copies to report an allocation failure on Linux."""
 import argparse
 from pathlib import Path
 import subprocess
@@ -34,11 +34,25 @@ WRAPPER = """
 extern void *imre_exception_new(uint32_t, const void *);
 extern void imre_exception_raise(const void *);
 extern void imre_exception_release(const void *);
-void *__wrap_COPY_OPERATION(const void *source) {
-    (void)source;
+static void allocation_failed(void) {
     void *error = imre_exception_new(15, 0);
     imre_exception_raise(error);
     imre_exception_release(error);
+}
+void *__wrap_imre_dict_copy(const void *source) {
+    (void)source;
+    allocation_failed();
+    return 0;
+}
+void *__wrap_imre_record_shallow_copy(const void *source) {
+    (void)source;
+    allocation_failed();
+    return 0;
+}
+uintptr_t __wrap_imre_deep_copy(uintptr_t source, uint32_t kind) {
+    (void)source;
+    (void)kind;
+    allocation_failed();
     return 0;
 }
 """
@@ -53,13 +67,17 @@ def main():
     with tempfile.TemporaryDirectory() as temp:
         work = Path(temp)
         source, wrapper, obj, binary = (work / n for n in ("case.py", "fail.c", "fail.o", "case"))
-        for operation, program in (("imre_dict_copy", DICT_SOURCE), ("imre_record_shallow_copy", RECORD_SOURCE)):
+        wrapper.write_text(WRAPPER)
+        subprocess.run([args.clang, "-Wall", "-Werror", "-c", wrapper, "-o", obj], check=True)
+        for operation, python_name, program in (
+            ("imre_dict_copy", "copy.copy", DICT_SOURCE),
+            ("imre_record_shallow_copy", "copy.copy", RECORD_SOURCE),
+            ("imre_deep_copy", "copy.deepcopy", DICT_SOURCE.replace("copy.copy(source)", "copy.deepcopy(source)")),
+        ):
             source.write_text(program)
-            wrapper.write_text(WRAPPER.replace("COPY_OPERATION", operation))
-            subprocess.run([args.clang, "-c", wrapper, "-o", obj], check=True)
             oracle = subprocess.run([sys.executable, "-c", "import runpy, sys; from unittest.mock import patch; "
-                                     "p=patch('copy.copy',side_effect=MemoryError); p.start(); runpy.run_path(sys.argv[1])",
-                                     source], capture_output=True, check=True)
+                                     "p=patch(sys.argv[1],side_effect=MemoryError); p.start(); runpy.run_path(sys.argv[2])",
+                                     python_name, source], capture_output=True, check=True)
             for level in ("0", "3"):
                 subprocess.run([args.imre.resolve(), "build", source, "-o", binary,
                                 "--runtime", args.runtime.resolve(), "--clang", args.clang,

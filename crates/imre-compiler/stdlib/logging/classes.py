@@ -118,3 +118,24 @@ class FileHandler:
                     stream.close()
         finally:
             self._closed = True
+
+
+class BufferingFormatter:
+    linefmt: Formatter
+
+    def __init__(self, linefmt: Formatter | None = None) -> None:
+        self.linefmt = _default_formatter if linefmt is None else linefmt
+
+    def formatHeader(self, records: list[LogRecord]) -> str:
+        return ""
+
+    def formatFooter(self, records: list[LogRecord]) -> str:
+        return ""
+
+    def format(self, records: list[LogRecord]) -> str:
+        if not records:
+            return ""
+        result = self.formatHeader(records)
+        for record in records:
+            result += self.linefmt.format(record)
+        return result + self.formatFooter(records)

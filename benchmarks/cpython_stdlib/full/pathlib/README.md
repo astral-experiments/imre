@@ -71,12 +71,19 @@ Linux host. The original tests compare paths through the first link and discard
 deeper repetitions; the report retains the actual number of native iterator pulls
 on each run.
 
+The [component runner](native_components.py) measures 36 further occurrences on
+five concrete or pure path classes, including `PureWindowsPath` on Linux. The
+three `test_suffixes` bodies and their list comparisons run natively. The other
+33 run the original body and assertions on the host with each path held by Imre.
+Across those methods 435 `relative_to`, 168 `is_relative_to` and 177 name, stem
+or suffix calls run natively per level, including the upstream invalid inputs.
+
 | Execution at each of O0 and O3 | Occurrences |
 | --- | ---: |
-| Native body, assertions and operation with host fixture | 96 |
-| Host body and assertions, native operation | 19 |
+| Native body, assertions and operation with host fixture | 99 |
+| Host body and assertions, native operation | 52 |
 | Mixed execution | 9 |
-| Reference only | 854 |
+| Reference only | 818 |
 | Upstream reference skip | 391 |
 | **Total** | **1,369** |
 

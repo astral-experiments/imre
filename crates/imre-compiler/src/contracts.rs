@@ -81,10 +81,12 @@ impl Builtin {
             Self::Text(operation) => Contract::new(
                 match operation {
                     TextOperation::Lower
+                    | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
-                    | TextOperation::ShlexSplit => true,
+                    | TextOperation::ShlexSplit
+                    | TextOperation::ShlexQuote => true,
                     TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -112,6 +114,10 @@ impl Builtin {
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
                     | PathOperation::WithName
+                    | PathOperation::WithStem
+                    | PathOperation::WithSuffix
+                    | PathOperation::Suffixes
+                    | PathOperation::RelativeTo
                     | PathOperation::Match { .. }
                     | PathOperation::Resolve
                     | PathOperation::WriteText
@@ -138,6 +144,7 @@ impl Builtin {
                     | PathOperation::Root
                     | PathOperation::Anchor
                     | PathOperation::CountPart
+                    | PathOperation::IsRelativeTo
                     | PathOperation::AsPosix
                     | PathOperation::Join
                     | PathOperation::Text
@@ -183,7 +190,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
-                ProcessOperation::OpenFlag(_) => Contract::new(false, PreservesLists),
+                ProcessOperation::DescriptorConstant(_) => Contract::new(false, PreservesLists),
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
                 | ProcessOperation::Gather { .. }
@@ -240,6 +247,7 @@ impl Builtin {
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
+                | ProcessOperation::RmTree
                 | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
@@ -282,6 +290,7 @@ impl Builtin {
             | Self::RegexGroupDict
             | Self::DictGet
             | Self::DictCopy
+            | Self::DeepCopy
             | Self::RecordCopy
             | Self::JsonDecode(_)
             | Self::CsvReader { .. }
@@ -363,12 +372,12 @@ impl Builtin {
             | Self::Split
             | Self::StringListCopy
             | Self::StringListFilter(_)
-            | Self::StringListSortSuffix(_)
             | Self::StringListNonempty
             | Self::Str
             | Self::NominalIdentity
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
+            | Self::ClassNameView
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
@@ -382,6 +391,7 @@ impl Builtin {
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
+            | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::DictDelete
@@ -442,6 +452,7 @@ impl Builtin {
             | Self::CounterNew
             | Self::CounterTotal
             | Self::DictAsBase
+            | Self::DictClear
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
@@ -774,6 +785,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_replace"
                 | "imre_path_absolute"
                 | "imre_path_with_name"
+                | "imre_path_change_extension"
+                | "imre_path_relative_to"
+                | "imre_path_suffixes"
                 | "imre_path_resolve"
                 | "imre_tempdir_new"
                 | "imre_tempdir_cleanup"
@@ -811,6 +825,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice_sum"
                 | "imre_str_get"
                 | "imre_str_lower"
+                | "imre_str_capitalize"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"
@@ -827,6 +842,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
                 | "imre_ndiff_deferred"
+                | "imre_str_list_sorted_suffix"
                 | "imre_dict_delete"
                 | "imre_dict_pop"
                 | "imre_cursor_length_hint"

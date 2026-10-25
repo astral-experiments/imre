@@ -484,9 +484,27 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
-            ProcessOperation::OpenFlag(name) => self.os_open_flag(name),
+            ProcessOperation::DescriptorConstant(name) => self.os_descriptor_constant(name),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
+            ProcessOperation::RmTree => {
+                let [path, ignore, _, _, fd] = args else {
+                    unreachable!()
+                };
+                let (ptr, tag) = match path.value.ty {
+                    Type::None => ("null", 2),
+                    Type::Bytes => (path.value.operand.as_str(), 1),
+                    _ => (path.value.operand.as_str(), 0),
+                };
+                let (fd, fd_kind) = match fd.value.ty {
+                    Type::Str => ("0", 2),
+                    Type::None => ("0", 0),
+                    _ => (fd.value.operand.as_str(), 1),
+                };
+                let ignore = self.instruction(format!("zext i1 {} to i32", ignore.value.operand));
+                self.checked_line(format!("call void @imre_shutil_rmtree(ptr {ptr}, i32 {tag}, i32 {ignore}, i64 {fd}, i32 {fd_kind}, ptr null, ptr null, ptr null, ptr null)"));
+                none()
+            }
             ProcessOperation::Copy(op) => {
                 let tag = |ty| match ty {
                     Type::Str => 0,

@@ -3,55 +3,54 @@
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
-use super::{Int, Str};
+use super::{Bytes, Int, Str};
 use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
 use std::rc::Rc;
 
-macro_rules! open_flags {
+macro_rules! descriptor_constants {
     ($($name:ident = $flag:ident),* $(,)?) => {$(
         #[unsafe(no_mangle)]
         pub static $name: usize = ((libc::$flag as usize) << 1) | 1;
     )*};
 }
-open_flags! {
+descriptor_constants! {
     imre_os_o_rdonly = O_RDONLY, imre_os_o_wronly = O_WRONLY, imre_os_o_rdwr = O_RDWR,
     imre_os_o_append = O_APPEND, imre_os_o_creat = O_CREAT, imre_os_o_excl = O_EXCL,
     imre_os_o_trunc = O_TRUNC, imre_os_o_cloexec = O_CLOEXEC, imre_os_o_directory = O_DIRECTORY,
     imre_os_o_nofollow = O_NOFOLLOW, imre_os_o_nonblock = O_NONBLOCK,
+    imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
+    imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
 }
 
-impl Filename {
-    /// Retain the same filesystem spelling for the syscall and its OSError.
-    ///
-    /// # Safety
-    /// `value` is the rooted native str, bytes or Path selected by `tag`.
-    unsafe fn from_syscall_handle(value: *const (), tag: u32) -> Self {
-        // SAFETY: str and bytes handles are borrowed; Path supplies an owned str.
-        unsafe {
-            match tag {
-                0 => Self::Str(super::acquire_rc(value as usize)),
-                1 => Self::Bytes(super::acquire_rc(value as usize)),
-                2 => Self::Str(Rc::from_raw(super::paths::imre_path_text(value.cast()))),
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    /// Validate the original bytes before converting any optional directory fd.
-    fn terminated(&self, function: &str) -> Result<CString> {
-        let bytes = match self {
-            Self::Str(s) => s.as_bytes(),
-            Self::Bytes(b) => b.as_slice(),
-        };
+/// Return a kernel path and the filesystem-protocol value to keep on OSError.
+///
+/// # Safety
+/// `value` is the rooted str, bytes or Path selected by `tag`.
+unsafe fn syscall_path(value: *const (), tag: u32, function: &str) -> Result<(CString, Filename)> {
+    let terminated = |bytes: &[u8]| {
         CString::new(bytes).map_err(|_| {
             Error::new(
                 Kind::ValueError,
                 format!("{function}: embedded null character in path"),
             )
         })
+    };
+    if tag == 1 {
+        // SAFETY: the caller roots this bytes handle through conversion.
+        let bytes: Rc<Bytes> = unsafe { super::acquire_rc(value as usize) };
+        return Ok((terminated(&bytes)?, Filename::Bytes(bytes)));
     }
+    // SAFETY: exact str is borrowed; Path.__fspath__ supplies an owned str.
+    let text = unsafe {
+        match tag {
+            0 => super::acquire_rc::<Str>(value as usize),
+            2 => Rc::from_raw(super::paths::imre_path_text(value.cast())),
+            _ => unreachable!(),
+        }
+    };
+    Ok((terminated(text.as_bytes())?, Filename::Str(text)))
 }
 
 /// Open relative to an optional directory fd. Set close-on-exec atomically.
@@ -66,11 +65,10 @@ pub unsafe extern "C" fn imre_os_open(
     mode: usize,
     dir_fd: usize,
 ) -> usize {
-    // SAFETY: the caller's representation tag describes this rooted path.
-    let path = unsafe { Filename::from_syscall_handle(path, bytes) };
     finish(
         (|| {
-            let name = path.terminated("open")?;
+            // SAFETY: the caller's representation tag describes this rooted path.
+            let (name, path) = unsafe { syscall_path(path, bytes, "open") }?;
             let flags = c_int(flags)? | libc::O_CLOEXEC;
             let mode = c_int(mode)?;
             // SAFETY: dir_fd is a rooted optional integer according to the ABI.
@@ -98,10 +96,10 @@ pub unsafe extern "C" fn imre_os_open(
 /// The caller roots the path for its static tag and the optional integer word.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_os_unlink(value: *const (), tag: u32, fd: usize, remove: u32) {
-    // SAFETY: the path's owner stays live through the syscall and error rendering.
-    let name = unsafe { Filename::from_syscall_handle(value, tag) };
     let result = (|| {
-        let path = name.terminated(if remove == 0 { "unlink" } else { "remove" })?;
+        let function = if remove == 0 { "unlink" } else { "remove" };
+        // SAFETY: the path's owner stays live through the syscall and error rendering.
+        let (path, name) = unsafe { syscall_path(value, tag, function) }?;
         // SAFETY: fd is a rooted optional integer.
         let dir_fd = unsafe { directory_fd(fd) }?;
         // SAFETY: the zero-terminated path is owned until unlinkat returns.
@@ -176,6 +174,40 @@ pub extern "C" fn imre_os_strerror(code: usize) -> *const Str {
             Ok(Rc::into_raw(Rc::new(Str::from(text.as_ref()))))
         }),
         std::ptr::null(),
+    )
+}
+
+/// Move the shared open-file offset, retaining the kernel's errors for pipes,
+/// closed descriptors, and unsupported sparse-file seeks.
+///
+/// # Safety
+/// All arguments are rooted tagged Python integers for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_lseek(fd: usize, position: usize, whence: usize) -> usize {
+    finish(
+        (|| {
+            let fd = c_int(fd)?;
+            // SAFETY: the compiler retains the exact integer for the call.
+            let position = unsafe { Int::borrow(position) };
+            let position = position
+                .as_small()
+                .or_else(|| position.big().to_i64())
+                .ok_or_else(|| {
+                    Error::new(
+                        Kind::OverflowError,
+                        "Python int too large to convert to C long",
+                    )
+                })?;
+            let whence = c_int(whence)?;
+            // SAFETY: lseek takes integer values and retains no pointers.
+            let offset = unsafe { libc::lseek(fd, position, whence) };
+            if offset < 0 {
+                Err(errno_error(io::Error::last_os_error()))
+            } else {
+                Ok(Int::from_usize(offset as usize).into_raw())
+            }
+        })(),
+        0,
     )
 }
 

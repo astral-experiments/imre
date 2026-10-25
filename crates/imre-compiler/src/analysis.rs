@@ -274,6 +274,15 @@ impl Session {
             .load(&self.db)
     }
 
+    /// Refresh the semantic AST after a source rewrite that preserves byte offsets.
+    pub(crate) fn replace_source(&mut self, module: usize, source: String) -> ParsedModuleRef {
+        let file = self.files[module];
+        let original = ruff_db::source::source_text(&self.db, file);
+        let value = original.with_text(source, &Default::default());
+        file.set_source_text_override(&mut self.db).to(Some(value));
+        self.parsed(file)
+    }
+
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
     fn diagnostic_copy(&self) -> Result<Self, String> {
@@ -463,9 +472,21 @@ pub(crate) enum CheckedDiagnostic {
     Call(TextRange),
     Keyword(TextRange),
     TupleListRead(TextRange),
+    MissingArgument(TextRange),
 }
 
 impl CheckedDiagnostic {
+    pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
+        let (range, kind) = match self {
+            Self::Decorator(range) => (range, 0),
+            Self::Call(range) => (range, 1),
+            Self::Keyword(range) => (range, 2),
+            Self::TupleListRead(range) => (range, 3),
+            Self::MissingArgument(range) => (range, 4),
+        };
+        (range.start(), range.end(), kind)
+    }
+
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
             Self::Decorator(decorator) => {
@@ -474,6 +495,7 @@ impl CheckedDiagnostic {
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
         }
     }
 }

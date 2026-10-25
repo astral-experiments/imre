@@ -5,7 +5,7 @@ use ::toml::de::{DeTable, DeValue};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use super::{Node, Nodes, View};
+use super::{KeyMemo, Node, Nodes, View};
 use crate::objects::mappings::{
     dict_set, imre_dict_contains, imre_dict_delete, imre_dict_get, imre_dict_new,
 };
@@ -141,7 +141,7 @@ impl Value {
                         Ok::<_, Error>(())
                     })
                 }?;
-                Node::Object(fields)
+                Node::Object(KeyMemo::default().fields(fields))
             }
         };
         nodes.try_reserve(1).map_err(|_| Error::allocation())?;
@@ -162,13 +162,25 @@ impl Value {
         })
     }
     fn from_json(view: &View, index: usize) -> Result<Self, Error> {
+        Self::from_json_at(view, index, 0)
+    }
+
+    fn from_json_at(view: &View, index: usize, depth: usize) -> Result<Self, Error> {
         if index == view.index
             && let Some(root) = view.snapshot_root()
         {
-            return Self::from_json(&root, root.index);
+            return Self::from_json_at(&root, root.index, depth);
+        }
+        if depth >= super::super::MAX_DEPTH
+            && matches!(&view.nodes[index], Node::Array(_) | Node::Object(_))
+        {
+            return Err(Error::new(
+                Kind::ValueError,
+                "document nesting exceeds 128 containers",
+            ));
         }
         Ok(match &view.nodes[index] {
-            Node::Deferred(array) => Self::from_json(array.view(), array.view().index)?,
+            Node::Deferred(array) => Self::from_json_at(array.view(), array.view().index, depth)?,
             Node::Null => Self::Null,
             Node::Bool(x) => Self::Bool(*x),
             Node::Integer(x) => Self::Integer(x.clone()),
@@ -178,12 +190,12 @@ impl Value {
             Node::Datetime(x) => Self::Datetime(x.clone()),
             Node::Array(a) => Self::array(
                 a.iter()
-                    .map(|&index| Self::from_json(view, index).map(Self::object)),
+                    .map(|&index| Self::from_json_at(view, index, depth + 1).map(Self::object)),
             )?,
             Node::Object(t) => Self::table(t.iter().map(|(key, index)| {
                 Ok((
-                    Rc::new(key.clone()),
-                    Self::from_json(view, *index)?.object(),
+                    t.owner(key)?,
+                    Self::from_json_at(view, *index, depth + 1)?.object(),
                 ))
             }))?,
         })
