@@ -68,13 +68,15 @@ def indent(text: str, prefix: str, predicate: None = None) -> str:
     for cls, names in methods.items():
         for name in names:
             fixture = "Original assertUnchanged helper and native unittest.TestCase/main"
+            operation = "textwrap.dedent"
             if cls == "IndentTestCase":
                 fixture = "Native unittest.main and TestCase; original CPython class tuples supplied as native properties"
+                operation = "textwrap.indent and textwrap.dedent" if name.startswith("test_roundtrip_") else "textwrap.indent"
             results[(f"{module.__name__}.{cls}.{name}", 1)] = {
                 "outcome": "pass",
                 "roles": roles(body="imre", assertions="imre", operation="imre",
                                fixture="imre" if cls == "DedentTestCase" else "mixed"),
-                "evidence": {"operation": "textwrap." + ("dedent" if cls == "DedentTestCase" else "indent"),
+                "evidence": {"operation": operation,
                              "fixture": fixture, "opt_level": tools.level,
                              "method_sha256": hashlib.sha256(method_bytes(TESTS, cls, name)).hexdigest()},
             }
@@ -156,7 +158,7 @@ def run_host_cases(module, binary, reference, native, lambdas, level):
         native[(name, 1)] = {
             "outcome": "pass", "roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
             "evidence": {"operation": "textwrap.dedent" if name.endswith("test_type_error") else "textwrap.indent",
-                         "fixture": "Unmodified CPython method and class; native public function and predicate",
+                         "fixture": "Unmodified CPython method and class; arguments sent to native public function",
                          "native_calls": count, "opt_level": level},
         }
     return build_report(reference, level, discovered, native)
