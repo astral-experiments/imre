@@ -175,6 +175,7 @@ const DEFERRED: &str = "inference is waiting for a function return type";
 
 struct Pending {
     params: Vec<Option<Type>>,
+    none_defaults: Vec<usize>,
     returns: Option<Type>,
     infer_return: bool,
 }
@@ -190,11 +191,22 @@ pub(super) struct Inference {
 }
 
 impl Inference {
-    pub fn register(&self, params: Vec<Option<Type>>, returns: Option<Type>) -> usize {
+    pub fn register(
+        &self,
+        params: Vec<Option<Type>>,
+        returns: Option<Type>,
+        none_defaults: Vec<usize>,
+    ) -> usize {
+        // Even a fully annotated return can have an unannotated default that a
+        // supplied argument must widen from None to its nullable scalar layout.
+        if !none_defaults.is_empty() {
+            self.widened.set(true);
+        }
         let mut pending = self.pending.borrow_mut();
         let id = pending.len();
         pending.push(Pending {
             params,
+            none_defaults,
             returns,
             infer_return: returns.is_none(),
         });
@@ -214,6 +226,15 @@ impl Inference {
         for (parameter, ty) in signature.params.iter_mut().zip(&inferred.params) {
             if let Some(ty) = ty {
                 parameter.ty = *ty;
+                if matches!(ty, Type::Optional(_))
+                    && let Some(default) = &mut parameter.default
+                    && default.ty == Type::None
+                {
+                    *default = Expr {
+                        ty: *ty,
+                        kind: ExprKind::Absent(Box::new(default.clone())),
+                    };
+                }
             }
         }
         if let Some(returns) = inferred.returns {
@@ -232,6 +253,36 @@ impl Inference {
             *slot = Some(ty);
             self.revision.set(self.revision.get() + 1);
         }
+    }
+
+    /// The default None establishes absence, not the payload type of supplied arguments.
+    /// An annotation or a non-None default keeps its original exact type contract.
+    fn none_default(&self, id: usize, index: usize) -> bool {
+        let pending = self.pending.borrow();
+        pending[id].none_defaults.contains(&index) && pending[id].params[index] == Some(Type::None)
+    }
+
+    fn widen_none_default(&self, id: usize, index: usize, value: Type, types: &Types) -> Type {
+        let payload = types.payload(value).unwrap_or(value);
+        if !matches!(
+            payload,
+            Type::Str | Type::Bytes | Type::Bool | Type::Int | Type::Float
+        ) {
+            return Type::None;
+        }
+        let expected = types.optional(payload);
+        let mut pending = self.pending.borrow_mut();
+        pending[id].params[index] = Some(expected);
+        // Inferred callers may forward the previous return type through other
+        // helpers. Recompute them before emitting any executable calls.
+        for function in &mut *pending {
+            if function.infer_return {
+                function.returns = None;
+            }
+        }
+        self.widened.set(true);
+        self.revision.set(self.revision.get() + 1);
+        expected
     }
 
     /// A later call from a different subcommand replaces a child layout with
@@ -543,7 +594,11 @@ impl Checker<'_> {
                 };
                 let node = argument.site();
                 let value = if let Some(ty) = inference.parameter(signature.id, index) {
-                    if matches!(ty, Type::Class(class) if checker.classes.parsers.namespace(class))
+                    if inference.none_default(signature.id, index) {
+                        let value = argument.value(checker)?;
+                        let expected = inference.widen_none_default(signature.id, index, value.ty, checker.types);
+                        checker.coerce(value, expected, node)?
+                    } else if matches!(ty, Type::Class(class) if checker.classes.parsers.namespace(class))
                     {
                         let value = argument.value(checker)?;
                         let expected = if value.ty == ty {

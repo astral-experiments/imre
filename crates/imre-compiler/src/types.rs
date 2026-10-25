@@ -199,6 +199,7 @@ impl Types {
             | Type::PathInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecInfo
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -616,6 +617,7 @@ impl Types {
             | Type::PathInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecInfo
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile

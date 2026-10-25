@@ -9,6 +9,7 @@ argparse = ["`ArgumentParser`, typed options, subcommands and generated help.","
 asyncio = ["Run subprocess tasks, wait for a task group and handle cancellation.","tests/fixtures/processes/async_groups.py"]
 base64 = ["`urlsafe_b64encode` on bytes.","benchmarks/cpython_stdlib/native_base64.py"]
 builtins = ["Read, assign and delete `builtins._`, including the value saved by the default display hook.","benchmarks/cpython_stdlib/full/sys/BUILTINS.md"]
+codecs = ["`lookup`, codec names, stateless ASCII, Latin-1 and UTF-8 encoding and decoding, and byte-order marks.","benchmarks/cpython_stdlib/full/sys/BUILTINS.md"]
 collections = ["`Counter`, `deque`, `defaultdict` and selected `collections.abc.Mapping` operations.","benchmarks/cpython_stdlib/full/collections/README.md"]
 configparser = ["`ConfigParser` can be bound in unreachable code. Its constructor does not run natively.","crates/imre-compiler/src/modules/declarations.rs"]
 contextlib = ["`nullcontext` and selected single-yield `@contextmanager` functions.","tests/fixtures/processes/async_resource_arguments.py"]
