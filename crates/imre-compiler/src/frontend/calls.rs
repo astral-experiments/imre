@@ -379,6 +379,7 @@ impl Checker<'_> {
             params,
             receiver,
             Some(scope),
+            None,
             |checker, index, argument| {
                 argument.checked(checker, params[index].ty, params[index].sign_only)
             },
@@ -394,12 +395,19 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         mut check: impl FnMut(&mut Self, usize, &ast::Expr) -> Result<Expr, String>,
     ) -> Result<ir::CallArgs, String> {
-        self.bind_supplied(call, params, receiver, None, |checker, index, argument| {
-            let Supplied::Source(node) = argument else {
-                unreachable!("only source calls expand tuples")
-            };
-            check(checker, index, node)
-        })
+        self.bind_supplied(
+            call,
+            params,
+            receiver,
+            None,
+            None,
+            |checker, index, argument| {
+                let Supplied::Source(node) = argument else {
+                    unreachable!("only source calls expand tuples")
+                };
+                check(checker, index, node)
+            },
+        )
     }
 
     pub(super) fn bind_supplied(
@@ -408,6 +416,7 @@ impl Checker<'_> {
         params: &[Parameter],
         receiver: Option<Expr>,
         mut scope: Option<&mut ArgumentScope>,
+        default_owner: Option<(usize, usize)>,
         mut check: impl FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
     ) -> Result<ir::CallArgs, String> {
         let offset = usize::from(receiver.is_some());
@@ -584,6 +593,22 @@ impl Checker<'_> {
                 };
                 if let ExprKind::Call(id, _) = &value.kind {
                     self.calls.insert(*id);
+                }
+                // A starred tuple can supply several parameters and keyword-rest has its
+                // own operand. Record the actual omission at the point that copies it.
+                if let Some(reads) = &mut self.default_reads {
+                    if let Some((id, skip)) = default_owner
+                        && matches!(default.kind, ExprKind::Int(_) | ExprKind::Bool(_))
+                    {
+                        reads.push((id, skip + index));
+                    } else if !matches!(
+                        &default.kind,
+                        ExprKind::None | ExprKind::Str(_) | ExprKind::Bytes(_) | ExprKind::Float(_)
+                    ) && !matches!(&default.kind, ExprKind::Absent(value) if matches!(value.kind, ExprKind::None))
+                    {
+                        // A composite default can embed a changed int or bool.
+                        self.default_reads = None;
+                    }
                 }
                 values.push(default.clone());
             }

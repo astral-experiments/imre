@@ -7,7 +7,7 @@ use super::*;
 /// bound receiver. Such values cannot enter heap aggregates in this milestone.
 pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
     // The declaration reader boxes only owners it has proven to be noncapturing.
-    if matches!(ty, Type::AnnotationValue(_)) {
+    if matches!(ty, Type::AnnotationValue(_)) || types.constructor_base(ty).is_some() {
         return false;
     }
     (matches!(ty, Type::Callable(_)) && !types.is_plain_callback(ty))

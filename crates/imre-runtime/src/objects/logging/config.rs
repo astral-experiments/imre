@@ -7,7 +7,6 @@ use crate::StrOwner;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Write};
-use std::rc::Rc;
 
 #[derive(Clone, Copy)]
 struct Control {
@@ -211,10 +210,11 @@ fn level(value: &Value) -> Result<Int> {
 fn logger_level(name: &str, level: Option<Int>) {
     let key = Str::from(name);
     // SAFETY: the string is live through lookup and each result transfers an owner.
-    let logger = unsafe { Rc::from_raw(super::imre_log_get(&key as *const Str as usize)) };
+    let logger =
+        unsafe { crate::ObjectOwner::from_raw(super::imre_log_get(&key as *const Str as usize)) };
     if let Some(level) = level {
         // SAFETY: both owners remain in this scope until after the level write.
-        unsafe { super::imre_log_set_level(Rc::as_ptr(&logger), level.0) };
+        unsafe { super::imre_log_set_level(crate::ObjectOwner::as_ptr(&logger), level.0) };
     }
 }
 
@@ -413,10 +413,15 @@ fn ini<'a>(source: &'a str, filename: &str) -> Result<Sections<'a>> {
     let mut sections = Sections::new();
     let mut section = "";
     let mut last = None::<(Str, usize)>;
+    let mut blank_lines = 0;
     let mut errors = IniDiagnostic::default();
     for (i, raw) in source.split_inclusive('\n').enumerate() {
         let text = raw.trim();
-        if text.is_empty() || text.starts_with(['#', ';']) {
+        if text.is_empty() {
+            blank_lines += 1;
+            continue;
+        }
+        if text.starts_with(['#', ';']) {
             continue;
         }
         let indent = raw.len() - raw.trim_start().len();
@@ -425,12 +430,14 @@ fn ini<'a>(source: &'a str, filename: &str) -> Result<Sections<'a>> {
         {
             let option = sections.get_mut(section).unwrap().get_mut(key).unwrap();
             option
-                .try_reserve(text.len() + 1)
+                .try_reserve(text.len() + blank_lines + 1)
                 .map_err(|_| Error::allocation())?;
-            option.push('\n');
+            option.extend(std::iter::repeat_n('\n', blank_lines + 1));
+            blank_lines = 0;
             option.push_str(text);
             continue;
         }
+        blank_lines = 0;
         if let Some(header) = text
             .strip_prefix('[')
             .and_then(|s| s.rsplit_once(']'))
@@ -651,4 +658,14 @@ pub unsafe extern "C" fn imre_log_file_config(
     // SAFETY: nonzero encoding is the exact string payload of the optional word.
     let (path, encoding) = unsafe { (&*path, (encoding as *const Str).as_ref()) };
     finish(file_config(path, disable, encoding), ());
+}
+
+#[test]
+fn ini_preserves_empty_lines_inside_multiline_values() {
+    let sections = ini(
+        "[logger]\nname=alpha\n\n# comment\n   \n    beta\n\nafter=next\n",
+        "test.ini",
+    )
+    .unwrap_or_else(|_| panic!("valid INI fixture should parse"));
+    assert_eq!(sections["logger"]["name"].as_str(), "alpha\n\n\nbeta");
 }

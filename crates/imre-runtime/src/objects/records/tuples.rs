@@ -8,9 +8,9 @@ use crate::objects::{Error, Int, Kind, OwnedWord};
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_tuple_buffer_new() -> *const Object {
     use crate::objects::{Storage, StorageCell};
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::TupleBuffer(
-        Vec::new(),
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::TupleBuffer(Vec::new()),
+    ))))
 }
 
 /// # Safety
@@ -239,11 +239,11 @@ mod tests {
         // SAFETY: the new display owns one reference; text roots the exact
         // input representation until each successful push retains it.
         unsafe {
-            let buffer = Rc::from_raw(imre_tuple_buffer_new());
+            let buffer = crate::ObjectOwner::from_raw(imre_tuple_buffer_new());
             for _ in 0..3 {
                 assert_eq!(
                     imre_tuple_buffer_push(
-                        Rc::as_ptr(&buffer),
+                        crate::ObjectOwner::as_ptr(&buffer),
                         3,
                         crate::StrOwner::as_ptr(&text) as usize
                     ),

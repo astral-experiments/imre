@@ -541,24 +541,18 @@ fn percent_value_in<'a>(
         .next()
         .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format"))?;
     let value = &next_argument(args)?;
+    if value.kind == WordKind::new(2) && matches!(c, 'd' | 'i' | 'u' | 's' | 'r' | 'a') {
+        // SAFETY: the selected operand roots this exact integer.
+        let integer = unsafe { Int::borrow(value.word) };
+        if integer.as_small().is_none() {
+            crate::integer_text::check_decimal(&integer.big())?;
+        }
+    }
     let mut text = match c {
         's' | 'r' | 'a' => {
             let mut s = display(value, c != 's');
-            if c == 'a' {
-                s = s
-                    .chars()
-                    .map(|c| {
-                        if c.is_ascii() {
-                            c.to_string()
-                        } else if c as u32 <= 255 {
-                            format!("\\x{:02x}", c as u32)
-                        } else if c as u32 <= 65535 {
-                            format!("\\u{:04x}", c as u32)
-                        } else {
-                            format!("\\U{:08x}", c as u32)
-                        }
-                    })
-                    .collect();
+            if c == 'a' && !s.is_ascii() {
+                s = super::super::text::ascii_escape(&s)?;
             }
             if let Some(n) = precision {
                 s = s.chars().take(n).collect();
@@ -764,9 +758,9 @@ pub unsafe extern "C" fn imre_logrecord_new(
     ];
     // SAFETY: the caller roots each value under the matching descriptor until it has been acquired.
     let record = Record::new(fields.map(|(v, k)| unsafe { WordKind::new(k).acquire(v) }));
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LogRecord(
-        Box::new(record),
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::LogRecord(Box::new(record)),
+    ))))
 }
 
 /// Accesses a rooted record for the duration of a nonreentrant operation.
@@ -881,7 +875,7 @@ pub unsafe extern "C" fn imre_logrecord_message(record: *const Object) -> *const
     // SAFETY: this only reads owned values from the live record.
     let result = unsafe { with_record(record, Record::message) };
     finish(
-        result.map(|s| StrOwner::into_raw(StrOwner::new(Str::from(s.as_str())))),
+        result.and_then(|s| crate::checked_owned_str(Str::from(s))),
         std::ptr::null(),
     )
 }
@@ -946,8 +940,7 @@ pub unsafe extern "C" fn imre_str_percent_tuple(
 
 fn percent(fmt: &Str, value: OwnedWord) -> *const Str {
     finish(
-        format_arguments(fmt.as_str(), &value)
-            .map(|s| StrOwner::into_raw(StrOwner::new(Str::from(s)))),
+        format_arguments(fmt.as_str(), &value).and_then(|s| crate::checked_owned_str(Str::from(s))),
         std::ptr::null(),
     )
 }

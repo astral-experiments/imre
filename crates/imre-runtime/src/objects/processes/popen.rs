@@ -13,10 +13,10 @@ mod selector;
 
 pub(super) use active::cleanup;
 pub(in crate::objects) use active::retain_live_owner;
-use control::ChildControl;
+use control::{ChildControl, ReturnCode};
 use std::sync::Arc;
 
-type Pipes = [Option<Rc<Object>>; 3];
+type Pipes = [Option<crate::ObjectOwner>; 3];
 
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
@@ -46,7 +46,7 @@ impl Popen {
         self.control.signal(signal)
     }
 
-    fn wait(&self, timeout: Option<&Deadline>) -> Result<Option<i32>> {
+    fn wait(&self, timeout: Option<&Deadline>) -> Result<Option<ReturnCode>> {
         self.control.wait(timeout)
     }
 }
@@ -259,9 +259,9 @@ pub unsafe extern "C" fn imre_popen_command(
 pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *const Object {
     // SAFETY: the compiler supplies the exact settings layout and rooted owners.
     let result = unsafe { spawn(&*config, LaunchConfig::extras(config)) }.map(|child| {
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Popen(Box::new(
-            child,
-        ))))))
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+            Storage::Popen(Box::new(child)),
+        ))))
     });
     finish(result, std::ptr::null())
 }
@@ -486,7 +486,9 @@ pub unsafe extern "C" fn imre_call_config(
     let result = unsafe { spawn(&*config, LaunchConfig::extras(config)) }.and_then(|mut p| {
         // SAFETY: the deadline kind was selected for this rooted word by the compiler.
         let timeout = unsafe { Deadline::from_word(kind, word) };
-        let waited = p.wait(timeout.as_ref());
+        let waited = p
+            .wait(timeout.as_ref())
+            .map(|code| code.map(ReturnCode::kernel));
         let killed = if matches!(waited, Ok(Some(_))) {
             Ok(())
         } else {
@@ -535,7 +537,9 @@ pub unsafe extern "C" fn imre_popen_pipe(handle: *const Object, index: u32) -> *
         with_process(handle, |p| {
             p.pipes[index as usize]
                 .as_ref()
-                .map_or(std::ptr::null(), |file| Rc::into_raw(file.clone()))
+                .map_or(std::ptr::null(), |file| {
+                    crate::ObjectOwner::into_raw(file.clone())
+                })
         })
     }
 }
@@ -579,7 +583,20 @@ pub unsafe extern "C" fn imre_child_status(control: *const ChildControl, poll: b
     } else {
         Ok(control.status())
     };
-    finish(result.map(|s| s.map_or(0, exit_word)), 0)
+    finish(result.map(|s| s.map_or(0, ReturnCode::into_word)), 0)
+}
+
+/// # Safety
+/// The caller roots the Popen's control and the optional Python integer through the store.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_child_set_status(control: *const ChildControl, word: usize) {
+    let value = (word != 0).then(|| {
+        // SAFETY: a nonzero word is a rooted integer on the calling thread.
+        let value = unsafe { Int::borrow(word) };
+        ReturnCode::from_int(&value)
+    });
+    // SAFETY: the Popen continues to own this control while its mutex is held.
+    unsafe { (*control).set_status(value) };
 }
 
 /// # Safety
@@ -598,7 +615,7 @@ pub unsafe extern "C" fn imre_child_wait(
     unsafe {
         let timeout = Deadline::from_word(kind, word);
         match (*control).wait(timeout.as_ref()) {
-            Ok(Some(code)) => exit_word(code),
+            Ok(Some(code)) => code.into_word(),
             Ok(None) => {
                 let cmd = with_process(owner, |p| p.args.clone());
                 raise_timeout(TimeoutError {

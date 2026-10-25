@@ -9,13 +9,12 @@ use ruff_python_literal::escape::{Escape, UnicodeEscape};
 use std::ffi::OsString;
 use std::fmt::Write;
 use std::os::unix::ffi::OsStringExt;
-use std::rc::Rc;
 
 #[derive(Clone)]
 pub(in crate::objects) enum Filename {
     Str(StrOwner),
     Bytes(crate::BytesOwner),
-    Path(Rc<Object>),
+    Path(crate::ObjectOwner),
     /// A POSIX name decoded with surrogateescape, outside Imre's scalar str domain.
     SurrogateEscaped(crate::BytesOwner),
 }
@@ -38,7 +37,7 @@ impl Filename {
                 unsafe {
                     crate::objects::values::write_repr(
                         output,
-                        Rc::as_ptr(p) as usize,
+                        crate::ObjectOwner::as_ptr(p) as usize,
                         crate::objects::words::WordKind::new(5),
                     );
                 }
@@ -50,7 +49,9 @@ impl Filename {
         Ok(match self {
             Self::Str(s) => StrOwner::into_raw(StrOwner::clone(s)) as usize,
             Self::Bytes(b) => crate::BytesOwner::into_raw(crate::BytesOwner::clone(b)) as usize | 1,
-            Self::Path(p) => Rc::into_raw(Rc::clone(p)) as usize | 6,
+            Self::Path(p) => {
+                crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(p)) as usize | 6
+            }
             Self::SurrogateEscaped(_) => {
                 return Err(Error::new(
                     Kind::UnicodeDecodeError,
@@ -203,6 +204,21 @@ mod tests {
     };
 
     #[test]
+    fn blocked_writes_match_os_error_and_expose_the_accepted_count() {
+        let error = Error::blocked_write(libc::EAGAIN, 17);
+        assert!(error.kind.matches(Kind::OSError));
+        error.raise();
+        // SAFETY: take transfers the raised exception, which stays live through the field read.
+        unsafe {
+            let error = crate::ObjectOwner::from_raw(imre_error_take());
+            assert_eq!(
+                imre_os_error_field(crate::ObjectOwner::as_ptr(&error), 4),
+                crate::Int::small(17).unwrap().into_raw()
+            );
+        }
+    }
+
+    #[test]
     fn projected_paths_keep_the_original_owners_after_the_exception_drops() {
         let a = StrOwner::new(Str::from("before"));
         let b = crate::BytesOwner::new(vec![0xff]);
@@ -217,18 +233,26 @@ mod tests {
         // SAFETY: take transfers the pending exception; each field returns an
         // owned word, with the str/bytes union tag removed before recovering its owner.
         unsafe {
-            let error = Rc::from_raw(imre_error_take());
-            let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+            let error = crate::ObjectOwner::from_raw(imre_error_take());
+            let message =
+                StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(message.as_str(), "[Errno 2] missing: 'before' -> b'\\xff'");
-            let repr = StrOwner::from_raw(imre_exception_repr(Rc::as_ptr(&error)));
+            let repr = StrOwner::from_raw(imre_exception_repr(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(repr.as_str(), "FileNotFoundError(2, 'missing')");
-            assert_eq!(imre_os_error_field(Rc::as_ptr(&error), 0), 5);
-            let reason =
-                StrOwner::from_raw(imre_os_error_field(Rc::as_ptr(&error), 1) as *const Str);
+            assert_eq!(
+                imre_os_error_field(crate::ObjectOwner::as_ptr(&error), 0),
+                5
+            );
+            let reason = StrOwner::from_raw(imre_os_error_field(
+                crate::ObjectOwner::as_ptr(&error),
+                1,
+            ) as *const Str);
             assert_eq!(reason.as_str(), "missing");
-            let first =
-                StrOwner::from_raw(imre_os_error_field(Rc::as_ptr(&error), 2) as *const Str);
-            let second = imre_os_error_field(Rc::as_ptr(&error), 3);
+            let first = StrOwner::from_raw(imre_os_error_field(
+                crate::ObjectOwner::as_ptr(&error),
+                2,
+            ) as *const Str);
+            let second = imre_os_error_field(crate::ObjectOwner::as_ptr(&error), 3);
             assert_eq!(second & 7, 1);
             let second = crate::BytesOwner::from_raw((second & !7) as *const Bytes);
             drop(error);

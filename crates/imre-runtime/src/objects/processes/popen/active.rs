@@ -4,13 +4,13 @@ use super::*;
 use crate::objects::words::Words;
 
 thread_local! {
-    static ACTIVE: Rc<Object> = Words::new(5).into_object();
+    static ACTIVE: crate::ObjectOwner = Words::new(5).into_object();
     static INTERNAL: RefCell<Vec<(Arc<ChildControl>, Pipes)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Called before releasing the last language owner, including a sequence or
 /// record field. Resurrection must share the original object, control and pipes.
-pub(in crate::objects) fn retain_live_owner(owner: &Rc<Object>) {
+pub(in crate::objects) fn retain_live_owner(owner: &crate::ObjectOwner) {
     // SAFETY: the caller holds this object's only reference on its owner thread.
     // Finalization reads status, writes a warning and polls; none calls Python.
     let keep = unsafe {
@@ -25,7 +25,9 @@ pub(in crate::objects) fn retain_live_owner(owner: &Rc<Object>) {
             unsafe {
                 active.0.with_mut(|storage| {
                     let entries = storage.sequence_mut();
-                    entries.values.push(Rc::into_raw(owner.clone()) as usize);
+                    entries
+                        .values
+                        .push(crate::ObjectOwner::into_raw(owner.clone()) as usize);
                     entries.update_header();
                 });
             }
@@ -78,7 +80,7 @@ pub(in crate::objects::processes) fn cleanup() {
 /// The caller receives an owner of the same list on every module attribute read.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_popen_active() -> *const Object {
-    ACTIVE.with(|active| Rc::into_raw(active.clone()))
+    ACTIVE.with(|active| crate::ObjectOwner::into_raw(active.clone()))
 }
 
 /// Apply the same nonblocking cleanup used by Popen's constructor.

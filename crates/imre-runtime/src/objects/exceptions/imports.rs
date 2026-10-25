@@ -98,9 +98,9 @@ fn view(kind: WordKind, word: usize) -> *const Object {
     let (kind, word) = unsafe { concrete(kind, word) };
     // SAFETY: the borrowed source field is rooted when the view acquires its own value.
     let field = unsafe { kind.acquire(word) };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ObjectValue(
-        field,
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::ObjectValue(field),
+    ))))
 }
 
 /// Test identity against the None singleton or a list with a stable native owner.
@@ -232,7 +232,7 @@ pub unsafe extern "C" fn imre_import_error_new(
                 e.details_mut().named = Some(named);
             });
         }
-        Rc::into_raw(err)
+        crate::ObjectOwner::into_raw(err)
     }
 }
 

@@ -136,7 +136,7 @@ pub unsafe extern "C" fn imre_string_iterable_list(value: usize) -> *const Objec
     let (word, _) = member(value);
     if value & 7 == 2 {
         // SAFETY: the tagged value roots this live sequence handle.
-        return std::rc::Rc::into_raw(unsafe { super::acquire_rc::<Object>(word) });
+        return crate::ObjectOwner::into_raw(unsafe { crate::ObjectOwner::acquire_word(word) });
     }
     debug_assert_eq!(value & 7, 4);
     let fields = word as *const usize;
@@ -151,7 +151,7 @@ pub unsafe extern "C" fn imre_string_iterable_list(value: usize) -> *const Objec
         // SAFETY: the immutable tuple keeps this str alive while taking the list's own reference.
         unsafe { WordKind::new(3).acquire(entry) }.into_word()
     }));
-    std::rc::Rc::into_raw(words.into_object())
+    crate::ObjectOwner::into_raw(words.into_object())
 }
 
 #[cfg(test)]
