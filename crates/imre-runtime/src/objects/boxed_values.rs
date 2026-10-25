@@ -116,7 +116,7 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
                 if n != 0 {
                     if n > 1 {
                         if pending.try_reserve(1).is_err() {
-                            return Error::allocation().returning(false);
+                            return Error::memory_error().returning(false);
                         }
                         pending.push((wa, wb, 1, n));
                     }

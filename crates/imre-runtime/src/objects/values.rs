@@ -241,7 +241,7 @@ pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Res
                 resume,
             } => {
                 if let Some(position) = resume {
-                    pending.try_reserve(1).map_err(|_| Error::allocation())?;
+                    pending.try_reserve(1).map_err(|_| Error::memory_error())?;
                     pending.push((left, right, kind, position));
                 }
                 current = (child_left, child_right, child_kind, 0);
