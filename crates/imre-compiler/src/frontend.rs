@@ -20,6 +20,7 @@ mod cached_properties;
 mod call_binding_errors;
 mod callables;
 mod calls;
+mod chainmap;
 mod comprehensions;
 mod contexts;
 mod copying;
@@ -37,6 +38,7 @@ mod expandtabs;
 mod expansions;
 mod fixed_tuples;
 mod fnmatch;
+mod format_cursors;
 mod fromkeys;
 mod fspath;
 mod function_caches;
@@ -1543,6 +1545,9 @@ fn annotation_with_aliases(
         }
         Some(Binding::Intrinsic(Intrinsic::Deque)) => return Ok(types.deque(Type::Int)),
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
+        Some(Binding::Intrinsic(Intrinsic::ChainMap)) => {
+            return Ok(types.chainmap(Type::Str, Type::Int));
+        }
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) => return Ok(Type::JsonDecoder),
@@ -1779,8 +1784,12 @@ fn annotation_with_aliases(
             }
             receiver
                 if matches!(receiver, ast::Expr::Name(name) if name.id == "dict")
-                    || graph.resolve_type(module, receiver)
-                        == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
+                    || matches!(
+                        graph.resolve_type(module, receiver),
+                        Some(Binding::Intrinsic(
+                            Intrinsic::DefaultDict | Intrinsic::ChainMap
+                        ))
+                    ) =>
             {
                 let ast::Expr::Tuple(arguments) = &*value.slice else {
                     return Err(error(
@@ -1815,6 +1824,11 @@ fn annotation_with_aliases(
                     ));
                 }
                 let value_type = nested(value)?;
+                if graph.resolve_type(module, receiver)
+                    == Some(Binding::Intrinsic(Intrinsic::ChainMap))
+                {
+                    return Ok(types.chainmap(key_type, value_type));
+                }
                 if graph.resolve_type(module, receiver)
                     == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
                 {
@@ -2549,6 +2563,29 @@ impl<'a> Checker<'a> {
                 } else {
                     self.list_call(call, self.types.element(concrete))?
                 }
+            }
+            ast::Expr::Attribute(attr)
+                if attr.attr.as_str() == "maps"
+                    && let Some(dict) = self.types.element(concrete)
+                    && let Some((key, value)) = self.types.mapping(dict)
+                    && self.types.dict(key, value) == dict
+                    && let ast::Expr::Call(call) = &*attr.value
+                    && self.resolve(&call.func)
+                        == Some(Binding::Intrinsic(Intrinsic::ChainMap)) =>
+            {
+                // A typed list target supplies the dictionary shape for an
+                // otherwise empty ChainMap constructor.
+                let owner = self.chainmap(call, Some((key, value)))?;
+                Expr {
+                    ty: concrete,
+                    kind: ExprKind::Builtin(Builtin::ChainMapMaps, vec![owner]),
+                }
+            }
+            ast::Expr::Call(call)
+                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ChainMap))
+                    && let Type::ChainMap(id) = concrete =>
+            {
+                self.chainmap(call, self.types.mapping(Type::Dict(id)))?
             }
             ast::Expr::Call(call)
                 if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Deque))
@@ -3313,6 +3350,19 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("range iteration returned above")
         };
+        if !items
+            && start.is_none()
+            && let Some(element) = self.types.cursor_element(iterable.ty)
+        {
+            let cursor = self.prepare_cursor(iterable, element);
+            return self.lower_prepared_iteration(
+                target,
+                cursor,
+                orelse,
+                before_iteration,
+                lower_body,
+            );
+        }
         if matches!(
             iterable.ty,
             Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
@@ -3956,6 +4006,15 @@ impl<'a> Checker<'a> {
             ast::Stmt::Delete(delete) => {
                 let mut statements = Vec::new();
                 for target in &delete.targets {
+                    if matches!(target, ast::Expr::Attribute(_))
+                        && self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast))
+                    {
+                        statements.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(Builtin::BuiltinsDeleteLast, vec![]),
+                        }));
+                        continue;
+                    }
                     if let ast::Expr::Name(name) = target
                         && let Some(&slot) = self.names.get(name.id.as_str())
                         && matches!(
@@ -4859,11 +4918,11 @@ impl<'a> Checker<'a> {
     ) -> Result<Expr, String> {
         if op == ast::Operator::Mod
             && left.ty == Type::Str
-            && matches!(right.ty, Type::Int | Type::Str)
+            && (matches!(right.ty, Type::Int | Type::Str) || self.types.percent_tuple(right.ty))
         {
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::PercentScalar, vec![left, right]),
+                kind: ExprKind::Builtin(Builtin::PercentFormat, vec![left, right]),
             });
         }
         if op == ast::Operator::Pow {
@@ -5084,6 +5143,12 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::BuiltinsLast => {
+                    return Ok(Expr {
+                        ty: Type::ObjectValue,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsLast, vec![]),
+                    });
+                }
                 Intrinsic::DescriptorConstant(name) => {
                     return Ok(Expr {
                         ty: Type::Int,
@@ -5609,6 +5674,7 @@ impl<'a> Checker<'a> {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                         || !values.iter().all(|v| {
                             v.ty == Type::ObjectValue
+                                || v.ty == Type::ListInt
                                 || self.boxable_value(v.ty)
                                 || self.types.mapping(v.ty) == Some((Type::Int, Type::Str))
                         })
@@ -5691,7 +5757,13 @@ impl<'a> Checker<'a> {
                         matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
                     if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
-                        || matches!(ty, Type::StringKeys | Type::Optional(_) | Type::Union(_))
+                        || matches!(
+                            ty,
+                            Type::ChainMap(_)
+                                | Type::StringKeys
+                                | Type::Optional(_)
+                                | Type::Union(_)
+                        )
                         || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
                         || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
                     {
@@ -5724,7 +5796,7 @@ impl<'a> Checker<'a> {
                 let list = Self::enum_text(self.expr(&subscript.value)?);
                 if self.mapping_class(list.ty).is_some() {
                     let key = self.expr(&subscript.slice)?;
-                    return self.mapping_primitive(list, "__getitem__", &[key], expression);
+                    return self.record_primitive(list, "__getitem__", &[key], expression);
                 }
                 if list.ty == Type::BuiltinClass {
                     // Python evaluates type arguments before invoking __class_getitem__.
@@ -5941,6 +6013,14 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Type::ChainMap(id) = receiver.ty
+                    && attribute.attr.as_str() == "maps"
+                {
+                    return Ok(Expr {
+                        ty: self.types.list(Type::Dict(id)),
+                        kind: ExprKind::Builtin(Builtin::ChainMapMaps, vec![receiver]),
+                    });
+                }
                 if let Type::ForwardRef(layout) = receiver.ty {
                     return self.forward_ref_attribute(layout, receiver, attribute);
                 }
@@ -6529,6 +6609,10 @@ impl<'a> Checker<'a> {
             return Ok(copy);
         }
         if calls::starred(call) {
+            if let Some(Binding::Intrinsic(Intrinsic::Credential(name))) = self.resolve(&call.func)
+            {
+                return self.credential_call(call, name);
+            }
             if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
                 && let Some(signature) = self.functions.get(&definition)
             {
@@ -6765,6 +6849,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Deque)) => return self.deque_new(call, None),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
+            Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }
@@ -6801,6 +6886,9 @@ impl<'a> Checker<'a> {
                 return self.readiness_call(call, op);
             }
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
+            Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
+                return self.credential_call(call, name);
+            }
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
                 return Ok(Expr {
@@ -6829,9 +6917,11 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
             Some(Binding::Intrinsic(
-                op @ (Intrinsic::HandlerRename | Intrinsic::HandlerLookup),
+                op @ (Intrinsic::HandlerRename
+                | Intrinsic::HandlerLookup
+                | Intrinsic::PrintActiveException),
             )) => {
-                return self.named_handler(op, call);
+                return self.handler_operation(op, call);
             }
             Some(Binding::Intrinsic(Intrinsic::MakeLogRecord)) => {
                 return self.make_log_record(call);
@@ -6871,6 +6961,12 @@ impl<'a> Checker<'a> {
                 return self.static_attribute(call);
             }
             Some(Binding::Intrinsic(Intrinsic::CsvReader)) => return self.csv_reader(call),
+            Some(Binding::Intrinsic(Intrinsic::FormatterParser)) => {
+                return self.format_cursor(call, false);
+            }
+            Some(Binding::Intrinsic(Intrinsic::FormatterFieldNameSplit)) => {
+                return self.format_cursor(call, true);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::WarningFilter { simple })) => {
                 return self.warning_filter(call, simple);

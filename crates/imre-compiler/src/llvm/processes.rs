@@ -347,11 +347,12 @@ impl Emitter<'_, '_> {
                     ("i1", args[9].value.operand.clone()),
                     ("i1", args[11].value.operand.clone()),
                 ];
-                // The original configuration remains the prefix. Only borrowed
-                // streams need the three-word trailer in runtime RedirectConfig.
-                let layout = if [12, 0, 4]
-                    .into_iter()
-                    .any(|shift| matches!((streams >> shift) & 15, 6 | 7))
+                // ChildConfig embeds RedirectConfig, which embeds the legacy prefix.
+                let child_options = streams & (1 << 18) != 0;
+                if child_options
+                    || [12, 0, 4]
+                        .into_iter()
+                        .any(|shift| matches!((streams >> shift) & 15, 6 | 7))
                 {
                     for (index, shift) in [(4, 12), (5, 0), (6, 4)] {
                         let word = if matches!((streams >> shift) & 15, 6 | 7) {
@@ -361,11 +362,24 @@ impl Emitter<'_, '_> {
                         };
                         fields.push(("i64", word));
                     }
-                    "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1, i64, i64, i64}"
-                } else {
-                    "{ptr, ptr, ptr, ptr, i64, i32, i32, i32, i32, i1, i1}"
-                };
-                let config = self.entry_alloca(layout);
+                }
+                if child_options {
+                    let start = args.len() - 3;
+                    fields.extend([
+                        ("i64", args[start].value.operand.clone()),
+                        ("i64", args[start + 1].value.operand.clone()),
+                        ("i1", args[start + 2].value.operand.clone()),
+                    ]);
+                }
+                let layout = format!(
+                    "{{{}}}",
+                    fields
+                        .iter()
+                        .map(|(ty, _)| *ty)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                let config = self.entry_alloca(&layout);
                 let mut aggregate = "poison".to_owned();
                 for (i, (ty, value)) in fields.iter().enumerate() {
                     aggregate = self.instruction(format!(
@@ -551,6 +565,40 @@ impl Emitter<'_, '_> {
             ProcessOperation::DescriptorConstant(name) => self.os_descriptor_constant(name),
             ProcessOperation::Readiness(op) => self.readiness(op, args, returns),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
+            ProcessOperation::CredentialId { group } => {
+                let operand = self.checked_instruction(format!(
+                    "call i64 @imre_os_credential_id(i64 {}, i32 {})",
+                    args[0].value.operand,
+                    u8::from(group)
+                ));
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
+                }
+            }
+            ProcessOperation::Credential(name) => {
+                if returns == Type::None {
+                    let words = args
+                        .iter()
+                        .map(|arg| format!("i64 {}", arg.value.operand))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.checked_line(format!("call void @imre_os_{name}({words})"));
+                    none()
+                } else if returns == Type::Int {
+                    let operand = self.instruction(format!("call i64 @imre_os_{name}()"));
+                    Value {
+                        ty: returns,
+                        operand,
+                        small_integer: true,
+                    }
+                } else {
+                    let tuple = self.record(returns);
+                    self.checked_line(format!("call void @imre_os_{name}(ptr {})", tuple.operand));
+                    tuple
+                }
+            }
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
             ProcessOperation::RmTree => {
                 let [path, ignore, _, _, fd] = args else {
