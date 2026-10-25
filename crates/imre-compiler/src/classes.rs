@@ -481,7 +481,7 @@ fn collect_class(
                     && node.name.as_str() == "PollSelector"
                     && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
-                    && !matches!(name, "__init__" | "__fspath__")
+                    && !matches!(name, "__init__" | "__fspath__" | "__setitem__")
                     && !unary_protocol
                     && !selector_context
                     && !(mapping && matches!(name, "__getitem__" | "__contains__"))
@@ -495,6 +495,13 @@ fn collect_class(
                     );
                 }
                 let kind = method_kind(graph, definition.module, method, &class_bindings)?;
+                if name == "__setitem__"
+                    && (kind != MethodKind::Instance
+                        || method.parameters.len() != 3
+                        || method.parameters.posonlyargs.len() + method.parameters.args.len() != 3)
+                {
+                    return Err(module.error(method, "__setitem__ requires self, key and value"));
+                }
                 if kind == MethodKind::PropertySetter {
                     let mut accessors = methods
                         .iter()

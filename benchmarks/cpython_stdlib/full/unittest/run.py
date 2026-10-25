@@ -256,7 +256,7 @@ def run(args, level, root, fixture_root):
         if row['id'].startswith(PREFIX + 'testmock.testpatch.PatchTest.'):
             method = row['id'].rsplit('.', 1)[-1]
             if method in patches:
-                if patch_cases.recorded_blocker(row, previous.get(row['id']), patches[method], fixture_root):
+                if patch_cases.recorded_blocker(row, previous.get((row['id'], row['occurrence'])), patches[method], fixture_root):
                     measured_blockers.add((row['id'], row['occurrence']))
                 if row['outcome'] == 'pass' and method not in patch_cases.REVIEWED:
                     raise ValueError(f"{row['id']}: review the original operation and assertions before publishing a new pass")

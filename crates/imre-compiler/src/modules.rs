@@ -109,6 +109,7 @@ pub(crate) enum IntrinsicModule {
     Urllib,
     UrllibParse,
     Collections,
+    CollectionsNative,
     CollectionsAbc,
     Copy,
     Itertools,
@@ -117,6 +118,7 @@ pub(crate) enum IntrinsicModule {
     Textwrap,
     Io,
     Gzip,
+    Codecs,
     Socket,
     Hashlib,
     Types,
@@ -297,6 +299,9 @@ pub(crate) enum Intrinsic {
     GaiError,
     SocketConstant(&'static str),
     Sha256,
+    CodecInfoClass,
+    CodecLookup,
+    CodecBom(&'static [u8]),
     HashNew,
     SimpleNamespace,
     HashAvailable,
@@ -325,6 +330,7 @@ pub(crate) enum Intrinsic {
     OrderedDict,
     NamedTuple,
     Counter,
+    CountElements,
     Deque,
     Repeat,
     LengthHint,
@@ -416,7 +422,10 @@ impl IntrinsicModule {
     /// Ty resolves these builtin names solely against its bundled stdlib. Only
     /// the exact import proved by the closed checker needs an import diagnostic.
     pub(crate) fn lacks_builtin_stub(self) -> bool {
-        matches!(self, Self::Opcode | Self::StringFormatting)
+        matches!(
+            self,
+            Self::Opcode | Self::StringFormatting | Self::CollectionsNative
+        )
     }
 
     fn named(name: &str) -> Option<Self> {
@@ -468,6 +477,7 @@ impl IntrinsicModule {
             "importlib.machinery" => Some(Self::ImportlibMachinery),
             "importlib.util" => Some(Self::ImportlibUtil),
             "collections" => Some(Self::Collections),
+            "_collections" => Some(Self::CollectionsNative),
             "collections.abc" => Some(Self::CollectionsAbc),
             "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
@@ -477,6 +487,7 @@ impl IntrinsicModule {
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
             "types" => Some(Self::Types),
+            "codecs" => Some(Self::Codecs),
             "socket" => Some(Self::Socket),
             "hashlib" => Some(Self::Hashlib),
             "base64" => Some(Self::Base64),
@@ -761,6 +772,13 @@ impl IntrinsicModule {
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
+            (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Codecs, "lookup") => Intrinsic::CodecLookup,
+            (Self::Codecs, "BOM_UTF8") => Intrinsic::CodecBom(b"\xef\xbb\xbf"),
+            (Self::Codecs, "BOM_UTF16_LE") => Intrinsic::CodecBom(b"\xff\xfe"),
+            (Self::Codecs, "BOM_UTF16_BE") => Intrinsic::CodecBom(b"\xfe\xff"),
+            (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
+            (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::Socket, "socket") => Intrinsic::Socket,
             (Self::Socket, "gaierror") => Intrinsic::GaiError,
             (Self::Socket, name) => Intrinsic::SocketConstant(match name {
@@ -810,9 +828,12 @@ impl IntrinsicModule {
             (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
-            (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections | Self::CollectionsNative, "_count_elements") => {
+                Intrinsic::CountElements
+            }
+            (Self::Collections | Self::CollectionsNative, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections | Self::CollectionsNative, "deque") => Intrinsic::Deque,
             (Self::Collections, "ChainMap") => Intrinsic::ChainMap,
-            (Self::Collections, "deque") => Intrinsic::Deque,
             (Self::Collections, "OrderedDict") => Intrinsic::OrderedDict,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
@@ -1179,6 +1200,12 @@ impl SourceGraph {
     /// Target headers decide whether an errno from-import succeeds or raises ImportError.
     pub(crate) fn checked_builtin_import(&self, module: ModuleId, alias: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::BuiltinImport(alias));
+    }
+
+    /// A sealed module exports this exact member even when typeshed omits it.
+    pub(crate) fn checked_builtin_attribute(&self, module: ModuleId, name: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::BuiltinAttribute(name));
     }
 
     /// Record an integer access with a proved native indexing implementation.
@@ -2136,6 +2163,11 @@ impl<'a> Loader<'a> {
                         }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
+                        if module == IntrinsicModule::Collections
+                            && binding == Binding::Intrinsic(Intrinsic::CountElements)
+                        {
+                            self.checked_builtin_imports.push((id, alias.range()));
+                        }
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
                     if module.lacks_builtin_stub()
