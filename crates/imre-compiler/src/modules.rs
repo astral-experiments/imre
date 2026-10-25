@@ -1676,9 +1676,10 @@ impl<'a> Loader<'a> {
             self.reject_stdlib_shadow(name)?;
         }
         let bundle = match (name.split('.').next(), module) {
-            (Some("logging"), Some(_)) => {
-                Some((LOGGING_CLASSES, include_str!("../stdlib/logging/classes.py")))
-            }
+            (Some("logging"), Some(_)) => Some((
+                LOGGING_CLASSES,
+                include_str!("../stdlib/logging/classes.py"),
+            )),
             (_, Some(IntrinsicModule::Textwrap)) => Some((
                 TEXTWRAP_FUNCTIONS,
                 include_str!("../stdlib/textwrap/functions.py"),
@@ -1695,13 +1696,7 @@ impl<'a> Loader<'a> {
                 ));
             }
             self.inputs.missing.push(path.clone());
-            let id = self.add(
-                path.clone(),
-                path,
-                implementation.into(),
-                false,
-                source,
-            )?;
+            let id = self.add(path.clone(), path, implementation.into(), false, source)?;
             self.modules[id].bundled = true;
             self.scan(id)?;
         }

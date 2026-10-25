@@ -6243,7 +6243,7 @@ impl<'a> Checker<'a> {
                 return self.system_path_call(intrinsic, call);
             }
             Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
-                return self.text_function(call, "text", ir::TextOperation::Dedent);
+                return self.dedent_call(call);
             }
             Some(Binding::Intrinsic(Intrinsic::UrlsafeB64encode)) => {
                 let args = self.arguments(
