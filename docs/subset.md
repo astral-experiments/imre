@@ -1184,6 +1184,10 @@ method keeps its receiver alive. An unannotated empty deque defaults to integer 
 Calling `d.__init__(iterable, maxlen)` validates the new bound, clears the
 same deque, and consumes the iterable. If iteration raises, items already
 appended remain visible through aliases. Omitting `maxlen` removes the old bound.
+Integer and boolean indices support reads, replacement, deletion and numeric
+augmented assignment, including negative positions. Replacement keeps an
+iterator valid; deletion invalidates it. Membership supports homogeneous
+integers, strings and booleans.
 
 `list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition preserves element values and shares reference-type elements across positions. Lists of immutable value structs store scalar payloads inline; `list[int]` uses specialized tagged-integer storage. Other lists use owned runtime slots. Calling `reverse()` reverses either list in place and returns `None`; aliases and active iterators see the new order.
 
@@ -1205,6 +1209,11 @@ Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the count
 `Counter.elements()` returns an iterator over the stored keys in insertion
 order. Each positive integer count repeats its key; a change to a later entry
 is visible when the iterator reaches it.
+
+`_collections._count_elements(mapping, iterable)`, also exported by
+`collections`, adds one per yielded key. It accepts dictionaries with integer
+counts and concrete classes with `get` and `__setitem__` methods. It updates
+the receiver before requesting another key, so mutations survive later errors.
 
 `mapping.clear()` removes every entry in place and returns `None`. Aliases see
 the empty dictionary; a `Counter` still returns zero for a missing key, and a

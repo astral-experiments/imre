@@ -116,34 +116,38 @@ pub(super) unsafe fn spawn(
     streams: u32,
     fds: [RawFd; 3],
     oversized_fd: bool,
+    allow_spawn: bool,
     child_attributes: impl FnOnce(bool) -> Result<ChildAttributes>,
 ) -> Result<Child> {
+    let modes = [12, 0, 4].map(|shift| (streams >> shift) & 15);
+    // SAFETY: the original command and configuration are still rooted.
+    unsafe { validate_command_shape(cmd, config) }
+        .map_err(|e| popen::error_after_handles(&modes, false, e))?;
     // SAFETY: the caller roots the command until both launch APIs finish validation.
-    let may_spawn = uses_posix_spawn(
-        unsafe { has_directory(cmd, config) },
-        !config.cwd.is_null(),
-        streams,
-        fds,
-    );
+    let direct = allow_spawn
+        && uses_posix_spawn(
+            unsafe { has_directory(cmd, config) },
+            !config.cwd.is_null(),
+            streams,
+            fds,
+        );
     // SAFETY: validation and copying complete before the command may fork.
     let (launch, cwd, attributes) = unsafe {
         prepare_command(cmd, config, || {
-            let attributes = child_attributes(may_spawn)?;
-            if oversized_fd && (!may_spawn || attributes.requires_fork()) {
+            let attributes = child_attributes(direct)?;
+            if oversized_fd && !direct {
                 return Err(c_int_overflow());
             }
             Ok(attributes)
-        })?
-    };
-    let direct = may_spawn && !attributes.requires_fork();
+        })
+    }
+    .map_err(|e| popen::error_after_handles(&modes, !direct, e))?;
     if launch.argv.strings.is_empty() && direct {
-        return Err(Error::new(
-            Kind::ValueError,
-            "posix_spawn: argv must not be empty",
-        ));
+        let error = Error::new(Kind::ValueError, "posix_spawn: argv must not be empty");
+        return Err(popen::error_after_handles(&modes, false, error));
     }
     if oversized_fd {
-        return Err(c_int_overflow());
+        return Err(popen::error_after_handles(&modes, false, c_int_overflow()));
     }
     let streams = if attributes.keep.is_empty() {
         streams

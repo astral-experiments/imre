@@ -119,6 +119,7 @@ pub(crate) enum Type {
     SimpleNamespace(usize),
     /// Nominal ModuleSpec backed by a record whose loader and state keep their exact types.
     ModuleSpec(usize),
+    CodecInfo,
     /// A POSIX IPv4 stream socket with shared descriptor ownership.
     Socket,
     Sha256,
@@ -350,6 +351,7 @@ impl std::fmt::Display for Type {
             Self::ProcessSelectorClass => "subprocess selector class",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
+            Self::CodecInfo => "codecs.CodecInfo",
             Self::Poll => "select.poll",
             Self::Socket => "socket.socket",
             Self::Sha256 => "SHA-256 hash",
@@ -951,6 +953,9 @@ pub(crate) enum Builtin {
     SortDetach,
     SortRestore,
     StringJoin,
+    JoinBufferNew,
+    JoinBufferAppend,
+    JoinBufferFinish,
     StringFormat,
     StringReplace,
     Text(TextOperation),
@@ -970,6 +975,8 @@ pub(crate) enum Builtin {
     /// bounds, with no intervening mutation or user code. Returns an owned
     /// element of a generic typed list; the index is canonical and nonnegative.
     SequenceGetInBounds,
+    /// Transfers the next slot of a fresh append-only list to its sole consumer.
+    SequenceTakeInBounds,
     /// Reduces an exact integer list after evaluating its source and start.
     /// Integer addition cannot invoke callbacks or raise a recoverable error.
     ListSum,
@@ -1025,6 +1032,10 @@ pub(crate) enum Builtin {
     Decode,
     DecodeAscii,
     UrlsafeB64encode,
+    CodecLookup,
+    CodecName,
+    CodecEncode,
+    CodecDecode,
     Socket(SocketOp),
     Sha256Hex,
     Sha256New,
@@ -1236,6 +1247,10 @@ pub(crate) enum Builtin {
     },
     DequeClear,
     DequeReverse,
+    DequeGet,
+    DequeSet,
+    DequeDelete,
+    DequeContains,
     DequeMaxlen,
     DequeIter {
         reverse: bool,
@@ -1952,7 +1967,7 @@ impl InstanceType {
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
-            Self::Tuple => matches!(ty, Type::Tuple(_)),
+            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::CodecInfo),
             Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::ModuleSpec => matches!(ty, Type::ModuleSpec(_)),
             Self::Exception(_) => matches!(

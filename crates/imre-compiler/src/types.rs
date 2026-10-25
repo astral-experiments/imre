@@ -284,6 +284,7 @@ impl Types {
             | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
             | Type::Sha256
@@ -747,6 +748,7 @@ impl Types {
             | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
             | Type::Sha256
@@ -1313,6 +1315,11 @@ impl Types {
             unreachable!("deque identity has a deque shape")
         };
         Some(element)
+    }
+
+    /// Mutable sequences with integer positions; their storage layouts remain distinct.
+    pub(crate) fn indexed_element(&self, ty: Type) -> Option<Type> {
+        self.element(ty).or_else(|| self.deque_element(ty))
     }
 
     pub(crate) fn set(&self, element: Type) -> Type {
