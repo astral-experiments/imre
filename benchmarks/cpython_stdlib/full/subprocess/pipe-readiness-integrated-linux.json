@@ -1,14 +1,21 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "imre_revision": "45a13687f0e217102998b0968865de5b4a61b495",
-  "tested_tree": "fe180c9d4550a21757e022162afaead621d05463",
-  "fixture_revision": "a70b4b59c6441b94760baa81ccf83c172ce90bdd",
-  "fixture_tree": "30ae67540aee05013d23e96ae8703e6213e8fc85",
+  "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+  "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+  "fixture_revision": "5c335cd64b934e291552e57b2417822b062bb09b",
+  "fixture_tree": "055119c12a8a20680b0c1681df5ed21348365856",
   "fixture_sources": {
     "readiness_original": "d663efa42d7ded1a0eec812b57ce72f2cd0ed2e5e2d1b652f1f31a1a7b8b9b6a",
-    "pipe_fixture_originals": "74fafed7fde1c880e2723e502dd5578664dbf4582b4808c2fe2d05b4a3f558b2"
+    "pipe_fixture_originals": "c43f7f26bf99e83d5ea2e3b17eb5592fb230c567f92e6ddd69e07ab73ece2e0b",
+    "readiness_operands": "0cf839045b41efaf624390305763fa8f134b84aff12c5b637f314c4d05a03be2"
   },
-  "operand_driver_sha256": "3be330e6a688a598563921f4b43a062fab08fb25d0c86d92e98909fe22d5a77e",
+  "comparison_before_selector_merge": {
+    "imre_revision": "45a13687f0e217102998b0968865de5b4a61b495",
+    "tested_tree": "fe180c9d4550a21757e022162afaead621d05463",
+    "fixture_revision": "a70b4b59c6441b94760baa81ccf83c172ce90bdd",
+    "receipt_commit": "5c335cd64b934e291552e57b2417822b062bb09b",
+    "operation": "Both observers found a native read of four bytes, one queued byte, host select returning the original stream, and one reap at O0/O3."
+  },
   "reports": [
     {
       "opt_level": 0,
@@ -16,8 +23,8 @@
         "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
         "opt_level": 0,
         "toolchain": {
-          "imre": "e1dc9b5d5e47044b6466ba3c8971962b2f0e218e26d1f33a34945f3bb9d78355",
-          "runtime": "633a18a1a27d7f50594f0e68882eebe7d8fb44ab4fc355d0efa2f7bf418ecded",
+          "imre": "446b01c66a60604697013fe998d712af0ddfcd8a0799d2dafb0c7605c32ac622",
+          "runtime": "9c7858bb292d4880045a37546570eb9cdd712222b201404f6380da624e47c26e",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
@@ -34,7 +41,7 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "2206a4b07bd1b4f76ee178869a0bbf1b19d4d05a76bc09ff55217dd2caaa8cce",
+                "native_parent_sha256": "72bbe7ba4f677461fdc0c31e8d64ea645e48e185ea82de29b0ee2d55564dc7cc",
                 "data_child_argv": [
                   "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
                   "-c",
@@ -54,7 +61,7 @@
         },
         "controls": {
           "raw-held": {
-            "native_parent_sha256": "b37d312c3f7b319578ea4191e55beb8d54d7a22588ea8d6e4b6abe9c7e285978",
+            "native_parent_sha256": "896812f6375708714f34959a9dbc610b3b0e6c5672ef8030032c4ec833ef15b8",
             "data_child_argv": [
               "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
               "-c",
@@ -70,7 +77,7 @@
             "native_reaps": 1
           },
           "buffered-held": {
-            "native_parent_sha256": "79f2a9142e2272c6429bbddf0673d7378b048a0a5a4145c53ab7a32d1015316f",
+            "native_parent_sha256": "ddfa8b5842915cffc9042b1faccd5c00de344d2c411195fc43697743f8c2d4d4",
             "data_child_argv": [
               "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
               "-c",
@@ -92,8 +99,8 @@
         "opt_level": 0,
         "fixture_sha256": "00e7fdc6d9313f3c93263f7a33f241ba102506e2241be64bcd8d97c79761d23b",
         "toolchain": {
-          "imre": "e1dc9b5d5e47044b6466ba3c8971962b2f0e218e26d1f33a34945f3bb9d78355",
-          "runtime": "633a18a1a27d7f50594f0e68882eebe7d8fb44ab4fc355d0efa2f7bf418ecded",
+          "imre": "446b01c66a60604697013fe998d712af0ddfcd8a0799d2dafb0c7605c32ac622",
+          "runtime": "9c7858bb292d4880045a37546570eb9cdd712222b201404f6380da624e47c26e",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
@@ -110,7 +117,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "8dad7fe4d21991cae2a4a1abc64cc1d448fef8cb16914d264ee3b1e35d30fdb2",
+                "actor_sha256": "3db739b3c3dce1171f51202eac4a1accb26367edcf138e37e43b284a0da6d03f",
                 "read_bytes": 4,
                 "remaining_kernel_bytes": 1,
                 "same_open_file_description": "SCM_RIGHTS",
@@ -157,8 +164,8 @@
         "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
         "opt_level": 3,
         "toolchain": {
-          "imre": "e1dc9b5d5e47044b6466ba3c8971962b2f0e218e26d1f33a34945f3bb9d78355",
-          "runtime": "633a18a1a27d7f50594f0e68882eebe7d8fb44ab4fc355d0efa2f7bf418ecded",
+          "imre": "446b01c66a60604697013fe998d712af0ddfcd8a0799d2dafb0c7605c32ac622",
+          "runtime": "9c7858bb292d4880045a37546570eb9cdd712222b201404f6380da624e47c26e",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
@@ -175,7 +182,7 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "19c74b575a8ffee5b2edfd3f667631beafbd6b3338c1b278352ef8ab58951d80",
+                "native_parent_sha256": "530430b11d28403cd0c9709d1da6e322e358c85a4725f24609ea37e982c7af73",
                 "data_child_argv": [
                   "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
                   "-c",
@@ -195,7 +202,7 @@
         },
         "controls": {
           "raw-held": {
-            "native_parent_sha256": "0fb8fb5e78bb74b22e06bee1b2adeb0992fa6a7c08fdef609b630cad8191ce1c",
+            "native_parent_sha256": "48a358d83113ea61f7d2feae6f6e52aa32482ae4df20ded07c3114180bce536a",
             "data_child_argv": [
               "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
               "-c",
@@ -211,7 +218,7 @@
             "native_reaps": 1
           },
           "buffered-held": {
-            "native_parent_sha256": "19f38053dbe89489230c696973332d3ed85fe63a448790c2f61bd566a9c8d053",
+            "native_parent_sha256": "531b9f96ce6eb0757266d72f931b3e1d2e7c3909c4ba58a08049adb4941e3e82",
             "data_child_argv": [
               "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
               "-c",
@@ -233,8 +240,8 @@
         "opt_level": 3,
         "fixture_sha256": "00e7fdc6d9313f3c93263f7a33f241ba102506e2241be64bcd8d97c79761d23b",
         "toolchain": {
-          "imre": "e1dc9b5d5e47044b6466ba3c8971962b2f0e218e26d1f33a34945f3bb9d78355",
-          "runtime": "633a18a1a27d7f50594f0e68882eebe7d8fb44ab4fc355d0efa2f7bf418ecded",
+          "imre": "446b01c66a60604697013fe998d712af0ddfcd8a0799d2dafb0c7605c32ac622",
+          "runtime": "9c7858bb292d4880045a37546570eb9cdd712222b201404f6380da624e47c26e",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
@@ -251,7 +258,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "056d309e635457f9066e91247b9461a4f4e180e0df1cc4fae1b601b1b5518c1c",
+                "actor_sha256": "03bbc5e39779c13c3342c0c56ad4db5d9dadf05cbb4799f1fb013e2e279fb4ef",
                 "read_bytes": 4,
                 "remaining_kernel_bytes": 1,
                 "same_open_file_description": "SCM_RIGHTS",

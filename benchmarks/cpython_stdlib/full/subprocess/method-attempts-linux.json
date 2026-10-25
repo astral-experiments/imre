@@ -1,7 +1,7 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "imre_revision": "12a645f666187b35ebfaa4c53ad152187bb356d7",
-  "tested_tree": "3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26",
+  "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+  "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
   "reports": [
     {
       "opt_level": 0,
@@ -141,19 +141,19 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close": {
           "status": "compile-blocked",
-          "reason": "case.py:13:20: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "reason": "case.py:13:20: Imre: field access requires a fixed class instance"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close_with_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:15:20: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "reason": "case.py:15:20: Imre: field access requires a fixed class instance"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_flush": {
           "status": "compile-blocked",
-          "reason": "case.py:16:20: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "reason": "case.py:16:20: Imre: field access requires a fixed class instance"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_write": {
           "status": "compile-blocked",
-          "reason": "case.py:13:20: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "reason": "case.py:13:20: Imre: field access requires a fixed class instance"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_repeated_call_after_stdout_close": {
           "status": "body-completed-needs-operation-review",
@@ -213,7 +213,7 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_invalid_args": {
           "status": "compile-blocked",
-          "reason": "case.py:10:9: Imre: unknown class method"
+          "reason": "case.py:13:27: Imre: unexpected keyword argument \"startupinfo\""
         },
         "test.test_subprocess.POSIXProcessTestCase.test_kill": {
           "status": "compile-blocked",
@@ -305,7 +305,7 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race2": {
           "status": "compile-blocked",
-          "reason": "case.py:19:14: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "reason": "case.py:19:14: Imre: field access requires a fixed class instance"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_shell_sequence": {
           "status": "compile-blocked",
@@ -329,7 +329,7 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": {
           "status": "compile-blocked",
-          "reason": "case.py:17:21: Imre: unexpected keyword argument \"start_new_session\""
+          "reason": "case.py:22:26: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_stderr_stdin_are_single_inout_fd": {
           "status": "compile-blocked",
@@ -409,7 +409,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_bytes_executable": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCase.test_bytes_executable_replaces_shell": {
           "status": "compile-blocked",
@@ -432,8 +432,12 @@
           "method_sha256": "fd5e05b723660dfbc18a04861156ff8b895de24dfdeca7df9137d74da6912456"
         },
         "test.test_subprocess.ProcessTestCase.test_call_timeout": {
-          "status": "compile-blocked",
-          "reason": "case.py:13:9: Imre: unknown class method"
+          "status": "body-completed-needs-operation-review",
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b"
         },
         "test.test_subprocess.ProcessTestCase.test_check_call_nonzero": {
           "status": "body-completed-needs-operation-review",
@@ -497,7 +501,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_stdout_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:15:33: Imre: unsupported exception attribute"
+          "reason": "case.py:15:33: Imre: expected dict[int, str], got object value; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_timeout": {
           "status": "body-completed-needs-operation-review",
@@ -537,7 +541,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input_nonbyte": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"select\""
+          "reason": "case.py:13:9: Imre: unsupported statement in the Imre subset"
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_pipe_buf": {
           "status": "compile-blocked",
@@ -573,7 +577,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_stdin_closed_before_call": {
           "status": "compile-blocked",
-          "reason": "case.py:19:30: Imre: expected int, got int | None; annotations are enforced contracts"
+          "reason": "case.py:19:30: Imre: expected bool | int, got int | None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_stdout": {
           "status": "body-completed-needs-operation-review",
@@ -589,11 +593,11 @@
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_input": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"socket\""
+          "reason": "case.py:29:18: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_output": {
           "status": "compile-blocked",
-          "reason": "case.py:20:9: Imre: unknown class method"
+          "reason": "case.py:20:54: Imre: assertRaises needs a fixed native method receiver"
         },
         "test.test_subprocess.ProcessTestCase.test_cwd": {
           "status": "compile-blocked",
@@ -629,11 +633,11 @@
         },
         "test.test_subprocess.ProcessTestCase.test_env": {
           "status": "compile-blocked",
-          "reason": "case.py:18:30: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:18:30: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_executable": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCase.test_executable_replaces_shell": {
           "status": "compile-blocked",
@@ -641,7 +645,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_executable_takes_precedence": {
           "status": "compile-blocked",
-          "reason": "case.py:9:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:9:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCase.test_executable_with_cwd": {
           "status": "compile-blocked",
@@ -685,7 +689,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_invalid_env": {
           "status": "compile-blocked",
-          "reason": "case.py:38:30: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:38:30: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_io_buffered_by_default": {
           "status": "compile-blocked",
@@ -704,8 +708,12 @@
           "reason": "ProcessTestCase.test_leaking_fds_on_error needs its upstream method decorator"
         },
         "test.test_subprocess.ProcessTestCase.test_list2cmdline": {
-          "status": "compile-blocked",
-          "reason": "case.py:8:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "status": "body-completed-needs-operation-review",
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "a2dcff9faa9ec44da990768fa1ce096e7ce9f2f43979d9d9d05525939396e731"
         },
         "test.test_subprocess.ProcessTestCase.test_no_leaking": {
           "status": "compile-blocked",
@@ -749,7 +757,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_stderr_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:15:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:15:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_stderr_filedes": {
           "status": "compile-blocked",
@@ -773,11 +781,11 @@
         },
         "test.test_subprocess.ProcessTestCase.test_stderr_redirect_with_no_stdout_redirect": {
           "status": "compile-blocked",
-          "reason": "case.py:25:26: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:25:26: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_stdin_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:14:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:14:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_stdin_filedes": {
           "status": "compile-blocked",
@@ -801,7 +809,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_stdout_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:14:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:14:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_stdout_filedes": {
           "status": "compile-blocked",
@@ -913,7 +921,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_bytes_executable": {
           "status": "compile-blocked",
-          "reason": "case.py:9:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:9:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_bytes_executable_replaces_shell": {
           "status": "compile-blocked",
@@ -928,7 +936,7 @@
           "method_sha256": "7fe6dbce6c124c584b2e229b432d7a2fcdccd5c63784a56e887e00c6d3fe7bb6",
           "selector_parents": [
             {
-              "binary_sha256": "263353523279629bcece0bf0bad4efd9f889af3231851721932bff934c30ed9f",
+              "binary_sha256": "d6dbf4ba159667103537657d6bfde29f1f25d53bfdc4a727afb3d0fd6bb2a503",
               "native_parent_syscalls": {}
             }
           ]
@@ -942,14 +950,24 @@
           "method_sha256": "fd5e05b723660dfbc18a04861156ff8b895de24dfdeca7df9137d74da6912456",
           "selector_parents": [
             {
-              "binary_sha256": "79273c4d0af95098a0e99f66abf2460ccc6eefa9c8b078f83ebf7e15271ab308",
+              "binary_sha256": "dd90d8b1eb2d74c762a885fcb83268c3555243caf9491b2bf34b23750fd0d620",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_call_timeout": {
-          "status": "compile-blocked",
-          "reason": "case.py:14:9: Imre: unknown class method"
+          "status": "body-completed-needs-operation-review",
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b",
+          "selector_parents": [
+            {
+              "binary_sha256": "c61ea2362f940c67606834e98916ffd554975e86e68a54d5f31b9e01d9502802",
+              "native_parent_syscalls": {}
+            }
+          ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_call_nonzero": {
           "status": "body-completed-needs-operation-review",
@@ -960,7 +978,7 @@
           "method_sha256": "9ff46ab62ba1550ee55186ec52d2e0df16b383c1ee120a3a4f795d96ea5e0b95",
           "selector_parents": [
             {
-              "binary_sha256": "18ac3c2a380ec858ba43d90c787f27eaf425080c6fe2906f099e7de0e9acb427",
+              "binary_sha256": "b77c45500701c326b0f377a2ea290590c415faefbd408a26d1d3ab6edbd16ec7",
               "native_parent_syscalls": {}
             }
           ]
@@ -974,7 +992,7 @@
           "method_sha256": "eb9e4e32882aede3b02500d8becc00d459666c137e77470d6e4dd16417c3edcd",
           "selector_parents": [
             {
-              "binary_sha256": "80611672f7885836dd346ed933541f0dd95d706cc053173cb0510a934e7b5be2",
+              "binary_sha256": "bb863039f66f6d3313178da00501a1cbe978b17e766badc86f43d0397ed8d4fd",
               "native_parent_syscalls": {}
             }
           ]
@@ -1012,7 +1030,7 @@
           "method_sha256": "471340b9db4c094ede2eb0b7f7cd8091993a42700fcfd8b4bc540c9099bab219",
           "selector_parents": [
             {
-              "binary_sha256": "983673e9e1537d0eefd69f5fb76d3ad6a601eef4aaa1f5d7ba871c86d6222437",
+              "binary_sha256": "33a37c3227290b5108a6d2e612d1cff26558863853aa13be8667358801a0bc9f",
               "native_parent_syscalls": {}
             }
           ]
@@ -1031,7 +1049,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdout_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:16:33: Imre: unsupported exception attribute"
+          "reason": "case.py:16:33: Imre: expected dict[int, str], got object value; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_timeout": {
           "status": "body-completed-needs-operation-review",
@@ -1042,7 +1060,7 @@
           "method_sha256": "dab34ef13e89a41ed1950fe3263dbeacf0c8ccf3cd18aed38d657ea3dd4cd0c3",
           "selector_parents": [
             {
-              "binary_sha256": "e4365aabe125fea1fcbf86ce7e2dca5ebd2b32fb4c778eecaa064c17ded1ba32",
+              "binary_sha256": "561e80863bba363f4e2a757706ade174010d6b4a583cadf2aaff0225f279750c",
               "native_parent_syscalls": {
                 "pselect6": 1
               }
@@ -1079,7 +1097,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_memoryview_input_nonbyte": {
           "status": "compile-blocked",
-          "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"select\""
+          "reason": "case.py:14:9: Imre: unsupported statement in the Imre subset"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_pipe_buf": {
           "status": "compile-blocked",
@@ -1098,7 +1116,7 @@
           "method_sha256": "9268e8036ce63337675e2a26cd1c00b71cdfd5eddb510a921bbf5401363946fb",
           "selector_parents": [
             {
-              "binary_sha256": "d2a0e183495cf14f5ed8626a4b257addad5ef50dbaf67cd6accf2c02cb594013",
+              "binary_sha256": "03cfe1cff13cb97622db00e607288597bdf88b2d7cc04cf18d1f88ab202d11b0",
               "native_parent_syscalls": {}
             }
           ]
@@ -1112,7 +1130,7 @@
           "method_sha256": "d26e8c51d429ecd45589fb980f2c07805e81349c23d357a7d78b2cf703f882ea",
           "selector_parents": [
             {
-              "binary_sha256": "b3f36c081e81f73ee95ebf61104528fb103368ca15d871370451fe9ba1ed8b7b",
+              "binary_sha256": "91b0323b9eb745a974c22af365fd284d52e4ab44fa994ed15f5ce1ad18e1550d",
               "native_parent_syscalls": {}
             }
           ]
@@ -1126,14 +1144,14 @@
           "method_sha256": "3e4af7f35b67768d0ab540fc19d472be0441519fc7fe279e86dc97bdc86c61c4",
           "selector_parents": [
             {
-              "binary_sha256": "7bba26965dc0ec7b779ae2efa25884162a67df4612ad4e4520ac28ae0371727e",
+              "binary_sha256": "4f03d248b814428cafd3a2eaa649b7d37546120f0e61d30c95e9252f4fa2b666",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stdin_closed_before_call": {
           "status": "compile-blocked",
-          "reason": "case.py:20:30: Imre: expected int, got int | None; annotations are enforced contracts"
+          "reason": "case.py:20:30: Imre: expected bool | int, got int | None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stdout": {
           "status": "body-completed-needs-operation-review",
@@ -1144,7 +1162,7 @@
           "method_sha256": "1c6f5f200cfd3b1438be8d1b1195f88da5226b4e27b3d81553a7815fb473b7a2",
           "selector_parents": [
             {
-              "binary_sha256": "e807fc80a085911d3b2665cf56439c33e2ddfd9d65e3e9a0738a4f5fcf9c6285",
+              "binary_sha256": "100ba9e898c9617b451856be9b577b7a39959f8d1c64fc0e5b2e029c15bb1111",
               "native_parent_syscalls": {}
             }
           ]
@@ -1155,11 +1173,11 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_timeout_large_input": {
           "status": "compile-blocked",
-          "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"socket\""
+          "reason": "case.py:30:18: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_timeout_large_output": {
           "status": "compile-blocked",
-          "reason": "case.py:21:9: Imre: unknown class method"
+          "reason": "case.py:21:54: Imre: assertRaises needs a fixed native method receiver"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd": {
           "status": "compile-blocked",
@@ -1195,11 +1213,11 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_env": {
           "status": "compile-blocked",
-          "reason": "case.py:19:30: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:19:30: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_executable": {
           "status": "compile-blocked",
-          "reason": "case.py:9:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:9:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_replaces_shell": {
           "status": "compile-blocked",
@@ -1207,7 +1225,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_takes_precedence": {
           "status": "compile-blocked",
-          "reason": "case.py:10:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:10:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_with_cwd": {
           "status": "compile-blocked",
@@ -1250,14 +1268,14 @@
           "method_sha256": "2c624dbefb8e0170b1b93696e7a5f891da573a3c795e902924d32f1ac99d6a9f",
           "selector_parents": [
             {
-              "binary_sha256": "04b888cec6a01afeefb144304dd418d6a6295bff7e7f5396b101390e40355c2c",
+              "binary_sha256": "d49f7e030f476ea543653d981c7b8314a88245aeeccd1f2f93eeae90187f23f2",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_env": {
           "status": "compile-blocked",
-          "reason": "case.py:39:30: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:39:30: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_io_buffered_by_default": {
           "status": "compile-blocked",
@@ -1276,8 +1294,18 @@
           "reason": "ProcessTestCase.test_leaking_fds_on_error needs its upstream method decorator"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_list2cmdline": {
-          "status": "compile-blocked",
-          "reason": "case.py:9:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "status": "body-completed-needs-operation-review",
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "a2dcff9faa9ec44da990768fa1ce096e7ce9f2f43979d9d9d05525939396e731",
+          "selector_parents": [
+            {
+              "binary_sha256": "83aa2f79f3a325b84ded8febf6247571a3c71d27967c9ccdd78a7f8956532426",
+              "native_parent_syscalls": {}
+            }
+          ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_no_leaking": {
           "status": "compile-blocked",
@@ -1321,7 +1349,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:16:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:16:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_filedes": {
           "status": "compile-blocked",
@@ -1344,18 +1372,18 @@
           "method_sha256": "3faa8fd08713ebcce3dd422f216a5c5c98c207d4dd3eeb5eeaa9241341d4a710",
           "selector_parents": [
             {
-              "binary_sha256": "352c865abbe3c7c0f688f1081e9a110b79b18897417576ffd0f2e0bce0b30bce",
+              "binary_sha256": "0649a9027ede33bc6447f029dd5c762f56eae8e2a797544177ba5e1efcaf2a5d",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_redirect_with_no_stdout_redirect": {
           "status": "compile-blocked",
-          "reason": "case.py:26:26: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:26:26: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:15:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:15:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_filedes": {
           "status": "compile-blocked",
@@ -1378,14 +1406,14 @@
           "method_sha256": "4be91d3e38077c5299349478ad299dacfbf1766c558c379dd7faf7633392c090",
           "selector_parents": [
             {
-              "binary_sha256": "81a0646a3a5aee68334a88aaeec07d06c569fa9de8b28f24647989d6256549d0",
+              "binary_sha256": "3fd6da3be2c61b9696b23637d978ac0ffbfba55498e665f4bdb2987ec24659bc",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:15:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:15:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_filedes": {
           "status": "compile-blocked",
@@ -1412,7 +1440,7 @@
           "method_sha256": "80819fcbb79ff23f90e6f6d74fa70d78feb227db1ed979ad6d9745818b7bbd3d",
           "selector_parents": [
             {
-              "binary_sha256": "179f41aa36504caf2d129c46e6bf5502165aac3367c43919be525099a2316701",
+              "binary_sha256": "4ccb93c50f68f191d448785c80b4a6ca15c283c1afeb8e29e0f6347c58c25fde",
               "native_parent_syscalls": {}
             }
           ]
@@ -1430,7 +1458,7 @@
           "method_sha256": "c2c8f9bf6c3ffaab945ce0001f38561a32034a731ab88ef1e0b6f40dcfe863f6",
           "selector_parents": [
             {
-              "binary_sha256": "a14092bb563fcfe8750784f57c3a0d5df8ed2d4569512d6548494997ed7a705a",
+              "binary_sha256": "c5ca38e162f722aa0a81f754375a9034b7c1b1aa0e826d26baeb589d300b7650",
               "native_parent_syscalls": {}
             }
           ]
@@ -1476,7 +1504,7 @@
           "method_sha256": "53a051cf04fa9d22cc0d33d41dc96b4393a3c4f4fe2ac2d71846908ee77575d2",
           "selector_parents": [
             {
-              "binary_sha256": "bf7a65b2e31e328a5ad75efb7bf07a28af7b867c63e16fa712d4ce34942537f7",
+              "binary_sha256": "14cf12473731fb1c9820fec00f567c21c5156ce110a52a6b2375abdb07d296b2",
               "native_parent_syscalls": {}
             }
           ]
@@ -1503,35 +1531,35 @@
         },
         "test.test_subprocess.RunFuncTestCase.test_capture_output": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_capture_stderr": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_capture_stdout": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check_output_input_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check_output_stdin_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check_output_stdin_with_input_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check_output_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check_zero": {
           "status": "body-completed-needs-operation-review",
@@ -1547,11 +1575,11 @@
         },
         "test.test_subprocess.RunFuncTestCase.test_returncode": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_run_kwargs": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_run_with_an_empty_env": {
           "status": "reference-skip",
@@ -1575,19 +1603,19 @@
         },
         "test.test_subprocess.RunFuncTestCase.test_stderr_with_capture_output_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_stdout_stdout": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_stdout_with_capture_output_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.Win32ProcessTestCase.test_call_string": {
           "status": "reference-skip",
@@ -1809,19 +1837,19 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close": {
           "status": "compile-blocked",
-          "reason": "case.py:13:20: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "reason": "case.py:13:20: Imre: field access requires a fixed class instance"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close_with_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:15:20: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "reason": "case.py:15:20: Imre: field access requires a fixed class instance"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_flush": {
           "status": "compile-blocked",
-          "reason": "case.py:16:20: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "reason": "case.py:16:20: Imre: field access requires a fixed class instance"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_write": {
           "status": "compile-blocked",
-          "reason": "case.py:13:20: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "reason": "case.py:13:20: Imre: field access requires a fixed class instance"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_communicate_repeated_call_after_stdout_close": {
           "status": "body-completed-needs-operation-review",
@@ -1881,7 +1909,7 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_invalid_args": {
           "status": "compile-blocked",
-          "reason": "case.py:10:9: Imre: unknown class method"
+          "reason": "case.py:13:27: Imre: unexpected keyword argument \"startupinfo\""
         },
         "test.test_subprocess.POSIXProcessTestCase.test_kill": {
           "status": "compile-blocked",
@@ -1973,7 +2001,7 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race2": {
           "status": "compile-blocked",
-          "reason": "case.py:19:14: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "reason": "case.py:19:14: Imre: field access requires a fixed class instance"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_shell_sequence": {
           "status": "compile-blocked",
@@ -1997,7 +2025,7 @@
         },
         "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": {
           "status": "compile-blocked",
-          "reason": "case.py:17:21: Imre: unexpected keyword argument \"start_new_session\""
+          "reason": "case.py:22:26: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.POSIXProcessTestCase.test_stderr_stdin_are_single_inout_fd": {
           "status": "compile-blocked",
@@ -2077,7 +2105,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_bytes_executable": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCase.test_bytes_executable_replaces_shell": {
           "status": "compile-blocked",
@@ -2100,8 +2128,12 @@
           "method_sha256": "fd5e05b723660dfbc18a04861156ff8b895de24dfdeca7df9137d74da6912456"
         },
         "test.test_subprocess.ProcessTestCase.test_call_timeout": {
-          "status": "compile-blocked",
-          "reason": "case.py:13:9: Imre: unknown class method"
+          "status": "body-completed-needs-operation-review",
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b"
         },
         "test.test_subprocess.ProcessTestCase.test_check_call_nonzero": {
           "status": "body-completed-needs-operation-review",
@@ -2165,7 +2197,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_stdout_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:15:33: Imre: unsupported exception attribute"
+          "reason": "case.py:15:33: Imre: expected dict[int, str], got object value; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_check_output_timeout": {
           "status": "body-completed-needs-operation-review",
@@ -2205,7 +2237,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input_nonbyte": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"select\""
+          "reason": "case.py:13:9: Imre: unsupported statement in the Imre subset"
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_pipe_buf": {
           "status": "compile-blocked",
@@ -2241,7 +2273,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_stdin_closed_before_call": {
           "status": "compile-blocked",
-          "reason": "case.py:19:30: Imre: expected int, got int | None; annotations are enforced contracts"
+          "reason": "case.py:19:30: Imre: expected bool | int, got int | None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_stdout": {
           "status": "body-completed-needs-operation-review",
@@ -2257,11 +2289,11 @@
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_input": {
           "status": "compile-blocked",
-          "reason": "case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"socket\""
+          "reason": "case.py:29:18: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_output": {
           "status": "compile-blocked",
-          "reason": "case.py:20:9: Imre: unknown class method"
+          "reason": "case.py:20:54: Imre: assertRaises needs a fixed native method receiver"
         },
         "test.test_subprocess.ProcessTestCase.test_cwd": {
           "status": "compile-blocked",
@@ -2297,11 +2329,11 @@
         },
         "test.test_subprocess.ProcessTestCase.test_env": {
           "status": "compile-blocked",
-          "reason": "case.py:18:30: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:18:30: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_executable": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCase.test_executable_replaces_shell": {
           "status": "compile-blocked",
@@ -2309,7 +2341,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_executable_takes_precedence": {
           "status": "compile-blocked",
-          "reason": "case.py:9:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:9:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCase.test_executable_with_cwd": {
           "status": "compile-blocked",
@@ -2353,7 +2385,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_invalid_env": {
           "status": "compile-blocked",
-          "reason": "case.py:38:30: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:38:30: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_io_buffered_by_default": {
           "status": "compile-blocked",
@@ -2372,8 +2404,12 @@
           "reason": "ProcessTestCase.test_leaking_fds_on_error needs its upstream method decorator"
         },
         "test.test_subprocess.ProcessTestCase.test_list2cmdline": {
-          "status": "compile-blocked",
-          "reason": "case.py:8:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "status": "body-completed-needs-operation-review",
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "a2dcff9faa9ec44da990768fa1ce096e7ce9f2f43979d9d9d05525939396e731"
         },
         "test.test_subprocess.ProcessTestCase.test_no_leaking": {
           "status": "compile-blocked",
@@ -2417,7 +2453,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_stderr_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:15:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:15:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_stderr_filedes": {
           "status": "compile-blocked",
@@ -2441,11 +2477,11 @@
         },
         "test.test_subprocess.ProcessTestCase.test_stderr_redirect_with_no_stdout_redirect": {
           "status": "compile-blocked",
-          "reason": "case.py:25:26: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:25:26: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_stdin_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:14:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:14:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_stdin_filedes": {
           "status": "compile-blocked",
@@ -2469,7 +2505,7 @@
         },
         "test.test_subprocess.ProcessTestCase.test_stdout_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:14:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:14:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCase.test_stdout_filedes": {
           "status": "compile-blocked",
@@ -2581,7 +2617,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_bytes_executable": {
           "status": "compile-blocked",
-          "reason": "case.py:9:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:9:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_bytes_executable_replaces_shell": {
           "status": "compile-blocked",
@@ -2596,7 +2632,7 @@
           "method_sha256": "7fe6dbce6c124c584b2e229b432d7a2fcdccd5c63784a56e887e00c6d3fe7bb6",
           "selector_parents": [
             {
-              "binary_sha256": "4276868a3317c1c90ba857eec3b3d5dba0705c60257e578b0fbe2cbc8462c436",
+              "binary_sha256": "96ec263adffb1249b831afb8be7749fa6eb8e1bab8b6b648ab3f223ed11e0d13",
               "native_parent_syscalls": {}
             }
           ]
@@ -2610,14 +2646,24 @@
           "method_sha256": "fd5e05b723660dfbc18a04861156ff8b895de24dfdeca7df9137d74da6912456",
           "selector_parents": [
             {
-              "binary_sha256": "52391d6d4ccd94bb9d9f9ed1e3e819a44ec2c460c49e1a412f1c10b1950a5598",
+              "binary_sha256": "df07da4e30466053e74bea6c8c2ee4d6c20b6d174dae806f6de2b636c40af9f2",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_call_timeout": {
-          "status": "compile-blocked",
-          "reason": "case.py:14:9: Imre: unknown class method"
+          "status": "body-completed-needs-operation-review",
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b",
+          "selector_parents": [
+            {
+              "binary_sha256": "7561b22e24d6190531a2f7b6b1fcc3a69eb7ab04970d0d37d85177b5761d0baf",
+              "native_parent_syscalls": {}
+            }
+          ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_call_nonzero": {
           "status": "body-completed-needs-operation-review",
@@ -2628,7 +2674,7 @@
           "method_sha256": "9ff46ab62ba1550ee55186ec52d2e0df16b383c1ee120a3a4f795d96ea5e0b95",
           "selector_parents": [
             {
-              "binary_sha256": "8ea14833ea390b400c2154e0b5cbaf9079e6540c0a9098f5e304397f981f750c",
+              "binary_sha256": "ba33e5985eb5aea705dd04959e7cf14ea8465b90817194481c7f9b66976fbfae",
               "native_parent_syscalls": {}
             }
           ]
@@ -2642,7 +2688,7 @@
           "method_sha256": "eb9e4e32882aede3b02500d8becc00d459666c137e77470d6e4dd16417c3edcd",
           "selector_parents": [
             {
-              "binary_sha256": "f7b210dfe0719b6b2aa873b47123c218a9cfcfea72527ad3dc91f1d9fad5fe30",
+              "binary_sha256": "7c0e498aeda73104bc17f308237c00dcb782a2acdb23819a9f9c32e879758ae9",
               "native_parent_syscalls": {}
             }
           ]
@@ -2680,7 +2726,7 @@
           "method_sha256": "471340b9db4c094ede2eb0b7f7cd8091993a42700fcfd8b4bc540c9099bab219",
           "selector_parents": [
             {
-              "binary_sha256": "dfd878c42e47d61969cbdee5863f31f79462eb64fb96d3015511a6ff4aef5b7d",
+              "binary_sha256": "57996ddf1b10506467a945de60cab018adcb8ca819e7228a4de9f9b3740983dd",
               "native_parent_syscalls": {}
             }
           ]
@@ -2699,7 +2745,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdout_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:16:33: Imre: unsupported exception attribute"
+          "reason": "case.py:16:33: Imre: expected dict[int, str], got object value; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_timeout": {
           "status": "body-completed-needs-operation-review",
@@ -2710,7 +2756,7 @@
           "method_sha256": "dab34ef13e89a41ed1950fe3263dbeacf0c8ccf3cd18aed38d657ea3dd4cd0c3",
           "selector_parents": [
             {
-              "binary_sha256": "67d62e72ac7dcc11f371306413732f5546a581a4be37956bdc0974627775388f",
+              "binary_sha256": "4cf33942245876b40975f8aa7bf8468e0b085ef3ea3883fc0686e006d6f55c37",
               "native_parent_syscalls": {
                 "pselect6": 1
               }
@@ -2747,7 +2793,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_memoryview_input_nonbyte": {
           "status": "compile-blocked",
-          "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"select\""
+          "reason": "case.py:14:9: Imre: unsupported statement in the Imre subset"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_pipe_buf": {
           "status": "compile-blocked",
@@ -2766,7 +2812,7 @@
           "method_sha256": "9268e8036ce63337675e2a26cd1c00b71cdfd5eddb510a921bbf5401363946fb",
           "selector_parents": [
             {
-              "binary_sha256": "e8429f4decf506c10ca5e10223b811e9640e3e39a8dc8beb1d25e59a6bd7a413",
+              "binary_sha256": "b10129c676cb917fe51aca87c0db0fac28623d9b449aa631c6a01855c870df63",
               "native_parent_syscalls": {}
             }
           ]
@@ -2780,7 +2826,7 @@
           "method_sha256": "d26e8c51d429ecd45589fb980f2c07805e81349c23d357a7d78b2cf703f882ea",
           "selector_parents": [
             {
-              "binary_sha256": "ac9284768685e83f6ee013ecb04f9bbd26e87045745e282b9da3843853737cc3",
+              "binary_sha256": "52461895ccb64b669b71d6fc12e87b4333d8741b0b86f1e00724f039745c576c",
               "native_parent_syscalls": {}
             }
           ]
@@ -2794,14 +2840,14 @@
           "method_sha256": "3e4af7f35b67768d0ab540fc19d472be0441519fc7fe279e86dc97bdc86c61c4",
           "selector_parents": [
             {
-              "binary_sha256": "5855f2f20fff988a3b02a225dfdee58cbfe1eb59f10adb03e759ba475913dceb",
+              "binary_sha256": "5b11834587dc8cbc99baf4813946877e1702ef0aafa1b4c3da75f6cdc868b286",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stdin_closed_before_call": {
           "status": "compile-blocked",
-          "reason": "case.py:20:30: Imre: expected int, got int | None; annotations are enforced contracts"
+          "reason": "case.py:20:30: Imre: expected bool | int, got int | None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stdout": {
           "status": "body-completed-needs-operation-review",
@@ -2812,7 +2858,7 @@
           "method_sha256": "1c6f5f200cfd3b1438be8d1b1195f88da5226b4e27b3d81553a7815fb473b7a2",
           "selector_parents": [
             {
-              "binary_sha256": "28c40363637e4b9ccf754ba4da80774498768a355f48f4f778af4e2bba9c5aca",
+              "binary_sha256": "d32bfb9e7205613543fded8779a15e0d939fc75287c17d3548be7a58b0851771",
               "native_parent_syscalls": {}
             }
           ]
@@ -2823,11 +2869,11 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_timeout_large_input": {
           "status": "compile-blocked",
-          "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"socket\""
+          "reason": "case.py:30:18: Imre: name is not a local value; globals and first-class functions are unsupported"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_timeout_large_output": {
           "status": "compile-blocked",
-          "reason": "case.py:21:9: Imre: unknown class method"
+          "reason": "case.py:21:54: Imre: assertRaises needs a fixed native method receiver"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd": {
           "status": "compile-blocked",
@@ -2863,11 +2909,11 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_env": {
           "status": "compile-blocked",
-          "reason": "case.py:19:30: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:19:30: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_executable": {
           "status": "compile-blocked",
-          "reason": "case.py:9:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:9:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_replaces_shell": {
           "status": "compile-blocked",
@@ -2875,7 +2921,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_takes_precedence": {
           "status": "compile-blocked",
-          "reason": "case.py:10:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:10:40: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_with_cwd": {
           "status": "compile-blocked",
@@ -2918,14 +2964,14 @@
           "method_sha256": "2c624dbefb8e0170b1b93696e7a5f891da573a3c795e902924d32f1ac99d6a9f",
           "selector_parents": [
             {
-              "binary_sha256": "4149ae954a39c95cbad43716b56a340a9f98be98b28eaaefefc3e960e49fd0d5",
+              "binary_sha256": "ac35f095fe7f60d15dbdf1ca8c6d791de191a646c8e4e34aa26b5d98c58c926b",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_env": {
           "status": "compile-blocked",
-          "reason": "case.py:39:30: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:39:30: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_io_buffered_by_default": {
           "status": "compile-blocked",
@@ -2944,8 +2990,18 @@
           "reason": "ProcessTestCase.test_leaking_fds_on_error needs its upstream method decorator"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_list2cmdline": {
-          "status": "compile-blocked",
-          "reason": "case.py:9:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "status": "body-completed-needs-operation-review",
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "a2dcff9faa9ec44da990768fa1ce096e7ce9f2f43979d9d9d05525939396e731",
+          "selector_parents": [
+            {
+              "binary_sha256": "731d06d7313222572e490b4b8a63f8fe259ac2d72ad76a0b0eab1fdc360ad054",
+              "native_parent_syscalls": {}
+            }
+          ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_no_leaking": {
           "status": "compile-blocked",
@@ -2989,7 +3045,7 @@
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:16:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:16:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_filedes": {
           "status": "compile-blocked",
@@ -3012,18 +3068,18 @@
           "method_sha256": "3faa8fd08713ebcce3dd422f216a5c5c98c207d4dd3eeb5eeaa9241341d4a710",
           "selector_parents": [
             {
-              "binary_sha256": "37ce2287374d620132f180ab618a3f9a6299258b41de2f5f2ef6b098ac66adf9",
+              "binary_sha256": "a22537d9af0d66d0528a523a677a83252fc5dbabdc4f233c5f453767d980ee54",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_redirect_with_no_stdout_redirect": {
           "status": "compile-blocked",
-          "reason": "case.py:26:26: Imre: expected int, got bytes; annotations are enforced contracts"
+          "reason": "case.py:26:26: Imre: expected bool | int, got bytes; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:15:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:15:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_filedes": {
           "status": "compile-blocked",
@@ -3046,14 +3102,14 @@
           "method_sha256": "4be91d3e38077c5299349478ad299dacfbf1766c558c379dd7faf7633392c090",
           "selector_parents": [
             {
-              "binary_sha256": "67368049b6800f39cdfe4b07ecabf1fd0b32b683db921a9ad6dcaa267beff199",
+              "binary_sha256": "6bbb38b4ed07c827d6ed26cd7c2ebf8203b82b333c24599e7de5793df3289093",
               "native_parent_syscalls": {}
             }
           ]
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_devnull": {
           "status": "compile-blocked",
-          "reason": "case.py:15:26: Imre: expected int, got None; annotations are enforced contracts"
+          "reason": "case.py:15:26: Imre: expected bool | int, got None; annotations are enforced contracts"
         },
         "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_filedes": {
           "status": "compile-blocked",
@@ -3080,7 +3136,7 @@
           "method_sha256": "80819fcbb79ff23f90e6f6d74fa70d78feb227db1ed979ad6d9745818b7bbd3d",
           "selector_parents": [
             {
-              "binary_sha256": "2040722d954cbc8e4f2d2510a4e534fc87a4be8f076de7d8bb45e9833847f376",
+              "binary_sha256": "33bf9e8f55e138a8a8dc5699f16e852eb4f2cababb4371a2120efe9e3f4ffab6",
               "native_parent_syscalls": {}
             }
           ]
@@ -3098,7 +3154,7 @@
           "method_sha256": "c2c8f9bf6c3ffaab945ce0001f38561a32034a731ab88ef1e0b6f40dcfe863f6",
           "selector_parents": [
             {
-              "binary_sha256": "88eaeb53c9b593bef86a550a0006a41b0e3d1ac8150bfb53bde3233299d13034",
+              "binary_sha256": "4668d268521a4097a939903372080da38a6b0daa96efee4225db2e2a5edc1d0a",
               "native_parent_syscalls": {}
             }
           ]
@@ -3144,7 +3200,7 @@
           "method_sha256": "53a051cf04fa9d22cc0d33d41dc96b4393a3c4f4fe2ac2d71846908ee77575d2",
           "selector_parents": [
             {
-              "binary_sha256": "428621aac995741020ac324e8ab1376979ac18c72149b44ff8acdf98b626db72",
+              "binary_sha256": "2ebd67a586575b2273cdc2061cc321169b8c57dad8ac42fafa1f7581ba9af18f",
               "native_parent_syscalls": {}
             }
           ]
@@ -3171,35 +3227,35 @@
         },
         "test.test_subprocess.RunFuncTestCase.test_capture_output": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_capture_stderr": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_capture_stdout": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check_output_input_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check_output_stdin_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check_output_stdin_with_input_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check_output_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_check_zero": {
           "status": "body-completed-needs-operation-review",
@@ -3215,11 +3271,11 @@
         },
         "test.test_subprocess.RunFuncTestCase.test_returncode": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_run_kwargs": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_run_with_an_empty_env": {
           "status": "reference-skip",
@@ -3243,19 +3299,19 @@
         },
         "test.test_subprocess.RunFuncTestCase.test_stderr_with_capture_output_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_stdout_stdout": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_stdout_with_capture_output_arg": {
           "status": "compile-blocked",
-          "reason": "case.py:8:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:8:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.RunFuncTestCase.test_timeout": {
           "status": "compile-blocked",
-          "reason": "case.py:7:5: Imre: decorators, type parameters, and variadic parameters are unsupported"
+          "reason": "case.py:7:32: Imre: keyword rest parameters need an element annotation"
         },
         "test.test_subprocess.Win32ProcessTestCase.test_call_string": {
           "status": "reference-skip",

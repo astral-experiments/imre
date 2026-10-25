@@ -2,17 +2,19 @@
 
 The [full method attempts](method-attempts-linux.json) record every one of the
 353 Linux occurrences at both optimization levels. The compiler/runtime was
-[`12a645f`](https://github.com/astral-sh/imre/commit/12a645f666187b35ebfaa4c53ad152187bb356d7),
-tree `3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26`. The original CPython fixture
+[`4851037`](https://github.com/astral-sh/imre/commit/4851037788ee9b71813db9d507bf84ff444ce61a),
+tree `d5ada98d3fab09be28ec2af344338dd4c3c9e9f2`. The original CPython fixture
 runner supplies the module, class and instance hooks; the compiled body uses a
 native case instance. No upstream method, expected result or skip was changed.
 
-Each all-method sweep completed 38 bodies, stopped compilation for 276, and
+Each all-method sweep completed 42 bodies, stopped compilation for 272, and
 observed 39 reference skips. The sweep explicitly enables the two CPU-gated
 failure-cleanup cases; the default reference and canonical reports retain
 all **41** original skips. The six checked-output methods in each poll variant
-need typed membership assertions. They completed separately and do not overlap
-the 38: **50 native bodies with host fixtures**, zero fully native occurrences.
+use typed membership assertions. They completed separately and do not overlap
+the 42. A completed body is an execution receipt; it earns a native-operation
+classification only where the operation itself has been checked. The fixture
+remains CPython, and zero occurrences are fully native.
 The earlier typed subclasses of `unittest.TestCase` no longer compiled once
 `assertIn` gained a dictionary parameter. The local case now uses native
 `bytes in bytes` or `str in str` and calls the bundled `TestCase.assertTrue`

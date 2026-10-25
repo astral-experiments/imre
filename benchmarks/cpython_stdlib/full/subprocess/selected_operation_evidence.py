@@ -5,11 +5,10 @@ import json
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+HERE = Path(__file__).resolve().parent
+sys.path[:0] = [str(HERE), str(HERE.parents[1])]
 from readiness_evidence import ID as READINESS_ID, verify_case
 from suite_evidence import build_report, validate_pair
-
-HERE = Path(__file__).resolve().parent
 
 
 def selected(report, attempts, revision, tree):

@@ -165,7 +165,7 @@ output. Pass the two files from each command, in level order, to
 
 [evidence-linux.json](evidence-linux.json) follows the [shared evidence contract](../../NATIVE_EVIDENCE.md).
 It covers the 353 original loader occurrences (353 distinct IDs) at each of -O0 and -O3.
-The [selector replay](CHECKED_AND_PIPES.md) measures 25 rows on Imre `12a645f`;
+The [selector replay](CHECKED_AND_PIPES.md) measures 25 rows on Imre `4851037`;
 other rows retain their individual measured revisions. There is no companion Python test
 package: `test.test_subprocess` is one module, and the five `subprocessdata` scripts are
 child programs. The earlier [native-linux.json](native-linux.json) records a different
@@ -174,12 +174,12 @@ pipe implementation revision and remains useful for comparing individual calls.
 | Execution | -O0 | -O3 |
 | --- | ---: | ---: |
 | Fully native | 0 | 0 |
-| Native method and subprocess operation, CPython fixture | 50 | 50 |
-| Host method and assertions, native subprocess operation | 69 | 69 |
+| Native method and subprocess operation, CPython fixture | 54 | 54 |
+| Host method and assertions, native subprocess operation | 82 | 82 |
 | Both host and native subprocess operations | 9 | 9 |
 | Host subprocess operation only | 6 | 6 |
-| Blocked | 163 | 163 |
-| Failed | 15 | 15 |
+| Blocked | 150 | 150 |
+| Failed | 11 | 11 |
 | Upstream skip with exact condition and source (2 CPU cases pass when enabled) | 41 | 41 |
 | **Total** | **353** | **353** |
 
@@ -192,8 +192,8 @@ the result. Native status does not imply that the child is native. Twelve inheri
 NoPoll cases never reached a selector in the native parent; [selector_proof.py](selector_proof.py)
 checked each one, with a separate timed communication case as a positive control.
 The control has no separate assertion call: its original loop must catch timeouts and
-eventually return. Eight host-driven cases use the older reconstructed
-`RunFuncTestCase` fixture. Six cases exercising the reference's private process interface
+eventually return. The ledger identifies any host-driven cases that use the older
+reconstructed `RunFuncTestCase` fixture. Six cases exercising the reference's private process interface
 are explicitly recorded as host operations. See [MOCK.md](MOCK.md) for the shared mock requirements.
 
 The default reference disables the CPU resource. The two inherited `test_leaking_fds_on_error`

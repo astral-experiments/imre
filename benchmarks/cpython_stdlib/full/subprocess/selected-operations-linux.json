@@ -1,7 +1,7 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "imre_revision": "12a645f666187b35ebfaa4c53ad152187bb356d7",
-  "tested_tree": "3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26",
+  "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+  "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
   "reports": [
     {
       "opt_level": 0,
@@ -9,8 +9,8 @@
         "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
         "opt_level": 0,
         "toolchain": {
-          "imre": "f6060be2079656368220a946a71d4c31ca9e336bae91efd72b13288503d5b863",
-          "runtime": "7e4c195aebfc1dea384ec14e0548f2367e7ac00ef73032237f5c8fb9601e0997",
+          "imre": "446b01c66a60604697013fe998d712af0ddfcd8a0799d2dafb0c7605c32ac622",
+          "runtime": "9c7858bb292d4880045a37546570eb9cdd712222b201404f6380da624e47c26e",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
@@ -44,8 +44,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "dcf4bbe61c9d2d1341acdbe3054f63f12d6e46290515f0036ee676e947a2c8f8",
-                "llvm_sha256": "c21be99a7b9bccf5ac76fa08a7db04a6199ecd13f31322ad606173ee9c725074",
+                "native_parent_sha256": "21067d2a3a3d628a30b962fbd23dacb9c54f53a5bf22c440cb495225ebcb5748",
+                "llvm_sha256": "09e9544ee1897efea282bc338176a0902528c583ddef9611a0084b64d7a5255b",
                 "runtime_calls": [
                   "imre_call_config"
                 ],
@@ -87,8 +87,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "8a641ae110e18472f75d200c857dd121d37cd58fbf73e75860bd9b5d8a1cec08",
-                "llvm_sha256": "69a37139e1cead4f117fa4b3fa921ff4b309512a4923dbe1d3857f5ece8e09e7",
+                "native_parent_sha256": "3ff625f24582748780ea61ce75e782bfbef0f64f684c78bf26778bc1f628d7fe",
+                "llvm_sha256": "71e4f689961e65b0a29b5df1a8002b0fe7dc651696488635f29fac0a77a49e37",
                 "runtime_calls": [
                   "imre_run_config"
                 ],
@@ -130,8 +130,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "bec989148f32d6df09e445c785d518f01c6426aede3bff64d953556aa8638174",
-                "llvm_sha256": "72260dcd6a38f1ff7bbe32c348655939782dc5a33df58ca7856938444a3f824f",
+                "native_parent_sha256": "01d2fc87fc50ffe8a61d883adcae80cb414e113a36109edfe5e7380c8932a08d",
+                "llvm_sha256": "21d61192664ca01c151ad04fb0cb66570e2e06e065d23bf295df9851634629ab",
                 "runtime_calls": [
                   "imre_run_config"
                 ],
@@ -175,8 +175,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "6e507c3b134266aa693a655fb3b7f6bb46fbd3293846feb17da361c586b2bef2",
-                "llvm_sha256": "846c3b5dd5332ba4bcbaddd907bdcb793711e9fd710c770fd3f3e42b3340299c",
+                "native_parent_sha256": "42179cbdeeccc2cae54ec4d27f0c45df5145689fa426b0c1f69ce788e8d918ab",
+                "llvm_sha256": "6125442af234b597e8454bb1bcfd0749ec1e3ea9fb36d9e88e4ab92064879c2d",
                 "runtime_calls": [
                   "imre_popen_config",
                   "imre_popen_config"
@@ -218,8 +218,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "5fb715e36e9060b65275b68f7c3a6c54486ca4323fcdf8e260389de54c9923ef",
-                "llvm_sha256": "8cd19df47f38abfa60dcba721c240738addb9190a7a7cee9f0f34bc07743e4c2",
+                "native_parent_sha256": "4f179161bc9eb03099a79c38188772c216d7ebe2c660cda3ea397e5abf826c85",
+                "llvm_sha256": "ae44aef89358a2e618b879cf326dd9fa9fa54cb419ca01058cdcea58ba8392bc",
                 "runtime_calls": [
                   "imre_call_config"
                 ],
@@ -261,8 +261,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "1837d0a2d378f92d95bbdd56fc10730932ee2b3f6fe26370834a2aa127c24178",
-                "llvm_sha256": "d16b230485199cdd2599379152ddb30a0cbec9b10935979c85b6c59c34b6ff82",
+                "native_parent_sha256": "d0ea150b53489ed8b920e62caaa9c3f6434fd00905fdb4faee61d2c89a93c934",
+                "llvm_sha256": "d830efbd134274b35fa7966d1ade5ccf3d419802177467fc0be4a1c60afe93a2",
                 "runtime_calls": [
                   "imre_run_config"
                 ],
@@ -304,8 +304,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "a3c063c977d7c69452d7c5b3b55b672d9516b70d7e884cfee842214f3db12aab",
-                "llvm_sha256": "a158a9ea9f45628613fa5fd1add6ba5454297ce6f821d8fc78fd3c68d9f13c64",
+                "native_parent_sha256": "dbaf2c7a6e1a09599cefc2ec0d040024fcdb389b5d80f10900131c3a40785c2f",
+                "llvm_sha256": "5629793962f957334ebf7783cfbb896a78f8e14326ab3407ea8217bf7259ce9d",
                 "runtime_calls": [
                   "imre_run_config"
                 ],
@@ -349,8 +349,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "682a56751986d198959722b093e5f5590aa177481d90dc7fc5777770c7d8b6e1",
-                "llvm_sha256": "0dc44c80c2be0da9a309e616b7e70987b820221f054fb2dca319093c8ac60498",
+                "native_parent_sha256": "71535816eb865ad64d1e8a7e775926ece0c71d5dc2a91517bf65dc6681751042",
+                "llvm_sha256": "87aace4c9170e6300d492ca0e621174792e6c5d5ae67d67f1e17b417cdb8c3d5",
                 "runtime_calls": [
                   "imre_popen_config",
                   "imre_popen_config"
@@ -392,8 +392,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "b14c09030ee9622fe952fdd31fa9392f8c13bed5f5c8cc457a232f5a0f032c40",
-                "llvm_sha256": "7aa3e4c70dd4ac1b41a01ae48012b82a11ba5d3a999e24c1542c4a4ed56feb73",
+                "native_parent_sha256": "11c9c8b0a765db565bf7530ffa1ba976fe0e0bf1ac4a58b16a59d66a3a3ba9c2",
+                "llvm_sha256": "c0a0e48ae38f2dc2d0b75b371e1d9335dc0331d20ca65d6f21f20d9ae9c42424",
                 "runtime_calls": [
                   "imre_run_config"
                 ],
@@ -433,7 +433,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "a2ffb48f315f3901c3957cbedf497f3e881027002e8fcc76a8bec9d1ed5cfb94",
+                  "binary_sha256": "6d6248164218ac83f426e55190aefc28d6fac09ec457ac5c9c572675f02d8bf8",
                   "native_parent_syscalls": {
                     "poll": 3
                   }
@@ -464,7 +464,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "3ea8763852a169d7eb6975bc8425bb979e2954003b180297766a8ee022d5e757",
+                  "binary_sha256": "aaf501398caadeebc6cad6645fd933dcc9a29b9a2fd65a4c072c1c5aaaf91bbf",
                   "native_parent_syscalls": {
                     "poll": 2
                   }
@@ -495,7 +495,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "735e6c595e2a77756ecbb775e5baf771f0f335ffe00fe6bb7fdd314215f41f2a",
+                  "binary_sha256": "75e9e38fec2f9d1f4e76e007f3621970b22e65bc2d531743b0660433e1a193fe",
                   "native_parent_syscalls": {
                     "poll": 2
                   }
@@ -526,7 +526,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "4ec7998401d0872e30ff6da0d69943a5640b649c1188d357ffddc675a727c9d4",
+                  "binary_sha256": "b54a868cf5ed1e7b41b069c52af5fb939a9d8627f913e2ae20f8f51b34ee9dfd",
                   "native_parent_syscalls": {
                     "poll": 2
                   }
@@ -557,7 +557,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "7e100846c86553ee287c5980225d791a0b3320a70a651137a255f81c4b8b8839",
+                  "binary_sha256": "882a0d524a75ad643fb15e657c6af2912c09e2f1e9b43ffc63d277b7222cacd6",
                   "native_parent_syscalls": {
                     "poll": 2
                   }
@@ -588,7 +588,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "22e9de7c997af940a4ea0341b7115e9bc56b5c29ba2353bc73c65e36c63e9b38",
+                  "binary_sha256": "481a98e1759ddb034679182c9ed0c094d6195d4cf2dbcfcb9d8ca143b527db12",
                   "native_parent_syscalls": {}
                 }
               ]
@@ -617,7 +617,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "5f79c2581cc8ad9ddd68c8a66dffe4d97246efb9872e83d8129082a3be1db036",
+                  "binary_sha256": "bac378fe520b674338b7597d1b86514fb798f69c16c85a5777859020b2e4bb4a",
                   "native_parent_syscalls": {
                     "pselect6": 3
                   }
@@ -648,7 +648,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "eddeaa915a18f37713ad4e947b8983f52ce8acad2bb09ea6f16d25c39193faba",
+                  "binary_sha256": "ed969c0594dc767482480e79149d1dba13ae331879a80ed7c931c173326d4d16",
                   "native_parent_syscalls": {
                     "pselect6": 2
                   }
@@ -679,7 +679,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "3b7369b0d5bd19688bcd39797c9ab520b18cb084e861a6db0d262e8c2ec1bc7c",
+                  "binary_sha256": "bc85920a4880f5a4406dd813be3fb41c162bde867d8f073c78b13280d90e9c25",
                   "native_parent_syscalls": {
                     "pselect6": 2
                   }
@@ -710,7 +710,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "b4030245058855e0d3c82d68d1ea49f1bcbc1b070de8337b095a68dff2c7fe43",
+                  "binary_sha256": "b1c0374b1533413038e39af8baa7c290c821bcfa43a813b1a3689031ca5d90b8",
                   "native_parent_syscalls": {
                     "pselect6": 2
                   }
@@ -741,7 +741,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "71f9d51e9cc75d08a6db04213fd61da8c3bc57f7a0251c52a01ed96380ff69f5",
+                  "binary_sha256": "dd91099e2e15f76468cf5b2906d2b4d3738862ff2b7bf5f2b5312f17d76f590b",
                   "native_parent_syscalls": {
                     "pselect6": 2
                   }
@@ -772,7 +772,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "9c42d57964ff718c0f8e86b0db663d32b1be2d51e91748ac173e9d3b65c409b7",
+                  "binary_sha256": "763ac9d40c06c82e7260200d31b32616b27e564b807064b594af2433ec8187df",
                   "native_parent_syscalls": {}
                 }
               ]
@@ -790,7 +790,7 @@
               "assertions": "Imre",
               "fixture_execution": "CPython module/class/instance hooks; native instance in child",
               "method_sha256": "dfa55970d928cd33e72794fee1686c8aaab73744976177c1410e6e5439aeedf0",
-              "native_parent_sha256": "987e1635970af42dd5d4fe9e058cc8c36c6b08b1aed0155ced595a08a6129081",
+              "native_parent_sha256": "49c2c885f86b8ecd79df4d5fa280b1e6145d2f543fb2458c5df3ce6003d667ac",
               "native_closed_fds": [
                 0,
                 1
@@ -820,8 +820,8 @@
         "opt_level": 0,
         "fixture_sha256": "00e7fdc6d9313f3c93263f7a33f241ba102506e2241be64bcd8d97c79761d23b",
         "toolchain": {
-          "imre": "f6060be2079656368220a946a71d4c31ca9e336bae91efd72b13288503d5b863",
-          "runtime": "7e4c195aebfc1dea384ec14e0548f2367e7ac00ef73032237f5c8fb9601e0997",
+          "imre": "446b01c66a60604697013fe998d712af0ddfcd8a0799d2dafb0c7605c32ac622",
+          "runtime": "9c7858bb292d4880045a37546570eb9cdd712222b201404f6380da624e47c26e",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
@@ -838,7 +838,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "a070fb7a13d96bf3dbf23eb509e9f7e4e975c848b353cb34001d036833cfa119",
+                "actor_sha256": "3db739b3c3dce1171f51202eac4a1accb26367edcf138e37e43b284a0da6d03f",
                 "read_bytes": 4,
                 "remaining_kernel_bytes": 1,
                 "same_open_file_description": "SCM_RIGHTS",
@@ -861,7 +861,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "4daa27b6df38bcea291ccbbd2af94fc53b3cc06b48f06d078d276d3c8d313060",
+                "actor_sha256": "5689a3288e6b7a0c4c344cd31a874d382cae69844a7450262fe3d3ed2bda0533",
                 "selector": "PollSelector",
                 "native_deliveries": 2,
                 "original_handler_calls": 2,
@@ -903,7 +903,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "c502cf2281cd3f8dfde8c7c1181aa3218d724850a348f2075602d95370a4b7ef",
+                "actor_sha256": "2e79d073865b75f9d31b1f70d9dfb7646d7af4271817509f0f09373ab845fb6e",
                 "selector": "SelectSelector",
                 "native_deliveries": 2,
                 "original_handler_calls": 2,
@@ -941,8 +941,8 @@
         "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
         "opt_level": 3,
         "toolchain": {
-          "imre": "f6060be2079656368220a946a71d4c31ca9e336bae91efd72b13288503d5b863",
-          "runtime": "7e4c195aebfc1dea384ec14e0548f2367e7ac00ef73032237f5c8fb9601e0997",
+          "imre": "446b01c66a60604697013fe998d712af0ddfcd8a0799d2dafb0c7605c32ac622",
+          "runtime": "9c7858bb292d4880045a37546570eb9cdd712222b201404f6380da624e47c26e",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
@@ -976,8 +976,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "2700e571e8dd5b6bc97a2eb801df730c3310702dd3e7284ccfb79fe93ee45834",
-                "llvm_sha256": "c21be99a7b9bccf5ac76fa08a7db04a6199ecd13f31322ad606173ee9c725074",
+                "native_parent_sha256": "5780aa98d86a20f959016b70b53fdd0771354ca11d1b87f50dc3721de8b43725",
+                "llvm_sha256": "09e9544ee1897efea282bc338176a0902528c583ddef9611a0084b64d7a5255b",
                 "runtime_calls": [
                   "imre_call_config"
                 ],
@@ -1019,8 +1019,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "7a44fab5b822a358e0bb3b092c3c599edb44aabeb6c27a8b843c723b3d8b5eb0",
-                "llvm_sha256": "69a37139e1cead4f117fa4b3fa921ff4b309512a4923dbe1d3857f5ece8e09e7",
+                "native_parent_sha256": "16bbb23964cd7863e85710489986e39fd8f7837ea1c4f1c923905d5303a51225",
+                "llvm_sha256": "71e4f689961e65b0a29b5df1a8002b0fe7dc651696488635f29fac0a77a49e37",
                 "runtime_calls": [
                   "imre_run_config"
                 ],
@@ -1062,8 +1062,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "71bce7ce56ad1255cae85a56ca4754189310bc979a10994c46ab7a418f32abe8",
-                "llvm_sha256": "72260dcd6a38f1ff7bbe32c348655939782dc5a33df58ca7856938444a3f824f",
+                "native_parent_sha256": "f1080eb4bd04f964c45d062b798cef820c38f4abbc60007b07c46e8d3b66c536",
+                "llvm_sha256": "21d61192664ca01c151ad04fb0cb66570e2e06e065d23bf295df9851634629ab",
                 "runtime_calls": [
                   "imre_run_config"
                 ],
@@ -1107,8 +1107,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "9e320193d808f10e2899562290d0af4e699868bc8f6d5c98e2fd54e3776ac41e",
-                "llvm_sha256": "846c3b5dd5332ba4bcbaddd907bdcb793711e9fd710c770fd3f3e42b3340299c",
+                "native_parent_sha256": "e51ff3acebde60dabf3fdf7f801081375c9ee8256b07284583230a6db666fe1b",
+                "llvm_sha256": "6125442af234b597e8454bb1bcfd0749ec1e3ea9fb36d9e88e4ab92064879c2d",
                 "runtime_calls": [
                   "imre_popen_config",
                   "imre_popen_config"
@@ -1150,8 +1150,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "3cfac7cba8638b6299d37591bdb0d0bdaddaad929b8ee3fb07757291e1f7f11d",
-                "llvm_sha256": "8cd19df47f38abfa60dcba721c240738addb9190a7a7cee9f0f34bc07743e4c2",
+                "native_parent_sha256": "550168a141d76775efcc7353ee161010740cf53f0d60be29a73512dcadc7bbb2",
+                "llvm_sha256": "ae44aef89358a2e618b879cf326dd9fa9fa54cb419ca01058cdcea58ba8392bc",
                 "runtime_calls": [
                   "imre_call_config"
                 ],
@@ -1193,8 +1193,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "7a8f72d0e3b29b2017858d60b0698a3e6668f05685be70a4862a75cb7a4315a2",
-                "llvm_sha256": "d16b230485199cdd2599379152ddb30a0cbec9b10935979c85b6c59c34b6ff82",
+                "native_parent_sha256": "c40e724328bdae0b380e1d4c7c743b50ab7cf674ec224ec042323d9a452e10d1",
+                "llvm_sha256": "d830efbd134274b35fa7966d1ade5ccf3d419802177467fc0be4a1c60afe93a2",
                 "runtime_calls": [
                   "imre_run_config"
                 ],
@@ -1236,8 +1236,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "0d93497efa94a6bb94837a11b5db6389edf430eee26f00b8a7d7f89f57a3fb00",
-                "llvm_sha256": "a158a9ea9f45628613fa5fd1add6ba5454297ce6f821d8fc78fd3c68d9f13c64",
+                "native_parent_sha256": "b1ee2d40a414aac517d4074e57570c708e3c40296b3d7a8774bc249677a52df1",
+                "llvm_sha256": "5629793962f957334ebf7783cfbb896a78f8e14326ab3407ea8217bf7259ce9d",
                 "runtime_calls": [
                   "imre_run_config"
                 ],
@@ -1281,8 +1281,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "11568facd938f04c41d58986e0c625d994bab6ade88d0006cab1811edaa89119",
-                "llvm_sha256": "0dc44c80c2be0da9a309e616b7e70987b820221f054fb2dca319093c8ac60498",
+                "native_parent_sha256": "2bfdab4f6937d54d042af84baac44d4131a6dc96e560dcdfed2239ac27f815a7",
+                "llvm_sha256": "87aace4c9170e6300d492ca0e621174792e6c5d5ae67d67f1e17b417cdb8c3d5",
                 "runtime_calls": [
                   "imre_popen_config",
                   "imre_popen_config"
@@ -1324,8 +1324,8 @@
                 "fixture": "cpython"
               },
               "observed": {
-                "native_parent_sha256": "3257e966b9779f5d5f8ba38e2cc90797b7e7df91b3b000f7892c9f64b8124be0",
-                "llvm_sha256": "7aa3e4c70dd4ac1b41a01ae48012b82a11ba5d3a999e24c1542c4a4ed56feb73",
+                "native_parent_sha256": "4239a06ddf604f49673b7080ddf07451128f37846083dec12a559270ed228268",
+                "llvm_sha256": "c0a0e48ae38f2dc2d0b75b371e1d9335dc0331d20ca65d6f21f20d9ae9c42424",
                 "runtime_calls": [
                   "imre_run_config"
                 ],
@@ -1365,7 +1365,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "4656427ef4a03a0a4852068da0a32c5c6cc8a7120467379e831c7300a89abd67",
+                  "binary_sha256": "718d909945d231fc3b968de18c1fe1240ce082c0d73ed2c92580cfe53bfd9ac7",
                   "native_parent_syscalls": {
                     "poll": 3
                   }
@@ -1396,7 +1396,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "3323ef9e852e8f425578eac3aa3b60abfa2fb548fd274f8dcdd4d7cb6784d98b",
+                  "binary_sha256": "611dafae8d86ea5a97d751e27d80543ad413d181226558903a7ad2f412b1c780",
                   "native_parent_syscalls": {
                     "poll": 2
                   }
@@ -1427,7 +1427,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "062bcdbe59023711b4d52dde56ab2bf68094329419e3dc1593776ecdd68e2467",
+                  "binary_sha256": "98c03c57f67a3f6da1e3c997b9c3a8822c75e847263a3ecc0e42ee237513f32b",
                   "native_parent_syscalls": {
                     "poll": 2
                   }
@@ -1458,7 +1458,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "80f0c036ac1f42c1d4674a51964606aeedcba0d0d0ab581eafe4678cdd36c666",
+                  "binary_sha256": "10fdb0cae633f087dcf96b62ec38fd073ab172255bd5af187ca9917fdcd2ae66",
                   "native_parent_syscalls": {
                     "poll": 2
                   }
@@ -1489,7 +1489,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "26095f7cf1eb69586e9db6907a85a9ec71b5d6dea739e41070353a9cd84ed20e",
+                  "binary_sha256": "98e6c55eda0556f02af6372ccb7b898308298bbb9174e0fa36c1bcfe80660a02",
                   "native_parent_syscalls": {
                     "poll": 2
                   }
@@ -1520,7 +1520,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "1e5f097d5b80b77b84ef1519197da825539a5502f100203f825aa6730bb41816",
+                  "binary_sha256": "603d9605967a4b6cca1f54b4fe25a00a76f3d9cc64c3d829cae5082dd08e03fc",
                   "native_parent_syscalls": {}
                 }
               ]
@@ -1549,7 +1549,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "67713c0473432d6a0c190592d9077b080bd3b9417e7d89d22ab7a0df8f95e4b2",
+                  "binary_sha256": "f31c3e749bd0addff34eedb0360712e8eb8dcee9e05fccedf123d851d56330ee",
                   "native_parent_syscalls": {
                     "pselect6": 3
                   }
@@ -1580,7 +1580,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "53aba38a7ad6e0769656ce2fbaa5c4154fd4bf10546c66f7a5cd34e9b32443a7",
+                  "binary_sha256": "75a9e9791869191bba02bdcf9a0f3f009f82dbc3b3b032aef30808d084cfc6bb",
                   "native_parent_syscalls": {
                     "pselect6": 2
                   }
@@ -1611,7 +1611,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "77d7d5b98f86f2518b46576f48d9cba0ef4f10d27181b7d7dade48e63a192ee7",
+                  "binary_sha256": "ecfd235301c8781e19395ed96c74d452d4aacf0aed6ae67352b9c06db7c448ac",
                   "native_parent_syscalls": {
                     "pselect6": 2
                   }
@@ -1642,7 +1642,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "de3a76e1f4b330d7c5d1ee34ebcb830d03fa1c9ec7369410a1be1fc64e7d1904",
+                  "binary_sha256": "257df290a09fb5dac98e12ab0eaabc901f14d03494e962254f3098575c8aebd6",
                   "native_parent_syscalls": {
                     "pselect6": 2
                   }
@@ -1673,7 +1673,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "383a7cd9770c94c9072fad5d0ebb8c2b31519d562838c11fd5ed5f210c4c180b",
+                  "binary_sha256": "36e097f00fcc3fcb85dae7fff50387416d2f7a0e966488bc4d2d5dfecb06d961",
                   "native_parent_syscalls": {
                     "pselect6": 2
                   }
@@ -1704,7 +1704,7 @@
               },
               "selector_parents": [
                 {
-                  "binary_sha256": "b9c6be5adffcf504d9ca6a303747675720f6c029e8157f452ba0b7102fe9c2d7",
+                  "binary_sha256": "ad4849e28ca65af5bdad48cce28c25bb640d92ce4263b9355d46b317051ce502",
                   "native_parent_syscalls": {}
                 }
               ]
@@ -1722,7 +1722,7 @@
               "assertions": "Imre",
               "fixture_execution": "CPython module/class/instance hooks; native instance in child",
               "method_sha256": "dfa55970d928cd33e72794fee1686c8aaab73744976177c1410e6e5439aeedf0",
-              "native_parent_sha256": "13a0c9bda52c33e373b67c1ef2be89447a42d3c94f070ce3f187e9798744717c",
+              "native_parent_sha256": "b7e5635be2d66578d8470db24234ba6a4020d543ca5ed659e1ba6bc4124851d6",
               "native_closed_fds": [
                 0,
                 1
@@ -1752,8 +1752,8 @@
         "opt_level": 3,
         "fixture_sha256": "00e7fdc6d9313f3c93263f7a33f241ba102506e2241be64bcd8d97c79761d23b",
         "toolchain": {
-          "imre": "f6060be2079656368220a946a71d4c31ca9e336bae91efd72b13288503d5b863",
-          "runtime": "7e4c195aebfc1dea384ec14e0548f2367e7ac00ef73032237f5c8fb9601e0997",
+          "imre": "446b01c66a60604697013fe998d712af0ddfcd8a0799d2dafb0c7605c32ac622",
+          "runtime": "9c7858bb292d4880045a37546570eb9cdd712222b201404f6380da624e47c26e",
           "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
         },
         "rows": {
@@ -1770,7 +1770,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "d0ff5fff769a3528854e20ffbd979af9d5be84271a91fb4ac101598c8db679b2",
+                "actor_sha256": "03bbc5e39779c13c3342c0c56ad4db5d9dadf05cbb4799f1fb013e2e279fb4ef",
                 "read_bytes": 4,
                 "remaining_kernel_bytes": 1,
                 "same_open_file_description": "SCM_RIGHTS",
@@ -1793,7 +1793,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "dee8f2a8319b7fcdfdd35edbda56785df9e394a08794bb8b0036bee4be3159da",
+                "actor_sha256": "ccbf3305866a78d4a2c3b19ab4136c7451279f9c3945a68929987b21ad4ad569",
                 "selector": "PollSelector",
                 "native_deliveries": 2,
                 "original_handler_calls": 2,
@@ -1835,7 +1835,7 @@
                 "fixture": "mixed"
               },
               "observed": {
-                "actor_sha256": "6ab96a786e143f982de1938082aef0f21c856a525b5b1291c438401fb9cc2467",
+                "actor_sha256": "e95ed24c3f6e2018de1c21ba9d4b0bca19f8fb2973c9ec93c94be2dfe1529326",
                 "selector": "SelectSelector",
                 "native_deliveries": 2,
                 "original_handler_calls": 2,
