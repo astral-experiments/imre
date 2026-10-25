@@ -61,3 +61,5 @@ logger and its parent receive the same record with the copied fields.
 Module-level calls install the default root handler before a conflicting extra
 raises. Heterogeneous literals, an aliased dictionary, `None`, and an empty
 mapping are covered. The comparison adds no suite IDs.
+
+The complete replay at `332837a` reproduced all 544 individual records from `773d272` byte for byte (SHA-256 `2b8a2abf07d9fab9db0beb7bb63aed37e1a7bba553d4095995781a70bce69d65`). All 116 file and argument checks also passed at O0 and O3.
