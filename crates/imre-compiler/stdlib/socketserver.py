@@ -82,6 +82,12 @@ class _SocketWriter:
         self._socket.sendall(data)
         return len(data)
 
+    def writable(self) -> bool:
+        return True
+
+    def fileno(self) -> int:
+        return self._socket.fileno()
+
     def flush(self) -> None:
         if self.closed:
             raise ValueError("I/O operation on closed file.")
@@ -91,6 +97,10 @@ class _SocketWriter:
 
 
 class StreamRequestHandler(BaseRequestHandler):
+    timeout = None
+    rbufsize = -1
+    wbufsize = 0
+    disable_nagle_algorithm = False
     _reader: _SocketReader | None
     _writer: _SocketWriter | None
 
@@ -100,6 +110,12 @@ class StreamRequestHandler(BaseRequestHandler):
         super().__init__(request, client_address, server)
 
     def setup(self) -> None:
+        if self.timeout is not None:
+            raise NotImplementedError("socketserver stream timeout only supports None")
+        if self.rbufsize != -1 or self.wbufsize != 0:
+            raise NotImplementedError("custom socketserver stream buffer sizes are unsupported")
+        if self.disable_nagle_algorithm:
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._reader = _SocketReader(self.request)
         self._writer = _SocketWriter(self.request)
 
@@ -129,6 +145,8 @@ class TCPServer:
     address_family = socket.AF_INET
     socket_type = socket.SOCK_STREAM
     allow_reuse_address = False
+    allow_reuse_port = False
+    timeout = None
     request_queue_size = 5
 
     def __init__(self, server_address: tuple[str, int], RequestHandlerClass: type[BaseRequestHandler], bind_and_activate: bool = True) -> None:
@@ -138,6 +156,8 @@ class TCPServer:
         _activate(self, bind_and_activate)
 
     def server_bind(self) -> None:
+        if self.allow_reuse_port:
+            raise NotImplementedError("socketserver allow_reuse_port is unsupported")
         if self.allow_reuse_address:
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind(self.server_address)
@@ -193,6 +213,8 @@ class TCPServer:
     def handle_request(self) -> None:
         if self.fileno() < 0:
             raise ValueError("Invalid file descriptor: -1")
+        if self.timeout is not None:
+            raise NotImplementedError("socketserver listener timeout only supports None")
         if not self.socket.getblocking():
             raise NotImplementedError("nonblocking listener requires selector integration")
         try:

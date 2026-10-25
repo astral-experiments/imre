@@ -16,7 +16,7 @@ class Echo(socketserver.BaseRequestHandler):
 
 
 class Reverse(Echo):
-    def handle(self) -> None:
+    def handle(self):
         self.request.sendall(self.request.recv(64)[::-1])
 
 

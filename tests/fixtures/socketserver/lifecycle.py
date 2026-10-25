@@ -44,7 +44,12 @@ class Rejected(Observed):
 
 
 class Lines(StreamRequestHandler):
+    disable_nagle_algorithm = True
+
     def handle(self) -> None:
+        assert self.request.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY) != 0
+        assert self.wfile.writable() and self.wfile.fileno() == self.request.fileno()
+        assert self.timeout is None and self.rbufsize == -1 and self.wbufsize == 0
         assert self.rfile.readline(0) == b""
         first = self.rfile.readline(2)
         rest = self.rfile.readline()
@@ -89,6 +94,7 @@ def main() -> None:
         assert saved is not None and saved.fileno() == -1
     delayed = TCPServer(("127.0.0.1", 0), Lines, bind_and_activate=False)
     with delayed:
+        assert delayed.timeout is None and not delayed.allow_reuse_port
         assert delayed.server_address[1] == 0
         delayed.server_bind()
         delayed.server_activate()

@@ -18,7 +18,10 @@ supports buffered binary `rfile.readline([size])` and unbuffered
 
 Timed and nonblocking request loops, `serve_forever`, `shutdown()`, threaded
 and forking servers, Unix sockets, datagrams and general socket file objects
-are outside this slice. The default error hook reports the peer and message
+are outside this slice. A non-None timeout is rejected instead of entering a
+blocking accept. Custom stream buffer sizes and `allow_reuse_port=True` are
+explicitly unsupported. The stream handler honors `disable_nagle_algorithm`.
+The default error hook reports the peer and message
 without Python traceback frames. Werkzeug also imports `http.server` and
 defines classes using both socketserver mixins.
 

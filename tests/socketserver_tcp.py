@@ -32,6 +32,18 @@ REJECT = {
 }
 
 
+TIMED_LISTENER = """from socketserver import TCPServer, BaseRequestHandler
+class Timed(TCPServer):
+    timeout = 0
+with Timed(("127.0.0.1", 0), BaseRequestHandler) as server:
+    try:
+        server.handle_request()
+        print("timed out")
+    except NotImplementedError as error:
+        print(str(error))
+"""
+
+
 def observe(command):
     p = subprocess.run(command, capture_output=True, timeout=25)
     if p.returncode or p.stderr:
@@ -56,7 +68,14 @@ def main():
             path.write_text(source)
             p = subprocess.run([compiler, "check", path], capture_output=True, text=True, timeout=60)
             assert p.returncode == 1 and message in p.stderr, (name, p)
+        timed = root / "timed_listener.py"
+        timed.write_text(TIMED_LISTENER)
+        assert observe([args.python, "-E", timed]) == b"timed out\n"
         for level in args.opt_levels:
+            timed_binary = root / "timed_listener"
+            subprocess.run([compiler, "build", timed, "--no-cache", "--runtime", args.runtime.resolve(),
+                            "--clang", args.clang, "--opt-level", level, "-o", timed_binary], check=True, timeout=180)
+            assert observe([timed_binary]) == b"socketserver listener timeout only supports None\n"
             for source, expected in oracles.items():
                 binary = root / source.stem
                 subprocess.run([compiler, "build", source, "--no-cache", "--runtime", args.runtime.resolve(),

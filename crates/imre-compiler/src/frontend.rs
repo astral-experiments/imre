@@ -4704,7 +4704,10 @@ impl<'a> Checker<'a> {
             } else {
                 ExprKind::Builtin(cleanup, vec![self.local(captured)])
             };
-            Expr { ty: Type::None, kind }
+            Expr {
+                ty: Type::None,
+                kind,
+            }
         };
         statements.push(Statement::Try {
             body: protected,
