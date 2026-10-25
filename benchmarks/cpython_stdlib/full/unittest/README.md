@@ -152,3 +152,11 @@ and the case's `failureException`. The [control](none_assertions.py) also
 checks optional values, bytes, tuples, and argument evaluation order.
 Native values that cannot bind to the compiler's `object` parameter, such as
 a list, currently produce a compiler diagnostic.
+
+In the [ordinary and reachable O0/O3 run](https://github.com/astral-sh/imre/actions/runs/40221013955),
+`Test_TestCase.testAssertIsNone` executed its unchanged body, assertions and
+bound callbacks in Imre with the original CPython fixture. The unchanged
+`TestLongMessage.testAssertIsNone` and `testAssertIsNotNone` exercised four
+native operations each; CPython ran their fixtures and checked the eight
+failure messages. These are three host-assisted cases in the 1,090-occurrence
+report.
