@@ -279,6 +279,11 @@ jobs:
           for suite in build_cache module_objects link_cache build_output; do
             env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/imre
           done
+      - name: Check original CPython textwrap cases against native indentation
+        run: |
+          suite=benchmarks/cpython_stdlib/full/textwrap
+          python3 "$suite/run.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/textwrap-native.json"
+          cmp "$suite/native-linux.json" "$RUNNER_TEMP/textwrap-native.json"
       - name: Run complete upstream copy methods in native Imre
         run: |
           python3 benchmarks/cpython_stdlib/full/copy/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/copy-native.json"

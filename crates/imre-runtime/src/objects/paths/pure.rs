@@ -402,7 +402,7 @@ impl PurePath {
                 format!(
                     "{}({}) has an empty name",
                     self.class(),
-                    string_repr(&self.as_posix())
+                    string_repr(self.as_posix()?.as_str())
                 ),
             ));
         };
@@ -410,13 +410,21 @@ impl PurePath {
         Ok(self.with_tail(tail)?.into_object())
     }
 
-    pub(super) fn as_posix(&self) -> Str {
-        if self.windows {
-            self.text.replace('\\', "/").into()
+    pub(super) fn as_posix(&self) -> Result<Rc<Str>> {
+        if self.windows && self.text.contains('\\') {
+            Ok(Rc::new(replace_separator(&self.text, '\\', '/')?))
         } else {
-            (*self.text).clone()
+            Ok(Rc::clone(&self.text))
         }
     }
+    pub(in crate::objects) fn push_posix_repr(&self, output: &mut String) {
+        if self.windows && self.text.contains('\\') {
+            crate::objects::exceptions::push_windows_path_repr(&self.text, output);
+        } else {
+            crate::objects::exceptions::push_string_repr(&self.text, output);
+        }
+    }
+
     pub(in crate::objects) fn class(&self) -> &'static str {
         if self.windows {
             "PureWindowsPath"
@@ -444,10 +452,10 @@ impl Storage {
     pub(super) fn windows_path(&self) -> bool {
         matches!(self, Self::PurePath(p) if p.windows)
     }
-    pub(in crate::objects) fn posix_spelling(&self) -> Rc<Str> {
+    pub(in crate::objects) fn posix_spelling(&self) -> Result<Rc<Str>> {
         match self {
-            Self::PurePath(p) if p.windows => Rc::new(p.as_posix()),
-            _ => Rc::clone(self.path_text()),
+            Self::PurePath(p) => p.as_posix(),
+            _ => Ok(Rc::clone(self.path_text())),
         }
     }
     pub(super) fn drive_root(&self) -> (&str, &str) {
@@ -485,12 +493,7 @@ pub unsafe extern "C" fn imre_path_join_object(
                     a.join(b.raw.iter().cloned()).map(PurePath::into_object)
                 }
                 _ => {
-                    let child = match b {
-                        Storage::PurePath(p) if p.windows => {
-                            Rc::new(replace_separator(&p.text, '\\', '/')?)
-                        }
-                        _ => Rc::clone(b.path_text()),
-                    };
+                    let child = b.posix_spelling()?;
                     // SAFETY: the local Rc roots the spelling while the original path stays live.
                     Ok(super::imre_path_join(left, Rc::as_ptr(&child)))
                 }
@@ -505,7 +508,8 @@ pub unsafe extern "C" fn imre_path_join_object(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_as_posix(path: *const Object) -> *const Str {
     // SAFETY: only an owned immutable spelling escapes.
-    unsafe { object(path).0.with(|p| Rc::into_raw(p.posix_spelling())) }
+    let spelling = unsafe { object(path).0.with(Storage::posix_spelling) };
+    super::finish(spelling.map(Rc::into_raw), std::ptr::null())
 }
 
 /// # Safety

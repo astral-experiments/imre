@@ -12,11 +12,11 @@ impl Storage {
         }
     }
 
-    fn path_repr(&self) -> String {
-        match self {
-            Self::PurePath(p) => format!("{}({})", p.class(), string_repr(&p.as_posix())),
+    fn path_repr(&self) -> Result<String> {
+        Ok(match self {
+            Self::PurePath(p) => format!("{}({})", p.class(), string_repr(p.as_posix()?.as_str())),
             _ => format!("PosixPath({})", string_repr(self.path())),
-        }
+        })
     }
 
     pub(super) fn replace_name(&self, replacement: Option<&Str>) -> Result<*const Object> {
@@ -34,7 +34,7 @@ impl Storage {
         if self.basename().is_empty() {
             return Err(Error::new(
                 Kind::ValueError,
-                format!("{} has an empty name", self.path_repr()),
+                format!("{} has an empty name", self.path_repr()?),
             ));
         }
         Ok(new_path(join(parent(self.component_text()), replacement)))
@@ -108,7 +108,7 @@ pub unsafe extern "C" fn imre_path_change_extension(
                 let Some(value) = value.filter(|v| !v.is_empty()) else {
                     return Err(Error::new(
                         Kind::ValueError,
-                        format!("{} has a non-empty suffix", s.path_repr()),
+                        format!("{} has a non-empty suffix", s.path_repr()?),
                     ));
                 };
                 let mut name = value.clone();
@@ -118,7 +118,7 @@ pub unsafe extern "C" fn imre_path_change_extension(
                 if old_stem.is_empty() {
                     return Err(Error::new(
                         Kind::ValueError,
-                        format!("{} has an empty name", s.path_repr()),
+                        format!("{} has an empty name", s.path_repr()?),
                     ));
                 }
                 let value = value.ok_or_else(|| {
