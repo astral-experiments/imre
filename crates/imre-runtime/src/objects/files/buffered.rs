@@ -11,7 +11,7 @@ use super::{Bytes, Error, Kind, Result, Str, decode_text, os_error};
 
 pub(super) struct Output {
     raw: BufWriter<File>,
-    text: Option<Vec<u8>>,
+    text: Option<crate::text_output::PendingText>,
     line_buffering: bool,
 }
 
@@ -20,7 +20,7 @@ impl Output {
         Self {
             line_buffering: !binary && file.is_terminal(),
             raw: BufWriter::with_capacity(capacity, file),
-            text: (!binary).then(Vec::new),
+            text: (!binary).then(crate::text_output::PendingText::default),
         }
     }
 
@@ -39,34 +39,12 @@ impl Output {
             self.raw.write_all(bytes)?;
             return if flush_line { self.raw.flush() } else { Ok(()) };
         };
-        // TextIOWrapper groups small encoded writes, but forwards a large write
-        // separately after draining any pending text.
-        const CHUNK_SIZE: usize = 8192;
-        if bytes.len() >= CHUNK_SIZE {
-            Self::drain_text(&mut self.raw, pending)?;
-            self.raw.write_all(bytes)?;
-        } else {
-            pending.extend_from_slice(bytes);
-            if pending.len() >= CHUNK_SIZE || flush_line {
-                Self::drain_text(&mut self.raw, pending)?;
-            }
-        }
-        if flush_line {
-            self.raw.flush()?;
-        }
-        Ok(())
-    }
-
-    fn drain_text(raw: &mut BufWriter<File>, pending: &mut Vec<u8>) -> io::Result<()> {
-        let result = raw.write_all(pending);
-        // TextIOWrapper removes the pending text even when the binary write fails.
-        pending.clear();
-        result
+        pending.write(&mut self.raw, bytes, flush_line)
     }
 
     pub(super) fn flush(&mut self) -> io::Result<()> {
         if let Some(pending) = &mut self.text {
-            Self::drain_text(&mut self.raw, pending)?;
+            return pending.flush(&mut self.raw);
         }
         self.raw.flush()
     }

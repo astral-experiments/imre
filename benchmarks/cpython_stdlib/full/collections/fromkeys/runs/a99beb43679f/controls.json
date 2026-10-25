@@ -1,0 +1,406 @@
+{
+  "builtin-shapes": {
+    "program_sha256": "7d5e2d99b213cf55a06db8403d63bf4c17ae5af4f899c7de984cd5a7c3d34143",
+    "expected": "{'\u00e9': None, 'a': None}\n{4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{4: 0, 2: 0, 7: 0}\n{8: 0}\n{4: 10, 2: 20, 7: 30}\n{5: None, 3: None}\n{}\n{}\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "{'\u00e9': None, 'a': None}\n{4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{4: 0, 2: 0, 7: 0}\n{8: 0}\n{4: 10, 2: 20, 7: 30}\n{5: None, 3: None}\n{}\n{}\n",
+        "stderr": ""
+      },
+      "O0-reachable-1": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "{'\u00e9': None, 'a': None}\n{4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{4: 0, 2: 0, 7: 0}\n{8: 0}\n{4: 10, 2: 20, 7: 30}\n{5: None, 3: None}\n{}\n{}\n",
+        "stderr": ""
+      },
+      "O3-reachable-0": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "{'\u00e9': None, 'a': None}\n{4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{4: 0, 2: 0, 7: 0}\n{8: 0}\n{4: 10, 2: 20, 7: 30}\n{5: None, 3: None}\n{}\n{}\n",
+        "stderr": ""
+      },
+      "O3-reachable-1": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "{'\u00e9': None, 'a': None}\n{4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{4: 0, 2: 0, 7: 0}\n{8: 0}\n{4: 10, 2: 20, 7: 30}\n{5: None, 3: None}\n{}\n{}\n",
+        "stderr": ""
+      }
+    }
+  },
+  "counter-class-policy": {
+    "program_sha256": "7cb31d4bd11267482076ccd2335bd277ac97842b716f7bd3b730b2590d918629",
+    "expected": "Counter.fromkeys() is undefined.  Use Counter(iterable) instead.\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "Counter.fromkeys() is undefined.  Use Counter(iterable) instead.\n",
+        "stderr": ""
+      },
+      "O0-reachable-1": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "Counter.fromkeys() is undefined.  Use Counter(iterable) instead.\n",
+        "stderr": ""
+      },
+      "O3-reachable-0": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "Counter.fromkeys() is undefined.  Use Counter(iterable) instead.\n",
+        "stderr": ""
+      },
+      "O3-reachable-1": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "Counter.fromkeys() is undefined.  Use Counter(iterable) instead.\n",
+        "stderr": ""
+      }
+    }
+  },
+  "defaultdict-class-policy": {
+    "program_sha256": "7d5d09540a9728545a998d62ba643b285aaa47b7160f6c6d789128cf7fd8a73e",
+    "expected": "defaultdict(None, {1: 9, 2: 9})\n3\ndefaultdict(<class 'list'>, {'prior': [5]})\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "defaultdict(None, {1: 9, 2: 9})\n3\ndefaultdict(<class 'list'>, {'prior': [5]})\n",
+        "stderr": ""
+      },
+      "O0-reachable-1": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "defaultdict(None, {1: 9, 2: 9})\n3\ndefaultdict(<class 'list'>, {'prior': [5]})\n",
+        "stderr": ""
+      },
+      "O3-reachable-0": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "defaultdict(None, {1: 9, 2: 9})\n3\ndefaultdict(<class 'list'>, {'prior': [5]})\n",
+        "stderr": ""
+      },
+      "O3-reachable-1": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "defaultdict(None, {1: 9, 2: 9})\n3\ndefaultdict(<class 'list'>, {'prior': [5]})\n",
+        "stderr": ""
+      }
+    }
+  },
+  "generator-errors": {
+    "program_sha256": "5f3c7f72e169d5b5962e8b14e5f84f138d2ff0bef2c5651c0d23e6ea0a5c1224",
+    "expected": "bad key iterator\n[10, 20, 1, 2, 3]\n[1, 2, 3]\nbad key iterator\n[10, 3]\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:36:5: Imre: supported list methods are append(value), extend(iterable), and pop()\n"
+      },
+      "O0-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:36:5: Imre: supported list methods are append(value), extend(iterable), and pop()\n"
+      },
+      "O3-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:36:5: Imre: supported list methods are append(value), extend(iterable), and pop()\n"
+      },
+      "O3-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:36:5: Imre: supported list methods are append(value), extend(iterable), and pop()\n"
+      }
+    }
+  },
+  "noniterable": {
+    "program_sha256": "28918f6aacd06c57e9aedf2892488d8dd115d8a0aa36f9c82de92c2acd3b8146",
+    "expected": "'int' object is not iterable\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "'int' object is not iterable\n",
+        "stderr": ""
+      },
+      "O0-reachable-1": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "'int' object is not iterable\n",
+        "stderr": ""
+      },
+      "O3-reachable-0": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "'int' object is not iterable\n",
+        "stderr": ""
+      },
+      "O3-reachable-1": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "'int' object is not iterable\n",
+        "stderr": ""
+      }
+    }
+  },
+  "set-range": {
+    "program_sha256": "7e06c172980a14c06cd4f44cb1849717a3a996ac87fbaeba57b8aa8369d9e1d9",
+    "expected": "{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:25: Imre: iterator values require an immediate for, comprehension, list, sum, any, or all consumer\n"
+      },
+      "O0-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:25: Imre: iterator values require an immediate for, comprehension, list, sum, any, or all consumer\n"
+      },
+      "O3-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:25: Imre: iterator values require an immediate for, comprehension, list, sum, any, or all consumer\n"
+      },
+      "O3-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:25: Imre: iterator values require an immediate for, comprehension, list, sum, any, or all consumer\n"
+      }
+    }
+  },
+  "shared-values": {
+    "program_sha256": "03be932a99c0c721bfa7e9573a955bc3c3ca285dd2bca960a9d1c91de829a88d",
+    "expected": "True\nTrue\n{'b': [5], 'a': [5]}\nTrue\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "True\nTrue\n{'b': [5], 'a': [5]}\nTrue\n",
+        "stderr": ""
+      },
+      "O0-reachable-1": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "True\nTrue\n{'b': [5], 'a': [5]}\nTrue\n",
+        "stderr": ""
+      },
+      "O3-reachable-0": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "True\nTrue\n{'b': [5], 'a': [5]}\nTrue\n",
+        "stderr": ""
+      },
+      "O3-reachable-1": {
+        "compile_exit": 0,
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "True\nTrue\n{'b': [5], 'a': [5]}\nTrue\n",
+        "stderr": ""
+      }
+    }
+  },
+  "upstream-class-BadSeq": {
+    "program_sha256": "f50664e13eb5fd054f85287fa64f934fb107222bbd3b6db547de961a789261db",
+    "expected": "raised Exc\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O0-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      }
+    }
+  },
+  "upstream-class-baddict1": {
+    "program_sha256": "e94c1f9b28fc6a8ea2699f029e72d97b4d3257121fc80c66fdc0dbf9151eea6e",
+    "expected": "raised Exc\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O0-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      }
+    }
+  },
+  "upstream-class-baddict2": {
+    "program_sha256": "4df6eb11626715bc3bf18d794a11e69dc7dfbc72356694a290f25f535b694f3f",
+    "expected": "raised Exc\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O0-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      }
+    }
+  },
+  "upstream-class-baddict3": {
+    "program_sha256": "4df596693ba09a47076fd122d75b21dbb65963a32061ed034607b3705d3b89ad",
+    "expected": "True 1003 999 None\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O0-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      }
+    }
+  },
+  "upstream-class-baddict4": {
+    "program_sha256": "2496242b7d8119f6d58c1a96e2a5748e61baa95ca34be97c05fc1149d48ec11e",
+    "expected": "True False 1003 999 None\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O0-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      }
+    }
+  },
+  "upstream-class-dictlike": {
+    "program_sha256": "a35e3915ebc1f8ea349651d3dcb773ca9724874bdec196cd1ef4d4fc6d858366",
+    "expected": "True {'a': None}\nTrue {'a': None}\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O0-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:2:5: Imre: unsupported statement in the Imre subset\n"
+      }
+    }
+  },
+  "upstream-class-mydict": {
+    "program_sha256": "abe2afe154e6da26898da36788133d60d1314b425b9d0cdc3b50a1f825d20833",
+    "expected": "True {'a': None, 'b': None}\n",
+    "modes": {
+      "O0-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:3:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O0-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:3:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-0": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:3:5: Imre: unsupported statement in the Imre subset\n"
+      },
+      "O3-reachable-1": {
+        "compile_exit": 1,
+        "outcome": "compile-blocked",
+        "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:3:5: Imre: unsupported statement in the Imre subset\n"
+      }
+    }
+  }
+}

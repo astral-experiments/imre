@@ -164,7 +164,7 @@ impl Checker<'_> {
             for keyword in &args.keywords {
                 if keyword.arg.as_deref() == Some("limit") {
                     self.graph
-                        .checked_positional_only_keyword(self.module, keyword.range());
+                        .checked_positional_keyword(self.module, keyword.range());
                 }
             }
             if args.args.is_empty() {
@@ -300,5 +300,18 @@ pub(super) fn exit_payload_supported(ty: Type, types: &Types) -> bool {
             .iter()
             .all(|&field| exit_payload_supported(field, types)),
         _ => false,
+    }
+}
+
+impl Checker<'_> {
+    pub(super) fn sys_version_info(&self, implementation: bool) -> Expr {
+        Expr {
+            ty: self.types.struct_sequence(
+                "sys.version_info",
+                crate::version::FIELDS,
+                vec![Type::Int, Type::Int, Type::Int, Type::Str, Type::Int],
+            ),
+            kind: ExprKind::Builtin(Builtin::SysVersionInfo { implementation }, vec![]),
+        }
     }
 }
