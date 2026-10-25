@@ -49,10 +49,25 @@ messages on the host. For `testAssertRaises`, the original host callback returns
 normally before Imre performs the missing-exception check. These nine are
 host-driven native operations.
 
-At each of O0 and O3: 0 fully native passes, 3 native bodies with host
-fixtures, 9 host-driven native operations (36 calls), 1,076 reference-only and
-2 reference skips. The [versioned evidence reports](native-linux.json) retain
+Five original `Test_TestCase` methods run their entire bodies and native
+assertions: `testAssertMultiLineEqual`, `testAssertEqualSingleLine`,
+`testAssertEqualwithEmptyString`, `testAssertEqualMultipleLinesMissingNewlineTerminator`,
+and `testAssertEqualMultipleLinesMismatchedNewlinesTerminators`. Each forces
+an actual mismatch and checks the diff. The [equality control](equality_protocol.py)
+compares complete failure messages, including first differing and extra list
+elements, Unicode, truncation, custom messages, and a subclass's failure class.
+It adds no upstream IDs.
+
+At each of O0 and O3: 0 fully native passes, 8 native bodies with host
+fixtures, 9 host-driven native operations (36 calls), 3 compile blockers,
+1,068 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
+
+Three additional complete equality methods are attempted at each level.
+`testAssertMultiLineEqualTruncates` constructs a TestCase with a method name;
+`testAssertEqual_diffThreshold` and `testAssertEqual_shorten` both reach
+`addCleanup`. Each record retains the original passing reference,
+the native diagnostic, source line, and method hash.
 
 The [context control](context_protocol.py) compares caught errors, stored managers, argument order and early exits with CPython at both levels. It adds no upstream IDs.
 
@@ -62,7 +77,6 @@ The [context control](context_protocol.py) compares caught errors, stored manage
 both optimization levels. It exercises nested mismatched handlers and the
 identity of the original caught object for LookupError, NameError,
 UnicodeEncodeError and shutil's OSError subclasses. The default gate also checks
-the identity, name and path of [structured import errors](https://github.com/astral-sh/imre/pull/590).
-On a build that includes [native CSV](https://github.com/astral-sh/imre/pull/468),
-add `--exception-family csv` to exercise csv.Error against unrelated handlers.
+the identity, name and path of [structured import errors](https://github.com/astral-sh/imre/pull/590)
+and [csv.Error](https://github.com/astral-sh/imre/pull/468) against unrelated handlers.
 These controls must compile, run, and match the reference; they contribute no upstream IDs.

@@ -57,6 +57,20 @@ impl<'a> Visitor<'a> for References<'_> {
         }
         if let ast::Expr::Attribute(attr) = expr {
             let name = attr.attr.to_string();
+            if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
+                self.found.attributes.extend(
+                    [
+                        "_baseAssertEqual",
+                        "assertMultiLineEqual",
+                        "assertListEqual",
+                        "_assertTextListEqual",
+                        "_assertBytesListEqual",
+                        "_assertIntListEqual",
+                    ]
+                    .into_iter()
+                    .map(str::to_owned),
+                );
+            }
             if name == "assertRaises"
                 && let Some(module) = self
                     .graph

@@ -85,6 +85,11 @@ impl Checker<'_> {
                 "partial requires a synchronous target with enough positional parameters",
             ));
         }
+        if bound.is_empty() {
+            // The call interface is unchanged. An indirect wrapper with this same
+            // signature would appear to call itself in the closed target set.
+            return Ok(callable);
+        }
 
         // A known definition uses its direct ABI. For a bound method, capture
         // the receiver before any bound arguments; a dynamic target owns the
