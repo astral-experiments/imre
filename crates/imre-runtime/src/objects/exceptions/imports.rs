@@ -2,6 +2,7 @@
 mod suggestions;
 
 use super::*;
+use crate::objects::boxed_values::{checked_text, concrete, tuple_item, word_text};
 use crate::objects::{records, values};
 use crate::{Bytes, Int};
 
@@ -79,42 +80,6 @@ impl Positional {
     }
 }
 
-/// Reads one statically described field; this works for both inline and shared record storage.
-unsafe fn tuple_item(tuple: usize, index: usize) -> (WordKind, usize) {
-    let ptr = tuple as *const usize;
-    // SAFETY: the caller roots a tuple and proves index is in its descriptor.
-    unsafe {
-        let kind = WordKind::new(*records::descriptor(ptr).kinds.add(index));
-        concrete(kind, kind.read_record_field(ptr.add(index)))
-    }
-}
-
-pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rc<Str> {
-    if kind.raw() == 3 && !repr {
-        // SAFETY: the owning field roots the exact string.
-        return unsafe { acquire_rc(word) };
-    }
-    let mut result = String::new();
-    // SAFETY: only concrete, representable field types reach this routine.
-    unsafe {
-        values::write_repr(&mut result, word, kind);
-    }
-    Rc::new(result.into())
-}
-
-// A tuple may store an optional scalar in its nullable representation. Views
-// expose the contained Python value, not the slot's storage tag.
-fn concrete(kind: WordKind, word: usize) -> (WordKind, usize) {
-    if kind.raw() & crate::objects::words::NULLABLE == 0 {
-        (kind, word)
-    } else if word == 0 {
-        (WordKind::new(0), 0)
-    } else {
-        let base = kind.raw() & !crate::objects::words::NULLABLE;
-        (WordKind::new(base), if base == 1 { word - 1 } else { word })
-    }
-}
-
 /// # Safety
 /// `tuple` is a live, compiler-described immutable tuple.
 #[unsafe(no_mangle)]
@@ -126,7 +91,7 @@ fn view(kind: WordKind, word: usize) -> *const Object {
     let (kind, word) = concrete(kind, word);
     // SAFETY: the borrowed source field is rooted when the view acquires its own value.
     let field = unsafe { kind.acquire(word) };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ExceptionField(
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ObjectValue(
         field,
     )))))
 }
@@ -249,9 +214,16 @@ pub unsafe extern "C" fn imre_import_error_reject_reset(
 /// The caller roots a view of a concrete exception field.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_exception_field_repr(value: *const Object) -> *const Str {
+    // SAFETY: the caller roots the boxed value throughout the immutable observation.
+    let owner = unsafe { object(value) };
+    if let Some(text) = super::super::errno::with_nonscalar_member(owner, |m| m.text(1)) {
+        return text;
+    }
     // SAFETY: the view retains the original value.
-    let (kind, word) = unsafe { exit_word(value) };
-    Rc::into_raw(word_text(kind, word, true))
+    unsafe {
+        let (kind, word) = exit_word(value);
+        checked_text(kind, word, true)
+    }
 }
 
 fn type_name(kind: WordKind) -> &'static str {
@@ -282,6 +254,11 @@ fn length(kind: WordKind, word: usize) -> Option<usize> {
 /// The caller roots an exception field and checks pending state for TypeError.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_exception_field_len(value: *const Object) -> usize {
+    // SAFETY: the caller roots the boxed value throughout the immutable observation.
+    let owner = unsafe { object(value) };
+    if let Some(n) = super::super::errno::with_nonscalar_member(owner, |m| m.length()) {
+        return n;
+    }
     // SAFETY: the view retains the original value.
     let (kind, word) = unsafe { exit_word(value) };
     match length(kind, word) {
@@ -301,6 +278,14 @@ pub unsafe extern "C" fn imre_exception_field_index(
     value: *const Object,
     index: usize,
 ) -> *const Object {
+    // SAFETY: the caller roots the boxed value throughout the immutable observation.
+    let owner = unsafe { object(value) };
+    // SAFETY: the caller passes a rooted integer for the index.
+    let index_word = unsafe { Int::borrow(index) };
+    if let Some(item) = super::super::errno::with_nonscalar_member(owner, |m| m.index(&index_word))
+    {
+        return item;
+    }
     // SAFETY: the field and integer stay live throughout indexing.
     unsafe {
         let (kind, word) = exit_word(value);
@@ -349,59 +334,5 @@ pub unsafe extern "C" fn imre_exception_field_index(
             ),
             _ => unreachable!(),
         }
-    }
-}
-
-/// Compare nested fixed tuples by their members, even across distinct native descriptors.
-/// Python's bool/int equivalence applies to leaves at every depth.
-pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) -> bool {
-    let numeric = |(k, w): (WordKind, usize)| {
-        if k.raw() == 1 {
-            (WordKind::new(2), (w << 1) | 1)
-        } else {
-            (k, w)
-        }
-    };
-    // Only unvisited siblings occupy the worklist. A wide tuple costs no
-    // auxiliary space, and ordinary scalar comparisons do not allocate.
-    let mut pending = smallvec::SmallVec::<[(usize, usize, usize, usize); 4]>::new();
-    let mut next = (left, right);
-    loop {
-        let ((ka, wa), (kb, wb)) = (
-            numeric(concrete(next.0.0, next.0.1)),
-            numeric(concrete(next.1.0, next.1.1)),
-        );
-        if ka != kb {
-            return false;
-        }
-        if ka.raw() == 6 && wa != wb {
-            // SAFETY: both words are rooted tuple payloads with static descriptors.
-            unsafe {
-                let n = records::descriptor(wa as *const usize).length;
-                if n != records::descriptor(wb as *const usize).length {
-                    return false;
-                }
-                if n != 0 {
-                    if n > 1 {
-                        pending.push((wa, wb, 1, n));
-                    }
-                    next = (tuple_item(wa, 0), tuple_item(wb, 0));
-                    continue;
-                }
-            }
-        } else {
-            // SAFETY: a matching concrete scalar or identical rooted tuple.
-            if !unsafe { values::equal(wa, wb, ka) } {
-                return false;
-            }
-        }
-        let Some((a, b, i, n)) = pending.pop() else {
-            return true;
-        };
-        if i + 1 < n {
-            pending.push((a, b, i + 1, n));
-        }
-        // SAFETY: the outer exception or comparison operand roots every tuple.
-        next = unsafe { (tuple_item(a, i), tuple_item(b, i)) };
     }
 }

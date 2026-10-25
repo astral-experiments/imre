@@ -1,5 +1,14 @@
 """Native call recording for fixed-layout unittest.mock users."""
 
+from _imre_mock import is_call_list, mark_call_list
+
+
+def _format_list(parts: list[str], pretty: bool) -> str:
+    entries = ", ".join(parts)
+    if pretty and len(entries) + 2 > 80:
+        entries = ",\n ".join(parts)
+    return "[" + entries + "]"
+
 
 def _key(text: str, kind: str) -> str:
     if kind == "bool":
@@ -43,7 +52,7 @@ class _Call:
         parts: list[str] = []
         for value in values:
             parts.append(value._format("call"))
-        return "[" + ", ".join(parts) + "]"
+        return _format_list(parts, is_call_list(values))
 
     def _matches(self, other: _Call) -> bool:
         if len(self._args) != len(other._args) or len(self._kwargs) != len(other._kwargs):
@@ -55,6 +64,12 @@ class _Call:
             if key not in other._kwargs or self._kwargs[key].key != other._kwargs[key].key:
                 return False
         return True
+
+
+def _new_call_list() -> list[_Call]:
+    result: list[_Call] = []
+    mark_call_list(result)
+    return result
 
 
 class _Ancestor:
@@ -82,7 +97,7 @@ class _Node:
         self.called = False
         self.call_count = 0
         self.call_args = None
-        self.call_args_list = []
+        self.call_args_list = _new_call_list()
         self.side_effect = side_effect
         self._mock_name = name
         self._children = {}
@@ -97,7 +112,7 @@ class _Node:
             node.called = False
             node.call_count = 0
             node.call_args = None
-            node.call_args_list = []
+            node.call_args_list = _new_call_list()
             # Children retain this private list to report subsequent ancestor calls.
             while len(node._history):
                 node._history.pop()
@@ -178,10 +193,7 @@ class Mock:
     def _calls_repr(self) -> str:
         if len(self._node._history) == 0:
             return ""
-        entries = ", ".join(self._node._history)
-        if len(entries) + 2 > 80:
-            entries = ",\n ".join(self._node._history)
-        return "\nCalls: [" + entries + "]."
+        return "\nCalls: " + _format_list(self._node._history, True) + "."
 
     def reset_mock(self, *, return_value: bool = False, side_effect: bool = False) -> None:
         self._node._reset(self._nodes, return_value, side_effect)
