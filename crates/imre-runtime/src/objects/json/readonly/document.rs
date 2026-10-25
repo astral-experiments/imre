@@ -424,7 +424,9 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 }
                 result?;
                 if op == 22 {
-                    StrOwner::into_raw(StrOwner::new(Str::new(text))) as usize
+                    StrOwner::into_raw(
+                        StrOwner::try_new(Str::from(text)).map_err(|_| Error::allocation())?,
+                    ) as usize
                 } else {
                     0
                 }
