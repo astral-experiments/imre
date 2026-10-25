@@ -97,3 +97,9 @@ chain, batched, cycle, tee and islice consume that same transient exception.
 These supplemental operations add no test ID. The unchanged
 `TestExamples.test_accumulate` is counted separately in the
 [per-occurrence reports](COVERAGE.md).
+
+[predicates.py](predicates.py) compares dropwhile, takewhile and filterfalse.
+It records which items callbacks see when a caller changes the input, a
+callback raises, or a callback pulls from the same cursor. Its stream control
+also seeks after reaching EOF.
+The three original predicate examples have separate per-occurrence records.
