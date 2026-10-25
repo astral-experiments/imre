@@ -6,14 +6,15 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from reference import BENCH, COMMIT, cases, routine, verify
+from reference import BENCH, COMMIT, routine, verify
 
 sys.path.insert(0, str(BENCH))
 from native_json import METHODS as ERROR_METHODS, sha256
 from native_json_values import METHODS as VALUE_METHODS, Native, unpack_native_repr
+from suite_inventory import cases, load_suite
+from suite_native import run_in_fixtures
 
 
 def counts():
@@ -26,6 +27,10 @@ def counts():
     methods.update({
         "test.test_json.test_decode.TestDecode.test_decoder_optimizations": 1,
         "test.test_json.test_fail.TestFail.test_failures": 34,
+        "test.test_json.test_fail.TestFail.test_truncated_input": 17,
+        "test.test_json.test_fail.TestFail.test_unexpected_data": 23,
+        "test.test_json.test_fail.TestFail.test_extra_data": 6,
+        "test.test_json.test_fail.TestFail.test_linecol": 4,
     })
     return methods
 
@@ -71,6 +76,26 @@ def binary_stream_controls(native):
             raise AssertionError("native reader accepted invalid binary control")
 
 
+def error_controls(native):
+    def fields(e):
+        return str(e), e.msg, e.doc, e.pos, e.lineno, e.colno
+
+    for data in ('["🌗",\n "é" 1]', '["🌗",\n "é" 1]'.encode("utf-16")):
+        try:
+            json.loads(data)
+        except json.JSONDecodeError as e:
+            expected = fields(e)
+        else:
+            raise AssertionError("expected malformed control")
+        try:
+            native.loads(data)
+        except json.JSONDecodeError as e:
+            if fields(e) != expected:
+                raise AssertionError((fields(e), expected)) from e
+        else:
+            raise AssertionError("native reader accepted malformed control")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for arg in ("imre", "runtime", "clang", "result"):
@@ -96,30 +121,41 @@ def main():
                               "ptr @imre_json_dumps(", "i32 @imre_json_dump("):
                 if "call " + signature not in llvm:
                     raise RuntimeError(f"missing native call: {signature}")
-            results = {}
-            for case in cases():
+            results, executions = {}, {}
+            suite = load_suite("test.test_json")
+            for case in cases(suite):
                 source = routine(case)
                 if source not in expected:
                     continue
-                native = Native(program, directory, case.JSONDecodeError)
-                case.json, case.loads, case.dumps = native, native.loads, native.dumps
-                result = unittest.TestResult()
-                case.run(result)
-                calls = len(native.calls)
-                passed = (result.testsRun == 1 and result.wasSuccessful() and not result.skipped
-                          and calls == expected[source])
-                results[case.id()] = {"source": source, "native_calls": calls,
-                                      "status": "pass" if passed else "fail"}
-                if not passed:
-                    ok = False
-                    results[case.id()]["diagnostics"] = [
-                        msg for _, msg in [*result.errors, *result.failures, *result.skipped]
-                    ] or [f"expected {expected[source]} native calls, got {calls}"]
-                    print(case.id(), results[case.id()]["diagnostics"], file=sys.stderr)
+
+                def execute(case, original, source=source):
+                    native = Native(program, directory, case.JSONDecodeError)
+                    case.json, case.loads, case.dumps = native, native.loads, native.dumps
+                    try:
+                        original()
+                    finally:
+                        results[case.id()]["native_calls"] = len(native.calls)
+                    if len(native.calls) != expected[source]:
+                        raise AssertionError(f"expected {expected[source]} native calls, got {len(native.calls)}")
+                    return "host-driven"
+
+                executions[case.id()] = execute
+                results[case.id()] = {"source": source, "native_calls": 0, "status": "fail"}
+            evidence, failures, skips = run_in_fixtures(suite, executions)
+            for name, outcomes in evidence.items():
+                if outcomes == ["host-driven"]:
+                    results[name]["status"] = "pass"
+            for name, message in [*failures, *skips]:
+                results[name]["status"] = "fail"
+                results[name].setdefault("diagnostics", []).append(message)
+                print(name, message, file=sys.stderr)
+            ok &= all(row["status"] == "pass" for row in results.values())
             if {r["source"] for r in results.values()} != expected.keys():
                 raise RuntimeError("some selected upstream routines were not discovered")
             binary_stream_controls(Native(program, directory, ValueError))
-            report["levels"][level] = {"binary_stream_controls": 21, "tests": results}
+            error_controls(Native(program, directory, json.JSONDecodeError))
+            report["levels"][level] = {"binary_stream_controls": 21, "error_controls": 2,
+                                       "tests": results}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     return int(not ok)
 

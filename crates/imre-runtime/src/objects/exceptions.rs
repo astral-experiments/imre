@@ -278,6 +278,7 @@ enum Payload {
     Message(Rc<Str>),
     /// Some builtins render a human message that differs from their original arguments.
     Arguments(Box<BuiltinArguments>),
+    Json(Rc<JsonError>),
     Key(OwnedWord),
     Exit(Option<OwnedWord>),
     Process(Box<super::processes::ProcessError>),
@@ -290,6 +291,14 @@ enum Payload {
 struct BuiltinArguments {
     message: Rc<Str>,
     args: smallvec::SmallVec<[OwnedWord; 5]>,
+}
+
+struct JsonError {
+    msg: Rc<Str>,
+    doc: Rc<Str>,
+    pos: usize,
+    lineno: usize,
+    colno: usize,
 }
 
 impl From<Rc<Str>> for Payload {
@@ -479,6 +488,26 @@ impl Error {
 
     pub(super) fn is_kind(&self, kind: Kind) -> bool {
         self.kind == kind
+    }
+
+    pub(super) fn json_decode(
+        msg: &str,
+        doc: Rc<Str>,
+        pos: usize,
+        lineno: usize,
+        colno: usize,
+    ) -> Self {
+        Self {
+            kind: Kind::JsonDecodeError,
+            payload: Some(Payload::Json(Rc::new(JsonError {
+                msg: Rc::new(Str::from(msg)),
+                doc,
+                pos,
+                lineno,
+                colno,
+            }))),
+            cause: None,
+        }
     }
 
     pub(crate) fn allocation() -> Self {
@@ -922,6 +951,10 @@ impl Storage {
             Payload::Empty => Rc::new(Str::new("")),
             Payload::Message(message) => Rc::clone(message),
             Payload::Arguments(arguments) => Rc::clone(&arguments.message),
+            Payload::Json(e) => Rc::new(Str::from(format!(
+                "{}: line {} column {} (char {})",
+                e.msg, e.lineno, e.colno, e.pos
+            ))),
             Payload::Process(process) => Rc::new(process.message()),
             Payload::Timeout(timeout) => Rc::new(timeout.message()),
             Payload::Key(key) if key.kind == WordKind::new(3) => {
@@ -943,6 +976,35 @@ impl Storage {
             }
         }
     }
+}
+
+/// # Safety
+/// The caller roots an exception and supplies the field selector emitted by the
+/// compiler. On success, string and integer fields transfer independent owners.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_json_error_field(value: *const Object, field: u32) -> usize {
+    // SAFETY: the exception stays live until the field has been acquired.
+    let result = unsafe {
+        object(value).0.with(|storage| {
+            let exception = storage.exception();
+            if let Payload::Json(e) = &exception.payload {
+                return Ok(match field {
+                    0 => Rc::into_raw(e.msg.clone()) as usize,
+                    1 => Rc::into_raw(e.doc.clone()) as usize,
+                    2 => crate::Int::from_usize(e.pos).into_raw(),
+                    3 => crate::Int::from_usize(e.lineno).into_raw(),
+                    4 => crate::Int::from_usize(e.colno).into_raw(),
+                    _ => unreachable!("invalid JSON exception field"),
+                });
+            }
+            let name = ["msg", "doc", "pos", "lineno", "colno"][field as usize];
+            Err(Error::new(
+                Kind::AttributeError,
+                format!("'{}' object has no attribute '{name}'", exception.name()),
+            ))
+        })
+    };
+    finish(result, 0)
 }
 
 fn exit_text(code: Option<&OwnedWord>, missing: &str) -> Rc<Str> {

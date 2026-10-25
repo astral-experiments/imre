@@ -89,9 +89,13 @@ This run records what upstream passes and skips on the host. Native compatibilit
 
 `native_zip_members.py` drives the original stored and deflated bad-CRC test methods. The host makes fixtures and runs unittest assertions; the child opens its own `BytesIO`, reads members, checks CRCs, and returns the sequence of reads and errors. A separate control checks duplicate entries, metadata, independent readers and caller-owned stream lifetimes.
 
+## Native Base64 cases
+
+`native_base64.py` runs CPython's unchanged `BaseXYTestCase.test_b64encode`. Its exact-bytes URL-safe call runs in Imre; the other encoders, non-bytes buffers, and type errors run in CPython and are recorded separately. Additional native controls check output padding and strict ASCII decode errors against CPython.
+
 ## Native Counter cases
 
-`native_counter.py` compiles the complete CPython `TestCounter.test_total`, `test_invariant_for_the_in_operator` and `test_eq` methods into standalone executables. The typed assertion adapters compare both native operands and count every executed assertion. The three tests must execute 1, 6 and 2 assertions respectively. The manifest pins the entire upstream `test_collections.py` file. The typed subset uses integer counts, so the upstream `test_update`, which also stores `None`, is outside this gate.
+`native_counter.py` compiles seven complete CPython `TestCounter` methods into standalone executables: `test_total`, `test_invariant_for_the_in_operator` and the five comparison methods. The native assertion adapters count every executed assertion: one for the total, six for membership and two per comparison method. The manifest pins the entire upstream `test_collections.py` file. The typed subset uses integer counts, so the upstream `test_update`, which also stores `None`, is outside this gate.
 
 ```sh
 python3 benchmarks/cpython_stdlib/native_counter.py \
