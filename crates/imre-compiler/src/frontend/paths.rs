@@ -121,21 +121,74 @@ impl Checker<'_> {
 
     pub(super) fn path_constructor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
-        let mut args = call.arguments.args.iter();
-        let first = if let Some(argument) = args.next() {
-            self.path_argument(argument)?
-        } else {
-            Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(String::new()),
+        let inputs = call
+            .arguments
+            .args
+            .iter()
+            .map(|arg| self.expr(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        let checked = inputs
+            .iter()
+            .any(|value| self.types.payload(value.ty).is_some());
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        let mut parts = Vec::new();
+        for (value, syntax) in inputs.into_iter().zip(&call.arguments.args) {
+            let mut part = if checked {
+                // Method lookup and each argument expression run before the constructor
+                // inspects any part. In particular a later argument may raise first.
+                let slot = self.hidden(value.ty);
+                body.push(Statement::Assign(slot, value));
+                clear.push(slot);
+                self.local(slot)
+            } else {
+                value
+            };
+            if let Some(payload) = self.types.payload(part.ty) {
+                let missing = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::IsNone, vec![part.clone()]),
+                };
+                let error = Statement::Raise(Some(Expr { ty: Type::Exception, kind: ExprKind::Exception {
+                    kind: exception_kind("TypeError").unwrap(),
+                    message: Some(Box::new(Expr { ty: Type::Str, kind: ExprKind::Str(
+                        "argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'NoneType'".into()) })),
+                }}));
+                part = Expr {
+                    ty: payload,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::If(missing, vec![error], vec![])],
+                        value: Box::new(Expr {
+                            ty: payload,
+                            kind: ExprKind::Unwrap(Box::new(part)),
+                        }),
+                        clear: vec![],
+                    },
+                };
             }
-        };
-        let mut result = operation(PathOperation::New, Type::Path, vec![first]);
-        for argument in args {
-            let next = self.path_argument(argument)?;
-            result = operation(PathOperation::Join, Type::Path, vec![result, next]);
+            parts.push(self.path_text(part, syntax)?);
         }
-        Ok(result)
+        let mut parts = parts.into_iter();
+        let first = parts.next().unwrap_or(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Str(String::new()),
+        });
+        let mut result = operation(PathOperation::New, Type::Path, vec![first]);
+        for part in parts {
+            result = operation(PathOperation::Join, Type::Path, vec![result, part]);
+        }
+        if checked {
+            Ok(Expr {
+                ty: Type::Path,
+                kind: ExprKind::Scope {
+                    body,
+                    clear,
+                    value: Box::new(result),
+                },
+            })
+        } else {
+            Ok(result)
+        }
     }
 
     pub(super) fn system_path_call(
