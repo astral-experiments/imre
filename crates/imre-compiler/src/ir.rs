@@ -1368,6 +1368,7 @@ pub(crate) enum LogOperation {
     Get,
     HandlerRename,
     HandlerLookup,
+    PrintActiveException,
     AddLevel,
     LevelName,
     LevelForName,
