@@ -60,7 +60,10 @@ def through_base(case: unittest.TestCase) -> None:
 
 class CustomFail(unittest.TestCase):
     def fail(self, msg: str | None = None) -> None:
-        print("custom fail: " + str(msg))
+        if msg is None:
+            print("custom fail: None")
+        else:
+            print("custom fail: " + msg)
 
 
 verify(Subject(), [])
