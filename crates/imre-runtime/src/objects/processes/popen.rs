@@ -6,31 +6,23 @@ use crate::StorageCell;
 use crate::objects::files::{FileState, errno_error};
 use std::cell::RefCell;
 
+mod active;
 mod communicate;
 mod control;
 
+pub(super) use active::cleanup;
+pub(in crate::objects) use active::retain_live_owner;
 use control::ChildControl;
 use std::sync::Arc;
 
 type Pipes = [Option<Rc<Object>>; 3];
-
-thread_local! {
-    // Like subprocess._active: dropping the last handle neither kills a live
-    // child nor blocks. A subsequent launch collects its status and pipes.
-    static ACTIVE: RefCell<Vec<(Arc<ChildControl>, Pipes)>> = const { RefCell::new(Vec::new()) };
-}
-
-pub(super) fn cleanup() {
-    ACTIVE.with_borrow_mut(|children| {
-        children.retain_mut(|(child, _)| !matches!(child.poll(), Ok(Some(_))));
-    });
-}
 
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
     control: Arc<ChildControl>,
     pipes: Pipes,
     communication: communicate::Communication,
+    finalized: bool,
 }
 
 impl Popen {
@@ -58,17 +50,27 @@ impl Popen {
     }
 }
 
-impl Drop for Popen {
-    fn drop(&mut self) {
+impl Popen {
+    /// Python calls __del__ only once, including when _active keeps self alive.
+    fn finalize(&mut self) -> bool {
+        if self.finalized {
+            return false;
+        }
+        self.finalized = true;
         // The public warning is about an unobserved returncode. Even a child
         // which has already exited can still be waiting for its parent to reap it.
         if self.control.status().is_none() {
             crate::objects::warnings::unobserved_child(self.control.pid);
         }
-        if !matches!(self.control.poll(), Ok(Some(_))) {
-            ACTIVE.with_borrow_mut(|children| {
-                children.push((self.control.clone(), std::mem::take(&mut self.pipes)))
-            });
+        !matches!(self.control.poll(), Ok(Some(_)))
+    }
+}
+
+impl Drop for Popen {
+    fn drop(&mut self) {
+        if self.finalize() {
+            // Internal run/call temporaries need not have a language-level owner.
+            active::defer_internal(self.control.clone(), std::mem::take(&mut self.pipes));
         }
     }
 }
@@ -121,10 +123,19 @@ struct ChildConfig {
     new_session: bool,
 }
 
+/// Bit 19 adds the exact pass_fds collection after the bit-18 prefix.
+#[repr(C)]
+struct PassFdsConfig {
+    child: ChildConfig,
+    keep: usize,
+    kind: u32,
+}
+
 #[derive(Default)]
 struct LaunchExtras {
     redirects: [usize; 3],
     child: Option<(usize, usize, bool)>,
+    keep: Option<(usize, u32)>,
 }
 
 impl LaunchConfig {
@@ -141,17 +152,24 @@ impl LaunchConfig {
         // SAFETY: the launch prefix is present for all three ABI layouts.
         let streams = unsafe { (*config).streams };
         if streams & (1 << 18) != 0 {
+            let keep = (streams & (1 << 19) != 0).then(|| {
+                // SAFETY: bit 19 promises the complete pass_fds trailer.
+                let full = unsafe { &*config.cast::<PassFdsConfig>() };
+                (full.keep, full.kind)
+            });
             // SAFETY: bit 18 promises the full child settings layout.
             let config = unsafe { &*config.cast::<ChildConfig>() };
             LaunchExtras {
                 redirects: config.redirect.words,
                 child: Some((config.group, config.mask, config.new_session)),
+                keep,
             }
         } else if Self::has_redirects(streams) {
             LaunchExtras {
                 // SAFETY: a borrowed stream promises the three-word extension.
                 redirects: unsafe { (*config.cast::<RedirectConfig>()).words },
                 child: None,
+                keep: None,
             }
         } else {
             LaunchExtras::default()
@@ -247,11 +265,34 @@ pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *cons
     finish(result, std::ptr::null())
 }
 
+/// Popen acquires these handles before opening a parent stream with bufsize.
+fn check_buffer_error_handles(modes: [u32; 3]) -> io::Result<()> {
+    let mut pipes = [const { None }; 3];
+    let mut devnull = None;
+    for (pipe, mode) in pipes.iter_mut().zip(modes) {
+        match mode {
+            1 => *pipe = Some(io::pipe()?),
+            2 if devnull.is_none() => {
+                devnull = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open("/dev/null")?,
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Create a native child with independently owned pipe ends and the original argv owner.
 ///
 /// # Safety
 /// The caller roots the argv, optional directory/environment and buffer size.
 unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
+    // CPython runs _cleanup before validating the new Popen's arguments.
+    cleanup();
     // SAFETY: settings describe the rooted command, path and integer representations.
     let args = unsafe { WordKind::new(config.arg_kind).acquire(config.args as usize) };
     let streams = config.streams | (u32::from(!config.close_fds) << 17);
@@ -261,6 +302,13 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             Kind::ValueError,
             "STDOUT can only be used for stderr",
         ));
+    }
+    if !config.close_fds
+        && let Some((word, kind)) = extras.keep
+        // SAFETY: the launch trailer retains the original collection.
+        && unsafe { super::pass_fds::nonempty(word, kind) }
+    {
+        crate::objects::warnings::pass_fds_override()?;
     }
     let c_int = |n: &Int| n.as_small().and_then(|n| i32::try_from(n).ok());
     let mut descriptors = [-1; 3];
@@ -293,7 +341,14 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
     let bufsize = if modes.contains(&1) {
         // SAFETY: the caller roots the buffer-size integer.
         let size = unsafe { Int::borrow(config.bufsize) };
-        c_int(&size).ok_or_else(c_int_overflow)?
+        match c_int(&size) {
+            Some(size) => size,
+            None => {
+                // Before reporting bufsize, preserve any error acquiring the pipe handles.
+                check_buffer_error_handles(modes).map_err(errno_error)?;
+                return Err(c_int_overflow());
+            }
+        }
     } else {
         -1
     };
@@ -301,27 +356,44 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
         let Some((group, mask, new_session)) = extras.child else {
             return Ok(ChildAttributes::default());
         };
-        // SAFETY: the group is a nullable integer (None uses a zero word);
-        // the mask is an exact integer. Both owners span the launch.
-        let group = if group == 0 {
-            -1
-        } else {
-            // SAFETY: a non-null group is a rooted integer.
-            let group = unsafe { Int::borrow(group) };
-            c_int(&group).ok_or_else(c_int_overflow)?
-        };
-        // SAFETY: the caller roots the requested mask through spawn.
+        let group = (group != 0).then(|| {
+            // SAFETY: a non-null group is a rooted Python integer.
+            unsafe { Int::borrow(group) }
+        });
+        // SAFETY: the caller roots the requested mask and descriptor collection.
         let mask = unsafe { Int::borrow(mask) };
-        if may_spawn && !new_session && group == -1 && mask.big().sign() == num_bigint::Sign::Minus
-        {
-            // posix_spawn inherits the mask without narrowing a negative Python integer.
+        let direct = may_spawn
+            && !new_session
+            && group.as_ref().is_none_or(|n| n.as_small() == Some(-1))
+            && mask.big().sign() == num_bigint::Sign::Minus
+            && extras.keep.is_none_or(|(word, kind)| {
+                // SAFETY: the bit-19 trailer supplies the collection's exact kind.
+                !unsafe { super::pass_fds::nonempty(word, kind) }
+            });
+        if direct {
             return Ok(ChildAttributes::default());
         }
+        // Fork/exec iterates pass_fds before C narrows the group and mask.
+        if extras.keep.is_some_and(|(_, kind)| kind == 0) {
+            return Err(Error::new(
+                Kind::TypeError,
+                "'NoneType' object is not iterable",
+            ));
+        }
+        let group = group
+            .as_ref()
+            .map_or(Ok(-1), |n| c_int(n).ok_or_else(c_int_overflow))?;
         let mask = c_int(&mask).ok_or_else(c_int_overflow)?;
+        let keep = match extras.keep {
+            // SAFETY: the bit-19 trailer retains the collection and its exact kind.
+            Some((word, kind)) => unsafe { super::pass_fds::copy(word, kind)? },
+            None => Vec::new(),
+        };
         Ok(ChildAttributes {
             new_session,
             group,
             mask: (mask >= 0).then_some(mask as libc::mode_t),
+            keep,
         })
     };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
@@ -340,6 +412,7 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             args,
             control: Arc::new(ChildControl::new(child)),
             communication: Default::default(),
+            finalized: false,
         }
     })
 }
@@ -427,6 +500,7 @@ pub unsafe extern "C" fn imre_call_config(
                     kind: WordKind::new(0),
                 };
                 raise_process(ProcessError {
+                    positional_streams: false,
                     cmd: p.args.clone(),
                     returncode: code,
                     stdout: absent(),
@@ -439,6 +513,7 @@ pub unsafe extern "C" fn imre_call_config(
                 raise_timeout(TimeoutError {
                     cmd: p.args.clone(),
                     timeout: timeout.expect("timed wait"),
+                    wait_budget: None,
                     stdout: None,
                     stderr: None,
                 });
@@ -528,6 +603,7 @@ pub unsafe extern "C" fn imre_child_wait(
                 raise_timeout(TimeoutError {
                     cmd,
                     timeout: timeout.expect("timed wait"),
+                    wait_budget: None,
                     stdout: None,
                     stderr: None,
                 });
