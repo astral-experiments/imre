@@ -26,6 +26,7 @@ mod callables;
 mod calls;
 mod chainmap;
 mod class_data;
+mod closed_calls;
 mod comprehensions;
 mod contexts;
 mod copying;
@@ -798,8 +799,14 @@ pub(crate) fn lower_with_owners(
         graph,
         &types,
     )?;
+    if closed_calls::has_keyword_displays(graph) {
+        inference.discover_packed_arguments();
+    }
     for (module, function, _) in &mut definitions {
         assignments::alias_builtin_parameters(function, &graph.modules[*module].bindings);
+        if closed_calls::prepare(function, graph, *module) {
+            inference.discover_packed_arguments();
+        }
     }
     inference.solve(
         graph,
@@ -900,10 +907,8 @@ pub(crate) fn lower_with_owners(
             checker.method_context(signature.method);
             checker.generator_item = classes.producer_items.get(&signature.id).copied();
             let mut params = Vec::new();
-            for (parameter, signature) in definition
-                .parameters
-                .iter_non_variadic_params()
-                .zip(&signature.params)
+            for (parameter, signature) in
+                closed_calls::parameters(&definition.parameters).zip(&signature.params)
             {
                 let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
                 checker.assigned.insert(slot);
@@ -1208,14 +1213,11 @@ fn signature(
             )
         })
         .map(|context| classes.instance(context.class));
-    if !function.decorator_list.is_empty()
-        || function.type_params.is_some()
-        || function.parameters.vararg.is_some()
-    {
+    if !function.decorator_list.is_empty() || function.type_params.is_some() {
         return Err(error(
             source,
             function,
-            "decorators, type parameters, and variadic parameters are unsupported",
+            "decorators and type parameters are unsupported",
         ));
     }
     let mut params = Vec::new();
@@ -1388,6 +1390,26 @@ fn signature(
             sign_only: ty == Type::Float
                 && parameter.annotation().is_some()
                 && sign_parameters::only_compares_zero(function, parameter.name().as_str()),
+        });
+    }
+    if let Some(pack) = function.parameters.vararg.as_deref() {
+        let annotation = pack.annotation().ok_or_else(|| {
+            error(
+                source,
+                pack,
+                "a variadic positional parameter requires an exact element annotation",
+            )
+        })?;
+        let element = annotation_in_class(annotation, graph, module, classes, types, owner)?;
+        sequences::check_pack_reads(function, pack.name.as_str(), graph, module, source)?;
+        let ty = types.list(element);
+        parameter_types.push(Some(ty));
+        params.push(Parameter {
+            name: pack.name.to_string(),
+            ty,
+            kind: ParameterKind::Variadic,
+            default: None,
+            sign_only: false,
         });
     }
     if let Some(keyword) = &function.parameters.kwarg {
@@ -5053,6 +5075,14 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
+        if binary.op == ast::Operator::Add
+            && (self.types.payload(left.ty) == Some(Type::Int)
+                || self.types.payload(right.ty) == Some(Type::Int))
+            && self.types.payload(left.ty).unwrap_or(left.ty) == Type::Int
+            && self.types.payload(right.ty).unwrap_or(right.ty) == Type::Int
+        {
+            return Ok(self.nullable_int_sum(left, right));
+        }
         if let (Type::Calendar(first), Type::Calendar(second)) = (left.ty, right.ty) {
             return calendar::binary(first, second, left, right, binary, self.source);
         }
@@ -6969,6 +6999,9 @@ impl<'a> Checker<'a> {
         }
         if self.unshadowed_builtin(&call.func, "dict") {
             return self.dict_constructor(call, None);
+        }
+        if let Some(expanded) = self.expand_closed_call(call) {
+            return self.call_on(&expanded, receiver);
         }
         if let Some(Binding::Intrinsic(
             kind @ (Intrinsic::TomliLoads

@@ -197,13 +197,13 @@ impl Checker<'_> {
         if signature.params[skip..].iter().any(|parameter| {
             matches!(
                 parameter.kind,
-                ParameterKind::KeywordOnly | ParameterKind::KeywordRest
+                ParameterKind::KeywordOnly | ParameterKind::Variadic | ParameterKind::KeywordRest
             )
         }) {
             return Err(error(
                 self.source,
                 node,
-                "function values cannot have keyword-only parameters",
+                "function values require fixed positional parameters",
             ));
         }
         let mut signature = signature.clone();
