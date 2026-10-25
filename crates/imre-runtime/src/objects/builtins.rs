@@ -27,6 +27,20 @@ pub extern "C" fn imre_builtins_last() -> *const Object {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn imre_builtins_import_last() -> *const Object {
+    LAST.with_borrow(Clone::clone).map_or_else(
+        || {
+            Error::new(
+                Kind::ImportError,
+                "cannot import name '_' from 'builtins' (unknown location)",
+            )
+            .returning(std::ptr::null())
+        },
+        Rc::into_raw,
+    )
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn imre_builtins_has_last() -> u32 {
     LAST.with_borrow(|slot| u32::from(slot.is_some()))
 }

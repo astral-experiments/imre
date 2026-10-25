@@ -39,6 +39,33 @@ impl Checker<'_> {
         Ok(Some(pipelines::integer(i64::from(setting))))
     }
 
+    pub(super) fn stdout_value(&self, importing: bool) -> Expr {
+        Expr {
+            ty: self.types.optional(Type::TextIO),
+            kind: ExprKind::Builtin(Builtin::SysStdout { importing }, vec![]),
+        }
+    }
+
+    /// Preserve lookup of an optional text stream before evaluating method arguments.
+    pub(super) fn optional_stream(&self, value: Expr, name: &str) -> Expr {
+        if self.types.payload(value.ty) == Some(Type::TextIO)
+            && matches!(
+                name,
+                "write" | "flush" | "close" | "read" | "readline" | "encoding" | "closed"
+            )
+        {
+            Expr {
+                ty: Type::TextIO,
+                kind: ExprKind::Builtin(
+                    Builtin::TextOptionalReceiver,
+                    vec![value, unpacking::string(name)],
+                ),
+            }
+        } else {
+            value
+        }
+    }
+
     fn sys_no_args(
         &mut self,
         call: &ast::ExprCall,
@@ -163,7 +190,10 @@ impl Checker<'_> {
             return Ok(None);
         };
         let stderr = match self.resolve(&attribute.value) {
-            Some(Binding::Intrinsic(Intrinsic::Stdout)) => false,
+            Some(Binding::Intrinsic(Intrinsic::Stdout | Intrinsic::OriginalStdout)) => {
+                // The ordinary TextIO method path evaluates and retains the receiver first.
+                return Ok(None);
+            }
             Some(Binding::Intrinsic(Intrinsic::Stderr)) => true,
             _ => return Ok(None),
         };
