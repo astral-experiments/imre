@@ -974,6 +974,13 @@ impl Checker<'_> {
                 "private native mock operations cannot be accessed directly",
             ));
         }
+        if attribute.attr.as_str() == "get"
+            && self.classes.declarations.definitions[class].mapping
+            && !self.classes.methods[class].contains_key("get")
+            && let Some(value) = &receiver
+        {
+            return self.mapping_get(call, value.clone());
+        }
         if call
             .arguments
             .keywords
@@ -991,6 +998,11 @@ impl Checker<'_> {
                 attribute.attr.as_str(),
                 "__str__" | "__post_init__" | "__copy__"
             )
+            && !(self.classes.declarations.definitions[class].mapping
+                && matches!(
+                    attribute.attr.as_str(),
+                    "__getitem__" | "__len__" | "__contains__"
+                ))
         {
             return Err(error(
                 self.source,
@@ -1005,10 +1017,13 @@ impl Checker<'_> {
         {
             return Ok(checked);
         }
-        if attribute.attr.as_str() == "assertRaises"
-            && !self.classes.methods[class].contains_key("assertRaises")
+        if matches!(
+            attribute.attr.as_str(),
+            "assertRaises" | "assertRaisesRegex"
+        ) && !self.classes.methods[class].contains_key(attribute.attr.as_str())
             && let Some(receiver) = &receiver
-            && let Some(context) = self.unittest_assert_raises(call, class, receiver)?
+            && let Some(context) =
+                self.unittest_assert_raises(call, class, receiver, attribute.attr.as_str())?
         {
             return Ok(context);
         }
@@ -1144,6 +1159,9 @@ impl Checker<'_> {
             .abstract_methods
             .is_empty()
         {
+            if self.classes.declarations.definitions[class].mapping {
+                return self.abstract_mapping_call(class, call);
+            }
             return Err(error(
                 self.source,
                 call,
@@ -1165,6 +1183,7 @@ impl Checker<'_> {
         let materialized = self.immediate_constructor_input(call, class);
         let call = materialized.as_ref().unwrap_or(call);
         let signature = self.classes.methods[class]["__init__"].clone();
+        let mut scope = calls::ArgumentScope::default();
         let normalization = self.normalized_record_input(class);
         let args = if let Some((field, wrapper, template)) = normalization {
             let params = &signature.params[1..];
@@ -1180,16 +1199,16 @@ impl Checker<'_> {
         } else if self.inference.is_some() {
             self.infer_call(call, &signature, None, 1)?.1
         } else {
-            self.arguments(call, &signature.params[1..], None)?
+            self.held_arguments(call, &signature.params[1..], None, &mut scope)?
         };
         self.calls.insert(signature.id);
-        let record = Expr {
+        let record = scope.finish(Expr {
             ty: Type::Class(class),
             kind: ExprKind::Construct {
                 initializer: signature.id,
                 args,
             },
-        };
+        });
         let decl = &self.classes.declarations.definitions[class];
         if let Some(&kind) = self.classes.declarations.exceptions.get(&decl.definition) {
             let text = self.classes.methods[class].get("__str__").map(|m| m.id);
@@ -1202,8 +1221,7 @@ impl Checker<'_> {
                     Builtin::NamedException {
                         kind,
                         message_field: decl.fields.len() - 1,
-                        tuple_args: self.classes.fields[class].last()
-                            == Some(&Type::ExceptionField),
+                        tuple_args: self.exception_tuple_slot(class),
                         text,
                         repr,
                         dataclass_repr: decl.dataclass.is_some_and(|d| d.repr),
@@ -1232,7 +1250,7 @@ impl Checker<'_> {
         let mut values = Vec::with_capacity(nodes.len());
         for node in nodes {
             let value = Self::string_value(self.expr(node)?);
-            if !self.import_argument_supported(value.ty) {
+            if !self.boxable_value(value.ty) {
                 return Err(error(
                     self.source,
                     node,
@@ -1246,7 +1264,7 @@ impl Checker<'_> {
             kind: ExprKind::Tuple(values),
         };
         let args = Expr {
-            ty: Type::ExceptionField,
+            ty: Type::ObjectValue,
             kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![tuple]),
         };
         Ok(self.store_exception_arguments(class, args))
@@ -1331,9 +1349,7 @@ impl Checker<'_> {
                 .bindings
                 .contains_key("super")
         {
-            if self.classes.fields[class].last() == Some(&Type::ExceptionField)
-                && call.arguments.keywords.is_empty()
-            {
+            if self.exception_tuple_slot(class) && call.arguments.keywords.is_empty() {
                 return self.set_exception_arguments(class, &call.arguments.args);
             }
             let [message] = call.arguments.args.as_ref() else {
@@ -1400,16 +1416,17 @@ impl Checker<'_> {
             ty: Type::Class(base),
             kind: ExprKind::Builtin(Builtin::RecordView, vec![self.local(self.names["self"])]),
         };
+        let mut scope = calls::ArgumentScope::default();
         let args = if self.inference.is_some() {
             self.infer_call(call, &signature, Some(receiver), 1)?.1
         } else {
-            self.arguments(call, &signature.params[1..], Some(receiver))?
+            self.held_arguments(call, &signature.params[1..], Some(receiver), &mut scope)?
         };
         self.calls.insert(signature.id);
-        Ok(Expr {
+        Ok(scope.finish(Expr {
             ty: Type::None,
             kind: ExprKind::Call(signature.id, args),
-        })
+        }))
     }
 
     fn immediate_constructor_input(
