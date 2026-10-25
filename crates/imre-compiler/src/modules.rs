@@ -129,6 +129,7 @@ pub(crate) enum Intrinsic {
     Declaration(&'static str),
     ArgumentParser,
     ArgparseNamespace,
+    BooleanOptionalAction,
     RawDescriptionHelpFormatter,
     FutureAnnotations,
     ShallowCopy,
@@ -545,6 +546,7 @@ impl IntrinsicModule {
             (Self::Os, "name") => Intrinsic::OsName,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
+            (Self::Argparse, "BooleanOptionalAction") => Intrinsic::BooleanOptionalAction,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
                 Intrinsic::RawDescriptionHelpFormatter
             }
