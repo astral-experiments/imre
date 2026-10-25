@@ -142,7 +142,13 @@ pub unsafe extern "C" fn imre_tee(
         if tuple.is_null() || (*layout).length == 0 {
             return tuple;
         }
-        let first = Fork::from_source(sources::acquire(mode, source));
+        let first = match sources::try_acquire(mode, source) {
+            Ok(source) => Fork::from_source(source),
+            Err(error) => {
+                records::imre_record_release(tuple);
+                return error.returning(std::ptr::null_mut());
+            }
+        };
         for i in 0..(*layout).length {
             let fork = adapter(Adapter::Tee(first.copy()));
             tuple

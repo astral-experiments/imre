@@ -82,6 +82,7 @@ pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *
     })))))
 }
 
+mod batched;
 mod sources;
 mod tee;
 use std::cell::{Cell, RefCell};
@@ -92,6 +93,7 @@ pub(super) enum Adapter {
     FloatCount { current: Cell<f64>, step: OwnedWord },
     Slice(Slice),
     Tee(tee::Fork),
+    Batched(batched::Batch),
     Cycle(Cycle),
     PathWalk(paths::Walker),
 }
@@ -118,6 +120,14 @@ enum Advance {
     Return(ItemResult),
 }
 
+/// Temporaries belonging to one invocation of `next`, including reentrant pulls.
+#[derive(Default)]
+enum PullFrame {
+    #[default]
+    Empty,
+    Batch(batched::Partial),
+}
+
 impl Drop for Adapter {
     fn drop(&mut self) {
         let mut source = self.take_source();
@@ -141,6 +151,7 @@ impl Adapter {
     fn take_source(&mut self) -> Option<Rc<Object>> {
         match self {
             Self::Tee(fork) => fork.take_source(),
+            Self::Batched(batch) => batch.take_source(),
             Self::Slice(slice) => slice.source.get_mut().take(),
             Self::Cycle(cycle) => cycle.source.get_mut().take(),
             _ => None,
@@ -172,6 +183,7 @@ impl Adapter {
             Self::Progression(_) => "range_iterator",
             Self::Sequence(_) => "iterator",
             Self::Tee(_) => "itertools._tee",
+            Self::Batched(_) => "itertools.batched",
             Self::Slice(_) => "itertools.islice",
             Self::Cycle(_) => "itertools.cycle",
             Self::PathWalk(_) => {
@@ -182,18 +194,20 @@ impl Adapter {
         write!(output, "<{name} object at {owner:p}>").unwrap();
     }
 
-    fn advance(&self, item: Option<ItemResult>) -> Advance {
+    fn advance(&self, frame: &mut PullFrame, item: Option<ItemResult>) -> Advance {
         match self {
             Self::Tee(fork) => fork.advance(item),
             Self::Slice(slice) => slice.advance(item),
             Self::Cycle(cycle) => cycle.advance(item),
+            Self::Batched(batch) => batch.advance(frame, item),
             _ => unreachable!("only composed cursors request source items"),
         }
     }
 
     fn next_composed(&self) -> Result<Option<OwnedWord>, Error> {
-        let mut nested = smallvec::SmallVec::<[Rc<Self>; 8]>::new();
-        let mut step = self.advance(None);
+        let mut root = PullFrame::Empty;
+        let mut nested = smallvec::SmallVec::<[(Rc<Self>, PullFrame); 8]>::new();
+        let mut step = self.advance(&mut root, None);
         loop {
             let item = match step {
                 Advance::Return(result) => {
@@ -209,7 +223,10 @@ impl Adapter {
                             Storage::IteratorAdapter(state)
                                 if matches!(
                                     **state,
-                                    Self::Tee(_) | Self::Slice(_) | Self::Cycle(_)
+                                    Self::Tee(_)
+                                        | Self::Slice(_)
+                                        | Self::Cycle(_)
+                                        | Self::Batched(_)
                                 ) =>
                             {
                                 Some(Rc::clone(state))
@@ -219,8 +236,9 @@ impl Adapter {
                     };
                     if let Some(state) = composed {
                         if nested.try_reserve(1).is_ok() {
-                            step = state.advance(None);
-                            nested.push(state);
+                            let mut frame = PullFrame::Empty;
+                            step = state.advance(&mut frame, None);
+                            nested.push((state, frame));
                             continue;
                         }
                         Err(Error::allocation())
@@ -229,7 +247,10 @@ impl Adapter {
                     }
                 }
             };
-            step = nested.last().map_or(self, Rc::as_ref).advance(Some(item));
+            step = match nested.last_mut() {
+                Some((state, frame)) => state.advance(frame, Some(item)),
+                None => self.advance(&mut root, Some(item)),
+            };
         }
     }
 
@@ -252,7 +273,9 @@ impl Adapter {
                     )))
                 }
             }
-            Self::Tee(_) | Self::Slice(_) | Self::Cycle(_) => self.next_composed(),
+            Self::Tee(_) | Self::Slice(_) | Self::Cycle(_) | Self::Batched(_) => {
+                self.next_composed()
+            }
             Self::PathWalk(walk) => walk.next(),
         }
     }
@@ -327,7 +350,10 @@ pub unsafe extern "C" fn imre_islice(
         return Error::new(Kind::ValueError, message).returning(std::ptr::null());
     }
     // SAFETY: the caller roots the exact source through validation and acquisition.
-    let source = unsafe { sources::acquire(mode, source) };
+    let source = match unsafe { sources::try_acquire(mode, source) } {
+        Ok(source) => source,
+        Err(error) => return error.returning(std::ptr::null()),
+    };
     Rc::into_raw(adapter(Adapter::Slice(Slice {
         source: RefCell::new(Some(source)),
         position: Cell::new(0),
@@ -382,7 +408,10 @@ impl Cycle {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_cycle(mode: u32, source: usize) -> *const Object {
     // SAFETY: the caller provides the exact representation until acquisition completes.
-    let source = unsafe { sources::acquire(mode, source) };
+    let source = match unsafe { sources::try_acquire(mode, source) } {
+        Ok(source) => source,
+        Err(error) => return error.returning(std::ptr::null()),
+    };
     Rc::into_raw(adapter(Adapter::Cycle(Cycle {
         source: RefCell::new(Some(source)),
         saved: RefCell::new(Vec::new()),

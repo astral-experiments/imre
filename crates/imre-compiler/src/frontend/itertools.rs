@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod batched;
+
 impl Checker<'_> {
     pub(super) fn repeat_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let mut args = ir::CallArgs::positional(Vec::new());
@@ -71,13 +73,14 @@ impl Checker<'_> {
         self.expr(node)
     }
 
-    fn cursor_source(&mut self, node: &ast::Expr) -> Result<(Expr, Type), String> {
-        let source = self.cursor_source_value(node)?;
-        let element = match source.ty {
-            Type::Str => Some(Type::Str),
+    fn iterable_element(&self, ty: Type) -> Option<Type> {
+        match ty {
+            Type::VarTuple(_) => self.types.var_tuple_element(ty),
+            Type::Str | Type::TextIO | Type::StringIO => Some(Type::Str),
+            Type::CsvReader => Some(self.types.list(Type::Str)),
             Type::Bytes => Some(Type::Int),
             Type::Tuple(_) => {
-                let fields = self.types.fields(source.ty).unwrap();
+                let fields = self.types.fields(ty).unwrap();
                 let first = fields.first().copied().unwrap_or(Type::Int);
                 fields.iter().all(|&t| t == first).then_some(first)
             }
@@ -88,7 +91,11 @@ impl Checker<'_> {
                 .or_else(|| self.types.set_element(ty))
                 .or_else(|| self.types.mapping(ty).map(|(key, _)| key)),
         }
-        .ok_or_else(|| {
+    }
+
+    fn cursor_source(&mut self, node: &ast::Expr) -> Result<(Expr, Type), String> {
+        let source = self.cursor_source_value(node)?;
+        let element = self.iterable_element(source.ty).ok_or_else(|| {
             error(
                 self.source,
                 node,

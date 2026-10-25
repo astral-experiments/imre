@@ -9,8 +9,8 @@ These are separate upstream suites, for **138 occurrences** in total. The JSON
 doctests are part of JSON's denominator. Imre's LLVM optimization level does
 not change CPython's discovery or remove docstrings.
 
-At O0 and O3, eleven complete primary methods pass under their original host
-fixtures. The 106 blocked occurrences, four reference skips and sixteen
+At O0 and O3, eleven complete primary methods and the batched doctest pass
+under their original host fixtures. The 105 blocked occurrences, four reference skips and sixteen
 reviewed exclusions remain in the primary report. The companion is blocked
 at both levels.
 
@@ -23,6 +23,12 @@ these bodies as `native-body-host-fixture`: CPython dispatches the original
 fixtures, and an Imre subprocess constructs its native instance. Filter and
 zip are builtin-only examples inside the upstream denominator.
 
+Ten of the eleven passing unittest bodies use the bundled `unittest.TestCase`
+assertions. The `zip` example still uses the native fixture for lists of tuples.
+The first assertion in `TestBasicOps.test_batched` compares a list of
+variable-length native tuples with a list of fixed tuples. The bundled list
+assertion cannot compare those elements yet; that complete body remains blocked.
+
 On the reference build, four huge allocations skip under the upstream
 address-space rule. The default resource configuration also skips the long-chain
 regression. That unchanged method passes with `-u cpu`; the native attempt
@@ -34,9 +40,10 @@ methods remain in the workload.
 
 The [batched example](upstream/batched.doctest) comes verbatim from
 [the original C docstring](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Modules/itertoolsmodule.c#L124).
-The runner verifies the blob and parses the immutable example before compiling
-it. Its output comparison, when reached, uses CPython's OutputChecker and is
-reported separately from the native iterator operation.
+The runner verifies the blob and parsed example against the original fixture,
+then compiles `doctest.DocTestSuite(itertools).debug()`. Imre runs the loop,
+prints its tuples, and checks the captured output. The original CPython
+`DocTestCase` still runs its `setUp` and `tearDown` hooks.
 
 The [companion](upstream/Lib/test/test_free_threading/test_itertools_batched.py)
 starts 10 threads against one batched iterator, 20 times. Its

@@ -210,7 +210,11 @@ impl Checker<'_> {
         if matches!(
             self.resolve(&call.func),
             Some(Binding::Intrinsic(
-                Intrinsic::Repeat | Intrinsic::Count | Intrinsic::Islice | Intrinsic::Cycle
+                Intrinsic::Repeat
+                    | Intrinsic::Count
+                    | Intrinsic::Islice
+                    | Intrinsic::Cycle
+                    | Intrinsic::Batched
             ))
         ) {
             let cursor = self.call(call)?;
@@ -1075,7 +1079,7 @@ impl Checker<'_> {
             let first = fields.first().copied().unwrap_or(Type::None);
             fields.iter().all(|ty| *ty == first).then_some(first)
         });
-        let element = self.types.element(iterable.ty)
+        let element = self.types.element(iterable.ty).or_else(|| self.types.var_tuple_element(iterable.ty))
             .or(set_element)
             .or((iterable.ty == Type::Str).then_some(Type::Str))
             .or((iterable.ty == Type::Bytes).then_some(Type::Int))
@@ -1098,8 +1102,10 @@ impl Checker<'_> {
         let mut acquire = vec![Statement::Assign(done, boolean(false))];
         let mut clear = vec![source, value, ready, done];
         let mut pull = Vec::new();
-        let indexed =
-            self.types.element(ty).is_some() || fields.is_some() || (reverse && ty == Type::Bytes);
+        let indexed = self.types.element(ty).is_some()
+            || self.types.var_tuple_element(ty).is_some()
+            || fields.is_some()
+            || (reverse && ty == Type::Bytes);
         if indexed {
             let cursor = self.hidden(Type::Int);
             clear.push(cursor);
@@ -1170,7 +1176,9 @@ impl Checker<'_> {
                 Expr {
                     ty: element,
                     kind: ExprKind::Builtin(
-                        if ty == Type::Bytes {
+                        if matches!(ty, Type::VarTuple(_)) {
+                            Builtin::TupleIndex
+                        } else if ty == Type::Bytes {
                             Builtin::BytesGet
                         } else if matches!(ty, Type::List(_)) {
                             Builtin::SequenceGetInBounds

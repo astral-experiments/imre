@@ -63,3 +63,14 @@ Python-defined iterator protocols, including sources that raise mid-pull.
 fork, a discarded lagging fork, source mutation, and an empty result that must
 not obtain an iterator. The larger `test_tee` body also requires weak references,
 dynamic types and arbitrary Python source iterators; it is not counted.
+
+[batched.py](batched.py) compares constructor argument evaluation, partial
+consumption, strict and non-strict tails, and sticky exhaustion after input
+errors. It interleaves a batch cursor with its source CSV reader or text file,
+including a CSV parse error and closing a file before or after acquisition.
+With a disposable filename argument it appends behind a live text reader:
+a non-strict short batch resumes, but an empty pull or strict failure stops it.
+On Linux, [batched_allocation.py](batched_allocation.py) fails the
+first native tuple allocation and compares it with a test-enabled pinned
+CPython using `_testcapi.set_nomemory`. Both keep the source at its first item
+and allow a later pull on the same batch cursor. Neither control adds a test ID.

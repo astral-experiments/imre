@@ -27,6 +27,7 @@ pub(crate) enum Type {
     /// The immutable top-level string keys of a private TOML document.
     StringKeys,
     Tuple(usize),
+    VarTuple(usize),
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
     /// Private state retained by an independently constructed function cache.
@@ -171,6 +172,7 @@ impl std::fmt::Display for Type {
             Self::Dict(id) => return write!(f, "dict#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
+            Self::VarTuple(id) => return write!(f, "variable-tuple#{id}"),
             Self::Callable(id) => return write!(f, "callable#{id}"),
             Self::Optional(id) => return write!(f, "optional#{id}"),
             Self::Union(id) => return write!(f, "union#{id}"),
@@ -242,6 +244,7 @@ impl std::fmt::Display for Type {
             | Self::Dict(_)
             | Self::Set(_)
             | Self::Tuple(_)
+            | Self::VarTuple(_)
             | Self::Callable(_)
             | Self::Optional(_)
             | Self::Union(_) => {
@@ -528,6 +531,8 @@ pub(crate) enum Builtin {
     },
     Islice,
     Tee,
+    Batched,
+    TupleIndex,
     Cycle,
     DirectoryContextView,
     TextStreamView,

@@ -156,6 +156,10 @@ impl FileState {
             .ok_or_else(|| Error::new(Kind::ValueError, "I/O operation on closed file."))
     }
 
+    pub(super) fn ensure_open(&mut self) -> Result<()> {
+        self.stream().map(|_| ())
+    }
+
     pub(super) fn read(&mut self) -> Result<Str> {
         if self.kind == FileKind::TextMemory {
             return self.text_memory()?.read(None, false);
@@ -626,7 +630,7 @@ pub unsafe extern "C" fn imre_text_enter(value: *const Object) -> u32 {
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.file_mut().stream().map(|_| 1))
+            .with_mut(|storage| storage.file_mut().ensure_open().map(|()| 1))
     };
     finish(result, 0)
 }

@@ -2321,6 +2321,25 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
             Storage::StringIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
+            Storage::CsvReader(reader) => reader.next().map(|row| {
+                row.map(|row| {
+                    (
+                        OwnedWord::from_owned(Rc::into_raw(row) as usize, WordKind::new(5)),
+                        None,
+                    )
+                })
+            }),
+            Storage::File(file) => file.readline().map(|line| {
+                (!line.is_empty()).then(|| {
+                    (
+                        OwnedWord::from_owned(
+                            Rc::into_raw(Rc::new(line)) as usize,
+                            WordKind::new(3),
+                        ),
+                        None,
+                    )
+                })
+            }),
             _ => storage
                 .mapping_iterator_mut()
                 .next()
