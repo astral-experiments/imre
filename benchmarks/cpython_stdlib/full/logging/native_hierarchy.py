@@ -92,11 +92,11 @@ def main():
                                    ("reconfigure_handlers.py", [("dict",), ("file", work / "logging.ini")])):
             sample = HERE / filename
             program = tools.build(sample.read_bytes(), work)
-            for args in commands:
-                expected = output([sys.executable, sample, *args])
-                actual = output([program, *args])
+            for arguments in commands:
+                expected = output([sys.executable, sample, *arguments])
+                actual = output([program, *arguments])
                 if actual != expected:
-                    raise AssertionError((filename, args, expected, actual))
+                    raise AssertionError((filename, arguments, expected, actual))
         callbacks = hierarchy_cases(tools, work)
         observed, failures, skips = run_in_fixtures(suite, callbacks)
         if failures or skips or set(observed) != set(callbacks):
