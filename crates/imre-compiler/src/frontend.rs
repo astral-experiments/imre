@@ -17,6 +17,7 @@ mod assignments;
 mod asyncio;
 mod bytes;
 mod cached_properties;
+mod call_binding_errors;
 mod callables;
 mod calls;
 pub(crate) use calls::scalar_literal;
@@ -87,6 +88,7 @@ mod truthiness;
 mod unbound_locals;
 mod unions;
 mod unittest;
+mod unittest_bound;
 mod unittest_equality;
 mod unittest_main;
 mod unittest_mock;
@@ -1477,6 +1479,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::StringIo)) => return Ok(Type::StringIO),
         Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return Ok(Type::LogFormatter),
+        Some(Binding::Intrinsic(Intrinsic::HandlerLevelType)) => return Ok(types.string_or_int()),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
@@ -2332,8 +2335,12 @@ impl<'a> Checker<'a> {
             }
         }
         if matches!(concrete, Type::Callable(_)) {
-            if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
-                self.resolve(expression)
+            if let Some(Binding::Intrinsic(
+                op @ (Intrinsic::Copy(_)
+                | Intrinsic::RmTree
+                | Intrinsic::Move
+                | Intrinsic::DestInSrc),
+            )) = self.resolve(expression)
             {
                 let value = self.shutil_function_value(op, Some(concrete), expression)?;
                 return self.coerce(value, expected, expression);
@@ -4885,8 +4892,9 @@ impl<'a> Checker<'a> {
         {
             return self.callable_value(&signature, None, None, expression);
         }
-        if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
-            self.resolve(expression)
+        if let Some(Binding::Intrinsic(
+            op @ (Intrinsic::Copy(_) | Intrinsic::RmTree | Intrinsic::Move | Intrinsic::DestInSrc),
+        )) = self.resolve(expression)
         {
             return self.shutil_function_value(op, None, expression);
         }
@@ -6073,6 +6081,9 @@ impl<'a> Checker<'a> {
                 {
                     return self.mock_child(class, receiver, attribute);
                 }
+                if let Some(bound) = self.bound_unittest_assertion(attribute, &receiver) {
+                    return Ok(bound);
+                }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 if let Some(name) = attribute.value.as_name_expr()
                     && let Some(&slot) = self.names.get(name.id.as_str())
@@ -6621,6 +6632,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
+            Some(Binding::Intrinsic(Intrinsic::Move)) => return self.shutil_move(call, false),
+            Some(Binding::Intrinsic(Intrinsic::DestInSrc)) => return self.shutil_move(call, true),
             Some(Binding::Intrinsic(Intrinsic::IgnorePatterns)) => {
                 return self.shutil_ignore_patterns(call);
             }
@@ -6629,6 +6642,11 @@ impl<'a> Checker<'a> {
                 return self.public_fspath(call, symbol == Intrinsic::PosixNormcase);
             }
             Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
+            Some(Binding::Intrinsic(
+                op @ (Intrinsic::HandlerRename | Intrinsic::HandlerLookup),
+            )) => {
+                return self.named_handler(op, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::MakeLogRecord)) => {
                 return self.make_log_record(call);
             }

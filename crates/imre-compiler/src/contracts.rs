@@ -266,6 +266,8 @@ impl Builtin {
                 | ProcessOperation::Which
                 | ProcessOperation::RmTree
                 | ProcessOperation::CopyTree(_)
+                | ProcessOperation::Move(_)
+                | ProcessOperation::DestInSrc
                 | ProcessOperation::IgnorePatterns
                 | ProcessOperation::TreeErrorArgs
                 | ProcessOperation::Copy(_)

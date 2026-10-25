@@ -10,6 +10,10 @@ on:
         description: Exact commit to build and verify against the Linux sys suite
         type: string
         required: false
+      logging_evidence:
+        description: Run all pinned logging occurrences at O0 and O3 and upload the report
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -307,6 +311,8 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/shutil/native_copy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copy.json"
           python3 benchmarks/cpython_stdlib/full/shutil/native_rmtree.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-rmtree.json"
           python3 benchmarks/cpython_stdlib/full/shutil/tree_ops.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copytree.json"
+          python3 benchmarks/cpython_stdlib/full/shutil/move_ops.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-move.json"
+          python3 benchmarks/cpython_stdlib/full/shutil/move_cross_device.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
           python3 benchmarks/cpython_stdlib/native_json.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
           python3 benchmarks/cpython_stdlib/native_json_values.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json-values.json"
           python3 benchmarks/cpython_stdlib/full/shlex/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shlex.json"
@@ -332,8 +338,20 @@ jobs:
             python3 benchmarks/cpython_stdlib/full/logging/native_formatters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-formatters-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-files-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_filters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-filters-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/logging/native_handlers.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-handlers-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/descriptor_seek.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-descriptor-seek-O$opt.json"
           done
+      - name: Replay every pinned Linux logging occurrence
+        if: github.event_name == 'workflow_dispatch' && inputs.logging_evidence
+        run: |
+          python3 benchmarks/cpython_stdlib/full/logging/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/logging-evidence-linux.json"
+          python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/logging/reference-linux.json "$RUNNER_TEMP/logging-evidence-linux.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name == 'workflow_dispatch' && inputs.logging_evidence && !cancelled()
+        with:
+          name: cpython-logging-evidence-linux
+          path: ${{ runner.temp }}/logging-evidence-linux.json
+          if-no-files-found: error
       - name: Build and install a Imre extension wheel
         run: |
           python3 -m pip install "wheel==0.45.1" "packaging==25.0"
