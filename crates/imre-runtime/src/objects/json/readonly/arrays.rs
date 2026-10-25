@@ -7,13 +7,14 @@ use std::rc::Rc;
 
 use serde_json::value::RawValue;
 
-use super::{Nodes, Source, View, elements, push_array};
+use super::{KeyMemo, Nodes, Source, View, elements, push_array};
 
 pub(in crate::objects::json) struct Deferred {
     text: Rc<super::Str>,
     normalized: Option<(Rc<String>, usize)>,
     range: Range<usize>,
     parsed: OnceCell<View>,
+    keys: KeyMemo,
 }
 
 impl Deferred {
@@ -63,6 +64,7 @@ impl Deferred {
             normalized,
             range: start..start + raw.len(),
             parsed: OnceCell::new(),
+            keys: source.keys.shared(),
         })))
     }
 
@@ -88,8 +90,9 @@ impl Deferred {
                 text,
                 original: spelling,
                 shared: Some((&self.text, self.range.start)),
+                keys: &self.keys,
             };
-            let node = match elements::parse(text, &mut nodes) {
+            let node = match elements::parse(text, &mut nodes, &self.keys) {
                 Some(array) => array,
                 None => push_array(&mut nodes, text, source)
                     .expect("the complete document and its Unicode scalars were validated"),
@@ -148,6 +151,7 @@ mod tests {
             text: &patched,
             original: Some((&input, &patched)),
             shared: None,
+            keys: &KeyMemo::default(),
         };
         let raw = Deferred::new(&patched, source).unwrap().unwrap();
         assert!(raw.truth());

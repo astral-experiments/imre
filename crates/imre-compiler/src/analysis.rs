@@ -123,6 +123,24 @@ impl Session {
             .read_to_string("stdlib/subprocess.pyi")
             .map_err(|error| error.to_string())?
             .replace("shell: bool =", "shell: bool | int =");
+        // check_output accepts **kwargs and reports these conflicts before
+        // launching. Code that catches those ValueErrors must reach the runtime.
+        let mut checked = false;
+        let subprocess: String = subprocess
+            .split_inclusive('\n')
+            .flat_map(|line| {
+                if line.trim_start().starts_with("def check_output(") {
+                    checked = true;
+                }
+                let extra = if checked && line.trim() == "*," {
+                    checked = false;
+                    "        stdout: object = ...,\n        check: object = ...,\n        capture_output: bool = False,\n"
+                } else {
+                    ""
+                };
+                [line, extra]
+            })
+            .collect();
         system
             .fs()
             .write_file_all(SystemPathBuf::from(root).join("subprocess.pyi"), subprocess)
@@ -445,9 +463,21 @@ pub(crate) enum CheckedDiagnostic {
     Call(TextRange),
     Keyword(TextRange),
     TupleListRead(TextRange),
+    MissingArgument(TextRange),
 }
 
 impl CheckedDiagnostic {
+    pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
+        let (range, kind) = match self {
+            Self::Decorator(range) => (range, 0),
+            Self::Call(range) => (range, 1),
+            Self::Keyword(range) => (range, 2),
+            Self::TupleListRead(range) => (range, 3),
+            Self::MissingArgument(range) => (range, 4),
+        };
+        (range.start(), range.end(), kind)
+    }
+
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
             Self::Decorator(decorator) => {
@@ -456,6 +486,7 @@ impl CheckedDiagnostic {
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
         }
     }
 }
