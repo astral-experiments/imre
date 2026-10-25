@@ -5308,6 +5308,11 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::DictCopy => self.call("imre_dict_copy", returns, &[&args[0].value]),
+            Builtin::DictFromKeysTarget => self.call(
+                "imre_dict_fromkeys_target",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::CounterNew => {
                 let (key, _) = self.module.types.mapping(returns).unwrap();
@@ -7114,6 +7119,7 @@ declare ptr @imre_namespace_dict(ptr)
 declare i64 @imre_namespace_get(ptr, ptr)
 declare void @imre_namespace_delete(ptr, ptr)
 declare ptr @imre_dict_copy(ptr)
+declare ptr @imre_dict_fromkeys_target(ptr, ptr)
 declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
