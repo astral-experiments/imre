@@ -112,6 +112,25 @@ impl<'a> Visitor<'a> for References<'_> {
                 self.found.attributes.insert(name);
             }
         }
+        match self.graph.resolve(self.module, expr) {
+            Some(Binding::Intrinsic(Intrinsic::DocExecute)) => {
+                if let Some(runner) = self.graph.doctest_runner() {
+                    self.found.definitions.insert(runner);
+                }
+            }
+            Some(Binding::Module(_) | Binding::IntrinsicModule(_)) => {
+                if let Some(Binding::Definition(docs)) = self
+                    .graph
+                    .modules
+                    .iter()
+                    .find(|module| module.bundled && module.name == "doctest")
+                    .and_then(|module| module.bindings.get("_module_docs"))
+                {
+                    self.found.definitions.insert(*docs);
+                }
+            }
+            _ => {}
+        }
         walk_expr(self, expr);
     }
 }

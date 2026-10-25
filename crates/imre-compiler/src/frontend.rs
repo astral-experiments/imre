@@ -26,6 +26,7 @@ mod counter;
 mod csv;
 mod dataclass_values;
 mod dispatch;
+mod doctest;
 mod documents;
 mod enums;
 mod expandtabs;
@@ -42,6 +43,7 @@ mod inspect;
 mod iterables;
 mod itertools;
 mod json;
+mod linecache;
 mod literals;
 mod local_functions;
 mod logging;
@@ -791,6 +793,8 @@ pub(crate) fn lower_with_owners(
                 &globals,
             );
             checker.returns = signature.returns;
+            checker.interactive_names =
+                module.is_doctest_case() && definition.name.as_str() == "_run_case";
             checker.asynchronous = signature.asynchronous;
             checker.method_context(signature.method);
             checker.generator_item = classes.producer_items.get(&signature.id).copied();
@@ -1116,6 +1120,16 @@ fn signature(
             matches!(value, ast::Expr::Subscript(subscript) if graph.resolve(module, &subscript.value) == Some(Binding::Intrinsic(Intrinsic::Sequence))));
         let empty_sequence = sequence
             && matches!(parameter.default.as_deref(), Some(ast::Expr::Tuple(tuple)) if tuple.elts.is_empty());
+        let wrapper_default =
+            parameter
+                .default
+                .as_deref()
+                .and_then(|value| match graph.resolve(module, value) {
+                    Some(Binding::Intrinsic(Intrinsic::WrapperAttributes(fields))) => {
+                        Some(functools::wrapper_attributes(fields, types))
+                    }
+                    _ => None,
+                });
         let ty = if let Some(receiver) = receiver
             && index == 0
         {
@@ -1171,6 +1185,8 @@ fn signature(
                     .map(|value| {
                         if inspect::is_sentinel(graph, module, value) {
                             Ok(Type::PlainObject)
+                        } else if let Some(default) = &wrapper_default {
+                            Ok(default.ty)
                         } else {
                             calls::scalar_literal(value, source).map(|value| value.ty)
                         }
@@ -1200,6 +1216,15 @@ fn signature(
                     })
                 } else if ty == Type::PlainObject && inspect::is_sentinel(graph, module, value) {
                     Ok(inspect::sentinel())
+                } else if let Some(default) = wrapper_default {
+                    if default.ty != ty {
+                        return Err(error(
+                            source,
+                            value,
+                            "wrapper attribute default requires its exact tuple type",
+                        ));
+                    }
+                    Ok(default)
                 } else {
                     calls::scalar_default(value, ty, types, source)
                 }
@@ -1767,6 +1792,8 @@ enum Iteration {
 }
 
 struct Checker<'a> {
+    /// Doctest prompts share an exec-style namespace until the case ends.
+    interactive_names: bool,
     /// A later local assignment shadows builtin iter throughout a function.
     local_iter: bool,
     context_method: bool,
@@ -1828,6 +1855,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            interactive_names: false,
             local_iter: false,
             zip_sum_rhs: None,
             asynchronous: false,
@@ -2210,6 +2238,12 @@ impl<'a> Checker<'a> {
             }
         }
         if matches!(concrete, Type::Callable(_)) {
+            if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
+                self.resolve(expression)
+            {
+                let value = self.shutil_function_value(op, Some(concrete), expression)?;
+                return self.coerce(value, expected, expression);
+            }
             if let Some(Binding::Definition(definition)) = self.resolve(expression)
                 && let Some(signature) = self.functions.get(&definition).cloned()
             {
@@ -3366,7 +3400,9 @@ impl<'a> Checker<'a> {
         if self.block_depth == 0 && !self.module_scope {
             self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
-            let mut names: Vec<_> = unbound_locals::candidates(statements).into_iter().collect();
+            let mut names: Vec<_> = unbound_locals::candidates(statements, self.interactive_names)
+                .into_iter()
+                .collect();
             names.sort_unstable();
             for name in names {
                 // Arguments enter already bound; deletion and nonordinary stores were excluded.
@@ -4675,6 +4711,12 @@ impl<'a> Checker<'a> {
                 &format!("no native implementation for {symbol}"),
             ));
         }
+        if let Some(target @ (Binding::Module(_) | Binding::IntrinsicModule(_))) =
+            self.resolve(expression)
+            && let Some(module) = self.module_docs(target, expression)?
+        {
+            return Ok(module);
+        }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
             | Intrinsic::IntConstant(level)
@@ -4698,6 +4740,11 @@ impl<'a> Checker<'a> {
             && let Some(signature) = self.functions.get(&definition).cloned()
         {
             return self.callable_value(&signature, None, None, expression);
+        }
+        if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
+            self.resolve(expression)
+        {
+            return self.shutil_function_value(op, None, expression);
         }
         if let Some(Binding::Value(definition)) = self.resolve(expression) {
             let (slot, ty) = self.globals.get(definition).ok_or_else(|| {
@@ -4771,7 +4818,13 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::HashAvailable, vec![]),
                     });
                 }
+                Intrinsic::Linecache(ir::LinecacheOperation::Cache) => {
+                    return Ok(self.linecache_mapping());
+                }
                 Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
+                Intrinsic::WrapperAttributes(fields) => {
+                    return Ok(functools::wrapper_attributes(fields, self.types));
+                }
                 Intrinsic::OsDevnull => {
                     return Ok(Expr {
                         ty: Type::Str,
@@ -5639,6 +5692,23 @@ impl<'a> Checker<'a> {
                     receiver.ty,
                     Type::Exception | Type::ImportException | Type::TimeoutExpired
                 ) {
+                    if attribute.attr.as_str() == "args"
+                        && let ExprKind::Local(slot) = receiver.kind
+                        && let Some(issue) = self
+                            .captured_process_errors
+                            .iter()
+                            .rev()
+                            .find(|capture| capture.slot == slot)
+                            .and_then(|capture| capture.tree_issue)
+                    {
+                        return Ok(Expr {
+                            ty: self.types.tuple(vec![self.types.list(issue)]),
+                            kind: ExprKind::Builtin(
+                                Builtin::Process(ir::ProcessOperation::TreeErrorArgs),
+                                vec![receiver],
+                            ),
+                        });
+                    }
                     let field = if receiver.ty == Type::TimeoutExpired {
                         self.timeout_error_attribute(&receiver, attribute)?
                     } else {
@@ -5848,6 +5918,9 @@ impl<'a> Checker<'a> {
         }
         if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
+        }
+        if let Some(suite) = self.doctest_suite(call)? {
+            return Ok(suite);
         }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
@@ -6213,6 +6286,10 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
+            Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
+            Some(Binding::Intrinsic(Intrinsic::IgnorePatterns)) => {
+                return self.shutil_ignore_patterns(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Copy(op))) => return self.shutil_copy(op, call),
             Some(Binding::Intrinsic(symbol @ (Intrinsic::FsPath | Intrinsic::PosixNormcase))) => {
                 return self.public_fspath(call, symbol == Intrinsic::PosixNormcase);
@@ -6243,6 +6320,11 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::Linecache(op)))
+                if op != ir::LinecacheOperation::Cache =>
+            {
+                return self.linecache_call(op, call);
             }
             Some(Binding::Intrinsic(Intrinsic::InspectIsMethodDescriptor)) => {
                 return self.is_method_descriptor(call);
@@ -6301,7 +6383,7 @@ impl<'a> Checker<'a> {
                 return self.system_path_call(intrinsic, call);
             }
             Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
-                return self.text_function(call, "text", ir::TextOperation::Dedent);
+                return self.dedent_call(call);
             }
             Some(Binding::Intrinsic(Intrinsic::UrlsafeB64encode)) => {
                 let args = self.arguments(

@@ -22,6 +22,7 @@ mod hashlib;
 mod inspect;
 mod itertools;
 mod json;
+mod linecache;
 mod logging;
 mod mappings;
 mod namespaces;
@@ -41,6 +42,8 @@ mod unions;
 mod values;
 mod words;
 mod zipfile;
+
+pub(crate) use files::errno_error;
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
