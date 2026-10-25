@@ -699,6 +699,21 @@ impl Mapping {
         keys
     }
 
+    /// The immutable dictionary roots both words for the duration of the visitor.
+    pub(super) fn visit_document_pairs(
+        &self,
+        mut visit: impl FnMut(&Str, &Object) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        assert_eq!((self.tables.key_kind(), self.value_kind.raw()), (3, 5));
+        let mut result = Ok(());
+        self.tables.all(|key, value| {
+            // SAFETY: the exact dictionary owns each string key and document value.
+            result = unsafe { visit(&*(key as *const Str), object(value as *const Object)) };
+            result.is_ok()
+        });
+        result
+    }
+
     pub(super) fn document_pairs(&self) -> Vec<(Rc<Str>, Rc<Object>)> {
         assert_eq!((self.tables.key_kind(), self.value_kind.raw()), (3, 5));
         let mut pairs = Vec::with_capacity(self.tables.len());

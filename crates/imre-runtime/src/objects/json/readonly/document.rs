@@ -2,7 +2,7 @@
 //! A subscript or shallow spread retains the same nested container owner.
 
 use ::toml::de::{DeTable, DeValue};
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 
 use super::{Node, Nodes, View};
 use crate::objects::mappings::{
@@ -69,12 +69,25 @@ impl Value {
             })
         }
     }
-    fn snapshot(&self, nodes: &mut Vec<Node>, depth: usize) -> Result<usize, Error> {
+    fn snapshot(
+        &self,
+        nodes: &mut Vec<Node>,
+        shared: &mut HashMap<(*const Object, usize), usize>,
+        depth: usize,
+    ) -> Result<usize, Error> {
         if depth >= super::super::MAX_DEPTH && matches!(self, Self::Array(_) | Self::Table(_)) {
             return Err(Error::new(
                 Kind::ValueError,
                 "document nesting exceeds 128 containers",
             ));
+        }
+        // Including the depth keeps the nesting check valid along every incoming path.
+        let identity = match self {
+            Self::Array(owner) | Self::Table(owner) => Some((Rc::as_ptr(owner), depth)),
+            _ => None,
+        };
+        if let Some(index) = identity.and_then(|key| shared.get(&key)) {
+            return Ok(*index);
         }
         let node = match self {
             Self::Null => Node::Null,
@@ -82,32 +95,57 @@ impl Value {
             Self::Integer(x) => Node::Integer(x.clone()),
             Self::Float(x) => Node::Float(*x),
             Self::String(x) => Node::String(x.clone()),
-            Self::Datetime(x) => Node::Datetime(x.clone()),
-            Self::Array(a) => Node::Array(
-                Self::elements(a)
-                    .iter()
-                    .map(|value| Self::read(value).snapshot(nodes, depth + 1))
-                    .collect::<Result<_, _>>()?,
-            ),
-            Self::Table(t) => Node::Object(
-                Self::items(t)
-                    .iter()
-                    .map(|(key, value)| {
-                        Ok((
-                            (**key).clone(),
-                            Self::read(value).snapshot(nodes, depth + 1)?,
-                        ))
+            Self::Datetime(x) => {
+                Node::Datetime(Str::try_new(x.as_str()).map_err(|_| Error::allocation())?)
+            }
+            Self::Array(owner) => {
+                // SAFETY: the document roots its exact list and every child throughout the snapshot.
+                let children = unsafe {
+                    owner.0.with(|s| {
+                        let words = &s.sequence().values;
+                        let mut children = Vec::new();
+                        children
+                            .try_reserve_exact(words.len())
+                            .map_err(|_| Error::allocation())?;
+                        for &word in words {
+                            let value = Self::read(object(word as *const Object));
+                            children.push(value.snapshot(nodes, shared, depth + 1)?);
+                        }
+                        Ok::<_, Error>(children)
                     })
-                    .collect::<Result<_, Error>>()?,
-            ),
+                }?;
+                Node::Array(children)
+            }
+            Self::Table(owner) => {
+                let mut fields = Vec::new();
+                // SAFETY: the source stays rooted and immutable while child indices are collected.
+                unsafe {
+                    owner.0.with(|s| {
+                        s.dictionary().visit_document_pairs(|name, value| {
+                            fields.try_reserve(1).map_err(|_| Error::allocation())?;
+                            let key =
+                                Str::try_new(name.as_str()).map_err(|_| Error::allocation())?;
+                            fields
+                                .push((key, Self::read(value).snapshot(nodes, shared, depth + 1)?));
+                            Ok(())
+                        })
+                    })
+                }?;
+                Node::Object(fields)
+            }
         };
+        nodes.try_reserve(1).map_err(|_| Error::allocation())?;
         let index = nodes.len();
         nodes.push(node);
+        if let Some(key) = identity {
+            shared.try_reserve(1).map_err(|_| Error::allocation())?;
+            shared.insert(key, index);
+        }
         Ok(index)
     }
     pub(in crate::objects) fn view(&self) -> Result<View, Error> {
         let mut nodes = Vec::new();
-        let index = self.snapshot(&mut nodes, 0)?;
+        let index = self.snapshot(&mut nodes, &mut HashMap::new(), 0)?;
         Ok(View {
             nodes: Nodes::Document(Rc::new(nodes)),
             index,
@@ -404,6 +442,40 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_children_reuse_the_same_snapshot_node() {
+        let mut value = Value::array(std::iter::empty());
+        for _ in 0..22 {
+            let child = value.object();
+            value = Value::array([child.clone(), child].into_iter());
+        }
+        let Ok(view) = value.view() else {
+            panic!("shallow shared graph must fit")
+        };
+        let Nodes::Document(nodes) = view.nodes else {
+            unreachable!()
+        };
+        assert_eq!(nodes.len(), 23);
+        for node in &nodes[1..] {
+            assert!(matches!(node, Node::Array(items) if items.len() == 2 && items[0] == items[1]));
+        }
+    }
+
+    #[test]
+    fn a_shorter_cached_path_cannot_hide_excess_depth() {
+        let mut shared = Value::Null;
+        for _ in 0..80 {
+            shared = Value::array(std::iter::once(shared.object()));
+        }
+        let shared = shared.object();
+        let mut long = shared.clone();
+        for _ in 0..60 {
+            long = Value::array(std::iter::once(long)).object();
+        }
+        let root = Value::array([shared, long].into_iter());
+        assert!(root.view().is_err());
+    }
 
     #[test]
     fn mutable_snapshot_checks_container_depth() {
