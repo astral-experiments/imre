@@ -6738,6 +6738,15 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
+            if matches!(attribute.attr.as_str(), "splitlines" | "isspace")
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.line_method(
+                    Self::string_value(receiver),
+                    attribute.attr.as_str(),
+                    call,
+                );
+            }
             if matches!(attribute.attr.as_str(), "lower" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
@@ -6901,20 +6910,6 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(builtin, vec![receiver]),
                     });
                 }
-            }
-            if receiver.ty == Type::Str
-                && attribute.attr.as_str() == "splitlines"
-                && call.arguments.args.is_empty()
-            {
-                return Ok(Expr {
-                    ty: self.types.list(Type::Str),
-                    kind: match receiver.kind {
-                        ExprKind::Builtin(Builtin::Decode, bytes) => {
-                            ExprKind::Builtin(Builtin::DecodeSplitLines, bytes)
-                        }
-                        _ => ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
-                    },
-                });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
                 if attribute.attr.as_str() == "clear"

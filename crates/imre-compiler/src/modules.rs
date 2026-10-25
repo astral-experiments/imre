@@ -840,6 +840,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::MissingArgument(call));
     }
 
+    /// This exact operand is excessive for a resolved native method that raises TypeError.
+    pub(crate) fn checked_excess_argument(&self, module: ModuleId, argument: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::ExcessArgument(argument));
+    }
+
     /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
     pub(crate) fn checked_dict_deletion(&self, module: ModuleId, target: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
