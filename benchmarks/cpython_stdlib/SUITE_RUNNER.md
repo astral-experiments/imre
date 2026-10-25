@@ -66,3 +66,5 @@ operations implemented by Imre, run the original method, and return evidence
 of the actual native calls. See the [versioned evidence contract](NATIVE_EVIDENCE.md)
 for per-occurrence records, exact exception policies and rollup validation.
 The original `run_in_fixtures` callback interface remains available.
+
+The default fixture supports `with self.assertRaises(ValueError) as cm:` and subsequent reads of `cm.exception`. The unchanged `Test_TestCase.testAssertRaisesNoExceptionType` exercises the default fixture at both levels.

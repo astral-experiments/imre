@@ -506,6 +506,8 @@ pub(crate) enum Builtin {
     EnumLookup(usize),
     EnumString,
     NominalIdentity,
+    /// Match an exception against the category list retained by an assertion context.
+    ExceptionMatchesAny,
     LiteralStringView,
     StringListContains,
     StringContains,
@@ -568,6 +570,7 @@ pub(crate) enum Builtin {
     },
     ImportErrorField(u32),
     ImportErrorReset,
+    ImportErrorRejectReset,
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,
@@ -744,6 +747,8 @@ pub(crate) enum Builtin {
         empty_list: bool,
     },
     JsonAdd,
+    /// Compare two parsed values, observing mutations to an original root list.
+    JsonEqual,
     /// Both lookups borrow the same local JSON document and use literal integer defaults.
     JsonAddFields(String, String),
     JsonIsInt,
@@ -942,6 +947,7 @@ pub(crate) enum PathOperation {
     Drive,
     Root,
     Anchor,
+    CountPart,
     AsPosix,
     Join,
     Match {
@@ -981,8 +987,9 @@ pub(crate) enum PathOperation {
     ContextExit,
     UnionText,
     Iterdir,
-    Glob,
-    Next,
+    Glob {
+        recursive: bool,
+    },
 }
 
 /// POSIX lexical operations preserve raw str or bytes spellings.
@@ -1072,6 +1079,7 @@ pub(crate) enum LogOperation {
     Level,
     Root,
     Parent,
+    Children,
     EffectiveLevel,
     SetLevel,
     Enabled,
@@ -1091,6 +1099,18 @@ pub(crate) enum FdOperation {
     SetBlocking,
     GetInheritable,
     SetInheritable,
+}
+
+/// Filesystem copy operations using the same ordered pair of path operands.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub(crate) enum CopyOperation {
+    File = 0,
+    Mode = 1,
+    Stat = 2,
+    Xattr = 3,
+    Copy = 4,
+    Copy2 = 5,
 }
 
 /// Synchronous process operations cannot invoke language callbacks.
@@ -1177,7 +1197,7 @@ pub(crate) enum ProcessOperation {
     Fd(FdOperation),
     OpenFlag(&'static str),
     Which,
-    CopyFile,
+    Copy(CopyOperation),
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,
