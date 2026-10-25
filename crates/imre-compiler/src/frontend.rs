@@ -1099,6 +1099,7 @@ fn signature(
     }
     let mut params = Vec::new();
     let mut parameter_types = Vec::new();
+    let mut none_defaults = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
         let module = owner
             .and_then(|id| {
@@ -1179,6 +1180,14 @@ fn signature(
                     })
                     .transpose()?)
         };
+        if parameter.annotation().is_none()
+            && matches!(
+                parameter.default.as_deref(),
+                Some(ast::Expr::NoneLiteral(_))
+            )
+        {
+            none_defaults.push(index);
+        }
         parameter_types.push(ty);
         // Unresolved types exist only in the discarded discovery pass. solve()
         // fills every slot before ordinary lowering can construct executable IR.
@@ -1241,7 +1250,7 @@ fn signature(
             (Some(_), "__str__" | "__repr__") => Some(Type::Str),
             _ => None,
         });
-    let id = inference.register(parameter_types, returns);
+    let id = inference.register(parameter_types, returns, none_defaults);
     Ok(Signature {
         id,
         asynchronous: function.is_async,
