@@ -92,6 +92,7 @@ mod unions;
 mod unittest;
 mod unittest_bound;
 mod unittest_equality;
+mod unittest_loader;
 mod unittest_main;
 mod unittest_mock;
 mod unittest_setup;
