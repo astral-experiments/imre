@@ -34,3 +34,25 @@ generator methods which a direct call would only construct retain their exact
 source blocker. The two reference skips retain their reasons. Repeated `--smoke ID`
 selects individual methods; unscheduled occurrences remain in the report. A
 misspelled ID is an error.
+
+## Recorded Linux run
+
+The [compressed receipt](projection-linux.json.gz) contains every occurrence, its
+source hash, and all four observations from [compiler bf141eb](https://github.com/astral-sh/imre/commit/bf141ebbc22492f9d7d8f530cab57f1cae23232a).
+This compiler includes the proposed callable and regex exception assertions.
+The uncompressed JSON has SHA-256
+`68f46b7f6e609a6436b3a3f78a12f7ef42fb4359c5982518223be9d4c6bd595d`.
+All four modes found the same counts:
+
+| Outcome | Occurrences per mode |
+| --- | ---: |
+| Projected method returned | 12 |
+| Compiler reported a blocker | 1,024 |
+| Fixture or method could not be projected | 52 |
+| Original Linux reference skip | 2 |
+| Total | **1,090** |
+
+For example, `Test_TestCase.testAssertEqualSingleLine` returned in all four
+modes. `Test_TestCase.testAssertMultiLineEqualTruncates` reached the call that
+the native method rejects. The receipt maps both results to the original method
+definitions. Use `gzip -dc projection-linux.json.gz` to inspect them.
