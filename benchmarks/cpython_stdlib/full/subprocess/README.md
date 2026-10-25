@@ -100,3 +100,25 @@ The differential `tests/fixtures/processes/popen_pipes.py` fixture also checks
 a 200,000-byte exchange on all three pipes, recovery after a zero deadline,
 rejection of new input, repeated output, text newline conversion, and shared
 descriptor/close state. It is not another upstream ID.
+
+## Original fixtures and per-ID evidence
+
+Use the shared [suite runner](../../SUITE_RUNNER.md) from
+[#508](https://github.com/astral-sh/imre/pull/508) to run these bodies under
+the pinned release's module, class, and instance hooks. In
+`native_body_host_fixtures`, the body, assertions, and subprocess operation
+execute in Imre; the fixtures execute in CPython. The literal Python helpers
+launched by the methods still execute in the specified CPython interpreter.
+
+[host_popen.py](host_popen.py) runs original host bodies and assertions, with a
+persistent Imre parent performing the requested Popen operations. The transport
+returns the native status, stdout, stderr, and exception message. In particular,
+the post-timeout test performs both communicate calls on the same native child.
+It records which calls actually ran. [audit.py](audit.py) exercises this route
+in isolation for every eligible reference ID, with the CPU resource enabled.
+A successful host assertion with no native operation, a subprocess operation
+executed inside a CPython child, or a check of the wrong process's descriptor
+table is not a native subprocess pass.
+
+Run either script with the same flags as `native_bodies.py`. The latter's
+`blocked` and the audit's failed/blocked rows remain in the denominator.
