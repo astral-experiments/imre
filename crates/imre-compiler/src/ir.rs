@@ -68,6 +68,7 @@ pub(crate) enum Type {
     Semaphore,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
+    LogRecord,
     Logger,
     TimedFileHandler,
     ClockTime,
@@ -179,6 +180,7 @@ impl std::fmt::Display for Type {
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
@@ -463,6 +465,7 @@ pub(crate) enum Builtin {
         bounded: bool,
     },
     Islice,
+    Tee,
     Cycle,
     DirectoryContextView,
     Document(DocumentOp),
@@ -513,6 +516,7 @@ pub(crate) enum Builtin {
     WallTime,
     Logging(LogOperation),
     Timed(TimedOperation),
+    LogRecord(LogRecordOperation),
     Input,
     Chr,
     Int,
@@ -615,6 +619,8 @@ pub(crate) enum Builtin {
     BytesIter,
     Encode,
     Decode,
+    DecodeAscii,
+    UrlsafeB64encode,
     Sha256Hex,
     Sha256New,
     HashNew,
@@ -796,6 +802,7 @@ pub(crate) enum Builtin {
     SetDiscard,
     SetIter,
     ExceptionMessage,
+    JsonErrorField(u32),
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
     ExceptionWithCause,
     ExceptionCause,
@@ -870,6 +877,7 @@ pub(crate) enum RegexCapture {
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
+    Lower,
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -975,6 +983,19 @@ pub(crate) enum TimedOperation {
     DoRollover,
 }
 
+/// Operations on a record with individually owned, named Python fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LogRecordOperation {
+    New,
+    Put,
+    Update,
+    Read,
+    Message,
+    Repr,
+    Flag,
+    SetFlag,
+}
+
 /// Operations on the native logging registry and its named loggers.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
@@ -1009,6 +1030,10 @@ pub(crate) enum ProcessOperation {
     },
     Popen {
         streams: u32,
+    },
+    Call {
+        streams: u32,
+        check: bool,
     },
     PopenPid,
     PopenArgs,
@@ -1076,6 +1101,7 @@ pub(crate) enum ProcessOperation {
     EnvironGet,
     GetCwd,
     Which,
+    CopyFile,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,
