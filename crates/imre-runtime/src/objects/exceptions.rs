@@ -506,6 +506,7 @@ impl Error {
     ) -> Self {
         Self {
             kind: Kind::JsonDecodeError,
+            cause: None,
             payload: Some(Payload::Json(Rc::new(JsonError {
                 msg: Rc::new(Str::from(msg)),
                 doc,
