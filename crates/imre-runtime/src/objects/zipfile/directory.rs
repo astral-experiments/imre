@@ -9,13 +9,14 @@ use super::super::{
     exceptions::{Error, Kind, Result},
     files,
 };
+use super::Info;
 
 const END: &[u8; 4] = b"PK\x05\x06";
 const END64: &[u8; 4] = b"PK\x06\x06";
 const LOCATOR64: &[u8; 4] = b"PK\x06\x07";
 const CENTRAL: &[u8; 4] = b"PK\x01\x02";
 
-fn bad(message: impl Into<Str>) -> Error {
+pub(super) fn bad(message: impl Into<Str>) -> Error {
     Error::new(Kind::BadZipFile, message)
 }
 
@@ -23,11 +24,11 @@ fn not_zip() -> Error {
     bad("File is not a zip file")
 }
 
-fn u16_at(bytes: &[u8], offset: usize) -> u16 {
+pub(super) fn u16_at(bytes: &[u8], offset: usize) -> u16 {
     u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap())
 }
 
-fn u32_at(bytes: &[u8], offset: usize) -> u32 {
+pub(super) fn u32_at(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }
 
@@ -42,7 +43,7 @@ fn read_at(reader: &mut (impl Read + Seek), offset: u64, buf: &mut [u8]) -> Resu
         .map_err(|_| not_zip())
 }
 
-fn grow(buf: &mut Vec<u8>, size: usize) -> Result<()> {
+pub(super) fn grow(buf: &mut Vec<u8>, size: usize) -> Result<()> {
     buf.clear();
     buf.try_reserve_exact(size)
         .map_err(|_| Error::allocation())?;
@@ -51,14 +52,19 @@ fn grow(buf: &mut Vec<u8>, size: usize) -> Result<()> {
 }
 
 /// A ZIP64 locator, when present, supplies the actual 64-bit directory size and location.
-fn directory_bounds(reader: &mut (impl Read + Seek), end: u64, size: u32) -> Result<(u64, u64)> {
+fn directory_bounds(
+    reader: &mut (impl Read + Seek),
+    end: u64,
+    size: u32,
+    offset: u32,
+) -> Result<(u64, u64, u64)> {
     let Some(locator_at) = end.checked_sub(20) else {
-        return Ok((end, size.into()));
+        return Ok((end, size.into(), offset.into()));
     };
     let mut locator = [0; 20];
     read_at(reader, locator_at, &mut locator)?;
     if !locator.starts_with(LOCATOR64) {
-        return Ok((end, size.into()));
+        return Ok((end, size.into(), offset.into()));
     }
     if u32_at(&locator, 4) != 0 || u32_at(&locator, 16) > 1 {
         return Err(bad("zipfiles that span multiple disks are not supported"));
@@ -85,11 +91,11 @@ fn directory_bounds(reader: &mut (impl Read + Seek), end: u64, size: u32) -> Res
     {
         return Err(bad("Corrupt zip64 end of central directory record"));
     }
-    Ok((position, size))
+    Ok((position, size, u64_at(&end64, 48)))
 }
 
 /// Read the usual fixed trailer first. With a comment, search at most its 64 KiB limit.
-fn find_directory(reader: &mut (impl Read + Seek)) -> Result<(u64, u64)> {
+fn find_directory(reader: &mut (impl Read + Seek)) -> Result<(u64, u64, i128)> {
     let length = reader.seek(SeekFrom::End(0)).map_err(|_| not_zip())?;
     let position = length.checked_sub(22).ok_or_else(not_zip)?;
     let mut end = [0; 22];
@@ -106,11 +112,12 @@ fn find_directory(reader: &mut (impl Read + Seek)) -> Result<(u64, u64)> {
         end.copy_from_slice(tail.get(at..at + 22).ok_or_else(not_zip)?);
         start + at as u64
     };
-    let (end, size) = directory_bounds(reader, position, u32_at(&end, 12))?;
+    let (end, size, offset) =
+        directory_bounds(reader, position, u32_at(&end, 12), u32_at(&end, 16))?;
     let start = end
         .checked_sub(size)
         .ok_or_else(|| bad("Bad offset for central directory"))?;
-    Ok((start, size))
+    Ok((start, size, i128::from(start) - i128::from(offset)))
 }
 
 // The upper half of IBM code page 437, the default ZIP filename encoding.
@@ -124,13 +131,13 @@ const CP437: [char; 128] = [
     '≥', '≤', '⌠', '⌡', '÷', '≈', '°', '∙', '·', '√', 'ⁿ', '²', '■', '\u{a0}',
 ];
 
-fn name(raw: &[u8], utf8: bool) -> Result<Str> {
+pub(super) fn name(raw: &[u8], utf8: bool) -> Result<Str> {
     if utf8 || raw.is_ascii() {
         let text = std::str::from_utf8(raw).map_err(|error| bytes::decode_error(raw, error))?;
-        return Str::try_new(text.split('\0').next().unwrap()).map_err(|_| Error::allocation());
+        return Str::try_new(text).map_err(|_| Error::allocation());
     }
     let mut text = Str::try_with_capacity(raw.len() * 3).map_err(|_| Error::allocation())?;
-    for &ch in raw.iter().take_while(|&&ch| ch != 0) {
+    for &ch in raw {
         text.push(if ch < 128 {
             char::from(ch)
         } else {
@@ -141,12 +148,7 @@ fn name(raw: &[u8], utf8: bool) -> Result<Str> {
 }
 
 /// ZIP64 may replace sentinel sizes/offsets, and Info-ZIP may override the display name.
-fn parse_extra(header: &[u8; 46], raw: &[u8], mut extra: &[u8], filename: &mut Str) -> Result<()> {
-    let mut zip64 = [
-        u32_at(header, 24) == u32::MAX,
-        u32_at(header, 20) == u32::MAX,
-        u32_at(header, 42) == u32::MAX,
-    ];
+fn parse_extra(raw: &[u8], mut extra: &[u8], info: &mut Info) -> Result<()> {
     while extra.len() >= 4 {
         let tag = u16_at(extra, 0);
         let len = usize::from(u16_at(extra, 2));
@@ -155,18 +157,16 @@ fn parse_extra(header: &[u8; 46], raw: &[u8], mut extra: &[u8], filename: &mut S
             .ok_or_else(|| bad(format!("Corrupt extra field {tag:04x} (size={len})")))?;
         if tag == 1 {
             let mut words = data.as_chunks::<8>().0.iter();
-            for (needed, field) in
-                zip64
-                    .iter_mut()
-                    .zip(["File size", "Compress size", "Header offset"])
-            {
-                if *needed {
+            for (slot, field) in [
+                (&mut info.file_size, "File size"),
+                (&mut info.compress_size, "Compress size"),
+                (&mut info.local_offset, "Header offset"),
+            ] {
+                if *slot == u64::from(u32::MAX) || (field == "File size" && *slot == u64::MAX) {
                     let word = words.next().ok_or_else(|| {
                         bad(format!("Corrupt zip64 extra field. {field} not found."))
                     })?;
-                    let value = u64::from_le_bytes(*word);
-                    *needed =
-                        value == u64::from(u32::MAX) || (field == "File size" && value == u64::MAX);
+                    *slot = u64::from_le_bytes(*word);
                 }
             }
         } else if tag == 0x7075 {
@@ -179,8 +179,10 @@ fn parse_extra(header: &[u8; 46], raw: &[u8], mut extra: &[u8], filename: &mut S
                 let text = std::str::from_utf8(&data[5..]).map_err(|_| {
                     bad("Corrupt unicode path extra field (0x7075): invalid utf-8 bytes")
                 })?;
-                *filename = Str::try_new(text.split('\0').next().unwrap())
-                    .map_err(|_| Error::allocation())?;
+                info.filename = Rc::new(
+                    Str::try_new(text.split('\0').next().unwrap())
+                        .map_err(|_| Error::allocation())?,
+                );
             }
         }
         extra = &extra[4 + len..];
@@ -188,13 +190,13 @@ fn parse_extra(header: &[u8; 46], raw: &[u8], mut extra: &[u8], filename: &mut S
     Ok(())
 }
 
-pub(super) fn names(reader: &mut (impl Read + Seek)) -> Result<Vec<Rc<Str>>> {
-    let (start, mut remaining) = find_directory(reader)?;
+pub(super) fn entries(reader: &mut (impl Read + Seek)) -> Result<Vec<Info>> {
+    let (start, mut remaining, prefix) = find_directory(reader)?;
     reader
         .seek(SeekFrom::Start(start))
         .map_err(files::errno_error)?;
     let mut source = BufReader::new(reader.take(remaining));
-    let mut names = Vec::new();
+    let mut entries = Vec::new();
     let mut buf = Vec::new();
     let mut header = [0; 46];
     while remaining > 0 {
@@ -215,7 +217,8 @@ pub(super) fn names(reader: &mut (impl Read + Seek)) -> Result<Vec<Rc<Str>>> {
             .map_err(|_| bad("Truncated central directory"))?;
         remaining -= n as u64;
         let raw = &buf[..name_len.min(n)];
-        let mut filename = name(raw, u16_at(&header, 8) & (1 << 11) != 0)?;
+        let flags = u16_at(&header, 8);
+        let original = Rc::new(name(raw, flags & (1 << 11) != 0)?);
         let version = header[6];
         if version > 63 {
             return Err(Error::new(
@@ -223,16 +226,47 @@ pub(super) fn names(reader: &mut (impl Read + Seek)) -> Result<Vec<Rc<Str>>> {
                 format!("zip file version {:.1}", f32::from(version) / 10.0),
             ));
         }
+        let filename = if let Some((prefix, _)) = original.split_once('\0') {
+            Rc::new(Str::try_new(prefix).map_err(|_| Error::allocation())?)
+        } else {
+            original.clone()
+        };
+        let mut info = Info {
+            filename,
+            original,
+            flags,
+            method: u16_at(&header, 10),
+            crc: u32_at(&header, 16),
+            compress_size: u64::from(u32_at(&header, 20)),
+            file_size: u64::from(u32_at(&header, 24)),
+            external_attr: u32_at(&header, 38),
+            local_offset: u64::from(u32_at(&header, 42)),
+            offset: 0,
+            end: 0,
+        };
         parse_extra(
-            &header,
             raw,
             &buf[raw.len()..(name_len + extra_len).min(n)],
-            &mut filename,
+            &mut info,
         )?;
-        names.try_reserve(1).map_err(|_| Error::allocation())?;
-        names.push(Rc::new(filename));
+        info.offset = i128::from(info.local_offset) + prefix;
+        entries.try_reserve(1).map_err(|_| Error::allocation())?;
+        entries.push(info);
     }
-    Ok(names)
+    // Each entry must finish before the next local header. Stable order for
+    // equal offsets distinguishes shared headers from overlapping payloads.
+    let mut order = Vec::new();
+    order
+        .try_reserve_exact(entries.len())
+        .map_err(|_| Error::allocation())?;
+    order.extend(0..entries.len());
+    order.sort_unstable_by_key(|&i| (entries[i].offset, i));
+    let mut end = i128::from(start);
+    for i in order.into_iter().rev() {
+        entries[i].end = end;
+        end = entries[i].offset;
+    }
+    Ok(entries)
 }
 
 #[cfg(test)]
@@ -276,9 +310,12 @@ mod tests {
             ],
             b"archive comment",
         );
-        let found = names(&mut Cursor::new(fixture)).ok().unwrap();
+        let found = entries(&mut Cursor::new(fixture)).ok().unwrap();
         assert_eq!(
-            found.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            found
+                .iter()
+                .map(|info| info.filename.as_str())
+                .collect::<Vec<_>>(),
             ["é", "nul", "ß", "é"]
         );
     }
@@ -291,12 +328,15 @@ mod tests {
         extra.extend(checksum.sum().to_le_bytes());
         extra.extend("é".as_bytes());
         let fixture = index(&[(b"a", 0, &extra), (b"b", 0, &extra)], b"");
-        let found = names(&mut Cursor::new(fixture)).ok().unwrap();
+        let found = entries(&mut Cursor::new(fixture)).ok().unwrap();
         assert_eq!(
-            found.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            found
+                .iter()
+                .map(|info| info.filename.as_str())
+                .collect::<Vec<_>>(),
             ["é", "b"]
         );
         extra[9] = 0xff;
-        assert!(names(&mut Cursor::new(index(&[(b"a", 0, &extra)], b""))).is_err());
+        assert!(entries(&mut Cursor::new(index(&[(b"a", 0, &extra)], b""))).is_err());
     }
 }
