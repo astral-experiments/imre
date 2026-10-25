@@ -294,6 +294,7 @@ impl Checker<'_> {
                     Type::ListInt
                         | Type::List(_)
                         | Type::Dict(_)
+                        | Type::ChainMap(_)
                         | Type::Set(_)
                         | Type::Class(_)
                         | Type::ModuleSpec(_)
