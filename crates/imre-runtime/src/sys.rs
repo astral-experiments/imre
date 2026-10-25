@@ -2,36 +2,12 @@
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initialize_io};
 use crate::objects::{Codec, errno_error};
 use std::io::{self, Write};
-use std::sync::OnceLock;
+mod encoding;
+mod input;
+pub(super) use input::read_input_line;
 
-static STDERR_CODEC: OnceLock<Codec> = OnceLock::new();
-
-/// Snapshot the encoder before user code can change the environment.
-pub(super) fn stderr_codec(isolated: bool) -> Codec {
-    *STDERR_CODEC.get_or_init(|| {
-        let utf8 = Codec::Utf8 { signature: false };
-        if isolated {
-            return utf8;
-        }
-        let setting = match std::env::var("PYTHONIOENCODING") {
-            Ok(setting) => setting,
-            Err(std::env::VarError::NotPresent) => return utf8,
-            Err(std::env::VarError::NotUnicode(_)) => {
-                let _ = writeln!(io::stderr().lock(), "PYTHONIOENCODING is not valid UTF-8");
-                std::process::exit(1);
-            }
-        };
-        let name = setting
-            .split_once(':')
-            .map_or(setting.as_str(), |(name, _)| name);
-        if name.is_empty() {
-            return utf8;
-        }
-        Codec::lookup(name).unwrap_or_else(|_| {
-            let _ = writeln!(io::stderr().lock(), "LookupError: unknown encoding: {name}");
-            std::process::exit(1);
-        })
-    })
+pub(super) fn initialize_encoding(isolated: bool, utf8: Option<bool>) {
+    encoding::settings(isolated, utf8);
 }
 
 pub(super) struct StderrOutput {
@@ -60,7 +36,7 @@ impl Write for StderrOutput {
             // The incremental encoder emits its signature once, even for an empty first write.
             self.codec = Codec::Utf8 { signature: false };
         }
-        self.stream.write_all(&encoded)
+        self.stream.write_encoded(&encoded, text.as_bytes())
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -72,14 +48,70 @@ static STDERR: LazyLock<Mutex<StderrOutput>> = LazyLock::new(|| {
     initialize_io();
     Mutex::new(StderrOutput {
         stream: Output::with_stream(io::stderr(), super::STDIO_SETTINGS.stderr_capacity, true),
-        codec: stderr_codec(false),
+        codec: encoding::settings(false, None).codec,
     })
 });
 
-/// Return the canonical Python codec name captured at native program startup.
+/// Each standard stream retains its own metadata. Single-character names share the
+/// same Latin-1 owners as other Python strings.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_stream_text(descriptor: u32, errors: u32) -> *const Str {
+    thread_local! {
+        static FIELDS: [(Rc<Str>, Rc<Str>); 3] = {
+            let settings = encoding::settings(false, None);
+            let name = settings.codec.name_owner();
+            std::array::from_fn(|fd| {
+                let errors = if fd == 2 { "backslashreplace" } else { settings.errors.as_ref() };
+                (crate::objects::literal_string(&name), crate::objects::literal_string(errors))
+            })
+        };
+    }
+    FIELDS.with(|fields| {
+        let (name, handler) = &fields[descriptor as usize];
+        Rc::into_raw(Rc::clone(if errors != 0 { handler } else { name }))
+    })
+}
+
+// Preserve the ABI of earlier generated stream accesses.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_stream_encoding() -> *const Str {
+    imre_sys_stream_text(1, 0)
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_stderr_encoding() -> *const Str {
-    Rc::into_raw(stderr_codec(false).name_owner())
+    imre_sys_stream_text(2, 0)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_stdout_errors() -> *const Str {
+    imre_sys_stream_text(1, 1)
+}
+
+fn stdout_chunk(out: &mut Output, text: &str) -> super::Result<()> {
+    let settings = encoding::settings(false, None);
+    if !out.captures.is_empty()
+        || matches!(settings.codec, Codec::Utf8 { signature: false })
+        || (matches!(settings.codec, Codec::Utf8 { signature: true }) && out.signature_emitted)
+    {
+        return out.write_all(text.as_bytes()).map_err(errno_error);
+    }
+    let encoded = settings
+        .codec
+        .encode(text, Some(settings.errors.as_ref()))?;
+    if matches!(settings.codec, Codec::Utf8 { signature: true }) {
+        out.signature_emitted = true;
+    }
+    out.write_encoded(&encoded, text.as_bytes())
+        .map_err(errno_error)
+}
+
+/// Encode before changing pending bytes, preserving the Python error on failure.
+pub(super) fn write_stdout(text: &str, newline: bool) -> super::Result<()> {
+    let mut out = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
+    stdout_chunk(&mut out, text)?;
+    if newline {
+        stdout_chunk(&mut out, "\n")?;
+    }
+    Ok(())
 }
 
 fn write_stream<W: Write>(stream: &Mutex<W>, text: &str, newline: bool) -> io::Result<()> {
@@ -111,9 +143,9 @@ pub(super) fn flush_stderr() -> io::Result<()> {
 
 /// Write the default display hook's repr followed by a newline to stdout.
 pub(super) fn write_display_line(text: &str) -> bool {
-    match write_stream(&OUTPUT, text, true) {
+    match write_stdout(text, true) {
         Ok(()) => true,
-        Err(error) => errno_error(error).returning(false),
+        Err(error) => error.returning(false),
     }
 }
 
@@ -147,13 +179,13 @@ pub unsafe extern "C" fn imre_sys_stream_write(stderr: u32, text: *const Str) ->
     // SAFETY: the caller roots the string until the stream write finishes.
     let text = unsafe { &*text };
     let result = if stderr != 0 {
-        write_stderr(text, false)
+        write_stderr(text, false).map_err(errno_error)
     } else {
-        write_stream(&OUTPUT, text, false)
+        write_stdout(text, false)
     };
     match result {
         Ok(()) => Int::from_usize(text.chars().count()).into_raw(),
-        Err(error) => errno_error(error).returning(0),
+        Err(error) => error.returning(0),
     }
 }
 

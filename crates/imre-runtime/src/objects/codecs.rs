@@ -153,7 +153,7 @@ impl Codec {
         }
     }
 
-    pub(super) fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
+    pub(crate) fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
         match self {
             Self::Latin1 => Ok(data.iter().copied().map(char::from).collect()),
             Self::Ascii => {
@@ -270,6 +270,12 @@ fn decoding_error(
 ) -> Result<()> {
     match errors.unwrap_or("strict") {
         "strict" | "surrogatepass" => return Err(strict()),
+        "surrogateescape" => {
+            return Err(Error::new(
+                Kind::NotImplementedError,
+                "native strings cannot represent surrogate-escaped input bytes",
+            ));
+        }
         "replace" => text.push('\u{fffd}'),
         "ignore" => (),
         "backslashreplace" => {
