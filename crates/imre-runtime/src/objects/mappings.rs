@@ -1412,13 +1412,16 @@ pub(super) unsafe fn dict_set(value: *const Object, key: usize, word: usize) -> 
     };
     old.map(drop)
 }
+/// Removes one entry and keeps its returned owners out of the storage borrow.
+///
 /// # Safety
-/// Root the dictionary and its exact key. Missing raises KeyError in ordinary
-/// dictionaries and is a no-op for a Counter. Drop removed owners after mutation.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_dict_delete(value: *const Object, key: usize) {
+/// The exact dictionary and key must remain rooted for the call.
+unsafe fn take_entry(
+    value: *const Object,
+    key: usize,
+) -> (Option<(OwnedWord, OwnedWord)>, Missing) {
     // SAFETY: lookup/removal cannot reenter; returned values own their references.
-    let (old, missing) = unsafe {
+    unsafe {
         object(value).0.with_mut(|s| {
             let mapping = s.dictionary_mut();
             mapping.update_ascii_int(key, 0);
@@ -1428,7 +1431,58 @@ pub unsafe extern "C" fn imre_dict_delete(value: *const Object, key: usize) {
                 .map(|(key, word)| (key, OwnedWord::from_owned(word, mapping.value_kind)));
             (old, mapping.missing)
         })
+    }
+}
+/// # Safety
+/// The exact dictionary and key must be rooted; write an owned word to the
+/// independent output slot only when a stored entry was removed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_try_pop(
+    value: *const Object,
+    key: usize,
+    out: *mut usize,
+) -> u32 {
+    // SAFETY: roots and output satisfy the caller contract.
+    let Some((_key, value)) = (unsafe { take_entry(value, key) }).0 else {
+        return 0;
     };
+    // SAFETY: only success writes one owned word to the independent output slot.
+    unsafe { out.write(value.into_word()) };
+    1
+}
+/// # Safety
+/// The exact dictionary, key, and (unless required) value-typed default must
+/// remain rooted. An absent required key sets KeyError; otherwise return one owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_pop(
+    value: *const Object,
+    key: usize,
+    default: usize,
+    required: u32,
+) -> usize {
+    // SAFETY: all inputs remain rooted across the removal.
+    if let Some((_key, value)) = (unsafe { take_entry(value, key) }).0 {
+        return value.into_word();
+    }
+    if required != 0 {
+        // SAFETY: a failed removal leaves the key and its dictionary rooted.
+        return unsafe { missing_key(value, key) }.returning(0);
+    }
+    // SAFETY: the eager fallback has the declared value kind.
+    unsafe {
+        object(value)
+            .0
+            .with(|s| s.dictionary().value_kind.acquire(default))
+    }
+    .into_word()
+}
+/// # Safety
+/// Root the dictionary and its exact key. Missing raises KeyError in ordinary
+/// dictionaries and is a no-op for a Counter. Drop removed owners after mutation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_delete(value: *const Object, key: usize) {
+    // SAFETY: inputs remain rooted until after the operation.
+    let (old, missing) = unsafe { take_entry(value, key) };
     if old.is_none() && missing != Missing::Zero {
         // SAFETY: the missing input remains rooted after the failed lookup.
         unsafe { missing_key(value, key) }.raise();
