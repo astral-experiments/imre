@@ -46,6 +46,7 @@ pub(crate) enum Type {
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
+    PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
     /// Async process handle, with bits for the captured stdout and stderr slots.
@@ -105,6 +106,18 @@ impl ProcessCapture {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PathFlavor {
+    Posix,
+    Windows,
+}
+
+impl Type {
+    pub(crate) fn is_path(self) -> bool {
+        matches!(self, Self::Path | Self::PurePath(_))
+    }
+}
+
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Self::Class(id) = self {
@@ -140,6 +153,8 @@ impl std::fmt::Display for Type {
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
+            Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
+            Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
             Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
@@ -819,6 +834,12 @@ pub(crate) enum PathOperation {
     Scripts,
     OsExists,
     New,
+    PureNew(PathFlavor),
+    JoinObject,
+    Drive,
+    Root,
+    Anchor,
+    AsPosix,
     Join,
     Match {
         full: bool,
