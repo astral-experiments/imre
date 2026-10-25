@@ -131,6 +131,7 @@ jobs:
           path: .cpython-stdlib-reference
           sparse-checkout: |
             Lib/test
+            Lib/logging
             Lib/ensurepip/_bundled
             Modules
           persist-credentials: false
@@ -256,6 +257,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/logging/native_levels.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
       - name: Run CPython logging record and formatter methods at O0 and O3
         run: |
+          python3 benchmarks/cpython_stdlib/full/logging/adapter_properties.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/logging-adapter-properties.json"
           for opt in 0 3; do
             python3 benchmarks/cpython_stdlib/full/logging/native_records.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-records-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_hierarchy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-children-O$opt.json"
