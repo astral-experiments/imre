@@ -1,0 +1,38 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "e65c158b2ef30907e80273ca17a00fc495850f76588fe76666742f2346dfbaaa",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_fnmatch",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/test_fnmatch.py:16:68: Imre: defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign"
+    },
+    {
+      "suite": "test.test_fnmatch",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/test_fnmatch.py:16:68: Imre: defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign"
+    },
+    {
+      "suite": "test.test_fnmatch",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/test_fnmatch.py:16:68: Imre: defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign"
+    },
+    {
+      "suite": "test.test_fnmatch",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/test_fnmatch.py:16:68: Imre: defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign"
+    }
+  ]
+}

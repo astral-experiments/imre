@@ -79,6 +79,9 @@ impl View {
         name: &str,
         output: &mut String,
     ) -> Result<(), Error> {
+        if self.nodes.deep() {
+            super::deep_values::check_toml_depth(self)?;
+        }
         let mut path = String::new();
         key(name, &mut path)?;
         self.table(self.index, &path, false, output)
@@ -94,7 +97,7 @@ impl View {
         let mut values = Vec::new();
         let mut tables = Vec::new();
         for (name, child) in entries(&self.nodes[index]) {
-            let (view, child) = self.resolved(child);
+            let (view, child) = self.try_resolved(child)?;
             match &view.nodes[child] {
                 Node::Object(_) => push(&mut tables, (name, view, child, false))?,
                 Node::Array(items)
@@ -163,7 +166,10 @@ impl View {
 
     fn literal(&self, index: usize, depth: usize, out: &mut String) -> Result<(), Error> {
         match &self.nodes[index] {
-            Node::Deferred(array) => return array.view().literal(array.view().index, depth, out),
+            Node::Deferred(array) => {
+                let view = array.try_view()?;
+                return view.literal(view.index, depth, out);
+            }
             Node::Null => {
                 return Err(Error::new(
                     Kind::TypeError,
@@ -179,6 +185,7 @@ impl View {
                 }
             }
             Node::Float(f) => append(out, &[&crate::floats::render(*f)])?,
+            Node::ConstantNan => append(out, &["nan"])?,
             Node::String(s) => quoted(s, out)?,
             Node::Datetime(date) => append(out, &[date])?,
             Node::Array(items) => {
@@ -235,9 +242,11 @@ mod tests {
             &mut nodes,
             raw,
             Source {
+                refused: &std::cell::Cell::new(false),
                 text: json,
                 original: None,
                 shared: None,
+                keys: &super::super::KeyMemo::default(),
             },
         )
         .unwrap();

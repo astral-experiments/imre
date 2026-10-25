@@ -4,6 +4,93 @@ use std::fmt::{self, Write};
 
 use crate::{Error, Kind, Str};
 
+/// Record the interpreter setting before any user code can change the environment.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_integer_digits_init(isolated: u32) {
+    let configured = if isolated != 0 {
+        DEFAULT_DIGITS
+    } else {
+        std::env::var_os("PYTHONINTMAXSTRDIGITS")
+            .filter(|raw| !raw.is_empty())
+            .map_or(DEFAULT_DIGITS, |raw| {
+                raw.to_str()
+                    .and_then(|s| s.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r']).parse::<i32>().ok())
+                    .filter(|&n| n == 0 || n >= 640)
+                    .map_or_else(
+                        || {
+                            eprintln!("Fatal Python error: config_init_int_max_str_digits: PYTHONINTMAXSTRDIGITS: invalid limit; must be >= 640 or 0 for unlimited.\nPython runtime state: preinitialized\n");
+                            std::process::exit(1);
+                        },
+                        |n| n as u32,
+                    )
+            })
+    };
+    let _ = DIGITS.set(DecimalLimit::new(configured));
+}
+
+const DEFAULT_DIGITS: u32 = 4300;
+static DIGITS: std::sync::OnceLock<DecimalLimit> = std::sync::OnceLock::new();
+
+struct DecimalLimit {
+    digits: u32,
+    maximum_exclusive: std::sync::OnceLock<num_bigint::BigUint>,
+}
+
+impl DecimalLimit {
+    fn new(digits: u32) -> Self {
+        Self {
+            digits,
+            maximum_exclusive: std::sync::OnceLock::new(),
+        }
+    }
+}
+
+fn decimal_limit() -> &'static DecimalLimit {
+    // Runtime unit tests may call the formatting ABI without a generated main.
+    DIGITS.get_or_init(|| DecimalLimit::new(DEFAULT_DIGITS))
+}
+
+pub(super) fn decimal_digits_allowed(count: usize) -> bool {
+    let limit = decimal_limit().digits;
+    limit == 0 || count <= limit as usize
+}
+
+/// A broad bit-length bound avoids allocating a configured power of ten for small inputs.
+pub(super) fn check_decimal(value: &num_bigint::BigInt) -> crate::Result<()> {
+    let limit = decimal_limit();
+    let digits = u64::from(limit.digits);
+    let bits = value.bits();
+    if digits == 0 || bits <= digits * 3 {
+        return Ok(());
+    }
+    if bits > digits * 4
+        || value.magnitude()
+            >= limit
+                .maximum_exclusive
+                .get_or_init(|| num_bigint::BigUint::from(10u8).pow(limit.digits))
+    {
+        Err(Error::new(
+            Kind::ValueError,
+            format!(
+                "Exceeds the limit ({} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit",
+                limit.digits
+            ),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Format a selected integer only after all Python call arguments have been evaluated.
+pub(super) fn decimal_string(value: &crate::Int) -> crate::Result<Str> {
+    if let Some(value) = value.as_small() {
+        return Ok(Str::new(itoa::Buffer::new().format(value)));
+    }
+    let big = value.big();
+    check_decimal(&big)?;
+    Ok(Str::from(big.to_string()))
+}
+
 /// Builds Python's base-ten conversion diagnostic from the original literal.
 /// CPython's `%.200R` limit truncates the rendered repr by code points.
 #[cold]
@@ -67,6 +154,9 @@ pub(super) fn newer_printable(value: char) -> bool {
         (0x2cea2, 0x2ceae), (0x323b0, 0x3347a),
     ];
     let codepoint = u32::from(value);
+    if codepoint < RANGES[0].0 {
+        return false;
+    }
     let end = RANGES.partition_point(|(start, _)| *start <= codepoint);
     end != 0 && codepoint < RANGES[end - 1].1
 }
@@ -84,19 +174,8 @@ fn literal_repr_prefix(value: &str) -> Str {
                 if self.remaining == 0 {
                     return Err(fmt::Error);
                 }
-                if newer_printable(character) {
-                    // Ruff's newer Unicode tables print these characters literally.
-                    // The ASCII escape goes through the same code-point limit.
-                    let code = u32::from(character);
-                    if code <= 0xffff {
-                        write!(self, "\\u{code:04x}")?;
-                    } else {
-                        write!(self, "\\U{code:08x}")?;
-                    }
-                } else {
-                    self.text.push(character);
-                    self.remaining -= 1;
-                }
+                self.text.push(character);
+                self.remaining -= 1;
             }
             Ok(())
         }

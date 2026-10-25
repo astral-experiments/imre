@@ -3,11 +3,12 @@
 //! this nonreentrant operation. Each result record owns its key and lists.
 
 use super::*;
+use crate::StrOwner;
 use crate::objects::records::{RecordDescriptor, allocate_record};
 use crate::objects::{Words, stdlib::shared_prefix};
 
 struct Row<const N: usize> {
-    key: Rc<Str>,
+    key: StrOwner,
     // Zero means absent in the initial table. Existing list handles cannot be
     // invalidated by a sealed default insertion, even when input maps alias.
     values: [usize; N],
@@ -102,6 +103,9 @@ unsafe fn gather<const N: usize>(
         // field receives one independently owned word of the exact checked kind.
         unsafe {
             let record = std::ptr::NonNull::new(allocate_record(descriptor))?.as_ptr();
+            // The record starts with zeroed fields, so the result can drop
+            // a partially initialized row if a default insertion fails.
+            result.values.push(record as usize);
             for (field, &column) in fields.iter().enumerate() {
                 let word = if column == 0 {
                     row.key.clone().into_word()
@@ -111,15 +115,18 @@ unsafe fn gather<const N: usize>(
                     if word == 0 {
                         // Do the actual subscription at its original position.
                         // Repeated fields and aliased maps see the same fresh list.
-                        imre_dict_get(sources[i], row.key.word())
+                        let list = imre_dict_get(sources[i], row.key.word());
+                        if list == 0 {
+                            return None;
+                        }
+                        list
                     } else {
                         kinds[i].acquire(word).into_word()
                     }
                 };
                 record.add(field).write(word);
             }
-            result.values.push(record as usize);
         }
     }
-    Some(Rc::into_raw(result.into_object()))
+    Some(crate::ObjectOwner::into_raw(result.into_object()))
 }

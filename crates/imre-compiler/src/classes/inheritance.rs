@@ -6,12 +6,14 @@ pub(super) fn resolve(
     graph: &SourceGraph,
     nodes: &[(DefinitionId, &ast::StmtClassDef)],
     ids: &HashMap<DefinitionId, usize>,
+    exceptions: &exceptions::Declarations,
 ) -> Result<Vec<Class>, String> {
     fn build(
         id: usize,
         graph: &SourceGraph,
         nodes: &[(DefinitionId, &ast::StmtClassDef)],
         ids: &HashMap<DefinitionId, usize>,
+        exceptions: &exceptions::Declarations,
         classes: &mut [Option<Class>],
         path: &mut Vec<usize>,
     ) -> Result<(), String> {
@@ -33,6 +35,9 @@ pub(super) fn resolve(
                 ));
             }
             for argument in &args.args {
+                if mapping_base(graph, definition.module, argument) {
+                    continue;
+                }
                 match graph.resolve(definition.module, argument) {
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
                         if args.args.len() == 1 => {}
@@ -46,7 +51,7 @@ pub(super) fn resolve(
                             );
                         }
                         let next = ids[&source];
-                        build(next, graph, nodes, ids, classes, path)?;
+                        build(next, graph, nodes, ids, exceptions, classes, path)?;
                         if let Some(first) = base {
                             let parent: &Class = classes[first].as_ref().unwrap();
                             if !parent.bases.contains(&next) {
@@ -67,29 +72,57 @@ pub(super) fn resolve(
                 }
             }
         }
-        classes[id] = Some(collect_class(
+        let mut class = collect_class(
             graph,
             module,
             definition,
             node,
             base.map(|i| (i, classes[i].as_ref().unwrap())),
-        )?);
+            exceptions.layouts.contains(&definition),
+            &exceptions.ids,
+        )?;
+        if exceptions.layouts.contains(&definition) {
+            let index = (exceptions.ids[&definition] - exceptions::FIRST_USER_EXCEPTION) as usize;
+            let mro = &exceptions.named[index].ancestors;
+            if let Some(field) = class
+                .fields
+                .iter()
+                .find(|field| exceptions::inherited_descriptor(&field.name, mro))
+            {
+                return Err(module.error(
+                    node,
+                    &format!(
+                        "a record field cannot store the inherited exception descriptor '{}'",
+                        field.name
+                    ),
+                ));
+            }
+            if base.is_none() {
+                exceptions::install_argument_slot(&mut class, module);
+            }
+        }
+        classes[id] = Some(class);
         path.pop();
         Ok(())
     }
     let mut classes = (0..nodes.len()).map(|_| None).collect::<Vec<_>>();
     let mut path = Vec::new();
     for id in 0..nodes.len() {
-        build(id, graph, nodes, ids, &mut classes, &mut path)?;
+        build(id, graph, nodes, ids, exceptions, &mut classes, &mut path)?;
     }
     Ok(classes.into_iter().map(Option::unwrap).collect())
 }
 
-/// Matches only zero-argument super bound by the surrounding instance initializer.
+/// Return the member and the name whose binding must be the builtin `super`.
+pub(crate) fn super_method(call: &ast::ExprCall) -> Option<(&ast::ExprAttribute, &ast::Expr)> {
+    let method = call.func.as_attribute_expr()?;
+    let proxy = method.value.as_call_expr()?;
+    (proxy.arguments.is_empty() && proxy.func.as_name_expr()?.id == "super")
+        .then_some((method, &proxy.func))
+}
+
 pub(crate) fn super_init(call: &ast::ExprCall) -> bool {
-    matches!(&*call.func, ast::Expr::Attribute(method) if method.attr.as_str() == "__init__"
-        && matches!(&*method.value, ast::Expr::Call(s) if s.arguments.is_empty()
-            && matches!(&*s.func, ast::Expr::Name(name) if name.id == "super")))
+    super_method(call).is_some_and(|(method, _)| method.attr.as_str() == "__init__")
 }
 
 pub(super) fn infer_fields(

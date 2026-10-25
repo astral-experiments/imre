@@ -2,7 +2,18 @@
 
 use super::*;
 
-pub(super) type CaptureLayout = std::rc::Rc<[crate::fixed_regex::Capture]>;
+#[derive(Clone)]
+pub(super) struct CaptureLayout {
+    groups: std::rc::Rc<[crate::fixed_regex::Capture]>,
+    nonempty_match: bool,
+}
+
+impl std::ops::Deref for CaptureLayout {
+    type Target = [crate::fixed_regex::Capture];
+    fn deref(&self) -> &Self::Target {
+        &self.groups
+    }
+}
 
 impl Checker<'_> {
     /// A successful search with an unchanged local has the fixed pattern's
@@ -88,10 +99,11 @@ impl Checker<'_> {
         };
         let dictionary = matches!(value.kind, ExprKind::Builtin(Builtin::RegexGroupDict, _));
         if !dictionary
+            && value.ty != Type::RegexPattern
             && !matches!(
                 value.kind,
                 ExprKind::Builtin(
-                    Builtin::RegexCompile(_) | Builtin::RegexSearch | Builtin::RegexMatchStart,
+                    Builtin::RegexCompile { .. } | Builtin::RegexSearch | Builtin::RegexMatchStart,
                     _
                 )
             )
@@ -201,10 +213,10 @@ impl Checker<'_> {
     }
 
     /// Accepts the optional flags parameter in either of its source spellings.
-    fn regex_verbose(&self, call: &ast::ExprCall, required: usize) -> Result<bool, String> {
+    fn regex_flags(&self, call: &ast::ExprCall, required: usize) -> Result<u8, String> {
         let args = &call.arguments;
         let flags = match (args.args.get(required..), args.keywords.as_ref()) {
-            (Some([]), []) => return Ok(false),
+            (Some([]), []) => return Ok(0),
             (Some([flags]), []) => flags,
             (Some([]), [keyword]) if keyword.arg.as_deref() == Some("flags") => &keyword.value,
             _ => {
@@ -215,21 +227,30 @@ impl Checker<'_> {
                 ));
             }
         };
-        if self.resolve(flags) == Some(Binding::Intrinsic(Intrinsic::RegexVerbose)) {
-            return Ok(true);
-        }
-        if matches!(flags, ast::Expr::NumberLiteral(number) if matches!(&number.value, ast::Number::Int(value) if value.as_i64() == Some(0)))
-        {
-            return Ok(false);
-        }
-        Err(error(
-            self.source,
-            flags,
-            "regex flags must be literal 0 or re.VERBOSE",
-        ))
+        self.fixed_flags(flags).ok_or_else(|| error(self.source, flags,
+            "regex flags must be literal 0, re.VERBOSE or re.UNICODE, optionally combined with |"))
     }
 
-    fn fixed_regex(&self, pattern: &ast::Expr, verbose: bool) -> Result<Expr, String> {
+    /// UNICODE is already the matching mode for a str pattern, but is still a
+    /// nonzero flag when re.search receives an already compiled Pattern.
+    fn fixed_flags(&self, expression: &ast::Expr) -> Option<u8> {
+        match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::RegexVerbose)) => return Some(64),
+            Some(Binding::Intrinsic(Intrinsic::RegexUnicode)) => return Some(32),
+            _ => {}
+        }
+        match expression {
+            ast::Expr::BinOp(op) if op.op == ast::Operator::BitOr => {
+                Some(self.fixed_flags(&op.left)? | self.fixed_flags(&op.right)?)
+            }
+            ast::Expr::NumberLiteral(n) if matches!(&n.value, ast::Number::Int(value) if value.as_i64() == Some(0)) => {
+                Some(0)
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn fixed_regex(&self, pattern: &ast::Expr, verbose: bool) -> Result<Expr, String> {
         let ast::Expr::StringLiteral(literal) = pattern else {
             return Err(error(
                 self.source,
@@ -244,25 +265,85 @@ impl Checker<'_> {
             .regex_literals
             .borrow_mut()
             .entry(pattern.source.clone())
-            .or_insert_with(|| pattern.groups.into());
+            .or_insert_with(|| CaptureLayout {
+                groups: pattern.groups.into(),
+                nonempty_match: !pattern.may_match_empty,
+            });
         Ok(Expr {
             ty: Type::RegexPattern,
-            kind: ExprKind::Builtin(Builtin::RegexCompile(pattern.source), Vec::new()),
+            kind: ExprKind::Builtin(
+                Builtin::RegexCompile {
+                    source: pattern.source,
+                    spelling: literal.value.to_str().to_owned(),
+                },
+                Vec::new(),
+            ),
         })
     }
 
     pub(super) fn compile_regex(&self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let verbose = self.regex_verbose(call, 1)?;
+        let verbose = self.regex_flags(call, 1)? & 64 != 0;
         self.fixed_regex(&call.arguments.args[0], verbose)
     }
 
+    pub(super) fn sub_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let (
+            [
+                ast::Expr::StringLiteral(pattern),
+                ast::Expr::StringLiteral(replacement),
+                text,
+            ],
+            [],
+        ) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        )
+        else {
+            return Err(error(
+                self.source,
+                call,
+                "re.sub expects a literal str pattern, a literal str replacement, and a str input",
+            ));
+        };
+        check_string(pattern, self.source)?;
+        check_string(replacement, self.source)?;
+        let fixed = crate::fixed_regex::translate(pattern.value.to_str(), false)
+            .map_err(|msg| error(self.source, pattern, &msg))?;
+        if fixed.may_match_empty {
+            return Err(error(
+                self.source,
+                pattern,
+                "re.sub requires a nonempty match",
+            ));
+        }
+        let template = crate::fixed_regex::replacement(replacement.value.to_str(), &fixed.groups)
+            .map_err(|msg| error(self.source, replacement, msg))?;
+        let pattern = Expr {
+            ty: Type::RegexPattern,
+            kind: ExprKind::Builtin(
+                Builtin::RegexCompile {
+                    source: fixed.source,
+                    spelling: pattern.value.to_str().to_owned(),
+                },
+                vec![],
+            ),
+        };
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(
+                Builtin::RegexSub(template),
+                vec![pattern, self.expr_expected(text, Type::Str)?],
+            ),
+        })
+    }
+
     pub(super) fn search_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let verbose = self.regex_verbose(call, 2)?;
+        let flags = self.regex_flags(call, 2)?;
         let pattern = &call.arguments.args[0];
         let pattern = if matches!(pattern, ast::Expr::StringLiteral(_)) {
-            self.fixed_regex(pattern, verbose)?
+            self.fixed_regex(pattern, flags & 64 != 0)?
         } else {
-            if verbose {
+            if flags != 0 {
                 return Err(error(
                     self.source,
                     pattern,
@@ -300,12 +381,31 @@ impl Checker<'_> {
         let args = call.arguments.args.as_ref();
         if receiver.ty == Type::RegexPattern {
             return match (method, args) {
+                ("finditer", [text]) => {
+                    if !self
+                        .capture_layout(&receiver)
+                        .is_some_and(|layout| layout.nonempty_match)
+                    {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "finditer requires a known fixed pattern that cannot match an empty string",
+                        ));
+                    }
+                    Ok(Expr {
+                        ty: self.types.cursor(Type::RegexMatch),
+                        kind: ExprKind::Builtin(
+                            Builtin::RegexFindIter,
+                            vec![receiver, self.expr_expected(text, Type::Str)?],
+                        ),
+                    })
+                }
                 ("search", [text]) => self.pattern_search(receiver, text, Builtin::RegexSearch),
                 ("match", [text]) => self.pattern_search(receiver, text, Builtin::RegexMatchStart),
                 _ => Err(error(
                     self.source,
                     call,
-                    "a regex pattern supports search(text) and match(text)",
+                    "a regex pattern supports search(text), match(text), and finditer(text)",
                 )),
             };
         }

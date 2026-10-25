@@ -3,10 +3,13 @@
 //! stable suffix sort can instead select just the rows they observe.
 
 use super::difflib::{Output, materialize_words};
+use super::exceptions::Error;
 use super::{Object, Str, Words, object};
+use crate::StrOwner;
 use std::cell::{OnceCell, Ref, RefCell};
 use std::rc::{Rc, Weak};
 
+mod lines;
 mod packed;
 
 #[cfg(test)]
@@ -92,6 +95,7 @@ pub(super) struct Deferred(View);
 
 #[derive(Clone)]
 enum View {
+    Lines(Rc<lines::TextLines>),
     Full(Rc<Snapshots>),
     Signed(Rc<Snapshots>),
     /// Owns the sorted rows. An independent result must not pin input strings
@@ -105,14 +109,31 @@ enum View {
 impl Deferred {
     pub(super) fn ordered(&self) -> &Words {
         match &self.0 {
+            View::Lines(lines) => lines.ordered(),
             View::Full(source) => source.full(),
             View::Signed(source) => source.signed(),
             View::Sorted { rows, .. } => rows,
         }
     }
 
+    pub(super) fn len(&self) -> usize {
+        match &self.0 {
+            View::Lines(lines) => lines.len(),
+            _ => self.ordered().values.len(),
+        }
+    }
+
+    pub(super) fn join_ranges(&self, separator: &str) -> Option<*const Str> {
+        if let View::Lines(lines) = &self.0 {
+            Some(lines.joined(separator))
+        } else {
+            None
+        }
+    }
+
     fn nonempty(&self) -> bool {
         match &self.0 {
+            View::Lines(lines) => lines.len() != 0,
             View::Full(source) => source.nonempty,
             View::Signed(source) => !source.projected().values.is_empty(),
             View::Sorted { rows, .. } => !rows.values.is_empty(),
@@ -123,6 +144,7 @@ impl Deferred {
         match &self.0 {
             View::Full(source) => Self(View::Signed(Rc::clone(source))),
             View::Signed(_) | View::Sorted { .. } => self.clone(),
+            View::Lines(_) => unreachable!("text ranges filter without ndiff projection"),
         }
     }
 }
@@ -172,7 +194,7 @@ fn filter(
             // SAFETY: retain the source string before adding it to the independent list.
             unsafe { values.kind.acquire(word) }.into_word()
         } else {
-            Rc::into_raw(Rc::new(Str::new(selected))) as usize
+            StrOwner::into_raw(StrOwner::new(Str::new(selected))) as usize
         };
         result.values.push(element);
     }
@@ -180,14 +202,18 @@ fn filter(
     result
 }
 
-/// Share equal immutable payloads across snapshots without changing either
-/// sequence. A merge finds every common sorted run; on unsorted input it can
-/// miss sharing opportunities, but it still substitutes only equal strings.
-fn snapshot_right(left: &Words, right: &Words) -> Words {
+/// A merge can reuse equal strings from the first snapshot when copying the second.
+fn snapshot<'a>(
+    words: &Words,
+    candidates: impl Iterator<Item = (usize, &'a Str)>,
+) -> Result<Words, Error> {
     let mut result = Words::new(3);
-    result.values.reserve(right.values.len());
-    let mut candidates = left.strings().peekable();
-    for (word, text) in right.strings() {
+    result
+        .values
+        .try_reserve(words.values.len())
+        .map_err(|_| Error::allocation())?;
+    let mut candidates = candidates.peekable();
+    for (word, text) in words.strings() {
         while candidates
             .next_if(|(_, candidate)| *candidate < text)
             .is_some()
@@ -195,13 +221,13 @@ fn snapshot_right(left: &Words, right: &Words) -> Words {
         let word = candidates
             .next_if(|(_, candidate)| *candidate == text)
             .map_or(word, |(word, _)| word);
-        // SAFETY: both snapshots own every borrowed word throughout the merge.
+        // SAFETY: the source and candidate buffers root every borrowed string.
         result
             .values
-            .push(unsafe { right.kind.acquire(word) }.into_word());
+            .push(unsafe { words.kind.acquire(word) }.into_word());
     }
     result.update_header();
-    result
+    Ok(result)
 }
 
 /// # Safety
@@ -212,43 +238,48 @@ pub unsafe extern "C" fn imre_ndiff_deferred(
     left: *const Object,
     right: *const Object,
 ) -> *const Object {
-    // SAFETY: acquiring the elements cannot invoke callbacks or alias a mutable borrow.
-    let left = unsafe {
-        object(left)
-            .0
-            .with(|storage| storage.sequence().copy_strings())
-    };
-    // SAFETY: sharing equal strings acquires independent references on both sides.
-    let right = unsafe {
-        object(right)
-            .0
-            .with(|storage| snapshot_right(&left, storage.sequence()))
-    };
-    let source = Rc::new(Snapshots {
-        nonempty: !left.values.is_empty() || !right.values.is_empty(),
-        inputs: RefCell::new(Inputs::Original(left, right)),
-        full: OnceCell::new(),
-        signed: OnceCell::new(),
-        projected: OnceCell::new(),
-    });
-    Rc::into_raw(Words::deferred(Deferred(View::Full(source))).into_object())
+    let result = (|| {
+        // SAFETY: acquiring the elements cannot invoke callbacks or alias a mutable borrow.
+        let left = unsafe {
+            object(left)
+                .0
+                .with(|storage| snapshot(storage.sequence(), std::iter::empty()))
+        }?;
+        // SAFETY: sharing equal strings acquires independent references on both sides.
+        let right = unsafe {
+            object(right)
+                .0
+                .with(|storage| snapshot(storage.sequence(), left.strings()))
+        }?;
+        let source = Rc::new(Snapshots {
+            nonempty: !left.values.is_empty() || !right.values.is_empty(),
+            inputs: RefCell::new(Inputs::Original(left, right)),
+            full: OnceCell::new(),
+            signed: OnceCell::new(),
+            projected: OnceCell::new(),
+        });
+        Ok(crate::ObjectOwner::into_raw(
+            Words::deferred(Deferred(View::Full(source))).into_object(),
+        ))
+    })();
+    crate::finish(result, std::ptr::null())
 }
 
 /// # Safety
 /// The caller roots a list of exact strings. The result transfers one distinct list.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_list_copy(list: *const Object) -> *const Object {
-    // SAFETY: reading a plan or retaining string elements cannot invoke user code.
-    let words = unsafe {
-        object(list).0.with(|storage| {
-            let words = storage.sequence_storage();
-            words.plan().map_or_else(
-                || words.copy_strings(),
-                |plan| Words::deferred(plan.clone()),
-            )
-        })
+    // SAFETY: the caller roots the list while an immutable plan owner is cloned.
+    let plan = unsafe {
+        object(list)
+            .0
+            .with(|storage| storage.sequence_storage().plan().cloned())
     };
-    Rc::into_raw(words.into_object())
+    match plan {
+        Some(plan) => crate::ObjectOwner::into_raw(Words::deferred(plan).into_object()),
+        // SAFETY: omitted bounds copy the entire rooted sequence.
+        None => unsafe { super::sequences::imre_seq_slice(list, 0, 0, 0) },
+    }
 }
 
 fn same_sign(first: &str, second: Option<&str>) -> bool {
@@ -286,12 +317,16 @@ pub unsafe extern "C" fn imre_str_list_filter(
         object(list).0.with(|storage| {
             let words = storage.sequence_storage();
             if let Some(plan) = words.plan() {
+                if let View::Lines(lines) = &plan.0 {
+                    return lines.filter(first, second, exclude, strip as usize);
+                }
                 if strip == 0 && exclude.is_none() && both_signs(first, second) {
-                    return Words::deferred(plan.signed());
+                    return Ok(Words::deferred(plan.signed()));
                 }
                 if same_sign(first, second) {
                     let origin;
                     let (rows, originals) = match &plan.0 {
+                        View::Lines(_) => unreachable!("text ranges handled above"),
                         View::Full(source) | View::Signed(source) => (
                             source.projected(),
                             (strip == 2).then(|| source.side(first)).flatten(),
@@ -307,27 +342,30 @@ pub unsafe extern "C" fn imre_str_list_filter(
                             (&**rows, originals)
                         }
                     };
-                    return filter(
+                    return Ok(filter(
                         rows,
                         first,
                         second,
                         exclude,
                         strip as usize,
                         originals.as_deref(),
-                    );
+                    ));
                 }
             }
-            filter(
+            Ok(filter(
                 words.resolved(),
                 first,
                 second,
                 exclude,
                 strip as usize,
                 None,
-            )
+            ))
         })
     };
-    Rc::into_raw(result.into_object())
+    super::finish(
+        result.map(|words| crate::ObjectOwner::into_raw(words.into_object())),
+        std::ptr::null(),
+    )
 }
 
 /// Stable ordering by the suffix starting at a fixed nonnegative scalar index.
@@ -346,25 +384,42 @@ pub unsafe extern "C" fn imre_str_list_sorted_suffix(
             let source = match (skip, words.plan()) {
                 (2, Some(Deferred(View::Signed(source)))) => Some(source),
                 (2, Some(plan @ Deferred(View::Sorted { .. }))) => {
-                    return Words::deferred(plan.clone());
+                    return Ok(Words::deferred(plan.clone()));
                 }
                 _ => None,
             };
             let input = source.map_or_else(|| words.resolved(), |source| source.projected());
-            let mut sorted = input.copy_strings();
+            let mut sorted = snapshot(input, std::iter::empty())?;
             let key = |word: usize| suffix(&*(word as *const Str), skip as usize);
-            sorted.values.sort_by(|&a, &b| key(a).cmp(key(b)));
-            if let Some(source) = source {
+            // The standard stable slice sort allocates scratch and aborts when
+            // that allocation fails. Keep a stack fallback, as direct string
+            // sorting does, so the already-owned result remains sortable.
+            let mut local = [std::mem::MaybeUninit::uninit(); 64];
+            let mut heap = Vec::<usize>::new();
+            let scratch = if sorted.values.len() <= 128
+                || heap.try_reserve_exact(sorted.values.len()).is_err()
+            {
+                local.as_mut_slice()
+            } else {
+                heap.spare_capacity_mut()
+            };
+            glidesort::sort_with_buffer_by(&mut sorted.values, scratch, |&a, &b| {
+                key(a).cmp(key(b))
+            });
+            Ok(if let Some(source) = source {
                 Words::deferred(Deferred(View::Sorted {
                     rows: Rc::new(sorted),
                     origin: Rc::downgrade(source),
                 }))
             } else {
                 sorted
-            }
+            })
         })
     };
-    Rc::into_raw(result.into_object())
+    crate::finish(
+        result.map(|words| crate::ObjectOwner::into_raw(words.into_object())),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety

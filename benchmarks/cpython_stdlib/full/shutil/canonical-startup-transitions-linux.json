@@ -1,0 +1,125 @@
+{
+  "schema": 1,
+  "module": "test.test_shutil",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "operation": "check",
+  "sources": [
+    {
+      "label": "before shared mock",
+      "compiler_commit": "5e045b32e6afcd58b5ce80d7b7e00998aa5f5654",
+      "compiler_tree": "af438144826f7596352796004355dec53f1db559",
+      "compiler_sha256": "30dfc2c6759d6eedfedda3c7ba7ff6b46a2af77e4c42783014046fcee44555f9",
+      "source_report": "canonical-mock-parent-startup.json",
+      "source_sha256": "3672cfb2e877f606e24e95604b17113484d2b7b680ca78eaa1e88791a0d7b27c",
+      "tests_executed": 0,
+      "checks": [
+        {
+          "suite": "test.test_shutil",
+          "entry": "import",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:4:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+        },
+        {
+          "suite": "test.test_shutil",
+          "entry": "import",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:4:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+        },
+        {
+          "suite": "test.test_shutil",
+          "entry": "runner",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:4:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+        },
+        {
+          "suite": "test.test_shutil",
+          "entry": "runner",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:4:1: Imre: standard-library imports and shadowing are unsupported: \"unittest\""
+        }
+      ]
+    },
+    {
+      "label": "shared mock merged",
+      "compiler_commit": "06c089fea67dd04094fd98d89777208139f4550e",
+      "compiler_tree": "d9e120bfa3fb63d6fbac5ade6451d2e0533d422a",
+      "compiler_sha256": "4fd53d8a66918ba3e5e73dd8f1c0d728fd415a114e445482450cd4f29c6740c1",
+      "source_report": "canonical-mock-landed-startup.json",
+      "source_sha256": "0dfec4c2ca74534bbb25ef6a20d45755a82fee35ecbbe05665432a0191e384d1",
+      "tests_executed": 0,
+      "checks": [
+        {
+          "suite": "test.test_shutil",
+          "entry": "import",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+        },
+        {
+          "suite": "test.test_shutil",
+          "entry": "import",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+        },
+        {
+          "suite": "test.test_shutil",
+          "entry": "runner",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+        },
+        {
+          "suite": "test.test_shutil",
+          "entry": "runner",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:11:1: Imre: standard-library imports and shadowing are unsupported: \"errno\""
+        }
+      ]
+    },
+    {
+      "label": "errno merged",
+      "compiler_commit": "5ca29ab630a6d600c78377ea893f8607801973a6",
+      "compiler_tree": "852dd81b78bfeabd36830a57adb406bf5b867da7",
+      "compiler_sha256": "1f85ecd545c96fe41e63e22de361b37e11efbae7c4445c8956bf833af521857c",
+      "source_report": "errno-canonical-5ca29ab-shutil-startup.json",
+      "source_sha256": "7eb4d7ac7885ccec63da3e7bf38161da4f990f6767b2501209a6ddad8de94b13",
+      "tests_executed": 0,
+      "checks": [
+        {
+          "suite": "test.test_shutil",
+          "entry": "import",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:14:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+        },
+        {
+          "suite": "test.test_shutil",
+          "entry": "import",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:14:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+        },
+        {
+          "suite": "test.test_shutil",
+          "entry": "runner",
+          "reachable_only": false,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:14:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+        },
+        {
+          "suite": "test.test_shutil",
+          "entry": "runner",
+          "reachable_only": true,
+          "exit": 1,
+          "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:14:1: Imre: standard-library imports and shadowing are unsupported: \"random\""
+        }
+      ]
+    }
+  ]
+}

@@ -10,11 +10,13 @@ use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule
 
 #[derive(Clone, Copy)]
 pub(crate) struct DataclassOptions {
+    pub(crate) value_struct: bool,
     pub(crate) init: bool,
     pub(crate) eq: bool,
     pub(crate) repr: bool,
     pub(crate) frozen: bool,
     pub(crate) kw_only: bool,
+    pub(crate) slots: bool,
 }
 
 #[derive(Clone)]
@@ -50,18 +52,25 @@ pub(super) fn options(
         ast::Expr::Call(call) => (&*call.func, Some(&call.arguments)),
         expression => (expression, None),
     };
-    if graph.resolve(module_id, target) != Some(Binding::Intrinsic(Intrinsic::Dataclass)) {
+    let binding = graph.resolve(module_id, target);
+    let value_struct = binding == Some(Binding::Intrinsic(Intrinsic::Struct));
+    if value_struct && arguments.is_some() {
+        return Err(module.error(decorator, "use bare @imre.struct without options"));
+    }
+    if !value_struct && binding != Some(Binding::Intrinsic(Intrinsic::Dataclass)) {
         return Err(module.error(
             decorator,
             "only the sealed @dataclasses.dataclass decorator is supported",
         ));
     }
     let mut options = DataclassOptions {
+        value_struct,
         init: true,
         eq: true,
         repr: true,
-        frozen: false,
+        frozen: value_struct,
         kw_only: false,
+        slots: value_struct,
     };
     if let Some(arguments) = arguments {
         if !arguments.args.is_empty() {
@@ -82,7 +91,8 @@ pub(super) fn options(
                 "kw_only" => options.kw_only = value,
                 // Every Imre record already has a fixed layout. These options
                 // do not opt into dynamic attributes or runtime pattern metadata.
-                "slots" | "match_args" => {}
+                "slots" => options.slots = value,
+                "match_args" => {}
                 "order" | "unsafe_hash" | "weakref_slot" if !value => {}
                 _ => {
                     return Err(
