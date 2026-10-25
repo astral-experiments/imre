@@ -1,0 +1,42 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "996b527d5466ec274f87fed2dbe05cef24a5b3f6a571e816b7838bcae1a99517",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_logging",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:26:1: Imre: standard-library imports and shadowing are unsupported: \"codecs\""
+    },
+    {
+      "suite": "test.test_logging",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:26:1: Imre: standard-library imports and shadowing are unsupported: \"codecs\""
+    },
+    {
+      "suite": "test.test_logging",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:26:1: Imre: standard-library imports and shadowing are unsupported: \"codecs\""
+    },
+    {
+      "suite": "test.test_logging",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:26:1: Imre: standard-library imports and shadowing are unsupported: \"codecs\""
+    }
+  ],
+  "imre_revision": "6e9fbaed38ddefd281ccc491fd60889996539de2",
+  "imre_tree": "5358232f3ffe1bd7e7053eaab467311cc39a33d7",
+  "primary_denominator": 272,
+  "staging": "Full pinned Lib/test; Imre resolves standard-library module implementations"
+}
