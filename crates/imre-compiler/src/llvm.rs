@@ -79,7 +79,7 @@ impl Type {
             | Self::GeneratorContext
             | Self::DirectoryContext(_)
             | Self::Semaphore
-            | Self::Popen(_)
+            | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::Logger
@@ -132,7 +132,7 @@ impl Type {
             | Self::GeneratorContext
             | Self::DirectoryContext(_)
             | Self::Semaphore
-            | Self::Popen(_)
+            | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::Logger
@@ -714,7 +714,7 @@ impl Emitter<'_, '_> {
             | Type::GeneratorContext
             | Type::DirectoryContext(_)
             | Type::Semaphore
-            | Type::Popen(_)
+            | Type::Popen(..)
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::TimedFileHandler
@@ -3308,7 +3308,7 @@ impl Emitter<'_, '_> {
                 | Type::GeneratorContext
                 | Type::DirectoryContext(_)
                 | Type::Semaphore
-                | Type::Popen(_)
+                | Type::Popen(..)
                 | Type::AsyncProcess(_)
                 | Type::Logger
                 | Type::RegexPattern
@@ -4263,6 +4263,13 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
+            Builtin::FileFileno => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_file_fileno(ptr {})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
             Builtin::TextClosed => {
                 let byte = self.instruction(format!(
                     "call i32 @imre_text_closed(ptr {})",
@@ -5113,7 +5120,7 @@ impl Emitter<'_, '_> {
                     | Type::GeneratorContext
                     | Type::DirectoryContext(_)
                     | Type::Semaphore
-                    | Type::Popen(_)
+                    | Type::Popen(..)
                     | Type::AsyncProcess(_)
                     | Type::Logger
                     | Type::TimedFileHandler
@@ -5354,7 +5361,7 @@ impl Emitter<'_, '_> {
             | Type::GeneratorContext
             | Type::DirectoryContext(_)
             | Type::Semaphore
-            | Type::Popen(_)
+            | Type::Popen(..)
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::TimedFileHandler
@@ -5421,7 +5428,7 @@ impl Emitter<'_, '_> {
             | Type::GeneratorContext
             | Type::DirectoryContext(_)
             | Type::Semaphore
-            | Type::Popen(_)
+            | Type::Popen(..)
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::TimedFileHandler
@@ -5986,7 +5993,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::GeneratorContext
         | Type::DirectoryContext(_)
         | Type::Semaphore
-        | Type::Popen(_)
+        | Type::Popen(..)
         | Type::AsyncProcess(_)
         | Type::Logger
         | Type::TimedFileHandler
@@ -6157,10 +6164,13 @@ declare i64 @imre_document(i32, i64, i64, i64)
 declare i64 @imre_string_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
 declare i64 @imre_projected_hash(ptr)
-declare ptr @imre_popen(ptr, ptr, ptr, i32)
+declare ptr @imre_popen_pipes(ptr, ptr, ptr, i32, i64, i1 zeroext)
+declare ptr @imre_popen_pipe(ptr, i32)
+declare i64 @imre_file_fileno(ptr)
 declare i64 @imre_popen_pid(ptr)
 declare ptr @imre_popen_args(ptr)
 declare i64 @imre_popen_status(ptr, i1 zeroext)
+declare ptr @imre_popen_communicate(ptr, ptr, i1 zeroext, i32, i64, ptr)
 declare i64 @imre_popen_wait(ptr, i32, i64)
 declare void @imre_popen_exit(ptr)
 declare void @imre_popen_signal(ptr, i64)
@@ -6213,6 +6223,11 @@ declare i32 @imre_path_equal(ptr, ptr)
 declare ptr @imre_path_read_bytes(ptr)
 declare ptr @imre_path_read_text(ptr)
 declare i64 @imre_path_write_text(ptr, ptr)
+declare i64 @imre_path_write_text_options(ptr, ptr, i64, i64, i64)
+declare ptr @imre_path_read_text_options(ptr, i64, i64, i64)
+declare i64 @imre_path_write_type_error(ptr)
+declare i64 @imre_path_write_bytes_union(ptr, i64)
+declare i64 @imre_path_write_text_union(ptr, i64, i64, i64, i64)
 declare i64 @imre_path_write_bytes(ptr, ptr)
 declare void @imre_path_mkdir(ptr, i64, i32, i32)
 declare void @imre_path_unlink(ptr, i32)

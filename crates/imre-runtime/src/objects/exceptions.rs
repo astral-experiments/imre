@@ -68,6 +68,7 @@ pub(crate) enum Kind {
     StopIteration = 35,
     BadZipFile = 36,
     NotImplementedError = 37,
+    UnicodeEncodeError = 38,
     NameError = 39,
     UnboundLocalError = 40,
     ImportError = 41,
@@ -115,6 +116,7 @@ impl Kind {
             35 => Self::StopIteration,
             36 => Self::BadZipFile,
             37 => Self::NotImplementedError,
+            38 => Self::UnicodeEncodeError,
             39 => Self::NameError,
             40 => Self::UnboundLocalError,
             41 => Self::ImportError,
@@ -144,6 +146,7 @@ impl Kind {
             Self::SystemError => "SystemError",
             Self::UnicodeError => "UnicodeError",
             Self::UnicodeDecodeError => "UnicodeDecodeError",
+            Self::UnicodeEncodeError => "UnicodeEncodeError",
             Self::UnsupportedOperation => "UnsupportedOperation",
             Self::FileNotFoundError => "FileNotFoundError",
             Self::PermissionError => "PermissionError",
@@ -192,9 +195,13 @@ impl Kind {
                     | Self::TomlDecodeError
                     | Self::UnicodeError
                     | Self::UnicodeDecodeError
+                    | Self::UnicodeEncodeError
                     | Self::UnsupportedOperation
             ),
-            Self::UnicodeError => matches!(self, Self::UnicodeError | Self::UnicodeDecodeError),
+            Self::UnicodeError => matches!(
+                self,
+                Self::UnicodeError | Self::UnicodeDecodeError | Self::UnicodeEncodeError
+            ),
             Self::ImportError => matches!(self, Self::ImportError | Self::ModuleNotFoundError),
             Self::SubprocessError => {
                 matches!(

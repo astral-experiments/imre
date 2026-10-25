@@ -98,7 +98,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
-            | Type::Popen(_)
+            | Type::Popen(..)
             | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::TaskGroup
@@ -426,7 +426,7 @@ impl Types {
             | Type::GeneratorContext
             | Type::DirectoryContext(_)
             | Type::Semaphore
-            | Type::Popen(_)
+            | Type::Popen(..)
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::TimedFileHandler
@@ -657,7 +657,7 @@ impl Types {
                 | Type::TextIO
                 | Type::BinaryIO
                 | Type::ZipFile
-                | Type::Popen(_)
+                | Type::Popen(..)
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
                 | Type::GeneratorContext

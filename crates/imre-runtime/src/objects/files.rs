@@ -3,7 +3,7 @@
 
 use std::fs::OpenOptions;
 use std::io::{self, SeekFrom};
-use std::os::fd::IntoRawFd;
+use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
@@ -13,12 +13,14 @@ use super::{
 };
 mod buffered;
 mod gzip;
+mod path_text;
 mod seekable;
 use seekable::Memory;
 
 use buffered::{Input, Output};
 
 pub(super) struct FileState {
+    fd: Option<RawFd>,
     stream: Option<Stream>,
     pub(super) name: Option<Rc<Str>>,
     // Preserve access mode after close: binary wrong-direction errors take precedence.
@@ -73,13 +75,80 @@ impl Drop for FileState {
 }
 
 impl FileState {
+    pub(super) fn closed(&self) -> bool {
+        self.stream.is_none()
+    }
+
+    pub(super) fn fileno(&self) -> Result<RawFd> {
+        let Some(fd) = self.fd else {
+            return Err(Error::new(Kind::UnsupportedOperation, "fileno"));
+        };
+        if self.closed() {
+            Err(Error::new(Kind::ValueError, "I/O operation on closed file"))
+        } else {
+            Ok(fd)
+        }
+    }
+
+    pub(super) fn close(&mut self) -> io::Result<()> {
+        self.stream.take().map_or(Ok(()), Stream::close)
+    }
+
+    pub(super) fn communicate_stdin(&mut self, input: &[u8], close: bool) -> Result<()> {
+        if self.closed() && input.is_empty() {
+            return Ok(());
+        }
+        let Stream::Write(writer) = self.stream()? else {
+            return Err(Error::new(Kind::UnsupportedOperation, "not writable"));
+        };
+        let flushed = writer.write(input).and_then(|()| writer.flush());
+        let ignore_broken_pipe = |result: io::Result<()>| match result {
+            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+            other => other.map_err(errno_error),
+        };
+        ignore_broken_pipe(flushed)?;
+        if close {
+            ignore_broken_pipe(self.close())?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn pipe(file: std::fs::File, read: bool, text: bool, bufsize: i32) -> Rc<Object> {
+        let fd = file.as_raw_fd();
+        // Popen treats line buffering as a TextIOWrapper option and uses the
+        // default binary buffer underneath. Binary mode also falls back to default.
+        let capacity = if bufsize < 0 || bufsize == 1 {
+            128 * 1024
+        } else {
+            bufsize as usize
+        };
+        let stream = if read {
+            Stream::Read(Input::pipe(file, !text, capacity))
+        } else {
+            Stream::Write(Output::pipe(file, capacity, text && bufsize == 1))
+        };
+        let kind = if text {
+            FileKind::Text
+        } else if read {
+            FileKind::BinaryRead
+        } else {
+            FileKind::BinaryWrite
+        };
+        Rc::new(Object(StorageCell::new(Storage::File(Box::new(Self {
+            fd: Some(fd),
+            name: None,
+            stream: Some(stream),
+            kind,
+        })))))
+    }
+
     fn stream(&mut self) -> Result<&mut Stream> {
         self.stream
             .as_mut()
             .ok_or_else(|| Error::new(Kind::ValueError, "I/O operation on closed file."))
     }
 
-    fn read(&mut self) -> Result<Str> {
+    pub(super) fn read(&mut self) -> Result<Str> {
         self.input()?.read_text()
     }
 
@@ -183,7 +252,7 @@ impl FileState {
         self.write_bytes(text.as_bytes())
     }
 
-    fn flush(&mut self) -> Result<()> {
+    pub(super) fn flush(&mut self) -> Result<()> {
         if self.kind == FileKind::BinaryWrite && self.stream.is_none() {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
@@ -335,11 +404,13 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     let (file, metadata) = open_file(path, mode)?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
     let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+    let fd = file.as_raw_fd();
     let stream = match mode {
         0 => Stream::Read(Input::new(file, gzip, binary, capacity)),
         _ => Stream::Write(Output::new(file, capacity, binary)),
     };
     Ok(FileState {
+        fd: Some(fd),
         stream: Some(stream),
         name: Some(Rc::new(Str::new(path))),
         kind: match (binary, mode) {
@@ -394,7 +465,7 @@ fn with_path_file<T>(
 }
 
 pub(super) fn read_path_text(path: &str) -> Result<Str> {
-    with_path_file(path, 0, false, FileState::read)
+    path_text::read(path, None, None, None)
 }
 
 pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
@@ -618,6 +689,15 @@ pub unsafe extern "C" fn imre_text_flush(value: *const Object) -> u32 {
     finish(result.map(|()| 1), 0)
 }
 
+/// # Safety
+/// The file stays rooted throughout this descriptor query.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_file_fileno(value: *const Object) -> usize {
+    // SAFETY: only a copied integer escapes the exact file storage.
+    let fd = unsafe { object(value).0.with(|s| s.file().fileno()) };
+    finish(fd.map(|fd| Int::from_usize(fd as usize).into_raw()), 0)
+}
+
 /// Detaches the stream before closing, so all aliases become closed even on error.
 ///
 /// # Safety
@@ -716,6 +796,7 @@ mod tests {
         let file = File::from(OwnedFd::from(writer));
         Rc::new(Object(StorageCell::new(Storage::File(Box::new(
             FileState {
+                fd: Some(file.as_raw_fd()),
                 stream: Some(Stream::Write(Output::new(file, 8192, false))),
                 kind: FileKind::Text,
                 name: None,
