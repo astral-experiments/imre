@@ -153,6 +153,23 @@ fn not(value: Expr) -> Expr {
     }
 }
 
+/// Handle exhaustion only inside the iterator or generator operation being pulled.
+fn catch_stop_iteration(body: Vec<Statement>, on_stop: Vec<Statement>) -> Vec<Statement> {
+    if !crate::effects::may_raise_locally(&body) {
+        return body;
+    }
+    vec![Statement::Try {
+        body,
+        handlers: vec![ir::ExceptHandler {
+            kinds: vec![exception_kind("StopIteration").unwrap()],
+            name: None,
+            body: on_stop,
+        }],
+        orelse: Vec::new(),
+        finalbody: Vec::new(),
+    }]
+}
+
 fn raise_value_error(message: String) -> Statement {
     Statement::Raise(Some(Expr {
         ty: Type::Exception,
@@ -1785,7 +1802,7 @@ impl Checker<'_> {
             let mut step = inputs[index].next.clone();
             step.push(Statement::If(
                 self.local(inputs[index].ready),
-                available,
+                self.generator_clause_body(available),
                 exhausted,
             ));
             cases = vec![Statement::If(
@@ -1819,6 +1836,29 @@ impl Checker<'_> {
             writes,
             clear,
         })
+    }
+
+    /// PEP 479 applies to the target binding, predicates, yielded expression,
+    /// and inner iterable construction after the source has produced an item.
+    fn generator_clause_body(&self, body: Vec<Statement>) -> Vec<Statement> {
+        let error = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("RuntimeError").unwrap(),
+                message: Some(Box::new(unpacking::string(
+                    "generator raised StopIteration",
+                ))),
+            },
+        };
+        let cause = Expr {
+            ty: self.types.optional(Type::Exception),
+            kind: ExprKind::Builtin(Builtin::ActiveException, Vec::new()),
+        };
+        let converted = Statement::Raise(Some(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Builtin(Builtin::ExceptionWithCause, vec![error, cause]),
+        }));
+        catch_stop_iteration(body, vec![converted])
     }
 
     /// Captures the callable before its source, then invokes it only after each
@@ -1909,35 +1949,27 @@ impl Checker<'_> {
         input.evaluate.append(&mut input.acquire);
         if filter {
             let ready = self.hidden(Type::Bool);
-            let done = self.hidden(Type::Bool);
             let mut step = std::mem::take(&mut input.next);
-            step.push(Statement::If(
-                self.local(input.ready),
+            let predicate = catch_stop_iteration(
                 vec![Statement::If(
                     self.truth_value(operation),
                     vec![Statement::Assign(ready, boolean(true))],
                     vec![Statement::Clear(input.value)],
                 )],
-                vec![Statement::Assign(done, boolean(true))],
+                vec![Statement::Clear(input.value), Statement::Break],
+            );
+            step.push(Statement::If(
+                self.local(input.ready),
+                predicate,
+                vec![Statement::Break],
             ));
-            input.evaluate.push(Statement::Assign(done, boolean(false)));
             input.next = vec![
                 Statement::Clear(input.value),
                 Statement::Assign(ready, boolean(false)),
-                Statement::While(
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Boolean(
-                            true,
-                            vec![not(self.local(ready)), not(self.local(done))],
-                        ),
-                    },
-                    step,
-                    Vec::new(),
-                ),
+                Statement::While(not(self.local(ready)), step, Vec::new()),
             ];
             input.ready = ready;
-            input.clear.extend([ready, done]);
+            input.clear.push(ready);
             if truth_filter && let Some(payload) = self.types.payload(input_type) {
                 let value = self.hidden(payload);
                 input.next.push(Statement::If(
@@ -1960,18 +1992,25 @@ impl Checker<'_> {
             }
         } else {
             let value = self.hidden(operation.ty);
-            input.next.push(Statement::If(
-                self.local(input.ready),
-                vec![
-                    Statement::Assign(value, operation),
-                    Statement::Clear(input.value),
-                ],
-                Vec::new(),
-            ));
+            // The source can use its ready slot to latch exhaustion. A failed
+            // callback ends this map pull without changing the source cursor.
+            let ready = self.hidden(Type::Bool);
+            input
+                .next
+                .push(Statement::Assign(ready, self.local(input.ready)));
+            let mut mapped = catch_stop_iteration(
+                vec![Statement::Assign(value, operation)],
+                vec![Statement::Assign(ready, boolean(false))],
+            );
+            mapped.push(Statement::Clear(input.value));
+            input
+                .next
+                .push(Statement::If(self.local(ready), mapped, Vec::new()));
             input.next.insert(0, Statement::Clear(value));
             input.value = value;
+            input.ready = ready;
             input.elementless = false;
-            input.clear.push(value);
+            input.clear.extend([value, ready]);
         }
         Ok(input)
     }

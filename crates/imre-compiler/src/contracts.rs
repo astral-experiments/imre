@@ -380,6 +380,8 @@ impl Builtin {
             | Self::ActiveException
             | Self::ExceptionRecord
             | Self::ExceptionCause
+            // A fresh exception retains its cause without replacing any existing owner.
+            | Self::ExceptionWithCause
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
             | Self::HexFormat { .. }
@@ -516,7 +518,6 @@ impl Builtin {
             | Self::DictClear
             | Self::ListClear
             | Self::DictIter(_)
-            | Self::ExceptionWithCause
             | Self::GlobalSet(_)
             | Self::ExactRecord(_)
             | Self::RecordView
