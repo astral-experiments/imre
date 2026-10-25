@@ -70,6 +70,7 @@ mod shutil;
 mod sign_parameters;
 mod sorted_rows;
 mod stdlib;
+mod string_io;
 mod string_lists;
 mod sys;
 mod text;
@@ -1440,6 +1441,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::StringIo)) => return Ok(Type::StringIO),
         Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return Ok(Type::LogFormatter),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
@@ -2058,6 +2060,15 @@ impl<'a> Checker<'a> {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             });
+        }
+        if value.ty == Type::StringIO
+            && self.types.payload(expected).unwrap_or(expected) == Type::TextIO
+        {
+            let stream = Expr {
+                ty: Type::TextIO,
+                kind: ExprKind::Builtin(Builtin::TextStreamView, vec![value]),
+            };
+            return self.coerce(stream, expected, node);
         }
         if expected == Type::StringIterable
             && (self.types.element(value.ty) == Some(Type::Str)
@@ -3082,7 +3093,10 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("range iteration returned above")
         };
-        if matches!(iterable.ty, Type::TextIO | Type::BinaryIO | Type::CsvReader) {
+        if matches!(
+            iterable.ty,
+            Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
+        ) {
             let input = if iterable.ty == Type::CsvReader {
                 self.prepare_csv_reader(iterable)
             } else {
@@ -3970,7 +3984,7 @@ impl<'a> Checker<'a> {
             && stored.is_none()
             && !archive
             && !popen
-            && !matches!(manager.ty, Type::TextIO | Type::BinaryIO)
+            && !matches!(manager.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
         {
             return Err(error(
                 self.source,
@@ -5742,7 +5756,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(builtin, vec![receiver]),
                     });
                 }
-                if matches!(receiver.ty, Type::TextIO | Type::BinaryIO)
+                if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
                     && attribute.attr.as_str() == "closed"
                 {
                     return Ok(Expr {
@@ -6188,6 +6202,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
                 return self.sha256_constructor(call, op == Intrinsic::HashNew);
             }
+            Some(Binding::Intrinsic(Intrinsic::StringIo)) => return self.string_io(call),
             Some(Binding::Intrinsic(Intrinsic::BytesIo)) => {
                 let args = self.arguments(
                     call,
@@ -6690,8 +6705,16 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::KeyUnion, vec![receiver, other]),
                 });
             }
+            if receiver.ty == Type::StringIO
+                && matches!(
+                    attribute.attr.as_str(),
+                    "getvalue" | "read" | "readline" | "seek" | "tell" | "truncate"
+                )
+            {
+                return self.string_io_method(receiver, attribute.attr.as_str(), call);
+            }
             self.reject_builtin_keywords(call)?;
-            if matches!(receiver.ty, Type::TextIO | Type::BinaryIO) {
+            if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
                 let binary = receiver.ty == Type::BinaryIO;
                 let data_type = if binary { Type::Bytes } else { Type::Str };
                 if binary

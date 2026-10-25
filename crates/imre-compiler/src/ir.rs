@@ -52,6 +52,7 @@ pub(crate) enum Type {
     TimeoutExpired,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
     TextIO,
+    StringIO,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
@@ -194,6 +195,7 @@ impl std::fmt::Display for Type {
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
+            Self::StringIO => "io.StringIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
@@ -573,6 +575,7 @@ pub(crate) enum Builtin {
     Tee,
     Cycle,
     DirectoryContextView,
+    TextStreamView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
     ExtensionImport(String),
@@ -767,6 +770,7 @@ pub(crate) enum Builtin {
     },
     Sha256Copy,
     BytesIo,
+    StringIo(StringIoOperation),
     BinarySeek,
     BinaryTell,
     ZipOpenFile,
@@ -986,6 +990,16 @@ impl Builtin {
 }
 
 pub(crate) const TUPLE_PROBE_ARITY: std::ops::RangeInclusive<usize> = 1..=16;
+
+/// Operations specific to Unicode text held in native memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StringIoOperation {
+    New,
+    Value,
+    Read,
+    Seek,
+    Position,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum DocumentShape {
