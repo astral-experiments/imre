@@ -2,7 +2,7 @@
 //! final ownership cleanup only closes resources and never changes error state.
 
 use crate::StrOwner;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
@@ -43,6 +43,7 @@ enum FileKind {
 
 enum Stream {
     Read(Input),
+    UnreadGzip { file: File, capacity: usize },
     Write(Output),
     Memory(Memory),
     TextMemory(text_memory::TextMemory),
@@ -54,6 +55,7 @@ impl Stream {
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
+            Self::UnreadGzip { file, .. } => (file, Ok(())),
             Self::Write(writer) => writer.finish(),
             Self::Memory(_) | Self::TextMemory(_) | Self::Member(_) => return Ok(()),
         };
@@ -179,6 +181,17 @@ impl FileState {
         } else {
             "I/O operation on closed file."
         };
+        if let Some(Stream::UnreadGzip { file, capacity }) = self
+            .stream
+            .take_if(|stream| matches!(stream, Stream::UnreadGzip { .. }))
+        {
+            self.stream = Some(Stream::Read(Input::new(
+                file,
+                true,
+                self.kind == FileKind::GzipBinaryRead,
+                capacity,
+            )));
+        }
         let stream = self
             .stream
             .as_mut()
@@ -226,6 +239,9 @@ impl FileState {
                 Kind::ValueError,
                 "read length must be non-negative or -1",
             ));
+        }
+        if size == 0 && matches!(self.stream, Some(Stream::UnreadGzip { .. })) {
+            return Ok(Bytes::new());
         }
         self.input()?.read_bytes(usize::try_from(size).ok())
     }
@@ -281,9 +297,11 @@ impl FileState {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
-            Stream::Read(_) | Stream::Member(_) | Stream::Memory(_) | Stream::TextMemory(_) => {
-                Ok(())
-            }
+            Stream::Read(_)
+            | Stream::UnreadGzip { .. }
+            | Stream::Member(_)
+            | Stream::Memory(_)
+            | Stream::TextMemory(_) => Ok(()),
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
@@ -350,6 +368,13 @@ pub(super) fn os_error(error: io::Error) -> Error {
 
 fn os_error_kind(kind: io::ErrorKind) -> Kind {
     match kind {
+        io::ErrorKind::WouldBlock => Kind::BlockingIOError,
+        io::ErrorKind::BrokenPipe => Kind::BrokenPipeError,
+        io::ErrorKind::ConnectionAborted => Kind::ConnectionAbortedError,
+        io::ErrorKind::ConnectionRefused => Kind::ConnectionRefusedError,
+        io::ErrorKind::ConnectionReset => Kind::ConnectionResetError,
+        io::ErrorKind::Interrupted => Kind::InterruptedError,
+        io::ErrorKind::TimedOut => Kind::TimeoutError,
         io::ErrorKind::AlreadyExists => Kind::FileExistsError,
         io::ErrorKind::NotFound => Kind::FileNotFoundError,
         io::ErrorKind::PermissionDenied => Kind::PermissionError,
@@ -393,7 +418,12 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
     }
     // SAFETY: the successful call initialized a terminated string.
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
-    build(os_error_kind(error.kind()), errno, &description)
+    let kind = match errno {
+        libc::EINPROGRESS | libc::EALREADY => Kind::BlockingIOError,
+        libc::ESHUTDOWN => Kind::BrokenPipeError,
+        _ => os_error_kind(error.kind()),
+    };
+    build(kind, errno, &description)
 }
 
 /// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.
@@ -451,6 +481,7 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
     let fd = file.as_raw_fd();
     let stream = match mode {
+        0 if gzip => Stream::UnreadGzip { file, capacity },
         0 | 4 => {
             let mut input = Input::new(file, gzip, binary, capacity);
             if mode == 4 {
@@ -980,6 +1011,32 @@ mod tests {
             input.text_line().unwrap_err().raise();
             take_error(Kind::UnicodeDecodeError);
         }
+    }
+
+    #[test]
+    fn unread_gzip_keeps_the_descriptor_without_allocating_read_buffers() {
+        let directory = Directory::new();
+        let path = directory.0.join("data.gz");
+        std::fs::write(&path, member(b"original")).unwrap();
+        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
+            .ok()
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, member(b"replacement")).unwrap();
+
+        state.flush().ok().unwrap();
+        assert!(
+            state
+                .read_size(&Int::from_usize(0))
+                .ok()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(matches!(state.stream, Some(Stream::UnreadGzip { .. })));
+        assert_eq!(
+            state.read_size(&Int::from_usize(8)).ok().unwrap(),
+            b"original"
+        );
     }
 
     #[test]
