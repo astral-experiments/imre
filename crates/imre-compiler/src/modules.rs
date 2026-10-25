@@ -169,6 +169,7 @@ pub(crate) enum Intrinsic {
     Ndiff,
     Final,
     Argv,
+    OrigArgv,
     Logger,
     LogRoot,
     LogEmit(Option<u8>),
@@ -395,6 +396,7 @@ impl IntrinsicModule {
                 Intrinsic::RawDescriptionHelpFormatter
             }
             (Self::Sys, "argv") => Intrinsic::Argv,
+            (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
             (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
             (Self::Sys, "exit") => Intrinsic::SysExit,
