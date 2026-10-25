@@ -61,7 +61,8 @@ def report_blockers(report, reference, level, adapters):
         if status == 'native candidate':
             reason = 'native method returned, but no adapter has verified its fixture and product operations'
         evidence = {'whole_method_probe': status, 'imre_commit': report['imre_commit'], 'opt_level': level}
-        for detail in ('stage', 'failing_line', 'wrapper_line', 'decorators', 'fixture_limits', 'code', 'stdout'):
+        for detail in ('stage', 'failing_line', 'wrapper_line', 'decorators', 'fixture_limits',
+                       'assertion_fixture', 'alternate_attempts', 'code', 'stdout'):
             if detail in result:
                 evidence[detail] = result[detail]
         if 'source' in record:

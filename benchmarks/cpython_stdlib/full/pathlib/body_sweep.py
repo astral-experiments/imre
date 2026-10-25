@@ -72,9 +72,10 @@ def type_name(raw, ctor):
     if raw == "NoneType":
         return "None"
     if raw in ("pathlib.PosixPath", "pathlib.PurePosixPath", "pathlib.PureWindowsPath"):
-        if ctor in FIVE:
-            return ctor
-        return raw.split(".")[-1]
+        observed = raw.rsplit(".", 1)[-1]
+        # Path() and PurePath() choose their concrete POSIX flavors on this host.
+        concrete = {"Path": "PosixPath", "PurePath": "PurePosixPath"}.get(ctor, ctor)
+        return ctor if concrete == observed else observed
     if raw.startswith(("list[", "set[")) and raw.endswith("]"):
         inner = raw[raw.index("[") + 1 : -1]
         if not inner:
@@ -172,7 +173,7 @@ def relative_imports(tree, lines, uses):
     return "".join(dict.fromkeys(statements))
 
 
-def fixture(case, tree, lines, method, shape):
+def fixture(case, tree, lines, method, shape, *, use_unittest):
     cls = type(case)
     helpers = []
     todo = [method]
@@ -245,11 +246,15 @@ def fixture(case, tree, lines, method, shape):
                 ctor = cls.__name__ + "." + ctor
             guard.append("exact user subclass " + mod + "." + str(ctor))
         if ctor:
-            lo = min(arities, default=1)
-            hi = max(arities, default=1)
-            params = ",".join(f"a{i}: str" + (" = ''" if i >= lo else "") for i in range(hi))
-            values = ",".join(f"a{i}" for i in range(hi))
-            ctor_code = f"    def cls(self{', ' if params else ''}{params}) -> {ctor}:\n        return {ctor}({values})\n"
+            if len(arities) > 1:
+                # Forward the original number of segments, including a zero-argument call.
+                # A padded empty segment can be observed by a subclass or through raw parts.
+                ctor_code = f"    def cls(self, *parts: str) -> {ctor}:\n        return {ctor}(*parts)\n"
+            else:
+                arity = next(iter(arities), 1)
+                params = ",".join(f"a{i}: str" for i in range(arity))
+                values = ",".join(f"a{i}" for i in range(arity))
+                ctor_code = f"    def cls(self{', ' if params else ''}{params}) -> {ctor}:\n        return {ctor}({values})\n"
     for name in sorted(attrs):
         if name in ("cls", "ground") or name.startswith(("assert", "test_", "_")):
             continue
@@ -257,7 +262,8 @@ def fixture(case, tree, lines, method, shape):
         if type(value) in (bool, str, int):
             fields[name] = (type(value).__name__, repr(value))
         elif type(value).__name__ in FIVE and type(value).__module__ == "pathlib":
-            fields[name] = ("Path", f"Path({os.fspath(value)!r})")
+            flavor = type(value).__name__
+            fields[name] = (flavor, f"{flavor}({os.fspath(value)!r})")
         elif value is not None and not callable(value):
             guard.append(f"fixture field {name}: {type(value).__module__}.{type(value).__qualname__}")
     if "ground" in attrs and hasattr(case, "ground"):
@@ -268,7 +274,7 @@ def fixture(case, tree, lines, method, shape):
             + "\n"
         )
         fields["ground"] = ("Ground", "Ground()")
-    assertions = checks(shape, attrs, getattr(typ, "__name__", None))
+    assertions = "" if use_unittest else checks(shape, attrs, getattr(typ, "__name__", None))
     inherited = not assertions
     pre += "class NativeCase" + ("(unittest.TestCase)" if inherited else "") + ":\n"
     pre += "".join(f"    {n}: {ty}\n" for n, (ty, val) in fields.items())
@@ -377,59 +383,57 @@ def run_all(args):
                         for registry in decorators:
                             if name not in getattr(module, "_tests_needing_" + registry[6:]):
                                 raise ValueError("original gate not registered: " + registry)
-                    pre, guards = fixture(case, tree, lines, method, shapes[case_id][0])
-                    if guards:
-                        rec["fixture_limits"] = guards
                     if decorators and not identity:
                         body = raw(lines, method, True)
-                    entry = (
-                        pre
-                        + body
-                        + f'\ncase = NativeCase()\ncase.{name}()\nprint("native method finished")\n'.encode()
-                    )
-                    digest = hashlib.sha256(entry).hexdigest()
-                    d = root / f"level_{level}" / f"case_{digest}"
-                    d.mkdir(parents=True, exist_ok=True)
-                    (d.parent / "__init__.py").touch()
-                    (d / "__init__.py").touch()
-                    artifact = cache.get(digest)
-                    if artifact is None:
-                        try:
-                            artifact = tools.build(entry, d)
-                        except NativeCompileError as exc:
-                            artifact = exc
-                        if isinstance(artifact, NativeCompileError) or args.keep_binaries:
-                            cache[digest] = artifact
-                    if isinstance(artifact, NativeCompileError):
+                    first_line = min([method.lineno, *[a.lineno for a in method.decorator_list]]) if decorators and not identity else method.lineno
+                    seen, rejected = set(), []
+                    for variant, use_unittest in (("unittest.TestCase", True), ("typed assertions", False)):
+                        pre, guards = fixture(case, tree, lines, method, shapes[case_id][0],
+                                              use_unittest=use_unittest)
+                        if pre in seen:
+                            continue
+                        seen.add(pre)
+                        entry = pre + body + f'\ncase = NativeCase()\ncase.{name}()\nprint("native method finished")\n'.encode()
+                        digest = hashlib.sha256(entry).hexdigest()
+                        d = root / f"level_{level}" / f"case_{digest}"
+                        d.mkdir(parents=True, exist_ok=True)
+                        (d.parent / "__init__.py").touch()
+                        (d / "__init__.py").touch()
+                        artifact = cache.get(digest)
+                        if artifact is None:
+                            try:
+                                artifact = tools.build(entry, d)
+                            except NativeCompileError as exc:
+                                artifact = exc
+                            if isinstance(artifact, NativeCompileError) or args.keep_binaries:
+                                cache[digest] = artifact
+                        if not isinstance(artifact, NativeCompileError):
+                            rec["assertion_fixture"] = variant
+                            break
                         msg = str(artifact).replace(str(d), "<case>").strip()
-                        messages = [
-                            x.strip()
-                            for x in msg.splitlines()
-                            if x.strip() and not x.lstrip().startswith("Compiling ")
-                        ]
+                        messages = [x.strip() for x in msg.splitlines()
+                                    if x.strip() and not x.lstrip().startswith("Compiling ")]
                         line = next((x for x in messages if "Imre:" in x or "error[" in x), messages[0])
                         m = re.search(r"<case>/case.py:(\d+):(\d+)", line)
-                        start = pre.count(b"\n") + 1
                         n = int(m[1]) if m else 0
-                        stage = (
-                            "unchanged body"
-                            if start <= n < start + body.count(b"\n")
-                            else "fixture or dependency"
-                        )
-                        diagnostic = line.replace(str(oracle), "<cpython>/Lib").replace(
-                            str(root), "<module-root>"
-                        )
-                        if stage == "unchanged body":
-                            rec.update(
-                                failing_line=(
-                                    min([method.lineno, *[a.lineno for a in method.decorator_list]])
-                                    if decorators and not identity
-                                    else method.lineno
-                                )
-                                + n
-                                - start
-                            )
-                        return record("compile blocker", stage=stage, diagnostic=diagnostic)
+                        first = pre.count(b"\n") + 1
+                        own = first <= n < first + body.count(b"\n")
+                        failure = {"assertion_fixture": variant, "stage": "unchanged body" if own else "fixture or dependency",
+                                   "diagnostic": line.replace(str(oracle), "<cpython>/Lib").replace(str(root), "<module-root>")}
+                        if own:
+                            failure["failing_line"] = first_line + n - first
+                        rejected.append(failure)
+                    else:
+                        # A diagnostic on an unchanged statement is more informative than
+                        # one in the adapter. Preserve the other attempts for inspection.
+                        chosen = next((x for x in rejected if x["stage"] == "unchanged body"), rejected[0])
+                        if guards:
+                            rec["fixture_limits"] = guards
+                        return record("compile blocker", alternate_attempts=[x for x in rejected if x is not chosen], **chosen)
+                    if rejected:
+                        rec["alternate_attempts"] = rejected
+                    if guards:
+                        rec["fixture_limits"] = guards
                     try:
                         run = subprocess.run(
                             [artifact], capture_output=True, text=True, encoding="utf8", timeout=60

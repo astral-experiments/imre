@@ -44,11 +44,15 @@ Generate both levels with the test-enabled 3.14.5 interpreter and validate them:
 ```sh
 python -B benchmarks/cpython_stdlib/full/pathlib/evidence.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
+    --body-report benchmarks/cpython_stdlib/full/pathlib/body-probes-linux.json \
     --result benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
 python3 benchmarks/cpython_stdlib/suite_evidence.py \
     benchmarks/cpython_stdlib/full/pathlib/reference-linux.json \
     benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
 ```
+
+The recorded method runs used walking head `ea9845a`; the whole-body diagnostics
+used published main `c306c73`. Each observation names its compiler revision.
 
 The lexical runner dispatches each original method under its upstream class.
 It checks that class and its separator before starting the typed native receiver.
@@ -83,29 +87,65 @@ and two symlink methods run natively with their upstream host fixtures. CPython
 drives the native cursors in the depth-limit and 100-open-cursor methods. The
 top-down and pruning methods also mutate or sort yielded name lists in CPython;
 the driver applies directory edits to the retained native list before resuming.
-These two are mixed. The callback-after-rename method is still reference only.
+These two are mixed. The callback-after-rename method still needs a native error callback and rename.
 The separate [walking matrix](walk_matrix.py) compares 216 combinations at each
 level, including edits that insert duplicate, absolute, empty, and dotted names.
 It checks each yielded path's spelling, logical parent, basename and equality,
 along with the order and contents of both yielded lists.
 
+The [whole-method sweep](body_sweep.py) independently attempted all 978 reference
+passes under their original fixture lifecycles. It profiles assertion operand **types**
+in CPython, then compiles the original method and its `_check` helpers using native
+receivers. It tries native unittest.TestCase assertions, then a typed native assertion
+fixture if compilation fails. It retains each diagnostic and never reruns a completed
+method with another fixture. It verifies the pinned definitions and preserves original wrappers. At
+each level, 109 entries completed in Imre, 409 encountered their first compiler
+diagnostic in the upstream method, 421 in a fixture or dependency, and 39 had
+an original wrapper that the native fixture could not execute. A completed probe
+earns pass credit only after its operations and assertions have been verified.
+
+The [counted adapter](native_basics.py) verifies 14 additional completions:
+empty paths and string roundtrips for five classes (including `PureWindowsPath`),
+POSIX absolute roots and existing-root `mkdir` calls. The 14 occurrences executed
+56 native constructors and 52 native assertions per level. The two `mkdir` methods
+require successful calls and contain no explicit assertions.
+
+Regenerate the [per-ID probe report](body-probes-linux.json) with the compiler
+and runtime built from the specified Imre commit. `--work` retains generated
+sources and results. Linked probe binaries are released after each run.
+
+```sh
+python -B -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/body_sweep.py \
+    --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
+    --work /tmp/pathlib-bodies
+python3 benchmarks/cpython_stdlib/full/pathlib/body_report.py --work /tmp/pathlib-bodies \
+    --imre-commit c306c73a8495f808bb84974c9a8d69c6d5648723 \
+    --result benchmarks/cpython_stdlib/full/pathlib/body-probes-linux.json
+```
+
 | Execution at each of O0 and O3 | Occurrences |
 | --- | ---: |
-| Native body, assertions and operation with host fixture | 102 |
+| Native body and operation, native assertions if present, host fixture | 116 |
 | Host body and assertions, native operation | 54 |
 | Mixed execution | 11 |
-| Reference only | 811 |
+| Blocked: diagnostic in the original body | 360 |
+| Blocked: fixture or dependency diagnostic | 398 |
+| Blocked: original fixture wrapper | 39 |
 | Upstream reference skip | 391 |
 | **Total** | **1,369** |
 
-This revision records zero fully native fixture lifecycles, extra
-exclusions, native failures or method blockers. The package startup blocker
-below is independent of those method outcomes. Three host-driven occurrences
-also record why their whole body does not yet compile: list `+=` in `test_iterdir`
-and the unannotated `_check` local function in both `test_glob_case_sensitive` fixtures.
+There are no fully native fixture lifecycles, extra exclusions, or native execution
+failures in this run. Some methods that the general probe could not compile have
+a more specific native or host-driven adapter. Those occurrences keep the observed
+execution roles; the 797 blocked rows above have no successful adapter. The
+per-ID records give the original source location, diagnostic or wrapper, and any
+missing fixture behavior. A blocked row is an outstanding failure to run the method.
 
 [Whole-package startup](whole-suite-startup.json) is tracked separately. On
 `76d74f9` normal imports stopped at the leading name guard in `test.support`.
 On the combined compiler head `03977539` both check modes reached the
 `annotationlib` import. The wrong-name guard raised the reference `ImportError`
-without running child initialization. None of these checks executes an upstream method.
+without running child initialization. Published main `c306c73` confirmed that stop for
+both entry points. After annotationlib landed in #586, all four checks on walking
+head `ea9845a` reached `inspect` in `test/support/__init__.py:9`. These checks
+execute no upstream method.
