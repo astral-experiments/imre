@@ -19,6 +19,7 @@ use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
 mod binary;
+mod decoder;
 mod encode;
 pub(super) mod readonly;
 mod syntax;

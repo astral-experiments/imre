@@ -127,6 +127,7 @@ impl Types {
             | Type::TimedFileHandler
             | Type::ClockTime
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -481,6 +482,7 @@ impl Types {
             | Type::TimedFileHandler
             | Type::ClockTime
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
