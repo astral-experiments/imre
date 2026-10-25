@@ -247,11 +247,28 @@ impl<'a> Visitor<'a> for Assignments {
     }
 }
 
-/// Handler targets are deleted on exit, even when the name previously existed.
+/// Explicit local deletions and the implicit deletion of handler targets can
+/// invalidate a binding that existed on entry.
 /// An outer handler cannot assume such a local survived the protected body.
 pub(crate) fn deleted_names(body: &[ast::Stmt]) -> HashSet<String> {
     struct Deletions(HashSet<String>);
     impl<'a> Visitor<'a> for Deletions {
+        fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
+            if let ast::Stmt::Delete(delete) = statement {
+                self.0.extend(
+                    delete
+                        .targets
+                        .iter()
+                        .filter_map(|target| target.as_name_expr().map(|name| name.id.to_string())),
+                );
+            } else if !matches!(
+                statement,
+                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)
+            ) {
+                walk_stmt(self, statement);
+            }
+        }
+
         fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
             let ast::ExceptHandler::ExceptHandler(handler_) = handler;
             if let Some(name) = &handler_.name {
