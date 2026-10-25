@@ -1,0 +1,7 @@
+{
+  "description": "Unmodified previously active reports; compiler sources and roles remain in each record.",
+  "reports": {
+    "evidence-linux.json": "d72fe27f7db1a76383ee6c8c47cb9c65111980fb0c2dca5c61b4cf717e577a7c",
+    "evidence-free-threading-linux.json": "c01741be1e1f65598e620293d952ceda1eb6684e2bcd11ce02a9504243180a28"
+  }
+}
