@@ -325,7 +325,7 @@ fn emit_program(
             }
         });
     }
-    let (uses_sys_argv, uses_orig_argv, uses_linecache) = module.startup_usage();
+    let (uses_sys_argv, uses_orig_argv, uses_linecache, uses_cache_paths) = module.startup_usage();
     let mut emitter = Emitter {
         module,
         output,
@@ -375,6 +375,7 @@ fn emit_program(
         uses_linecache,
         uses_percent_tuple: false,
         uses_builtins_last: module.uses_builtins_last(),
+        uses_cache_paths,
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -572,6 +573,7 @@ struct Emitter<'a, 'module> {
     uses_linecache: bool,
     uses_percent_tuple: bool,
     uses_builtins_last: bool,
+    uses_cache_paths: bool,
     has_extensions: bool,
 }
 
@@ -1828,6 +1830,12 @@ impl Emitter<'_, '_> {
             self.line("call void @imre_record_error_init()");
             self.line("call void @imre_stdio_init()");
             self.line("call void @imre_init_literals()");
+        }
+        if entry && self.uses_cache_paths {
+            self.line(format!(
+                "call void @imre_cache_paths_init(i32 {})",
+                u32::from(!self.module.ignore_python_environment)
+            ));
         }
         if entry && self.uses_linecache {
             self.line("call void @imre_linecache_init()");
@@ -6064,9 +6072,52 @@ impl Emitter<'_, '_> {
             Builtin::ModuleParentPrefix => {
                 self.call("imre_module_parent_prefix", returns, &[&args[0].value])
             }
-            Builtin::ModuleCacheFromOrigin => {
-                self.call("imre_module_cache_from_origin", returns, &[&args[0].value])
+            Builtin::CachePath(operation) => {
+                use crate::ir::CachePathOperation as Op;
+                match *operation {
+                    Op::Get(prefix) => {
+                        let word = self.instruction(format!(
+                            "call i64 @imre_cache_config_get(i32 {})",
+                            u32::from(prefix)
+                        ));
+                        self.decode_word(word, returns)
+                    }
+                    Op::Set(prefix) => {
+                        let word = self.word(&args[0].value);
+                        self.line(format!(
+                            "call void @imre_cache_config_set(i32 {}, i64 {word})",
+                            u32::from(prefix)
+                        ));
+                        none()
+                    }
+                    Op::Tag => self.call("imre_cache_path_tag", returns, &[]),
+                    Op::Forward => self.call(
+                        "imre_cache_from_source",
+                        returns,
+                        &[&args[0].value, &args[1].value, &args[2].value],
+                    ),
+                    Op::Reverse => self.call(
+                        "imre_source_from_cache",
+                        returns,
+                        &[&args[0].value, &args[1].value],
+                    ),
+                    Op::Debug => {
+                        let a =
+                            self.instruction(format!("zext i1 {} to i32", args[0].value.operand));
+                        let b =
+                            self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                        self.checked_line(format!(
+                            "call void @imre_cache_debug_validate(i32 {a}, i32 {b})"
+                        ));
+                        none()
+                    }
+                }
             }
+            Builtin::ModuleCacheFromOrigin => self.call(
+                "imre_module_cache_from_origin",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::NamespaceWrap | Builtin::NamespaceDict => self.call(
                 if matches!(builtin, Builtin::NamespaceWrap) {
                     "imre_namespace_wrap"
@@ -8551,7 +8602,14 @@ declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)
 declare ptr @imre_module_parent_prefix(ptr)
-declare i64 @imre_module_cache_from_origin(i64)
+declare i64 @imre_module_cache_from_origin(i64, ptr)
+declare void @imre_cache_paths_init(i32)
+declare i64 @imre_cache_config_get(i32)
+declare void @imre_cache_config_set(i32, i64)
+declare ptr @imre_cache_path_tag()
+declare ptr @imre_cache_from_source(ptr, ptr, ptr)
+declare ptr @imre_source_from_cache(ptr, ptr)
+declare void @imre_cache_debug_validate(i32, i32)
 declare ptr @imre_str_slice(ptr, i64, i64, i64)
 declare ptr @imre_float_count(double, i32, i64)
 declare ptr @imre_progression(i64, i64, i64)
