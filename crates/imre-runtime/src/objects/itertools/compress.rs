@@ -92,3 +92,93 @@ pub unsafe extern "C" fn imre_compress(
         selectors: Some(selectors),
     })))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repeat(value: i64, times: i64) -> Rc<Object> {
+        // SAFETY: both integers are immediate and the new cursor transfers an owner.
+        unsafe {
+            Rc::from_raw(imre_repeat(
+                2,
+                Int::small(value).unwrap().0,
+                Int::small(times).unwrap().0,
+            ))
+        }
+    }
+
+    fn filter(data: &Rc<Object>, selectors: &Rc<Object>) -> Rc<Object> {
+        // SAFETY: mode zero shares each rooted cursor in its current position.
+        unsafe {
+            Rc::from_raw(imre_compress(
+                0,
+                Rc::as_ptr(data) as usize,
+                0,
+                Rc::as_ptr(selectors) as usize,
+            ))
+        }
+    }
+
+    #[test]
+    fn reentry_before_the_selector_preserves_both_data_items() {
+        // SAFETY: the progression acquires its immediate integer arguments.
+        let data = unsafe {
+            Rc::from_raw(sources::imre_progression(
+                Int::small(0).unwrap().0,
+                0,
+                Int::small(1).unwrap().0,
+            ))
+        };
+        let selectors = repeat(1, 2);
+        let cursor = filter(&data, &selectors);
+        // SAFETY: the constructor installed a compress adapter; only its owner escapes.
+        let state = unsafe {
+            cursor.0.with(|s| match s {
+                Storage::IteratorAdapter(a) => Rc::clone(a),
+                _ => unreachable!(),
+            })
+        };
+        let mut frame = PullFrame::Empty;
+        let Advance::Pull(data) = state.advance(&mut frame, None) else {
+            panic!("expected data");
+        };
+        let Advance::Pull(selector) = state.advance(&mut frame, Some(next_item(&data))) else {
+            panic!("expected selector");
+        };
+        assert!(
+            matches!(next_item(&cursor), Ok(Some(item)) if item.word == Int::small(1).unwrap().0)
+        );
+        assert!(
+            matches!(state.advance(&mut frame, Some(next_item(&selector))), Advance::Return(Ok(Some(item))) if item.word == Int::small(0).unwrap().0)
+        );
+        // The exhausted selector still costs data item 2, even though nothing is returned.
+        assert!(matches!(next_item(&cursor), Ok(None)));
+        assert!(
+            matches!(next_item(&data), Ok(Some(item)) if item.word == Int::small(3).unwrap().0)
+        );
+    }
+
+    #[test]
+    fn deep_selector_pulls_preserve_the_shared_data_cursor() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let n = 16_384;
+                let data = repeat(1, n + 2);
+                let mut top = repeat(1, 1);
+                for _ in 0..n {
+                    top = filter(&data, &top);
+                }
+                assert!(matches!(next_item(&top), Ok(Some(_))));
+                drop(top);
+                assert_eq!(Rc::strong_count(&data), 1);
+                assert!(matches!(next_item(&data), Ok(Some(_))));
+                assert!(matches!(next_item(&data), Ok(Some(_))));
+                assert!(matches!(next_item(&data), Ok(None)));
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+}

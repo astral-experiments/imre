@@ -1,6 +1,7 @@
 """Exercise live data and selector cursors, including the last unsuccessful pull."""
 
-from itertools import compress, count, islice
+import csv
+from itertools import batched, compress, count, islice
 
 
 def rhs() -> list[int]:
@@ -46,6 +47,36 @@ try:
     compress(None, rhs())
 except TypeError as err:
     print(str(err))
+
+# Selecting an iterator calls its truth test without consuming it.
+empty_cursor = islice('hi', 0)
+print(''.join(compress('xy', [empty_cursor, empty_cursor])))
+labels: list[str] = []
+print(''.join(compress('abc', [labels, [''], labels])))
+print(''.join(compress('xy', batched('ab', 1))))
+
+# A data error precedes that pair's selector pull. A selector error loses its
+# associated data item; on the next call the following pair is independent.
+bad_data = csv.reader(['"bad"x', 'good'], strict=True)
+positions = count(1)
+rows = compress(bad_data, positions)
+try:
+    next(rows)
+except csv.Error as err:
+    print(str(err))
+print(next(positions))
+print(next(rows))
+print(next(positions))
+
+bad_selectors = csv.reader(['"bad"x', '', 'yes'], strict=True)
+numbers = count(10)
+selected = compress(numbers, bad_selectors)
+try:
+    next(selected)
+except csv.Error as err:
+    print(str(err))
+print(next(selected))
+print(next(numbers))
 try:
     compress(selectors=3, data=[1])
 except TypeError as err:

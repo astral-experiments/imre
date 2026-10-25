@@ -84,3 +84,8 @@ advances and releases 16,384 nested chains while preserving an aliased leaf.
 
 [compress.py](compress.py) compares data and selector positions, propagation
 of selector errors, argument acquisition order, and truth of builtin values.
+
+The selector regression also separates data errors from selector errors: only
+the latter discard a data item. Empty iterator selectors test true without a
+pull. The runtime controls pause an outer pull while a second consumer reads
+the same cursor, and traverse 16,384 selector adapters on a 256 KiB stack.
