@@ -4,6 +4,71 @@ use crate::ir::{FdOperation, ProcessOperation};
 mod credentials;
 
 impl Checker<'_> {
+    /// Evaluate every argument before binding a fixed positional POSIX signature.
+    fn posix_positional(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &str,
+        size: usize,
+        returns: Type,
+        lower: impl FnOnce(&mut Self, &mut calls::ArgumentScope, Vec<Expr>) -> Result<Expr, String>,
+    ) -> Result<Expr, String> {
+        let mut scope = calls::ArgumentScope::default();
+        let mut supplied = Vec::new();
+        for arg in &call.arguments.args {
+            if let ast::Expr::Starred(spread) = arg {
+                supplied.extend(scope.spread(self, spread)?);
+            } else {
+                let value = self.expr(arg)?;
+                supplied.push(scope.hold(self, value));
+            }
+        }
+        for keyword in &call.arguments.keywords {
+            if keyword.arg.is_none() {
+                return Err(error(
+                    self.source,
+                    keyword,
+                    "expanded keyword arguments are unsupported",
+                ));
+            }
+            let value = self.expr(&keyword.value)?;
+            scope.hold(self, value);
+        }
+        let count = supplied.len();
+        let message = if !call.arguments.keywords.is_empty() {
+            Some(format!("posix.{name}() takes no keyword arguments"))
+        } else if size == count {
+            None
+        } else {
+            Some(match size {
+                0 => format!("posix.{name}() takes no arguments ({count} given)"),
+                1 => format!("posix.{name}() takes exactly one argument ({count} given)"),
+                _ => format!("{name} expected {size} arguments, got {count}"),
+            })
+        };
+        if let Some(message) = message {
+            // Mark only the bad binding sites; errors inside evaluated operands remain visible.
+            if call.arguments.args.len() < size {
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+            }
+            for arg in call.arguments.args.iter().skip(size) {
+                self.graph.checked_excess_argument(self.module, arg.range());
+            }
+            for keyword in &call.arguments.keywords {
+                self.graph
+                    .checked_positional_keyword(self.module, keyword.range());
+            }
+            self.graph.checked_keywords(
+                self.module,
+                call.arguments.keywords.iter().map(Ranged::range),
+            );
+            return Ok(scope.finish(posix_type_error(returns, message)));
+        }
+        let value = lower(self, &mut scope, supplied)?;
+        Ok(scope.finish(value))
+    }
+
     pub(super) fn fd_call(
         &mut self,
         call: &ast::ExprCall,
@@ -11,6 +76,21 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         use FdOperation::*;
 
+        if op == Pipe2 {
+            let returns = self.types.tuple(vec![Type::Int; 2]);
+            return self.posix_positional(call, "pipe2", 1, returns, |checker, _, args| {
+                let flags = args.into_iter().next().expect("one bound pipe2 argument");
+                checker.graph.checked_overload(checker.module, call.range());
+                let flags = checker.index_word(flags, &call.func, false)?;
+                Ok(Expr {
+                    ty: returns,
+                    kind: ExprKind::Builtin(
+                        Builtin::Process(ProcessOperation::Fd(Pipe2)),
+                        vec![flags],
+                    ),
+                })
+            });
+        }
         if matches!(op, Open | Unlink | Remove) {
             return self.os_path_at(call, op);
         }
@@ -62,7 +142,7 @@ impl Checker<'_> {
         let returns = match op {
             Close | SetBlocking | SetInheritable | Unlink | Remove => Type::None,
             Open | Seek | Dup | Dup2 => Type::Int,
-            Pipe => self.types.tuple(vec![Type::Int, Type::Int]),
+            Pipe | Pipe2 => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,
         };
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Fd(op)), returns, args))
@@ -122,5 +202,19 @@ impl Checker<'_> {
             },
             args,
         ))
+    }
+}
+
+fn posix_type_error(ty: Type, message: String) -> Expr {
+    let exception = Expr {
+        ty: Type::Exception,
+        kind: ExprKind::Exception {
+            kind: exception_kind("TypeError").unwrap(),
+            message: Some(Box::new(unpacking::string(message))),
+        },
+    };
+    Expr {
+        ty,
+        kind: ExprKind::Builtin(Builtin::RaiseException, vec![exception]),
     }
 }
