@@ -351,6 +351,7 @@ pub(crate) enum Intrinsic {
     GetEnv,
     GetCwd,
     Strerror,
+    StatResult,
     Fd(crate::ir::FdOperation),
     DescriptorConstant(&'static str),
     FsPath,
@@ -1001,6 +1002,12 @@ impl SourceGraph {
     pub(crate) fn checked_positional_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
+    }
+
+    /// The native binder raises for this keyword because the receiver was already bound.
+    pub(crate) fn checked_repeated_keyword(&self, module: ModuleId, keyword: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::RepeatedKeyword(keyword));
     }
 
     pub(crate) fn checked_keywords(

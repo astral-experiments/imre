@@ -26,6 +26,7 @@ mod copying;
 mod counter;
 mod csv;
 mod dataclass_values;
+mod defaultdict_factory;
 mod deque;
 mod dispatch;
 mod doctest;
@@ -415,6 +416,8 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
         "RecursionError" => return Some(43),
+        "Warning" => return Some(80),
+        "RuntimeWarning" => return Some(81),
         _ => {}
     }
     if name == "ImportError" {
@@ -1536,6 +1539,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
         Some(Binding::Intrinsic(Intrinsic::ModuleType)) => return Ok(Type::NativeModule),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
+        Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(
@@ -2407,6 +2411,11 @@ impl<'a> Checker<'a> {
         self.reject_class_receiver_value(expression)?;
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
         if let ast::Expr::Call(call) = expression
+            && let Some(raised) = self.defaultdict_factory_error(call, expected)?
+        {
+            return Ok(raised);
+        }
+        if let ast::Expr::Call(call) = expression
             && let Some(shape) = self.types.mapping(concrete)
             && let Some(result) = self.fromkeys_call(call, Some(shape))?
         {
@@ -2532,9 +2541,7 @@ impl<'a> Checker<'a> {
             {
                 self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
             }
-            ast::Expr::Call(call)
-                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
-            {
+            ast::Expr::Call(call) if self.is_defaultdict_constructor(&call.func) => {
                 let (key, value) = self.types.mapping(concrete).ok_or_else(|| {
                     error(
                         self.source,
@@ -2543,7 +2550,8 @@ impl<'a> Checker<'a> {
                     )
                 })?;
                 if self.types.element(value).is_none()
-                    || !matches!(call.arguments.args.as_slice(), [ast::Expr::Name(name)] if name.id == "list")
+                    || !matches!(call.arguments.args.as_slice(), [factory @ ast::Expr::Name(name)]
+                        if name.id == "list" && !self.names.contains_key("list") && self.resolve(factory).is_none())
                     || !call.arguments.keywords.is_empty()
                 {
                     return Err(error(
@@ -4780,16 +4788,11 @@ impl<'a> Checker<'a> {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
         if binary.op == ast::Operator::Mod
-            && let ExprKind::Str(pattern) = &left.kind
+            && matches!(left.ty, Type::Str | Type::StrLiteral(_))
             && matches!(right.ty, Type::Str | Type::StrLiteral(_))
         {
-            return self.percent_string(pattern, right).ok_or_else(|| {
-                error(
-                    self.source,
-                    binary,
-                    "literal percent formatting supports one %s field and %% escapes",
-                )
-            });
+            left = Self::string_value(left);
+            right = Self::string_value(right);
         }
         if binary.op == ast::Operator::Add
             && left.ty == Type::JsonValue
@@ -5940,6 +5943,9 @@ impl<'a> Checker<'a> {
                     return self.descriptor_attribute(receiver, method, attribute);
                 }
                 if let Some(declaration) = self.types.tuple_metadata(receiver.ty) {
+                    if self.types.is_stat_result(receiver.ty) {
+                        return self.stat_result_attribute(receiver, attribute, &declaration);
+                    }
                     return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
@@ -6323,6 +6329,11 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if receiver.is_none()
+            && let Some(raised) = self.defaultdict_factory_error(call, Type::None)?
+        {
+            return Ok(raised);
+        }
         if receiver.is_none()
             && let Some(result) = self.fromkeys_call(call, None)?
         {
@@ -7467,6 +7478,17 @@ impl<'a> Checker<'a> {
                 if attribute.attr.as_str() == "fromkeys" {
                     return self.dict_fromkeys(call, None, Some(receiver));
                 }
+                if attribute.attr.as_str() == "copy"
+                    && receiver.ty == self.types.dict(key_type, value_type)
+                {
+                    if !call.arguments.is_empty() {
+                        return Err(error(self.source, call, "dict.copy() takes no arguments"));
+                    }
+                    return Ok(Expr {
+                        ty: receiver.ty,
+                        kind: ExprKind::Builtin(Builtin::DictCopy, vec![receiver]),
+                    });
+                }
                 if attribute.attr.as_str() == "clear"
                     && call.arguments.args.is_empty()
                     && call.arguments.keywords.is_empty()
@@ -7490,7 +7512,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "supported dictionary methods are clear(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
+                        "supported dictionary methods are clear(), copy() on a plain dictionary, get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
                     ));
                 }
                 let key = self.expr_expected(&call.arguments.args[0], key_type)?;
@@ -7982,6 +8004,7 @@ impl<'a> Checker<'a> {
                         | Type::ForwardRef(_)
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)
+                        | Type::Tuple(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {

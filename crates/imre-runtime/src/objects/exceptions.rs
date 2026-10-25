@@ -85,6 +85,9 @@ pub(crate) enum Kind {
     ImportError = 41,
     ModuleNotFoundError = 42,
     RecursionError = 43,
+    // Warning exception identities use a separate block from module errors and filter categories.
+    Warning = 80,
+    RuntimeWarning = 81,
     ShutilReadError = 100,
     ShutilRegistryError = 101,
     TarError = 102,
@@ -151,6 +154,8 @@ impl Kind {
             41 => Self::ImportError,
             42 => Self::ModuleNotFoundError,
             43 => Self::RecursionError,
+            80 => Self::Warning,
+            81 => Self::RuntimeWarning,
             100 => Self::ShutilReadError,
             101 => Self::ShutilRegistryError,
             102 => Self::TarError,
@@ -214,6 +219,8 @@ impl Kind {
             Self::ImportError => "ImportError",
             Self::ModuleNotFoundError => "ModuleNotFoundError",
             Self::RecursionError => "RecursionError",
+            Self::Warning => "Warning",
+            Self::RuntimeWarning => "RuntimeWarning",
             Self::ShutilReadError => "ReadError",
             Self::ShutilRegistryError => "RegistryError",
             Self::TarError => "TarError",
@@ -228,6 +235,7 @@ impl Kind {
     fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
+            Self::Warning => matches!(self, Self::Warning | Self::RuntimeWarning),
             Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::Exception => !matches!(
                 self,
