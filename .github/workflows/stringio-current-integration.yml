@@ -20,6 +20,7 @@ jobs:
         run: |
           git rev-parse HEAD^ HEAD
           git diff --exit-code HEAD^ HEAD -- crates Cargo.lock Cargo.toml
+          git ls-tree -r HEAD -- crates/imre-compiler/src/{contracts.rs,frontend.rs,frontend/enums.rs,frontend/itertools.rs,frontend/string_io.rs,ir.rs,llvm.rs,types.rs} crates/imre-runtime/src/objects/files/text_memory.rs crates/imre-compiler/stdlib/doctest.py
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
