@@ -230,6 +230,10 @@ pub(crate) enum Intrinsic {
     Path,
     PurePath(crate::ir::PathFlavor),
     Which,
+    CopyFile,
+    ShutilError,
+    SameFileError,
+    SpecialFileError,
     TemporaryDirectory,
     Popen,
     SubprocessRun,
@@ -463,6 +467,10 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Shutil, "which") => Intrinsic::Which,
+            (Self::Shutil, "copyfile") => Intrinsic::CopyFile,
+            (Self::Shutil, "Error") => Intrinsic::ShutilError,
+            (Self::Shutil, "SameFileError") => Intrinsic::SameFileError,
+            (Self::Shutil, "SpecialFileError") => Intrinsic::SpecialFileError,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
             (Self::Subprocess, "Popen") => Intrinsic::Popen,

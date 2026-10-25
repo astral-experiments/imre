@@ -24,11 +24,21 @@ impl Output {
         }
     }
 
+    pub(super) fn pipe(file: File, capacity: usize, line_buffering: bool) -> Self {
+        // Popen creates TextIOWrapper(write_through=True) around the binary pipe.
+        Self {
+            raw: BufWriter::with_capacity(capacity, file),
+            text: None,
+            line_buffering,
+        }
+    }
+
     pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
-        let Some(pending) = &mut self.text else {
-            return self.raw.write_all(bytes);
-        };
         let flush_line = self.line_buffering && memchr::memchr2(b'\r', b'\n', bytes).is_some();
+        let Some(pending) = &mut self.text else {
+            self.raw.write_all(bytes)?;
+            return if flush_line { self.raw.flush() } else { Ok(()) };
+        };
         // TextIOWrapper groups small encoded writes, but forwards a large write
         // separately after draining any pending text.
         const CHUNK_SIZE: usize = 8192;
@@ -106,6 +116,7 @@ impl Read for Source {
 pub(super) struct Input {
     raw: BufReader<io::Take<Source>>,
     text: TextBuffer,
+    unbuffered: bool,
 }
 
 impl Input {
@@ -123,6 +134,18 @@ impl Input {
                 source.take(u64::MAX),
             ),
             text: TextBuffer::default(),
+            unbuffered: false,
+        }
+    }
+
+    pub(super) fn pipe(file: File, binary: bool, capacity: usize) -> Self {
+        Self {
+            raw: BufReader::with_capacity(
+                if binary { capacity.max(1) } else { 8192 },
+                Source::Plain(file).take(u64::MAX),
+            ),
+            text: TextBuffer::default(),
+            unbuffered: binary && capacity == 0,
         }
     }
 
@@ -179,7 +202,18 @@ impl Input {
             bytes
                 .try_reserve_exact(limit)
                 .map_err(|_| Error::new(Kind::MemoryError, "bytes allocation failed"))?;
-            self.read_sized(&mut bytes, limit).map_err(os_error)?;
+            if self.unbuffered {
+                let n = self
+                    .raw
+                    .get_mut()
+                    .get_mut()
+                    .read_uninit(&mut bytes.spare_capacity_mut()[..limit])
+                    .map_err(os_error)?;
+                // SAFETY: read_uninit initialized exactly this many reserved bytes.
+                unsafe { bytes.set_len(n) };
+            } else {
+                self.read_sized(&mut bytes, limit).map_err(os_error)?;
+            }
             // CPython releases the unused part of a short read. Keeping the
             // requested capacity alive with a tiny result exhausts address space.
             if bytes.len() < limit {

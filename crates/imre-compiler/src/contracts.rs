@@ -72,7 +72,8 @@ impl Builtin {
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
-                    TextOperation::Split(_)
+                    TextOperation::Lower
+                    | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit => true,
@@ -105,6 +106,8 @@ impl Builtin {
                     | PathOperation::Match { .. }
                     | PathOperation::Resolve
                     | PathOperation::WriteText
+                    | PathOperation::WriteUnion { .. }
+                    | PathOperation::WriteTypeError
                     | PathOperation::WriteBytes
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
@@ -182,9 +185,11 @@ impl Builtin {
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
                 | ProcessOperation::PopenPid
+                | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
                 | ProcessOperation::PopenStatus { .. }
                 | ProcessOperation::PopenExit
+                | ProcessOperation::PopenCommunicate { .. }
                 | ProcessOperation::PopenWait
                 | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncSpawn { .. }
@@ -215,6 +220,7 @@ impl Builtin {
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Which
+                | ProcessOperation::CopyFile
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -381,6 +387,7 @@ impl Builtin {
             | Self::SysPlatform
             | Self::OsName
             | Self::SysArgv
+            | Self::FileFileno
             | Self::TextClose
             | Self::TextEnter
             | Self::TextFlush
@@ -696,6 +703,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_read_bytes"
                 | "imre_path_read_text"
                 | "imre_path_write_text"
+                | "imre_path_read_text_options"
+                | "imre_path_write_text_options"
+                | "imre_path_write_type_error"
+                | "imre_path_write_bytes_union"
+                | "imre_path_write_text_union"
                 | "imre_path_write_bytes"
                 | "imre_path_mkdir"
                 | "imre_path_unlink"
@@ -739,6 +751,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice"
                 | "imre_list_slice_sum"
                 | "imre_str_get"
+                | "imre_str_lower"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"

@@ -463,7 +463,7 @@ impl Launch {
     /// Call only from Command::pre_exec after stdio and cwd setup. Every referenced
     /// buffer was allocated in the parent; only async-signal-safe libc operations
     /// and allocation-free OS-error construction are allowed until exec or _exit.
-    unsafe fn exec_child(&mut self) -> io::Result<()> {
+    unsafe fn exec_child(&mut self, close_fds: bool) -> io::Result<()> {
         for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
             // SAFETY: restore_signals resets dispositions Python ignores; signal
             // is async-signal-safe and both arguments are valid signal constants.
@@ -472,7 +472,10 @@ impl Launch {
             }
         }
         // SAFETY: this is the forked child after Command's stdio setup.
-        unsafe { self.descriptors.apply()? };
+        if close_fds {
+            // SAFETY: the forked child owns its descriptor table.
+            unsafe { self.descriptors.apply()? };
+        }
         let mut saved_error = None;
         let mut last_error = libc::ENOENT;
         let mut attempt = |executable| {
@@ -523,7 +526,7 @@ impl Launch {
         let mut command = Command::new(OsStr::from_bytes(self.argv.strings[0].as_bytes()));
         let stderr = (streams >> 4) & 15;
         command
-            .stdin(Stdio::inherit())
+            .stdin(output((streams >> 12) & 15)?)
             .stdout(output(streams & 15)?)
             .stderr(output(stderr)?);
         if let Some(cwd) = cwd {
@@ -537,7 +540,7 @@ impl Launch {
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                self.exec_child()
+                self.exec_child(streams & (1 << 17) == 0)
             })
         };
         command.spawn()
@@ -602,6 +605,34 @@ enum Captured {
     TimedOut(Option<Vec<u8>>, Option<Vec<u8>>),
 }
 
+fn poll_milliseconds(timeout: f64) -> Result<i32> {
+    if timeout.is_nan() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "cannot convert float NaN to integer",
+        ));
+    }
+    if timeout == f64::INFINITY {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "cannot convert float infinity to integer",
+        ));
+    }
+    // Python's poll first converts milliseconds to its signed nanosecond clock,
+    // then bounds the millisecond argument to the platform's signed C int.
+    let milliseconds = (timeout * 1000.0).ceil();
+    if milliseconds >= 9_223_372_036_855.0 {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "timestamp too large to convert to C PyTime_t",
+        ));
+    }
+    if milliseconds > f64::from(i32::MAX) {
+        return Err(Error::new(Kind::OverflowError, "timeout is too large"));
+    }
+    Ok(milliseconds as i32)
+}
+
 /// Matches POSIX communicate: poll fairly, snapshot before post-deadline reads,
 /// then kill/reap the direct child without an unbounded post-timeout pipe drain.
 fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
@@ -625,30 +656,7 @@ fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
     for fd in fds.into_iter().filter(|&fd| fd >= 0) {
         nonblocking(fd).map_err(os_error)?;
     }
-    if timeout.is_nan() {
-        return Err(Error::new(
-            Kind::ValueError,
-            "cannot convert float NaN to integer",
-        ));
-    }
-    if timeout == f64::INFINITY {
-        return Err(Error::new(
-            Kind::OverflowError,
-            "cannot convert float infinity to integer",
-        ));
-    }
-    // Python's poll first converts milliseconds to its signed nanosecond clock,
-    // then bounds the millisecond argument to the platform's signed C int.
-    let milliseconds = ((timeout - started.elapsed().as_secs_f64()) * 1000.0).ceil();
-    if milliseconds >= 9_223_372_036_855.0 {
-        return Err(Error::new(
-            Kind::OverflowError,
-            "timestamp too large to convert to C PyTime_t",
-        ));
-    }
-    if milliseconds > f64::from(i32::MAX) {
-        return Err(Error::new(Kind::OverflowError, "timeout is too large"));
-    }
+    poll_milliseconds(timeout - started.elapsed().as_secs_f64())?;
     let duration = if timeout > 0.0 {
         Duration::from_secs_f64(timeout)
     } else {
