@@ -353,7 +353,6 @@ impl Builtin {
             | Self::SetContains
             | Self::Split
             | Self::Ndiff
-            | Self::StringListCopy
             | Self::StringListFilter(_)
             | Self::StringListSortSuffix(_)
             | Self::StringListNonempty
@@ -373,6 +372,7 @@ impl Builtin {
             Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
+            | Self::StringListCopy
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::DictDelete
@@ -803,6 +803,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_repeat"
                 | "imre_str_repeat"
                 | "imre_seq_slice"
+                | "imre_str_list_copy"
                 | "imre_dict_copy"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
