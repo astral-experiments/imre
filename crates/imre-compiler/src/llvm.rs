@@ -3971,6 +3971,7 @@ impl Emitter<'_, '_> {
                     Get => "imre_log_get",
                     HandlerRename => "imre_log_handler_rename",
                     HandlerLookup => "imre_log_handler_lookup",
+                    PrintActiveException => "imre_log_print_active_exception",
                     AddLevel => "imre_log_add_level",
                     LevelName => "imre_log_level_name",
                     LevelForName => "imre_log_level_for_name",
@@ -4607,7 +4608,7 @@ impl Emitter<'_, '_> {
                     representation_kind(other.ty, &self.module.types)
                 };
                 let word = self.word(other);
-                let bit = self.instruction(format!(
+                let bit = self.checked_instruction(format!(
                     "call i32 @imre_system_exit_code_equal(ptr {}, i32 {kind}, i64 {word})",
                     args[i].value.operand
                 ));
@@ -7897,6 +7898,7 @@ declare ptr @imre_logrecord_repr(ptr)
 declare ptr @imre_log_get(i64)
 declare void @imre_log_handler_rename(ptr, i64, i64)
 declare i64 @imre_log_handler_lookup(ptr)
+declare void @imre_log_print_active_exception()
 declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)
 declare i64 @imre_log_level_for_name(ptr)
@@ -8294,6 +8296,18 @@ mod tests {
                 .0
                 .contains("call void @imre_object_release(")
         );
+    }
+
+    #[test]
+    fn boxed_equality_checks_errors_before_using_the_result() {
+        let body = function_body(
+            "from collections.abc import Mapping\n\ndef check(left: Mapping[str, object], right: Mapping[str, object]) -> None:\n    print(left['x'] == right['x'])\ncheck({'x': (1, 2)}, {'x': (3, 4)})\n",
+        );
+        let (_, result) = body
+            .split_once("call i32 @imre_system_exit_code_equal(")
+            .unwrap();
+        let (before_test, _) = result.split_once("icmp ne i32").unwrap();
+        assert!(before_test.contains("call i32 @imre_error_pending()"));
     }
 
     #[test]

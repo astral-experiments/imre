@@ -13,7 +13,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_evidence import roles, write_reports
-from suite_native import NativeCompileError, Toolchain, compile_blocker, method_bytes, native_method, run_evidence, testcase_fixture
+from suite_native import (NativeCompileError, NativeDefaultMethod, Toolchain, compile_blocker,
+                          method_bytes, native_method, run_evidence, testcase_fixture)
 
 PREFIX = "test.test_unittest."
 ASSERTIONS = {
@@ -29,6 +30,16 @@ EQUALITY_BLOCKERS = {
     "testAssertMultiLineEqualTruncates": (1016, "6:34: Imre: too many positional arguments"),
     "testAssertEqual_diffThreshold": (1036, "14:9: Imre: unknown class method"),
     "testAssertEqual_shorten": (1067, "9:9: Imre: unknown class method"),
+}
+# Each entry has a reviewed native product operation and the original default fixture.
+DEFAULT_MOCK_METHODS = {
+    "test_assert_not_called": "unittest.mock.Mock.assert_not_called",
+    "test_assert_called": "unittest.mock.Mock.assert_called",
+    "test_assert_called_once": "unittest.mock.Mock.assert_called_once",
+    "test_ordered_call_signature": "unittest.mock.Mock.call_args and its representation",
+    "test_assert_any_call": "unittest.TestCase.assertRaises and unittest.mock.Mock.assert_any_call",
+    "test_assert_called_with": "unittest.TestCase.assertRaises and unittest.mock.Mock.assert_called_with",
+    "test_assert_called_once_with": "unittest.TestCase.assertRaises and unittest.mock.Mock.assert_called_once_with",
 }
 MOCK_BLOCKERS = {
     "test_assert_called_once_message_not_called": (1858, "10:9: Imre: unknown class method"),
@@ -94,7 +105,7 @@ def run(args, level, root):
     reference = json.loads((HERE / "reference-linux.json").read_text())
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
-    lang = Toolchain(args.imre, args.runtime, args.clang, level)
+    lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
     for name in ["equality_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
                  "callable_binding", "context_regex", *("context_" + family for family in families)]:
@@ -108,7 +119,7 @@ def run(args, level, root):
             raise AssertionError(f"{program.name} differs from CPython: {observed!r} != {oracle!r}")
     driver = root / "assertions"
     driver.mkdir()
-    executions, blocked, measured_blockers = {}, {}, set()
+    executions, native_defaults, blocked, measured_blockers = {}, {}, {}, set()
     host = {PREFIX + "test_assertions.TestLongMessage." + name: op for name, op in ASSERTIONS.items()}
     try:
         binary = lang.build((HERE / "assertion_driver.py").read_bytes(), driver)
@@ -127,16 +138,9 @@ def run(args, level, root):
                          "testAssertEqualMultipleLinesMissingNewlineTerminator",
                          "testAssertEqualMultipleLinesMismatchedNewlinesTerminators",
                          "testAssertMultiLineEqual", *EQUALITY_BLOCKERS)),
-        ("testmock.testmock", "MockTest", "test_assert_not_called", "unittest.mock.Mock.assert_not_called"),
-        ("testmock.testmock", "MockTest", "test_assert_called", "unittest.mock.Mock.assert_called"),
+        *(("testmock.testmock", "MockTest", method, operation) for method, operation in DEFAULT_MOCK_METHODS.items()),
         ("testmock.testmock", "MockTest", "test_assert_called_exception_message",
          "unittest.TestCase.assertRaisesRegex and unittest.mock.Mock.assert_called"),
-        ("testmock.testmock", "MockTest", "test_assert_called_once", "unittest.mock.Mock.assert_called_once"),
-        ("testmock.testmock", "MockTest", "test_ordered_call_signature", "unittest.mock.Mock.call_args and its representation"),
-        *(("testmock.testmock", "MockTest", method, "unittest.TestCase.assertRaises and unittest.mock.Mock." + assertion)
-          for method, assertion in (("test_assert_any_call", "assert_any_call"),
-                                    ("test_assert_called_with", "assert_called_with"),
-                                    ("test_assert_called_once_with", "assert_called_once_with"))),
         *(("testmock.testmock", "MockTest", method, "unittest.mock recording, reset, and call assertions")
           for method in MOCK_BLOCKERS),
     ):
@@ -144,6 +148,10 @@ def run(args, level, root):
         case_id = PREFIX + f"{module}.{owner}.{method}"
         directory = root / method
         directory.mkdir()
+        if module == "testmock.testmock" and method in DEFAULT_MOCK_METHODS:
+            blob = manifest["files"][path.relative_to(HERE / "upstream").as_posix()]
+            native_defaults[case_id, 1] = NativeDefaultMethod(lang, directory, path, blob, ("imre", operation))
+            continue
         fixture = testcase_fixture("bool" if method == "test_stop" else None)
         if module == "testmock.testmock":
             fixture = "from unittest.mock import Mock\n" + fixture
@@ -168,7 +176,7 @@ def run(args, level, root):
                 )
             blocked[case_id, 1] = observation
     report = run_evidence(load_suite(manifest["module"]), executions, reference, level,
-                          preflight=blocked, exceptions=reference_skips(level))
+                          preflight=blocked, native_defaults=native_defaults, exceptions=reference_skips(level))
     failures = [r for r in report["records"]
                 if (r["outcome"] not in {"pass", "not-run"}
                     and not (r["outcome"] == "blocked" and r["id"] in measured_blockers))
@@ -194,6 +202,7 @@ def main():
     for option in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + option, type=Path, required=True)
     parser.add_argument("--cpython-source", type=Path)
+    parser.add_argument("--reachable-only", action="store_true", help="build all native entries in reachable-only mode")
     parser.add_argument("--exception-family", action="append", choices=("csv", "import"), default=[],
                         help="explicitly require a family control (csv and import are checked by default)")
     args = parser.parse_args()

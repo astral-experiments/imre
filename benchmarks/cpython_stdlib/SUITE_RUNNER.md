@@ -112,6 +112,53 @@ s.substitute, ...)`. Its source prefix is `"from string import Template\n" +
 testcase_fixture()`. Pass `operation=("imre", "string.Template.substitute")` to
 `native_method`; the original class and module lifecycle remain host-assisted.
 
+### Running a method with native default fixtures
+
+Use `NativeDefaultMethod` for a discovered, directly defined method of a plain
+`unittest.TestCase` with default module, class, and instance fixtures. For
+example, the original CPython 3.14.5
+`test.test_unittest.testmock.testmock.MockTest.test_assert_not_called` calls a
+Mock child and then verifies that its second `assert_not_called()` raises
+`AssertionError`. The class, assertion, Mock, and fixture run in the same native
+process. Discovery and the reference inventory still run on CPython.
+
+```python
+from suite_inventory import load_suite
+from suite_native import NativeDefaultMethod, Toolchain, run_evidence
+
+test_id = "test.test_unittest.testmock.testmock.MockTest.test_assert_not_called"
+source = upstream / "Lib/test/test_unittest/testmock/testmock.py"
+entry = NativeDefaultMethod(
+    Toolchain(imre, runtime, clang, level), directory, source,
+    "764585ec5d54688b483dca510d6fa187a9fc2531",
+    ("imre", "unittest.mock.Mock.assert_not_called"),
+)
+report = run_evidence(load_suite(reference["module"]), {}, reference, level,
+                      native_defaults={(test_id, 1): entry})
+```
+
+Use a fresh existing directory for each binary and the full pinned reference
+from your module. Pass `reachable_only=True` to `Toolchain` to check that mode.
+Declare the location of the operation explicitly. For an operation delegated
+to a CPython child, pass `("cpython", description)`; use `assertions="mixed"`
+if assertions also run in both processes. The native entry alone cannot
+establish that a delegated operation or assertion ran in Imre.
+If your full reference includes approved skips, pass the same per-occurrence
+`exceptions` as in your other reports.
+
+The entry checks the Git blob, the discovered method's code, and the original
+import bindings. It preserves the class header and the complete method bytes,
+then invokes native `unittest.main()` with `-v`. A pass requires exit 0, empty
+stdout, the exact staged ID, one test, and the success summary on stderr. Only
+elapsed time is normalized. The receipt records the original ID and occurrence,
+the staged `__main__` ID, source blob, method and entry hashes, mode, streams,
+and status. The package itself has not been imported natively by this path.
+
+A decorated method or class, custom setup/teardown, registered cleanup,
+configured instance, additional base, class helper or unresolved global needs
+its actual fixture. Use the host fixture path when applicable and record its
+role. A native compile blocker or unsuccessful run never earns pass credit.
+
 ### Matching an exception message
 
 `with case.assertRaisesRegex(ErrorType, pattern) as caught` first checks the
