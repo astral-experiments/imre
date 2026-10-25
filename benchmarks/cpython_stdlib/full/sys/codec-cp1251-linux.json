@@ -1,0 +1,54 @@
+{
+  "kind": "supplemental codec controls",
+  "platform": "linux",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre_commit": "e850e13e0e9e3024e8680755531456e8be8e07a8",
+  "imre_tree": "788af022effcf7ac14de2eede4cc30955505ed98",
+  "original_test_occurrences": 0,
+  "controls": [
+    {
+      "source": "benchmarks/cpython_stdlib/full/sys/codec_cp1251.py",
+      "source_sha256": "ca4e5e8bec7ceaefd30a475ca130273de6fadeaef3d7f61587f4d9cb6e8dc6a5",
+      "observations": [
+        {
+          "opt_level": 0,
+          "stdout_bytes": 1039,
+          "stdout_sha256": "38b3398a2628ed9050218eed2b8aaa1822b65122b945c4b519e92093fa73c05a",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "exit": 0,
+          "matches_pinned_cpython": true
+        },
+        {
+          "opt_level": 3,
+          "stdout_bytes": 1039,
+          "stdout_sha256": "38b3398a2628ed9050218eed2b8aaa1822b65122b945c4b519e92093fa73c05a",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "exit": 0,
+          "matches_pinned_cpython": true
+        }
+      ]
+    },
+    {
+      "source": "benchmarks/cpython_stdlib/full/sys/codec_lookup.py",
+      "source_sha256": "39d2f06c989dbaaf9be66c84cff43c06634fa1673cbdf1ca9f9e2aa3ef2d005f",
+      "observations": [
+        {
+          "opt_level": 0,
+          "stdout_bytes": 582,
+          "stdout_sha256": "3aeddd9fe447bd132de2d40e13dfc57e7244b2f39dd4fb69d4e574b939252f3c",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "exit": 0,
+          "matches_pinned_cpython": true
+        },
+        {
+          "opt_level": 3,
+          "stdout_bytes": 582,
+          "stdout_sha256": "3aeddd9fe447bd132de2d40e13dfc57e7244b2f39dd4fb69d4e574b939252f3c",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "exit": 0,
+          "matches_pinned_cpython": true
+        }
+      ]
+    }
+  ]
+}

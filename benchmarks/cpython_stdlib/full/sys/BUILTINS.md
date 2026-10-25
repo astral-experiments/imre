@@ -51,6 +51,7 @@ does not run that case. In `test.test_logging.EncodingTest.test_encoding_cyrilli
 obtains `codecs.getwriter('cp1251')`, sets its class encoding, and logs into a
 wrapped `io.BytesIO`. A [separate codec control](codec_cp1251.py) compares all
 255 defined bytes with pinned CPython, checks the undefined byte and error
-handlers, and encodes the exact Cyrillic message and newline. The original
+handlers, and encodes the exact Cyrillic message and newline. The [Linux results
+at O0 and O3](codec-cp1251-linux.json) include both this and the existing codec control. The original
 method still needs a mutable writer class, stream delivery and its logging
 fixture. These consumer occurrences stay with their respective suite reports.
