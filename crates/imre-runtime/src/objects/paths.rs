@@ -502,9 +502,11 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
     unsafe {
         object(path).0.with(|storage| {
             if let Storage::PurePath(p) = storage {
-                return p
-                    .join([super::acquire_rc::<Str>(child as usize)])
-                    .into_object();
+                return finish(
+                    p.join(std::iter::once(super::acquire_rc::<Str>(child as usize)))
+                        .map(PurePath::into_object),
+                    std::ptr::null(),
+                );
             }
             let parent = storage.path_value();
             let child_text = &*child;
@@ -670,7 +672,7 @@ pub unsafe extern "C" fn imre_path_parent(path: *const Object) -> *const Object 
                 return path;
             }
             if let Storage::PurePath(p) = storage {
-                return p.parent().into_object();
+                return finish(p.parent().map(PurePath::into_object), std::ptr::null());
             }
             let Storage::Path { text, .. } = storage else {
                 fail("SystemError", "expected a path object");

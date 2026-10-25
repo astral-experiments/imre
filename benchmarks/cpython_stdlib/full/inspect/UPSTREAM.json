@@ -14,6 +14,9 @@
     "Lib/test/test_inspect/inspect_stringized_annotations.py": "a56fb050ead975fd81cc000f59601eff4627193a",
     "Lib/test/test_inspect/inspect_stringized_annotations_2.py": "87206d5a646922c5040d933e878d394112a56c61",
     "Lib/test/test_inspect/inspect_stringized_annotations_pep695.py": "39bfe2edb03f3069b1b374f909a2da3d86ce0dd1",
-    "Lib/test/test_inspect/test_inspect.py": "28acb2a45a31b75c43e82f9f0d64fcb9944915ec"
+    "Lib/test/test_inspect/test_inspect.py": "28acb2a45a31b75c43e82f9f0d64fcb9944915ec",
+    "Lib/test/typinganndata/__init__.py": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "Lib/test/typinganndata/ann_module7.py": "8f890cd28025be10203d1521c92a953b36533262",
+    "Lib/test/typinganndata/ann_module9.py": "952217393e1ff752be288c8aadcd15faac3694ee"
   }
 }

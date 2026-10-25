@@ -763,7 +763,12 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
             && names(&attr.value, self.builder)
             && matches!(
                 attr.attr.as_str(),
-                "parse_args" | "format_help" | "format_usage" | "print_help" | "print_usage"
+                "parse_args"
+                    | "parse_known_args"
+                    | "format_help"
+                    | "format_usage"
+                    | "print_help"
+                    | "print_usage"
             )
         {
             self.operations.push(call.start());
@@ -1263,7 +1268,7 @@ impl Checker<'_> {
             kind: ExprKind::Str(parser.schema.clone()),
         };
         let method = call.func.as_attribute_expr().unwrap().attr.as_str();
-        if method != "parse_args" {
+        if !matches!(method, "parse_args" | "parse_known_args") {
             let print = method.starts_with("print");
             let file = match (
                 call.arguments.args.as_ref(),
@@ -1319,7 +1324,7 @@ impl Checker<'_> {
                 return Err(error(
                     self.source,
                     call,
-                    "argparse parse_args accepts one argument list",
+                    &format!("argparse {method} accepts one argument list"),
                 ));
             }
         };
@@ -1342,10 +1347,16 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
             },
         };
+        let namespace = Type::Class(parser.class);
         Ok(Some(Expr {
-            ty: Type::Class(parser.class),
+            ty: if method == "parse_known_args" {
+                self.types.tuple(vec![namespace, argv_type])
+            } else {
+                namespace
+            },
             kind: ExprKind::Builtin(
                 Builtin::ParseArgs {
+                    namespace: parser.class,
                     children: parser.children.clone(),
                     process_argv: explicit.is_none(),
                 },
