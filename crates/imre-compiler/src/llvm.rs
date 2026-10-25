@@ -1235,9 +1235,9 @@ impl Emitter<'_, '_> {
                                 receiver.operand
                             ));
                             let index_mask = self.instruction(format!("load i64, ptr {mask}"));
-                            let cursor = self.entry_alloca("{ i64, i64, i64, ptr, ptr }");
+                            let cursor = self.entry_alloca("{ i64, i64, i64, ptr }");
                             self.line(format!(
-                                "store {{ i64, i64, i64, ptr, ptr }} zeroinitializer, ptr {cursor}"
+                                "store {{ i64, i64, i64, ptr }} zeroinitializer, ptr {cursor}"
                             ));
                             ListBuffer::Struct {
                                 data,
@@ -7633,8 +7633,7 @@ declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
 declare ptr @imre_struct_list_new(ptr)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
-declare void @imre_struct_read_block(ptr, i64, ptr) nounwind
-declare i64 @llvm.ctpop.i64(i64)
+declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare ptr @imre_struct_row(ptr, i64) nounwind
 declare ptr @imre_struct_row_checked(ptr, i64)
 declare i32 @imre_struct_append(ptr, ptr, ptr)
@@ -7671,53 +7670,30 @@ deferred:
   %resolved = call i32 @imre_seq_resolve_header(ptr %sequence)
   ret i32 %resolved
 }
-; Fields match the runtime's repr(C) ReadBlock. Sparse cursors are private to
-; the proven read-only loop; unsigned subtraction handles reverse/random seeks.
-define internal ptr @imre_struct_cursor_row(ptr %list, i64 %at, ptr %cursor, i64 %width) alwaysinline nounwind {
+; Fields match the runtime's repr(C) ReadSpan. Unsigned subtraction rejects
+; a seek backwards before the cached start as well as advances past its end.
+define internal ptr @imre_struct_cursor_row(ptr %list, i64 %at, ptr %span, i64 %width) alwaysinline nounwind {
 entry:
-  %lenptr = getelementptr inbounds {i64,i64,i64,ptr,ptr}, ptr %cursor, i32 0, i32 1
-  %bitsptr = getelementptr inbounds {i64,i64,i64,ptr,ptr}, ptr %cursor, i32 0, i32 2
-  %baseptr = getelementptr inbounds {i64,i64,i64,ptr,ptr}, ptr %cursor, i32 0, i32 3
-  %editsptr = getelementptr inbounds {i64,i64,i64,ptr,ptr}, ptr %cursor, i32 0, i32 4
-  %lo = load i64, ptr %cursor
+  %lenptr = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 1
+  %maskptr = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 2
+  %dataptr = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 3
+  %lo = load i64, ptr %span
   %len = load i64, ptr %lenptr
   %delta = sub i64 %at, %lo
   %hit = icmp ult i64 %delta, %len
   br i1 %hit, label %read, label %seek
 seek:
-  call void @imre_struct_read_block(ptr %list, i64 %at, ptr %cursor)
+  call void @imre_struct_seek_span(ptr %list, i64 %at, ptr %span)
   br label %read
 read:
-  %start = load i64, ptr %cursor
-  %bits = load i64, ptr %bitsptr
+  %start = load i64, ptr %span
+  %mask = load i64, ptr %maskptr
+  %data = load ptr, ptr %dataptr
   %relative = sub i64 %at, %start
-  %empty = icmp eq i64 %bits, 0
-  br i1 %empty, label %common, label %occupied
-occupied:
-  %full = icmp eq i64 %bits, -1
-  br i1 %full, label %consecutive, label %mixed
-consecutive:
-  %full_offset = mul i64 %relative, %width
-  %full_data = load ptr, ptr %editsptr
-  %full_row = getelementptr inbounds i64, ptr %full_data, i64 %full_offset
-  ret ptr %full_row
-mixed:
-  %slot = and i64 %relative, 63
-  %bit = shl i64 1, %slot
-  %present = and i64 %bits, %bit
-  %changed = icmp ne i64 %present, 0
-  br i1 %changed, label %edit, label %common
-edit:
-  %below = sub i64 %bit, 1
-  %before = and i64 %bits, %below
-  %rank = call i64 @llvm.ctpop.i64(i64 %before)
-  %offset = mul i64 %rank, %width
-  %data = load ptr, ptr %editsptr
+  %index = and i64 %relative, %mask
+  %offset = mul i64 %index, %width
   %row = getelementptr inbounds i64, ptr %data, i64 %offset
   ret ptr %row
-common:
-  %base = load ptr, ptr %baseptr
-  ret ptr %base
 }
 
 define internal i64 @imre_seq_len_fast(ptr %sequence) alwaysinline nounwind {

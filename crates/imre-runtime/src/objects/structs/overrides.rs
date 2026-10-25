@@ -117,26 +117,37 @@ impl Overrides {
         })
     }
 
-    /// Read a whole block with one map lookup. Long untouched prefixes and
-    /// suffixes can share one view regardless of their length.
-    pub(super) fn read_block(
-        &self,
-        at: usize,
-        len: usize,
-        default: *const usize,
-    ) -> super::ReadBlock {
+    /// Describe a run without testing its bitmap on every visit. Adjacent edits
+    /// occupy adjacent scalar rows; every untouched slot shares the default.
+    pub(super) fn span(&self, at: usize, len: usize, default: &[usize]) -> super::ReadSpan {
+        let uniform = |count| super::ReadSpan {
+            start: at,
+            len: count,
+            index_mask: 0,
+            data: default.as_ptr(),
+        };
         if self.len == 0 || at > self.last {
-            return super::ReadBlock::uniform(at, len - at, default);
+            return uniform(len - at);
         }
         if at < self.first {
-            return super::ReadBlock::uniform(0, self.first, default);
+            return uniform(self.first - at);
         }
-        let start = at / BLOCK * BLOCK;
-        let mut view = super::ReadBlock::uniform(start, BLOCK.min(len - start), default);
-        if let Some(block) = self.blocks.get(&(at / BLOCK)) {
-            view.bits = block.mask;
-            view.edits = block.words.as_ptr();
+        let offset = at % BLOCK;
+        let limit = (BLOCK - offset).min(len - at);
+        let Some(block) = self.blocks.get(&(at / BLOCK)) else {
+            return uniform(limit);
+        };
+        let bits = block.mask >> offset;
+        if bits & 1 == 0 {
+            uniform((bits.trailing_zeros() as usize).min(limit))
+        } else {
+            let start = block.offset(1 << offset, default.len());
+            super::ReadSpan {
+                start: at,
+                len: (bits.trailing_ones() as usize).min(limit),
+                index_mask: usize::MAX,
+                data: block.words[start..].as_ptr(),
+            }
         }
-        view
     }
 }

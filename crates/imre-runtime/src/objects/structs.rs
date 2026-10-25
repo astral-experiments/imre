@@ -415,53 +415,46 @@ pub unsafe extern "C" fn imre_struct_read_view(
     }
 }
 
-/// Private ABI shared with imre_struct_cursor_row in the compiler. Set bits
-/// index compact scalar rows by rank; clear bits all address the same default.
+/// Private ABI shared with the compiler's imre_struct_cursor_row. A zero
+/// index mask broadcasts one immutable value; all ones expose consecutive rows.
 #[repr(C)]
-pub struct ReadBlock {
+pub struct ReadSpan {
     start: usize,
     len: usize,
-    bits: u64,
-    base: *const usize,
-    edits: *const usize,
-}
-
-impl ReadBlock {
-    fn uniform(start: usize, len: usize, base: *const usize) -> Self {
-        Self {
-            start,
-            len,
-            bits: 0,
-            base,
-            edits: std::ptr::null(),
-        }
-    }
+    index_mask: usize,
+    data: *const usize,
 }
 
 /// # Safety
 /// The list stays unchanged throughout the proven read-only loop, `at` is in
-/// bounds, and `out` points to the compiler's private five-word read cursor.
+/// bounds, and `out` points to the compiler's private four-word read cursor.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_struct_read_block(
-    list: *const Object,
-    at: usize,
-    out: *mut ReadBlock,
-) {
+pub unsafe extern "C" fn imre_struct_seek_span(list: *const Object, at: usize, out: *mut ReadSpan) {
     // SAFETY: all payload pointers borrow scalar words from this rooted list.
     unsafe {
         object(list).0.with(|s| {
             let seq = s.sequence_storage();
-            let block = if let Some(rows) = seq.rows() {
+            let span = if let Some(rows) = seq.rows() {
                 match &rows.storage {
                     RowStorage::Repeated(base, edits) => {
-                        edits.read_block(at, rows.len, base.word as *const usize)
+                        edits.span(at, rows.len, base_row(base, rows.layout.length))
                     }
-                    RowStorage::Packed(_) => ReadBlock::uniform(at, 1, rows.row(at).as_ptr()),
+                    RowStorage::Packed(_) => ReadSpan {
+                        start: at,
+                        len: rows.len - at,
+                        index_mask: usize::MAX,
+                        data: rows.row(at).as_ptr(),
+                    },
                 }
             } else {
-                ReadBlock::uniform(at, 1, seq.resolved().values[at] as *const usize)
+                ReadSpan {
+                    start: at,
+                    len: 1,
+                    index_mask: 0,
+                    data: seq.resolved().values[at] as *const usize,
+                }
             };
-            out.write(block);
+            out.write(span);
         });
     }
 }
