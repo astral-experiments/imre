@@ -799,6 +799,12 @@ Use `group = parser.add_argument_group(title, description)` to place arguments i
 
 A subcommand is optional by default. With `add_subparsers(dest="command")`, the namespace contains `command=None` when omitted. Without `dest`, no command field is added. Use `required=True` or set the group's `required` attribute to require a selection. Each literal `add_parser("name", aliases=["alias"], help="...")` introduces a child parser with its own options. The destination retains the spelling the caller used; child help uses its canonical name. A `match args.command` case or `if args.command == "alias"` branch selects the child's concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
+For literal option declarations, a keyword outside the constructor signature of
+`BooleanOptionalAction`, `store_true`, `store_false`, `store_const`, `append_const`,
+or `count` raises `TypeError` at the `add_argument` call. An explicit `--no-` spelling on
+`BooleanOptionalAction` raises `ValueError`. Keyword expressions run before the
+constructor error. If the caller catches it, previously registered options remain usable.
+
 Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()` or `parse_known_args()`. The latter returns the namespace and a list of unrecognized arguments in order. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested subcommands are outside this grammar.
 
 The `store_true`, `store_false`, and `store_const` actions store a value without consuming the next argument. A `count` action increments once for each occurrence, including each letter in a cluster such as `-vvv`.
