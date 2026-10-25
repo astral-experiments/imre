@@ -271,6 +271,8 @@ impl std::fmt::Display for Type {
 }
 
 pub(crate) struct Module {
+    /// Isolated command mode ignores Python environment variables at native startup.
+    pub isolated: bool,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -658,6 +660,7 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysStderrEncoding,
     SysVersionInfo {
         implementation: bool,
     },

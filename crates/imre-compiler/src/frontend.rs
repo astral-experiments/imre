@@ -1088,6 +1088,10 @@ pub(crate) fn lower_with_owners(
     }
     Ok((
         ir::Module {
+            isolated: graph
+                .command_startup
+                .as_ref()
+                .is_some_and(|(flags, _)| flags.isolated),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             class_fields: classes.fields,
@@ -5883,12 +5887,25 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(self.string_join_value(None, attribute));
                 }
+                if matches!(
+                    self.resolve(&attribute.value),
+                    Some(Binding::Intrinsic(Intrinsic::Stderr))
+                ) {
+                    match attribute.attr.as_str() {
+                        "encoding" => {
+                            return Ok(Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Builtin(Builtin::SysStderrEncoding, vec![]),
+                            });
+                        }
+                        "errors" => return Ok(unpacking::string("backslashreplace")),
+                        _ => {}
+                    }
+                }
                 if attribute.attr.as_str() == "encoding"
                     && matches!(
                         self.resolve(&attribute.value),
-                        Some(Binding::Intrinsic(
-                            Intrinsic::Stdin | Intrinsic::Stdout | Intrinsic::Stderr
-                        ))
+                        Some(Binding::Intrinsic(Intrinsic::Stdin | Intrinsic::Stdout))
                     )
                 {
                     return Ok(unpacking::string("utf-8"));

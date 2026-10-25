@@ -61,7 +61,7 @@ The versioned gate loads the original suite and runs its selected methods
 under their CPython fixtures. For every remaining non-skipped method it either
 tries to compile the complete definition or records the original decorator
 that requires an adapter. An unreviewed exception proposal remains a blocker.
-The unchanged `test_exit` runs under its original CPython fixture and assertions: six caught calls and five original child programs complete in Imre, including `2**128` and a pending stderr write. The next unchanged child source contains a lone U+DCFF. Its native compile failure blocks the method before the final Latin-1 check; no partial method receives pass credit.
+The unchanged `test_exit` runs under its original CPython fixture and assertions: six caught calls and five original child programs complete in Imre, including `2**128` and a pending stderr write. The next child contains a lone U+DCFF that Imre cannot compile. Running the final Latin-1 child independently returns status 1, an empty stdout and stderr bytes `68 e9 0a` at both levels. The [stderr comparison](stderr-encoding-linux.json) retains the original child hashes and bytes; the complete method remains blocked.
 
 Pass `--evidence /tmp/sys-evidence-O$opt.json` to the command above for each
 optimization level. Combine and validate the two files with:

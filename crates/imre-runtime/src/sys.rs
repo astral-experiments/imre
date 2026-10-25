@@ -1,18 +1,88 @@
-//! The process's two UTF-8 text output streams use the same buffering as print.
+//! Process text streams and their native encoding and buffering.
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initialize_io};
-use crate::objects::errno_error;
+use crate::objects::{Codec, errno_error};
 use std::io::{self, Write};
+use std::sync::OnceLock;
 
-static STDERR: LazyLock<Mutex<Output<io::Stderr>>> = LazyLock::new(|| {
+static STDERR_CODEC: OnceLock<Codec> = OnceLock::new();
+
+/// Snapshot the encoder before user code can change the environment.
+pub(super) fn stderr_codec(isolated: bool) -> Codec {
+    *STDERR_CODEC.get_or_init(|| {
+        let utf8 = Codec::Utf8 { signature: false };
+        if isolated {
+            return utf8;
+        }
+        let setting = match std::env::var("PYTHONIOENCODING") {
+            Ok(setting) => setting,
+            Err(std::env::VarError::NotPresent) => return utf8,
+            Err(std::env::VarError::NotUnicode(_)) => {
+                let _ = writeln!(io::stderr().lock(), "PYTHONIOENCODING is not valid UTF-8");
+                std::process::exit(1);
+            }
+        };
+        let name = setting
+            .split_once(':')
+            .map_or(setting.as_str(), |(name, _)| name);
+        if name.is_empty() {
+            return utf8;
+        }
+        Codec::lookup(name).unwrap_or_else(|_| {
+            let _ = writeln!(io::stderr().lock(), "LookupError: unknown encoding: {name}");
+            std::process::exit(1);
+        })
+    })
+}
+
+pub(super) struct StderrOutput {
+    stream: Output<io::Stderr>,
+    codec: Codec,
+}
+
+impl Write for StderrOutput {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.write_all(bytes)?;
+        Ok(bytes.len())
+    }
+
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if matches!(self.codec, Codec::Utf8 { signature: false }) {
+            return self.stream.write_all(bytes);
+        }
+        let text = std::str::from_utf8(bytes).map_err(io::Error::other)?;
+        let encoded = self
+            .codec
+            .encode(text, Some("backslashreplace"))
+            .map_err(|_| {
+                io::Error::other("could not encode standard error with backslashreplace")
+            })?;
+        if matches!(self.codec, Codec::Utf8 { signature: true }) {
+            // The incremental encoder emits its signature once, even for an empty first write.
+            self.codec = Codec::Utf8 { signature: false };
+        }
+        self.stream.write_all(&encoded)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
+    }
+}
+
+static STDERR: LazyLock<Mutex<StderrOutput>> = LazyLock::new(|| {
     initialize_io();
-    Mutex::new(Output::with_stream(
-        io::stderr(),
-        super::STDIO_SETTINGS.stderr_capacity,
-        true,
-    ))
+    Mutex::new(StderrOutput {
+        stream: Output::with_stream(io::stderr(), super::STDIO_SETTINGS.stderr_capacity, true),
+        codec: stderr_codec(false),
+    })
 });
 
-fn write_stream<W: Write>(stream: &Mutex<Output<W>>, text: &str, newline: bool) -> io::Result<()> {
+/// Return the canonical Python codec name captured at native program startup.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_stderr_encoding() -> *const Str {
+    Rc::into_raw(stderr_codec(false).name_owner())
+}
+
+fn write_stream<W: Write>(stream: &Mutex<W>, text: &str, newline: bool) -> io::Result<()> {
     let mut stream = stream.lock().unwrap_or_else(|poison| poison.into_inner());
     stream.write_all(text.as_bytes())?;
     if newline {
@@ -25,7 +95,7 @@ pub(super) fn write_stderr(text: &str, newline: bool) -> io::Result<()> {
     write_stream(&STDERR, text, newline)
 }
 
-pub(super) fn stderr_writer() -> std::sync::MutexGuard<'static, Output<io::Stderr>> {
+pub(super) fn stderr_writer() -> std::sync::MutexGuard<'static, StderrOutput> {
     STDERR.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 

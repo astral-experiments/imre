@@ -72,13 +72,7 @@ unsafe fn codec(info: *const Object) -> Codec {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_codec_name(info: *const Object) -> *const Str {
     // SAFETY: the codec info was returned by the registry.
-    let index = match unsafe { codec(info) } {
-        Codec::Ascii => 0,
-        Codec::Latin1 => 1,
-        Codec::Utf8 { signature: false } => 2,
-        Codec::Utf8 { signature: true } => 3,
-    };
-    NAMES.with(|names| Rc::into_raw(names[index].clone()))
+    Rc::into_raw(unsafe { codec(info) }.name_owner())
 }
 
 /// # Safety
@@ -114,14 +108,28 @@ pub unsafe extern "C" fn imre_codec_decode(
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum Codec {
+pub(crate) enum Codec {
     Utf8 { signature: bool },
     Latin1,
     Ascii,
 }
 
 impl Codec {
-    pub(super) fn lookup(value: &str) -> Result<Self> {
+    fn index(self) -> usize {
+        match self {
+            Self::Ascii => 0,
+            Self::Latin1 => 1,
+            Self::Utf8 { signature: false } => 2,
+            Self::Utf8 { signature: true } => 3,
+        }
+    }
+
+    /// Return the retained canonical name shared with registry entries.
+    pub(crate) fn name_owner(self) -> Rc<Str> {
+        NAMES.with(|names| names[self.index()].clone())
+    }
+
+    pub(crate) fn lookup(value: &str) -> Result<Self> {
         Self::by_key(&normalize(value), value)
     }
 
@@ -195,7 +203,7 @@ impl Codec {
         }
     }
 
-    pub(super) fn encode<'a>(self, text: &'a str, errors: Option<&str>) -> Result<Cow<'a, [u8]>> {
+    pub(crate) fn encode<'a>(self, text: &'a str, errors: Option<&str>) -> Result<Cow<'a, [u8]>> {
         let (codec, limit) = match self {
             Self::Utf8 { signature: false } => return Ok(Cow::Borrowed(text.as_bytes())),
             Self::Utf8 { signature: true } => {

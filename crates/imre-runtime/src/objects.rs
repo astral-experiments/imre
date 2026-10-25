@@ -14,6 +14,7 @@ mod boxed_values;
 mod builtins;
 mod bytes;
 mod codecs;
+pub(crate) use codecs::Codec;
 mod contexts;
 mod copying;
 mod csv;
