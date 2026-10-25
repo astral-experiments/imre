@@ -181,7 +181,8 @@ class TestCase:
 
     def _baseAssertEqual(self, first: int, second: int, msg: str | None = None) -> None:
         if first != second:
-            raise self.failureException(self._formatMessage(msg, f"{first!r} != {second!r}"))
+            left, right = _short_reprs(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, left + " != " + right))
 
     def _truncateMessage(self, message: str, diff: str) -> str:
         limit = self.maxDiff
