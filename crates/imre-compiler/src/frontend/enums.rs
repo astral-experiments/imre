@@ -148,6 +148,88 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        let operands = [&left, &right];
+        let tuple = |e: &Expr| {
+            matches!(e.ty, Type::Tuple(_))
+                || matches!(
+                    e.kind,
+                    ExprKind::Builtin(
+                        Builtin::ExceptionArgs
+                            | Builtin::ImportErrorField(0)
+                            | Builtin::ExceptionTupleView,
+                        _
+                    )
+                )
+        };
+        if operands.iter().any(|e| e.ty == Type::ObjectValue)
+            && operands
+                .iter()
+                .all(|e| matches!(e.ty, Type::ObjectValue | Type::Tuple(_)))
+            && operands.iter().any(|e| tuple(e))
+        {
+            // One proven tuple rules out unsupported scalar identity, even when
+            // the other operand is an alias stored through a general object view.
+            let view = |e: Expr| {
+                if e.ty == Type::ObjectValue {
+                    e
+                } else {
+                    Expr {
+                        ty: Type::ObjectValue,
+                        kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![e]),
+                    }
+                }
+            };
+            let same = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::ExceptionTupleIdentity,
+                    vec![view(left), view(right)],
+                ),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(same)),
+                }
+            } else {
+                same
+            });
+        }
+        let identity = match (left.ty, right.ty) {
+            (Type::ObjectValue, Type::ListInt | Type::List(_)) => {
+                Some(Builtin::ExceptionFieldIdentity { reversed: false })
+            }
+            (Type::ListInt | Type::List(_), Type::ObjectValue) => {
+                Some(Builtin::ExceptionFieldIdentity { reversed: true })
+            }
+            (Type::ObjectValue, Type::Class(class)) if self.boxed_dataclass(class) => {
+                Some(Builtin::ObjectRecordIdentity {
+                    class,
+                    reversed: false,
+                })
+            }
+            (Type::Class(class), Type::ObjectValue) if self.boxed_dataclass(class) => {
+                Some(Builtin::ObjectRecordIdentity {
+                    class,
+                    reversed: true,
+                })
+            }
+            _ => None,
+        };
+        if let Some(identity) = identity {
+            let same = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(identity, vec![left, right]),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(same)),
+                }
+            } else {
+                same
+            });
+        }
         // A comparison with a bool singleton only observes whether the other
         // operand is that same singleton; integer object identity is irrelevant.
         if let Some(union) = [left.ty, right.ty]
@@ -303,7 +385,9 @@ impl Checker<'_> {
                         | Type::Dict(_)
                         | Type::ChainMap(_)
                         | Type::Set(_)
+                        | Type::Deque(_)
                         | Type::Class(_)
+                        | Type::ModuleSpec(_)
                 )
             })
             || types == [Type::Str; 2]
@@ -313,9 +397,13 @@ impl Checker<'_> {
             || (types.iter().all(|ty| matches!(ty, Type::Tuple(_)))
                 && types
                     .iter()
-                    .any(|ty| self.types.struct_sequence_fields(*ty).is_some()))
+                    .any(|ty| self.types.library_tuple_fields(*ty).is_some()))
             || types == [Type::Logger; 2]
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::Popen(..) | Type::ActivePopen))
             || types == [Type::StringIO; 2]
+            || types == [Type::HandlerLock; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
             || types == [Type::PathInfo; 2]

@@ -82,6 +82,7 @@ struct OptionSpec {
     help: String,
     optional: bool,
     group: Option<usize>,
+    mutex: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -101,6 +102,8 @@ struct Parser {
     options: Vec<OptionSpec>,
     #[serde(default)]
     groups: Vec<ArgumentGroup>,
+    #[serde(default)]
+    mutex_required: Vec<bool>,
     subcommands: Option<Subcommands>,
 }
 
@@ -322,8 +325,48 @@ impl Parser {
         }
     }
 
+    fn select_group<'a>(&'a self, seen: &mut [Option<usize>], slot: usize) -> Result<(), Stop<'a>> {
+        if let Some(group) = self.options[slot].mutex {
+            if let Some(other) = seen[group]
+                && other != slot
+            {
+                return Err(Stop::Error(
+                    self,
+                    format!(
+                        "argument {}: not allowed with argument {}",
+                        self.options[slot].error_name(),
+                        self.options[other].error_name()
+                    ),
+                ));
+            }
+            seen[group] = Some(slot);
+        }
+        Ok(())
+    }
+
+    /// Resolve the whole short-option cluster before invoking its actions in order.
+    fn apply_flags<'a>(
+        &'a self,
+        flags: impl IntoIterator<Item = Option<(usize, &'a str)>>,
+        seen: &mut [Option<usize>],
+        values: &mut [Option<Bound<'a>>],
+    ) -> Result<(), Stop<'a>> {
+        for flag in flags {
+            let Some((slot, spelling)) = flag else {
+                return Err(Stop::Help(self));
+            };
+            self.select_group(seen, slot)?;
+            values[slot] =
+                Some(self.options[slot].flag_value(self, values[slot].take(), spelling)?);
+        }
+        Ok(())
+    }
+
     fn parse<'a>(&'a self, args: &[&'a str]) -> Result<Parsed<'a>, Stop<'a>> {
         let mut values = self.options.iter().map(|_| None).collect::<Vec<_>>();
+        let mut seen = Vec::new();
+        seen.try_reserve_exact(self.mutex_required.len())?;
+        seen.resize(self.mutex_required.len(), None);
         let mut extras = Vec::new();
         let mut index = 0;
         let mut selected = None;
@@ -403,6 +446,9 @@ impl Parser {
                         index += 1;
                     }
                     values[slot] = Some(self.options[slot].bind(self, Some(&taken))?);
+                    if !taken.is_empty() {
+                        self.select_group(&mut seen, slot)?;
+                    }
                 }
                 extras.try_reserve(end - index)?;
                 extras.extend(args[index..end].iter().copied().map(Cow::Borrowed));
@@ -413,7 +459,7 @@ impl Parser {
             }
             let arg = args[index];
             index += 1;
-            let mut clustered_help = false;
+            let mut cluster = Vec::new();
             let (slot, spelling, explicit) = match self.token(arg) {
                 Token::Help(None) => return Err(Stop::Help(self)),
                 Token::Help(Some(value)) => {
@@ -482,18 +528,12 @@ impl Parser {
                                 ),
                             ));
                         }
-                        if let Some((slot, option)) = option {
-                            values[slot] =
-                                Some(option.flag_value(self, values[slot].take(), matched)?);
-                        } else {
-                            clustered_help = true;
-                        }
+                        cluster.try_reserve(1)?;
+                        cluster.push(slot.map(|slot| (slot, matched)));
                         suffix = rest;
                     }
                     let Some(take) = take else {
-                        if clustered_help {
-                            return Err(Stop::Help(self));
-                        }
+                        self.apply_flags(cluster, &mut seen, &mut values)?;
                         continue;
                     };
                     take
@@ -524,7 +564,7 @@ impl Parser {
                 }
                 explicit.as_slice()
             } else if !option.takes_value() {
-                values[slot] = Some(option.flag_value(self, values[slot].take(), spelling)?);
+                self.apply_flags([Some((slot, spelling))], &mut seen, &mut values)?;
                 continue;
             } else {
                 let start = index;
@@ -549,10 +589,9 @@ impl Parser {
                 }
                 &args[start..index]
             };
-            if clustered_help {
-                return Err(Stop::Help(self));
-            }
+            self.apply_flags(cluster, &mut seen, &mut values)?;
             values[slot] = Some(option.bind(self, Some(taken))?);
+            self.select_group(&mut seen, slot)?;
         }
         let mut missing = Vec::new();
         let mut words = Vec::with_capacity(values.len());
@@ -590,6 +629,21 @@ impl Parser {
                     missing.join(", ")
                 ),
             ));
+        }
+        for (id, required) in self.mutex_required.iter().enumerate() {
+            if *required && seen[id].is_none() {
+                let names = self
+                    .options
+                    .iter()
+                    .filter(|o| o.mutex == Some(id))
+                    .map(OptionSpec::error_name)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                return Err(Stop::Error(
+                    self,
+                    format!("one of the arguments {names} is required"),
+                ));
+            }
         }
         if self
             .subcommands
@@ -629,12 +683,12 @@ impl OptionSpec {
 }
 
 impl Parser {
-    fn from_schema(schema: &str) -> Self {
+    fn from_schema(schema: &str) -> Result<Self, Error> {
         let mut parser: Self = serde_json::from_str(schema)
             .unwrap_or_else(|_| fail("SystemError", "invalid argparse schema"));
         parser.normalize_numbers();
-        parser.set_child_programs();
-        parser
+        parser.set_child_programs()?;
+        Ok(parser)
     }
 }
 
@@ -653,7 +707,10 @@ pub unsafe extern "C" fn imre_argparse_text(
 ) -> *const Str {
     // SAFETY: both strings stay rooted while the formatter reads them.
     let (schema, description) = unsafe { (&*schema, &*description) };
-    let parser = Parser::from_schema(schema);
+    let parser = match Parser::from_schema(schema) {
+        Ok(parser) => parser,
+        Err(error) => return error.returning(std::ptr::null_mut()),
+    };
     let text: Str = if usage {
         parser.usage(help::width())
     } else {
@@ -712,7 +769,10 @@ pub unsafe extern "C" fn imre_argparse_parse(
 ) -> *mut usize {
     // SAFETY: these immutable inputs remain rooted during parsing and construction.
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
-    let parser = Parser::from_schema(schema);
+    let parser = match Parser::from_schema(schema) {
+        Ok(parser) => parser,
+        Err(error) => return error.returning(std::ptr::null_mut()),
+    };
     let mut owners = Vec::new();
     let mut args = Vec::new();
     // SAFETY: argv is a rooted list[str]; take independent string owners before
