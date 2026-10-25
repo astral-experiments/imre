@@ -8,8 +8,9 @@
     "denominator": 121,
     "distinct_ids": 121,
     "counts": {
+      "host-driven-native-operation": 2,
       "native-body-host-fixture": 4,
-      "reference-only": 73,
+      "reference-only": 71,
       "reference-skip": 44
     },
     "records": [
@@ -286,14 +287,18 @@
         "opt_level": 0,
         "fixture_variant": "integer-fd readiness",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "one native selector registers fd numbers and unregisters them after native close and dup2",
+          "fixture": "CPython runs the unchanged method and its cleanups; both processes inherit the same two socketpairs. Duplicate unregister raises native KeyError; omitting dup2 gives native EBADF."
+        },
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_selectors.DefaultSelectorTestCase.test_unregister_after_socket_close",
@@ -2027,14 +2032,18 @@
         "opt_level": 0,
         "fixture_variant": "integer-fd readiness",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "one native selector registers fd numbers and unregisters them after native close and dup2",
+          "fixture": "CPython runs the unchanged method and its cleanups; both processes inherit the same two socketpairs. Duplicate unregister raises native KeyError; omitting dup2 gives native EBADF."
+        },
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_selectors.PollSelectorTestCase.test_unregister_after_socket_close",
@@ -2347,8 +2356,9 @@
     "denominator": 121,
     "distinct_ids": 121,
     "counts": {
+      "host-driven-native-operation": 2,
       "native-body-host-fixture": 4,
-      "reference-only": 73,
+      "reference-only": 71,
       "reference-skip": 44
     },
     "records": [
@@ -2625,14 +2635,18 @@
         "opt_level": 3,
         "fixture_variant": "integer-fd readiness",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "one native selector registers fd numbers and unregisters them after native close and dup2",
+          "fixture": "CPython runs the unchanged method and its cleanups; both processes inherit the same two socketpairs. Duplicate unregister raises native KeyError; omitting dup2 gives native EBADF."
+        },
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_selectors.DefaultSelectorTestCase.test_unregister_after_socket_close",
@@ -4366,14 +4380,18 @@
         "opt_level": 3,
         "fixture_variant": "integer-fd readiness",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "one native selector registers fd numbers and unregisters them after native close and dup2",
+          "fixture": "CPython runs the unchanged method and its cleanups; both processes inherit the same two socketpairs. Duplicate unregister raises native KeyError; omitting dup2 gives native EBADF."
+        },
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_selectors.PollSelectorTestCase.test_unregister_after_socket_close",

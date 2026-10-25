@@ -166,6 +166,13 @@ def main():
                 ):
                     observations[name] = ({"body": "cpython", "assertions": "cpython", "operation": "imre", "fixture": "mixed"},
                                           {"operation": operation, "fixture": fixture})
+                reuse = build(HERE / "selector_reuse.py", level)
+                print(require([sys.executable, "-B", HERE / "host_selector_reuse.py", reuse]).strip())
+                for owner in ("PollSelectorTestCase", "DefaultSelectorTestCase"):
+                    observations[f"test.test_selectors.{owner}.test_unregister_after_fd_close_and_reuse"] = (
+                        {"body": "cpython", "assertions": "cpython", "operation": "imre", "fixture": "mixed"},
+                        {"operation": "one native selector registers fd numbers and unregisters them after native close and dup2",
+                         "fixture": "CPython runs the unchanged method and its cleanups; both processes inherit the same two socketpairs. Duplicate unregister raises native KeyError; omitting dup2 gives native EBADF."})
             for suite, owner, method, fixture, before, after, failure in CASES:
                 case, body, source = method_source(suite, owner, method, fixture)
                 file = work / "method.py"
