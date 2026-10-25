@@ -43,6 +43,31 @@ pub(super) enum Node {
     Object(ObjectFields),
 }
 
+fn copy_entries<T, U>(
+    items: &[T],
+    mut copy: impl FnMut(&T) -> Result<U, Error>,
+) -> Result<Vec<U>, Error> {
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(items.len())
+        .map_err(|_| Error::allocation())?;
+    for item in items {
+        result.push(copy(item)?);
+    }
+    Ok(result)
+}
+
+fn copy_text(text: &Str) -> Result<Str, Error> {
+    Str::try_new(text.as_str()).map_err(|_| Error::allocation())
+}
+
+fn append_copy(nodes: &mut Vec<Node>, node: Node) -> Result<usize, Error> {
+    nodes.try_reserve(1).map_err(|_| Error::allocation())?;
+    let index = nodes.len();
+    nodes.push(node);
+    Ok(index)
+}
+
 impl Node {
     fn truth(&self) -> bool {
         match self {
@@ -196,14 +221,16 @@ impl View {
 
     /// Snapshot the current elements when an array projected to a native list
     /// is used as an immutable value again. Its aliases may have mutated it.
-    fn snapshot_root(&self) -> Option<Self> {
-        self.nodes.root_items()?;
+    fn snapshot_root(&self) -> Result<Option<Self>, Error> {
+        if self.nodes.root_items().is_none() {
+            return Ok(None);
+        }
         let mut nodes = Vec::new();
-        let index = self.copy_to(self.index, &mut nodes);
-        Some(Self {
+        let index = self.copy_to(self.index, &mut nodes)?;
+        Ok(Some(Self {
             nodes: Nodes::copied(nodes, self.nodes.deep()),
             index,
-        })
+        }))
     }
 
     fn get_receiver(&self) -> Result<&Node, Error> {
@@ -224,7 +251,7 @@ impl View {
 
     /// Preserve nested array elements and object lookups when concatenating
     /// values borrowed from two independently owned documents.
-    fn copy_to(&self, index: usize, destination: &mut Vec<Node>) -> usize {
+    fn copy_to(&self, index: usize, destination: &mut Vec<Node>) -> Result<usize, Error> {
         if self.nodes.deep() && !(index == self.index && self.nodes.root_items().is_some()) {
             return deep_values::copy(self, index, destination);
         }
@@ -233,45 +260,33 @@ impl View {
                 // SAFETY: the list roots all immutable JSON views while their children are copied.
                 Node::Array(unsafe {
                     items.0.with(|storage| {
-                        storage
-                            .sequence()
-                            .values
-                            .iter()
-                            .map(|&word| {
-                                with_view(word as *const Object, |child| {
-                                    child.copy_to(child.index, destination)
-                                })
+                        copy_entries(&storage.sequence().values, |&word| {
+                            with_view(word as *const Object, |child| {
+                                child.copy_to(child.index, destination)
                             })
-                            .collect()
+                        })
                     })
-                })
+                }?)
             }
-            (Node::Array(items), _) => Node::Array(
-                items
-                    .iter()
-                    .map(|&i| self.copy_to(i, destination))
-                    .collect(),
-            ),
-            (Node::Object(fields), _) => Node::Object(
-                fields.with_entries(
-                    fields
-                        .iter()
-                        .map(|(key, i)| (key.clone(), self.copy_to(*i, destination)))
-                        .collect(),
-                ),
-            ),
+            (Node::Array(items), _) => {
+                Node::Array(copy_entries(items, |&i| self.copy_to(i, destination))?)
+            }
+            (Node::Object(fields), _) => {
+                Node::Object(fields.with_entries(copy_entries(fields, |(key, index)| {
+                    Ok((copy_text(key)?, self.copy_to(*index, destination)?))
+                })?))
+            }
+            (Node::Datetime(text), _) => Node::Datetime(copy_text(text)?),
             (scalar, _) => scalar.clone(),
         };
-        let index = destination.len();
-        destination.push(node);
-        index
+        append_copy(destination, node)
     }
 
     fn add(&self, other: &Self) -> Result<Self, Error> {
-        if let Some(root) = self.snapshot_root() {
+        if let Some(root) = self.snapshot_root()? {
             return root.add(other);
         }
-        if let Some(root) = other.snapshot_root() {
+        if let Some(root) = other.snapshot_root()? {
             return self.add(&root);
         }
         if let Node::Deferred(array) = &self.nodes[self.index] {
@@ -303,11 +318,18 @@ impl View {
             Node::String(StrOwner::new(s))
         } else if let (Node::Array(a), Node::Array(b)) = (left, right) {
             let mut nodes = Vec::new();
-            let mut items = Vec::with_capacity(a.len() + b.len());
-            items.extend(a.iter().map(|&i| self.copy_to(i, &mut nodes)));
-            items.extend(b.iter().map(|&i| other.copy_to(i, &mut nodes)));
-            let index = nodes.len();
-            nodes.push(Node::Array(items));
+            let len = a.len().checked_add(b.len()).ok_or_else(Error::allocation)?;
+            let mut items = Vec::new();
+            items
+                .try_reserve_exact(len)
+                .map_err(|_| Error::allocation())?;
+            for &index in a {
+                items.push(self.copy_to(index, &mut nodes)?);
+            }
+            for &index in b {
+                items.push(other.copy_to(index, &mut nodes)?);
+            }
+            let index = append_copy(&mut nodes, Node::Array(items))?;
             return Ok(Self {
                 nodes: Nodes::copied(nodes, self.nodes.deep() || other.nodes.deep()),
                 index,
