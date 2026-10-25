@@ -66,6 +66,18 @@ impl Builtin {
                 Contract::new(true, Unknown)
             }
             Self::Linecache(..) => Contract::new(true, Unknown),
+            Self::CodecStream(op) => {
+                use crate::ir::CodecStreamOperation as Stream;
+                match op {
+                    Stream::Encoding | Stream::Write => Contract::new(true, PreservesLists),
+                    Stream::SetEncoding => Contract::new(false, Unknown),
+                    Stream::Class
+                    | Stream::New
+                    | Stream::Stream
+                    | Stream::Errors
+                    | Stream::Reset => Contract::new(false, PreservesLists),
+                }
+            }
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -861,6 +873,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
                 | "imre_codec_lookup"
+                | "imre_codec_writer_encoding"
+                | "imre_codec_writer_write"
                 | "imre_codec_encode"
                 | "imre_codec_decode"
                 | "imre_hash_new"

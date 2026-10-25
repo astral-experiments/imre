@@ -257,6 +257,14 @@ impl Checker<'_> {
                     }));
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::CodecWriterClass && attribute.attr.as_str() == "encoding" {
+                    let value = self.coerce(value, Type::Str, target)?;
+                    return Ok(Statement::Expr(codecs::writer_op(
+                        ir::CodecStreamOperation::SetEncoding,
+                        Type::None,
+                        vec![value, receiver],
+                    )));
+                }
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.

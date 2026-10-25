@@ -5914,6 +5914,9 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::CsvLineNumber, vec![receiver]),
                     });
                 }
+                if let Some(value) = codecs::writer_attribute(&receiver, attribute.attr.as_str()) {
+                    return Ok(value);
+                }
                 if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "name" {
                     return Ok(Expr {
                         ty: Type::Str,
@@ -6553,6 +6556,9 @@ impl<'a> Checker<'a> {
                 return self.typed_expr(value);
             }
             Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
+            Some(Binding::Intrinsic(Intrinsic::CodecGetWriter)) => {
+                return self.codec_getwriter(call);
+            }
             Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
                 return self.sha256_constructor(call, op == Intrinsic::HashNew);
             }
@@ -6999,6 +7005,9 @@ impl<'a> Checker<'a> {
             }
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::CodecWriter {
+                return self.codec_writer_method(receiver, attribute, call);
             }
             if receiver.ty == Type::CodecInfo {
                 return self.codec_method(receiver, attribute, call);

@@ -386,6 +386,9 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if callable.ty == Type::CodecWriterClass {
+            return self.codec_writer_new(call, callable);
+        }
         if let Type::StrDescriptor(method) = callable.ty {
             return self.invoke_descriptor(call, callable, method);
         }

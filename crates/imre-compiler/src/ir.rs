@@ -94,6 +94,8 @@ pub(crate) enum Type {
     /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
     SimpleNamespace(usize),
     CodecInfo,
+    CodecWriterClass,
+    CodecWriter,
     Sha256,
     JsonDecoder,
     /// An open or closed ZIP archive retains its ordered central directory.
@@ -239,6 +241,8 @@ impl std::fmt::Display for Type {
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::CodecInfo => "codecs.CodecInfo",
+            Self::CodecWriterClass => "type[codecs.StreamWriter]",
+            Self::CodecWriter => "codecs.StreamWriter",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -807,6 +811,7 @@ pub(crate) enum Builtin {
     DecodeAscii,
     UrlsafeB64encode,
     CodecLookup,
+    CodecStream(CodecStreamOperation),
     CodecName,
     CodecEncode,
     CodecDecode,
@@ -1066,6 +1071,19 @@ impl Builtin {
 }
 
 pub(crate) const TUPLE_PROBE_ARITY: std::ops::RangeInclusive<usize> = 1..=16;
+
+/// A codec's writer class, its instances, and their stream state.
+#[derive(Clone, Copy)]
+pub(crate) enum CodecStreamOperation {
+    Class,
+    New,
+    Encoding,
+    SetEncoding,
+    Stream,
+    Errors,
+    Write,
+    Reset,
+}
 
 /// Operations specific to Unicode text held in native memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -173,6 +173,8 @@ impl Types {
             | Type::PlainObject
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -572,6 +574,8 @@ impl Types {
             | Type::PlainObject
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile

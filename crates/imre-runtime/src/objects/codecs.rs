@@ -1,6 +1,8 @@
 //! Native text codecs shared by the registry and text files.
 
 mod cp1251;
+mod writer;
+pub(super) use writer::{Writer, WriterClass};
 
 use super::bytes::decode_error;
 use super::exceptions::Result;
@@ -116,7 +118,7 @@ pub unsafe extern "C" fn imre_codec_decode(
     )
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub(super) enum Codec {
     Utf8 { signature: bool },
     Latin1,

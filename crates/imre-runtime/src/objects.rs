@@ -104,6 +104,8 @@ enum Storage {
     ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
     CodecInfo(codecs::Codec),
+    CodecWriterClass(codecs::WriterClass),
+    CodecWriter(codecs::Writer),
     Exception(exceptions::Exception),
     ValueView(OwnedWord),
     File(Box<files::FileState>),

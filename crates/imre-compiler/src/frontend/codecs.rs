@@ -1,7 +1,94 @@
 //! Native codec registry lookup and stateless byte/text conversion.
 use super::*;
+use ir::CodecStreamOperation as Stream;
+
+pub(super) fn writer_op(op: Stream, ty: Type, values: Vec<Expr>) -> Expr {
+    Expr {
+        ty,
+        kind: ExprKind::Builtin(Builtin::CodecStream(op), values),
+    }
+}
+
+pub(super) fn writer_attribute(receiver: &Expr, name: &str) -> Option<Expr> {
+    let (op, ty) = match (receiver.ty, name) {
+        (Type::CodecInfo, "streamwriter") => (Stream::Class, Type::CodecWriterClass),
+        (Type::CodecWriterClass, "encoding") => (Stream::Encoding, Type::Str),
+        (Type::CodecWriter, "stream") => (Stream::Stream, Type::BinaryIO),
+        (Type::CodecWriter, "errors") => (Stream::Errors, Type::Str),
+        _ => return None,
+    };
+    Some(writer_op(op, ty, vec![receiver.clone()]))
+}
+
+fn parameter(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
+    Parameter {
+        name: name.into(),
+        ty,
+        default,
+        kind: ParameterKind::PositionalOrKeyword,
+        sign_only: false,
+    }
+}
 
 impl Checker<'_> {
+    pub(super) fn codec_getwriter(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let args = self.arguments(call, &[parameter("encoding", Type::Str, None)], None)?;
+        let entry = self.ordered_builtin(Builtin::CodecLookup, Type::CodecInfo, args);
+        Ok(writer_op(
+            Stream::Class,
+            Type::CodecWriterClass,
+            vec![entry],
+        ))
+    }
+
+    pub(super) fn codec_writer_new(
+        &mut self,
+        call: &ast::ExprCall,
+        class: Expr,
+    ) -> Result<Expr, String> {
+        let parameters = [
+            parameter("stream", Type::BinaryIO, None),
+            parameter("errors", Type::Str, Some(unpacking::string("strict"))),
+        ];
+        let args = self.arguments(call, &parameters, Some(class))?;
+        Ok(self.ordered_builtin(Builtin::CodecStream(Stream::New), Type::CodecWriter, args))
+    }
+
+    pub(super) fn codec_writer_method(
+        &mut self,
+        receiver: Expr,
+        attr: &ast::ExprAttribute,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let (op, parameters, owner) = match attr.attr.as_str() {
+            "write" => (
+                Builtin::CodecStream(Stream::Write),
+                vec![parameter("object", Type::Str, None)],
+                receiver,
+            ),
+            "reset" => (Builtin::CodecStream(Stream::Reset), vec![], receiver),
+            "flush" => (
+                Builtin::TextFlush,
+                vec![],
+                writer_op(Stream::Stream, Type::BinaryIO, vec![receiver]),
+            ),
+            "close" => (
+                Builtin::TextClose,
+                vec![],
+                writer_op(Stream::Stream, Type::BinaryIO, vec![receiver]),
+            ),
+            _ => {
+                return Err(error(
+                    self.source,
+                    attr,
+                    "unsupported codec stream writer method",
+                ));
+            }
+        };
+        let args = self.arguments(call, &parameters, Some(owner))?;
+        Ok(self.ordered_builtin(op, Type::None, args))
+    }
+
     pub(super) fn codec_lookup(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         if !call.arguments.keywords.is_empty() {
             return self.sys_type_error(

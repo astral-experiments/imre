@@ -100,6 +100,8 @@ impl Type {
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
+            | Self::CodecWriterClass
+            | Self::CodecWriter
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -170,6 +172,8 @@ impl Type {
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
+            | Self::CodecWriterClass
+            | Self::CodecWriter
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -775,6 +779,8 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -3398,6 +3404,8 @@ impl Emitter<'_, '_> {
                 | Type::PlainObject
                 | Type::PathInfo
                 | Type::CodecInfo
+                | Type::CodecWriterClass
+                | Type::CodecWriter
                 | Type::Sha256
                 | Type::JsonDecoder
                 | Type::ZipFile
@@ -4777,6 +4785,32 @@ impl Emitter<'_, '_> {
             }
             Builtin::CodecLookup => {
                 self.call("imre_codec_lookup", Type::CodecInfo, &[&args[0].value])
+            }
+            Builtin::CodecStream(op) => {
+                use crate::ir::CodecStreamOperation as Stream;
+                let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
+                match op {
+                    Stream::Class => self.call("imre_codec_writer_class", returns, &values),
+                    Stream::New => self.call("imre_codec_writer_new", returns, &values),
+                    Stream::Encoding => self.call("imre_codec_writer_encoding", returns, &values),
+                    Stream::Stream => self.call("imre_codec_writer_stream", returns, &values),
+                    Stream::Errors => self.call("imre_codec_writer_errors", returns, &values),
+                    Stream::SetEncoding => {
+                        self.void_call("imre_codec_writer_set_encoding", &values);
+                        none()
+                    }
+                    Stream::Reset => {
+                        self.void_call("imre_codec_writer_reset", &values);
+                        none()
+                    }
+                    Stream::Write => {
+                        self.checked_instruction(format!(
+                            "call i32 @imre_codec_writer_write(ptr {}, ptr {})",
+                            values[0].operand, values[1].operand
+                        ));
+                        none()
+                    }
+                }
             }
             Builtin::CodecName => self.call("imre_codec_name", Type::Str, &[&args[0].value]),
             Builtin::CodecEncode | Builtin::CodecDecode => self.call(
@@ -6173,6 +6207,8 @@ impl Emitter<'_, '_> {
                     | Type::SimpleNamespace(_)
                     | Type::PathInfo
                     | Type::CodecInfo
+                    | Type::CodecWriterClass
+                    | Type::CodecWriter
                     | Type::Sha256
                     | Type::JsonDecoder
                     | Type::ZipFile
@@ -6431,6 +6467,8 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -6515,6 +6553,8 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -7112,6 +7152,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::SimpleNamespace(_)
         | Type::PathInfo
         | Type::CodecInfo
+        | Type::CodecWriterClass
+        | Type::CodecWriter
         | Type::Sha256
         | Type::JsonDecoder
         | Type::ZipFile
@@ -7479,6 +7521,14 @@ declare ptr @imre_inspect_sentinel()
 declare ptr @imre_inspect_str_descriptor(i32)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_codec_lookup(ptr)
+declare ptr @imre_codec_writer_class(ptr)
+declare ptr @imre_codec_writer_new(ptr, ptr, ptr)
+declare ptr @imre_codec_writer_encoding(ptr)
+declare void @imre_codec_writer_set_encoding(ptr, ptr)
+declare ptr @imre_codec_writer_stream(ptr)
+declare ptr @imre_codec_writer_errors(ptr)
+declare i32 @imre_codec_writer_write(ptr, ptr)
+declare void @imre_codec_writer_reset(ptr)
 declare ptr @imre_codec_name(ptr)
 declare ptr @imre_codec_encode(ptr, ptr, ptr)
 declare ptr @imre_codec_decode(ptr, ptr, ptr)
