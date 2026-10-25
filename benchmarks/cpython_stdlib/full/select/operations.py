@@ -9,6 +9,13 @@ def track(p: select.poll, fd: int) -> None:
     p.register(fd, select.POLLIN)
 
 
+def observed_mask(events: list[tuple[int, int]], fd: int) -> int:
+    if len(events) == 0:
+        return -1
+    assert len(events) == 1 and events[0][0] == fd
+    return events[0][1]
+
+
 def state() -> None:
     r, w = os.pipe()
     r2, w2 = os.pipe()
@@ -41,6 +48,10 @@ def state() -> None:
     assert len(ww) == 0 and len(xx) == 0
     os.close(r)
     p.modify(r, 0)
+    # An empty interest mask may produce no event on Darwin. Compare the
+    # kernel's complete response with CPython on the same platform.
+    print(observed_mask(p.poll(0), r))
+    p.register(r)
     invalid = p.poll(0)
     assert len(invalid) == 1 and invalid[0][0] == r and invalid[0][1] == select.POLLNVAL
     try:
@@ -71,7 +82,9 @@ def state() -> None:
     p.unregister(r2)
     os.close(r2)
     p.register(w2, 0)
-    assert p.poll(0)[0][1] & (select.POLLERR | select.POLLHUP)
+    print(observed_mask(p.poll(0), w2))
+    p.modify(w2, select.POLLOUT)
+    print(observed_mask(p.poll(0), w2))
     p.unregister(w2)
     os.close(w2)
     print("state passed")
