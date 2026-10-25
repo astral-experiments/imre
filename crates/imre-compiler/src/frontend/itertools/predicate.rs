@@ -39,6 +39,16 @@ impl Checker<'_> {
                     "predicate cursor argument unpacking needs a known call shape",
                 ));
             }
+            self.graph.checked_overload(self.module, call.range());
+            if args.len() < 2 {
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+            }
+            for arg in args.iter().skip(2) {
+                self.graph.checked_excess_argument(self.module, arg.range());
+            }
+            self.graph
+                .checked_keywords(self.module, keywords.iter().map(Ranged::range));
             let mut values = Vec::new();
             for node in args.iter().chain(keywords.iter().map(|kw| &kw.value)) {
                 values.push(if matches!(node, ast::Expr::Lambda(lambda) if lambda.parameters.as_deref().is_none_or(|params| params.iter_non_variadic_params().all(|p| p.default.is_none()))) || builtin_bool(self, node) {
@@ -131,6 +141,11 @@ impl Checker<'_> {
             };
             PredicateTest::Invalid(format!("'{name}' object is not callable"))
         };
+        if matches!(test, PredicateTest::Invalid(_))
+            || matches!(source.ty, Type::None | Type::Bool | Type::Int | Type::Float)
+        {
+            self.graph.checked_overload(self.module, call.range());
+        }
         Ok(Expr {
             ty: self.types.cursor(item),
             kind: ExprKind::Builtin(Builtin::Predicate(mode, test), vec![function, source]),
