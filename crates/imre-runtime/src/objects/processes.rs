@@ -24,6 +24,7 @@ use super::{Bytes, Int, Object, Storage, Str, fail, object};
 mod argv;
 mod asynchronous;
 mod launch_error;
+mod pass_fds;
 mod popen;
 pub(super) use asynchronous::AsyncProcess;
 pub(super) use popen::Popen;
@@ -460,11 +461,11 @@ impl PathSearch {
     }
 }
 
-#[derive(Clone, Copy)]
 struct ChildAttributes {
     new_session: bool,
     group: libc::pid_t,
     mask: Option<libc::mode_t>,
+    keep: Vec<RawFd>,
 }
 
 impl Default for ChildAttributes {
@@ -473,6 +474,7 @@ impl Default for ChildAttributes {
             new_session: false,
             group: -1,
             mask: None,
+            keep: Vec::new(),
         }
     }
 }
@@ -481,7 +483,7 @@ impl ChildAttributes {
     /// A negative group other than -1 skips setpgid, but still selects CPython's
     /// fork/exec path and preserves the caller's executable object on failure.
     fn requires_fork(&self) -> bool {
-        self.new_session || self.group != -1 || self.mask.is_some()
+        self.new_session || self.group != -1 || self.mask.is_some() || !self.keep.is_empty()
     }
 }
 
@@ -541,7 +543,7 @@ impl Launch {
     unsafe fn exec_child(
         &mut self,
         close_fds: bool,
-        attributes: ChildAttributes,
+        attributes: &ChildAttributes,
     ) -> io::Result<()> {
         if let Some(mask) = attributes.mask {
             // SAFETY: this is the forked child; umask never fails.
@@ -568,6 +570,8 @@ impl Launch {
         if close_fds {
             // SAFETY: the forked child owns its descriptor table.
             unsafe { self.descriptors.apply()? };
+            // SAFETY: this runs only after fork. No allocator or callback is used.
+            unsafe { pass_fds::inherit(&attributes.keep)? };
         }
         let mut saved_error = None;
         let mut last_error = libc::ENOENT;
@@ -622,6 +626,14 @@ impl Launch {
         // STDOUT in the stdin slot reaches child descriptor setup as fd -2.
         if (streams >> 12) & 15 == 5 {
             return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
+        // Check before opening any stdio or launch-error pipes: an invalid caller
+        // fd must not accidentally become valid when Command allocates a pipe.
+        for &fd in &attributes.keep {
+            // SAFETY: F_GETFD validates the supplied fd without changing it.
+            if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
         }
         // Check the original descriptor table before duplicating anything. A
         // duplicate for stdout must not make a closed stderr descriptor valid.
@@ -684,7 +696,7 @@ impl Launch {
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                self.exec_child(streams & (1 << 17) == 0, attributes)
+                self.exec_child(streams & (1 << 17) == 0, &attributes)
             })
         };
         command.spawn()
