@@ -9,6 +9,7 @@ use std::cell::RefCell;
 mod active;
 mod communicate;
 mod control;
+mod selector;
 
 pub(super) use active::cleanup;
 pub(in crate::objects) use active::retain_live_owner;

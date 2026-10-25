@@ -81,6 +81,7 @@ mod powers;
 mod processes;
 mod projected_equality;
 mod properties;
+mod random;
 mod readiness;
 mod record_inputs;
 mod records;
@@ -1917,6 +1918,11 @@ fn annotation_with_aliases(
                 }
             }
             ast::Expr::Name(name) if name.id == "tuple" => {
+                if let ast::Expr::Tuple(fields) = &*value.slice
+                    && let [element, ast::Expr::EllipsisLiteral(_)] = fields.elts.as_slice()
+                {
+                    return Ok(types.var_tuple(nested(element)?));
+                }
                 let fields = if let ast::Expr::Tuple(fields) = &*value.slice {
                     fields
                         .elts
@@ -2349,6 +2355,17 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
             });
         }
+        if let Some(element) = self.types.var_tuple_element(expected)
+            && self
+                .types
+                .fields(value.ty)
+                .is_some_and(|fields| fields.iter().all(|&ty| ty == element))
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            });
+        }
         if expected == Type::ObjectValue && self.object_value_supported(value.ty) {
             return Ok(Expr {
                 ty: expected,
@@ -2728,19 +2745,9 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Call(call)
                 if self.types.mapping(concrete).is_some()
-                    && matches!(&*call.func, ast::Expr::Name(name) if name.id == "dict")
-                    && call.arguments.args.is_empty()
-                    && call.arguments.keywords.is_empty() =>
+                    && self.unshadowed_builtin(&call.func, "dict") =>
             {
-                let (key, value) = self.types.mapping(concrete).unwrap();
-                Expr {
-                    ty: self.types.dict(key, value),
-                    kind: ExprKind::Dict {
-                        key,
-                        value,
-                        entries: Vec::new(),
-                    },
-                }
+                self.dict_constructor(call, self.types.mapping(concrete))?
             }
             ast::Expr::Call(call)
                 if self.types.set_element(concrete).is_some()
@@ -3495,6 +3502,7 @@ impl<'a> Checker<'a> {
         let element = self
             .types
             .element(iterable.ty)
+            .or_else(|| self.types.var_tuple_element(iterable.ty))
             .or(set_element)
             .or_else(|| self.types.deque_element(iterable.ty))
             .or(string.then_some(Type::Str))
@@ -3550,7 +3558,9 @@ impl<'a> Checker<'a> {
                 Expr {
                     ty: element,
                     kind: ExprKind::Builtin(
-                        if matches!(self.locals[captured], Type::List(_)) {
+                        if matches!(self.locals[captured], Type::VarTuple(_)) {
+                            Builtin::TupleIndex
+                        } else if matches!(self.locals[captured], Type::List(_)) {
                             Builtin::SequenceGetInBounds
                         } else {
                             Builtin::ListGet
@@ -5210,6 +5220,22 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
+        if let Some(Binding::Intrinsic(
+            intrinsic @ (Intrinsic::PopenSelector | Intrinsic::SelectorClass(_)),
+        )) = self.resolve(expression)
+        {
+            let mode = match intrinsic {
+                Intrinsic::SelectorClass(select) => Some(select),
+                _ => None,
+            };
+            return Ok(Expr {
+                ty: Type::ProcessSelectorClass,
+                kind: ExprKind::Builtin(
+                    Builtin::Process(ir::ProcessOperation::SelectorClass(mode)),
+                    Vec::new(),
+                ),
+            });
+        }
         if let Some(Binding::Intrinsic(Intrinsic::Declaration(symbol))) = self.resolve(expression) {
             return Err(error(
                 self.source,
@@ -5393,6 +5419,7 @@ impl<'a> Checker<'a> {
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
                 Intrinsic::SysVersionInfo => return Ok(self.sys_version_info(false)),
+                Intrinsic::SysThreadInfo => return Ok(self.sys_thread_info()),
                 Intrinsic::SysHexversion => {
                     return Ok(crate::version::integer(crate::version::hex(
                         crate::version::components(false),
@@ -5971,7 +5998,27 @@ impl<'a> Checker<'a> {
                         && matches!((ty, right), (Type::Tuple(_), Type::Tuple(_)))
                         && self.types.fields(ty) == self.types.fields(right);
                     let paths = ty.is_path() && right.is_path();
-                    if !numeric && !records && !paths && !tuples {
+                    let variable_tuple = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                        && matches!(
+                            (ty, right),
+                            (Type::VarTuple(_), Type::Tuple(_) | Type::VarTuple(_))
+                                | (Type::Tuple(_), Type::VarTuple(_))
+                        )
+                        && self
+                            .types
+                            .var_tuple_element(ty)
+                            .or_else(|| self.types.var_tuple_element(right))
+                            .is_some_and(|elem| {
+                                self.types.hashable_key(elem)
+                                    && [ty, right].into_iter().all(|t| {
+                                        self.types.var_tuple_element(t) == Some(elem)
+                                            || self
+                                                .types
+                                                .fields(t)
+                                                .is_some_and(|fs| fs.iter().all(|&f| f == elem))
+                                    })
+                            });
+                    if !numeric && !records && !paths && !tuples && !variable_tuple {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
@@ -6015,6 +6062,7 @@ impl<'a> Checker<'a> {
                         Type::List(_) => comparable_list,
                         Type::Dict(_) => self.types.is_counter(ty),
                         Type::Tuple(_) => self.types.hashable_key(ty),
+                        Type::VarTuple(_) => variable_tuple,
                         Type::ListInt
                         | Type::ChainMap(_)
                         | Type::StringKeys
@@ -6202,6 +6250,35 @@ impl<'a> Checker<'a> {
                         }
                     } else {
                         expression
+                    });
+                }
+                if matches!(list.ty, Type::VarTuple(_)) {
+                    let (literal, negative) = match &*subscript.slice {
+                        ast::Expr::UnaryOp(u) if u.op == ast::UnaryOp::USub => (&*u.operand, true),
+                        node => (node, false),
+                    };
+                    let position = match literal {
+                        ast::Expr::NumberLiteral(n) if let ast::Number::Int(v) = &n.value => v
+                            .to_string()
+                            .parse::<i64>()
+                            .ok()
+                            .and_then(|i| if negative { i.checked_neg() } else { Some(i) }),
+                        _ => None,
+                    };
+                    let element = self
+                        .types
+                        .display_tuple_index(list.ty, position)
+                        .ok_or_else(|| {
+                            error(
+                                self.source,
+                                &*subscript.slice,
+                                "this tuple index can select different field types",
+                            )
+                        })?;
+                    let index = self.expr_expected(&subscript.slice, Type::Int)?;
+                    return Ok(Expr {
+                        ty: element,
+                        kind: ExprKind::Builtin(Builtin::TupleIndex, vec![list, index]),
                     });
                 }
                 if let Some(fields) = self.types.fields(list.ty) {
@@ -6816,12 +6893,6 @@ impl<'a> Checker<'a> {
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
-        if matches!(&*call.func,ast::Expr::Name(n) if n.id=="dict" && !self.names.contains_key("dict"))
-            && self.resolve(&call.func).is_none()
-            && let Some(mapping) = self.dict_from_zip(call)?
-        {
-            return Ok(mapping);
-        }
         if call.arguments.keywords.iter().any(|kw| kw.arg.is_none()) {
             let mut normalized = call.clone();
             normalized.arguments.keywords.retain(|kw| {
@@ -6845,6 +6916,9 @@ impl<'a> Checker<'a> {
             if normalized.arguments.keywords.len() != call.arguments.keywords.len() {
                 return self.call_on(&normalized, receiver);
             }
+        }
+        if self.unshadowed_builtin(&call.func, "dict") {
+            return self.dict_constructor(call, None);
         }
         if let Some(Binding::Intrinsic(
             kind @ (Intrinsic::TomliLoads
@@ -7358,6 +7432,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::SubprocessList2Cmdline)) => {
                 return self.subprocess_list2cmdline(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Random(op))) => return self.random_call(op, call),
+            Some(Binding::Intrinsic(Intrinsic::RandomChoice)) => return self.random_choice(call),
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
@@ -8585,6 +8661,7 @@ impl<'a> Checker<'a> {
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)
                         | Type::Tuple(_)
+                        | Type::VarTuple(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
@@ -8714,6 +8791,7 @@ impl<'a> Checker<'a> {
                             | Type::Deque(_)
                             | Type::StringKeys
                             | Type::Tuple(_)
+                            | Type::VarTuple(_)
                     ) =>
             {
                 (Builtin::Len, Type::Int)
