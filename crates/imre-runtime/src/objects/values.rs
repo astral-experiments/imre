@@ -96,6 +96,7 @@ pub unsafe extern "C" fn imre_record_equal(left: *const usize, right: *const usi
 }
 
 pub(super) enum Comparison {
+    Error(Error),
     Done(bool),
     Child {
         left: usize,
@@ -256,6 +257,7 @@ pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Res
             }
         };
         match step {
+            Comparison::Error(error) => return Err(error),
             Comparison::Done(false) => return Ok(false),
             Comparison::Done(true) => match pending.pop() {
                 Some(next) => current = next,
@@ -385,14 +387,13 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                     Comparison::Done(super::calendar::equal(left, right))
                 }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
-                (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
-                (Storage::Document(left), Storage::Document(right)) => {
-                    let result = left.view().and_then(|left| Ok(left.equal(&right.view()?)));
-                    Comparison::Done(result.unwrap_or_else(|error| {
-                        error.raise();
-                        false
-                    }))
-                }
+                (Storage::Json(left), Storage::Json(right)) => left
+                    .equal(right)
+                    .map_or_else(Comparison::Error, Comparison::Done),
+                (Storage::Document(left), Storage::Document(right)) => left
+                    .view()
+                    .and_then(|left| left.equal(&right.view()?))
+                    .map_or_else(Comparison::Error, Comparison::Done),
                 (
                     left @ (Storage::Path { .. } | Storage::PurePath(_)),
                     right @ (Storage::Path { .. } | Storage::PurePath(_)),

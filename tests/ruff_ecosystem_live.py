@@ -1,6 +1,8 @@
-"""Compare Ruff's original ecosystem CLI on three local Git checkouts."""
+"""Run both commands of one compiled Ruff ecosystem CLI against CPython."""
 
 import argparse
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -32,6 +34,21 @@ if [ "$1" = rule ]; then
     [ "$*" = "rule --all --output-format json" ]
     printf '%s\\n' '[{"name":"unused-import","code":"F401"}]'
     exit
+fi
+if [ "$1" = format ]; then
+    [ "$(cat revision.txt)" = tip ]
+    [ "$(cat sample.py)" = original ] || { echo "formatter did not start from the original revision" >&2; exit 90; }
+    ! grep -q required-version ruff.toml || exit 80
+    project=${PWD##*:}
+    version=${0##*/}
+    if [ "$ECOSYSTEM_CASE:$project:$version" = format-error:failed:comparison ]; then
+        echo "synthetic formatter failed" >&2
+        exit 17
+    fi
+    if [ "$ECOSYSTEM_CASE" != format-unchanged ] && [ "$project" = changed ]; then
+        echo "$version" > sample.py
+    fi
+    exit 0
 fi
 [ "$1" = check ]
 case " $* " in
@@ -74,6 +91,7 @@ def seed(directory):
     git(source, "config", "user.email", "tests@example.invalid")
     git(source, "config", "commit.gpgSign", "false")
     (source / "ruff.toml").write_bytes(CONFIG)
+    (source / "sample.py").write_text("original\n")
     (source / "revision.txt").write_text("base\n")
     git(source, "add", ".")
     git(source, "commit", "-qm", "base")
@@ -83,7 +101,11 @@ def seed(directory):
     for cache in caches:
         cache.mkdir()
         for project in PROJECTS:
-            git(directory, "clone", "-q", str(remote), str(cache / f"fixture:{project}"))
+            checkout = cache / f"fixture:{project}"
+            git(directory, "clone", "-q", str(remote), str(checkout))
+            git(checkout, "config", "user.name", "Ecosystem Bot")
+            git(checkout, "config", "user.email", "ecosystem@astral.sh")
+            git(checkout, "config", "commit.gpgSign", "false")
     (source / "revision.txt").write_text("tip\n")
     git(source, "commit", "-qam", "tip")
     git(source, "push", "-q", str(remote), "main")
@@ -95,7 +117,11 @@ def main():
     parser.add_argument("--compiler", type=Path, required=True)
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--opt-level", choices=["0", "3"], default="3")
     args = parser.parse_args()
+    manifest = json.loads((EXAMPLE / "UPSTREAM.json").read_text())
+    for name, digest in manifest["files"].items():
+        assert hashlib.sha256((EXAMPLE / name).read_bytes()).hexdigest() == digest, name
     with tempfile.TemporaryDirectory(prefix="imre-ecosystem-live-") as temporary:
         directory = Path(temporary)
         package = directory / "ruff_ecosystem"
@@ -104,8 +130,8 @@ def main():
         binary = directory / "ruff-ecosystem"
         subprocess.run(
             [args.compiler.resolve(), "build", package / "__main__.py", "--module-root", directory,
-             "--reachable-only", "--entry-profile", EXAMPLE / "check-entry.json",
-             "--runtime", args.runtime.resolve(), "-o", binary],
+             "--reachable-only", "--entry-profile", EXAMPLE / "markdown-entry.json",
+             "--opt-level", args.opt_level, "--runtime", args.runtime.resolve(), "-o", binary],
             check=True, timeout=300,
         )
         executables = [directory / name for name in ["baseline", "comparison"]]
@@ -114,7 +140,9 @@ def main():
             executable.chmod(0o755)
         caches, tip = seed(directory)
         commands = [[args.python, "-m", "ruff_ecosystem"], [binary]]
-        for case in ["unchanged", "changed", "preview", "checker-error", "git-error"]:
+        for case in ["unchanged", "changed", "preview", "checker-error",
+                     "format-unchanged", "format-changed", "format-error", "git-error"]:
+            subcommand = "format" if case.startswith("format-") else "check"
             if case == "git-error":
                 for cache in caches:
                     git(cache / "fixture:failed", "remote", "set-url", "origin", directory / "missing.git")
@@ -124,7 +152,7 @@ def main():
                     (cache / f"fixture:{project}" / "ruff.toml").write_text("# dirty checkout\n")
                 options = ["--force-preview"] if case == "preview" else []
                 result = subprocess.run(
-                    [*command, "--cache", cache, *options, "check", *executables],
+                    [*command, "--cache", cache, *options, subcommand, *executables],
                     cwd=directory, env={**os.environ, "PYTHONPATH": str(directory), "ECOSYSTEM_CASE": case},
                     capture_output=True, timeout=30,
                 )
@@ -137,7 +165,12 @@ def main():
             assert output[0] == output[1], (case, output)
             stdout, stderr = output[0]
             assert not stderr, (case, stderr)
-            if case == "unchanged":
+            if case == "format-unchanged":
+                assert stdout.decode() == "✅ ecosystem check detected no format changes.\n"
+            elif subcommand == "format":
+                assert b"-baseline\n+comparison" in stdout and b"sample.py~L1" in stdout, stdout
+                assert (b"synthetic formatter failed" in stdout) == (case == "format-error"), stdout
+            elif case == "unchanged":
                 assert stdout.decode() == "✅ ecosystem check detected no linter changes.\n"
             else:
                 assert b"F401" in stdout and b"fixture/changed" in stdout, stdout
