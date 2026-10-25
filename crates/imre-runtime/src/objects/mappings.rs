@@ -411,6 +411,18 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         Ok(None)
     }
 
+    /// Probe an exact rooted key once. Only a miss acquires the table's key owner.
+    unsafe fn setdefault(&mut self, word: usize, default: V) -> Result<(V, bool), Error> {
+        // SAFETY: the caller roots an exact key of this table's representation.
+        let key = unsafe { K::borrow(word) };
+        let hash = HASHER.hash_one(&*key);
+        if let Some(index) = self.position(hash, &*key) {
+            return Ok((self.entries[index].as_ref().unwrap().value, false));
+        }
+        self.insert_absent(hash, (*key).clone(), default)?;
+        Ok((default, true))
+    }
+
     /// Transfers the removed key and value so they can drop outside the mutation.
     fn remove(&mut self, key: &K) -> Result<Option<Entry<K, V>>, Error> {
         let hash = key.try_hash()?;
@@ -2125,6 +2137,35 @@ pub unsafe extern "C" fn imre_dict_get_default(
     // SAFETY: the eager default remains rooted and has this exact value kind.
     unsafe { kind.acquire(default) }.into_word()
 }
+
+/// Return the stored value or insert the already evaluated default, bypassing
+/// the receiver's missing-key hook. Only a new entry changes iteration order.
+///
+/// # Safety
+/// The mapping and both argument words are rooted with their exact declared kinds.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_setdefault(
+    value: *const Object,
+    key: usize,
+    default: usize,
+) -> usize {
+    // SAFETY: all inputs remain rooted throughout the non-reentrant lookup and
+    // insertion. The table retains its own value and the caller receives another owner.
+    let result = unsafe {
+        object(value).0.with_mut(|s| {
+            let mapping = s.dictionary_mut();
+            let (word, inserted) =
+                table!(&mut mapping.tables, table => table.setdefault(key, default))?;
+            if inserted {
+                mapping.value_kind.acquire(word).into_word();
+                mapping.update_ascii_int(key, word);
+            }
+            Ok(mapping.value_kind.acquire(word).into_word())
+        })
+    };
+    crate::finish(result, 0)
+}
+
 /// # Safety
 /// Inputs match this dictionary's concrete types and preserve heap acyclicity.
 /// Acquisition precedes mutation, including replacement of the sole stored owner.

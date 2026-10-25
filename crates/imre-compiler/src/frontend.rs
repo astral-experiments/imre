@@ -6506,6 +6506,49 @@ impl<'a> Checker<'a> {
         self.call_with_key_view(call, None, receiver)
     }
 
+    /// Evaluate the receiver, key and default before the mapping probes its table.
+    fn dict_setdefault(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Expr,
+        args: &[ast::Expr],
+    ) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let Some((key_type, value_type)) = self.types.mapping(receiver.ty) else {
+            return Err(error(
+                self.source,
+                call,
+                "dict.setdefault requires a dictionary",
+            ));
+        };
+        let [key, rest @ ..] = args else {
+            return Err(error(self.source, call, "dict.setdefault requires a key"));
+        };
+        let key = self.expr_expected(key, key_type)?;
+        let value = match rest {
+            [default] => self.expr_expected(default, value_type)?,
+            [] => self.coerce(
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+                value_type,
+                call,
+            )?,
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "dict.setdefault takes at most two arguments",
+                ));
+            }
+        };
+        Ok(Expr {
+            ty: value_type,
+            kind: ExprKind::Builtin(Builtin::DictSetDefault, vec![receiver, key, value]),
+        })
+    }
+
     /// A direct `dict.keys()` operand roots the mapping until the operation.
     /// Other methods called `keys` still use ordinary class/module dispatch.
     fn union_operand(&mut self, source: &ast::Expr) -> Result<(Expr, Option<Type>), String> {
@@ -6565,9 +6608,10 @@ impl<'a> Checker<'a> {
             return self.counter_unbound_update(call, op, method.attr.as_str());
         }
         if let ast::Expr::Attribute(method) = &*call.func
-            && method.attr.as_str() == "clear"
-            && (self.unshadowed_builtin(&method.value, "list")
-                || self.unshadowed_builtin(&method.value, "dict")
+            && matches!(method.attr.as_str(), "clear" | "setdefault")
+            && (self.unshadowed_builtin(&method.value, "dict")
+                || (method.attr.as_str() == "clear"
+                    && self.unshadowed_builtin(&method.value, "list"))
                 || matches!(
                     self.resolve(&method.value),
                     Some(Binding::Intrinsic(
@@ -6576,6 +6620,17 @@ impl<'a> Checker<'a> {
                 ))
         {
             self.reject_builtin_keywords(call)?;
+            if method.attr.as_str() == "setdefault" {
+                let Some((owner, args)) = call.arguments.args.split_first() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "unbound dict.setdefault requires a dictionary",
+                    ));
+                };
+                let receiver = self.expr(owner)?;
+                return self.dict_setdefault(call, receiver, args);
+            }
             let [owner] = call.arguments.args.as_ref() else {
                 return Err(error(
                     self.source,
@@ -7552,6 +7607,9 @@ impl<'a> Checker<'a> {
                         ty: receiver.ty,
                         kind: ExprKind::Builtin(Builtin::DictCopy, vec![receiver]),
                     });
+                }
+                if attribute.attr.as_str() == "setdefault" {
+                    return self.dict_setdefault(call, receiver, &call.arguments.args);
                 }
                 if attribute.attr.as_str() == "clear"
                     && call.arguments.args.is_empty()
