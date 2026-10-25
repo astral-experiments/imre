@@ -3,6 +3,16 @@
 Both reports use the [shared per-occurrence contract](../../SUITE_RUNNER.md).
 Each has a row for every upstream ID at each optimization level.
 
+The [verified compiler snapshot](https://github.com/astral-sh/imre/commit/2f137d67646331a4445f22f63f8895502a0c0a16)
+combines the cache, partial, static bindings, annotation reader, ForwardRef and
+unittest assertion context changes. Both optimization levels attempted all 325
+complete methods: 178 stopped in fixture compilation, 124 in method compilation,
+21 at an upstream method decorator, and two completed with host fixtures.
+Sixteen first diagnostics changed since the preceding observation. This run also
+repeated the native reduce operations and all four free-threaded attempts.
+The separate 64-occurrence cache run on `c0d2708` reproduced the earlier
+observations byte for byte. Each record identifies its own compiler revision.
+
 | Pinned Linux suite | Reference | Native bodies with host fixtures | Host-driven native operations | Mixed | Failed | Blocked |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | [test.test_functools](evidence-linux.json) | 325 | 2 | 13 | 12 | 1 | 297 |

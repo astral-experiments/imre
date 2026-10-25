@@ -173,6 +173,7 @@ impl Emitter<'_, '_> {
             "call ptr @imre_value_repr(i64 {word}, i32 {})",
             representation_kind(value.ty, &self.module.types)
         ));
+        self.check_error();
         self.owned(Value {
             ty: Type::Str,
             operand,
