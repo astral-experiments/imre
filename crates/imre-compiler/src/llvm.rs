@@ -91,6 +91,7 @@ impl Type {
             | Self::ClockTime
             | Self::PlainObject
             | Self::StrDescriptor(_)
+            | Self::SimpleNamespace(_)
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -151,6 +152,7 @@ impl Type {
             | Self::ClockTime
             | Self::PlainObject
             | Self::StrDescriptor(_)
+            | Self::SimpleNamespace(_)
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -741,6 +743,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::SimpleNamespace(_)
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -3249,7 +3252,12 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {result}, 0"))
                 }
-                Type::Path | Type::PurePath(_) | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
+                Type::Path
+                | Type::PurePath(_)
+                | Type::List(_)
+                | Type::Dict(_)
+                | Type::Set(_)
+                | Type::SimpleNamespace(_) => {
                     let operation = if left.ty.is_path() {
                         "path"
                     } else {
@@ -4087,6 +4095,18 @@ impl Emitter<'_, '_> {
                 self.retain(&value);
                 self.owned(value)
             }
+            Builtin::CacheParameter(typed) => {
+                let operand = self.instruction(format!(
+                    "call ptr @imre_callable_cache_parameter(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*typed)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             Builtin::CacheTable => self.call("imre_cache_table", returns, &[&args[0].value]),
             Builtin::CacheProbe(capacity) => {
                 let key = self.key_word(&args[1].value);
@@ -4319,6 +4339,12 @@ impl Emitter<'_, '_> {
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
+            Builtin::DocCaptureStart => {
+                self.checked_line("call void @imre_doctest_capture_start()");
+                none()
+            }
+            Builtin::DocCaptureTake => self.call("imre_doctest_capture_take", returns, &[]),
+            Builtin::DocAscii => self.call("imre_doctest_ascii", returns, &[&args[0].value]),
             Builtin::SysStreamWrite { stderr } => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -4400,16 +4426,23 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::ParseArgs {
+                namespace,
                 children,
                 process_argv,
             } => {
-                let Type::Class(class) = returns else {
-                    unreachable!()
+                let pair_layout = if matches!(returns, Type::Tuple(_)) {
+                    format!(
+                        "@{}",
+                        self.output
+                            .global_ref(format!("layout_{}", record_name(returns)))
+                    )
+                } else {
+                    "null".to_owned()
                 };
                 let [schema, description, argv] = args.as_slice() else {
                     unreachable!()
                 };
-                let layout = self.output.global_ref(format!("layout_class_{class}"));
+                let layout = self.output.global_ref(format!("layout_class_{namespace}"));
                 let child_layouts = if children.is_empty() {
                     "null".to_owned()
                 } else {
@@ -4431,7 +4464,7 @@ impl Emitter<'_, '_> {
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @imre_argparse_parse(ptr @{layout}, ptr {child_layouts}, ptr {}, ptr {}, ptr {}, i1 {process_argv})",
+                        "call ptr @imre_argparse_parse(ptr @{layout}, ptr {child_layouts}, ptr {pair_layout}, ptr {}, ptr {}, ptr {}, i1 {process_argv})",
                         schema.value.operand, description.value.operand, argv.value.operand,
                     )),
                     small_integer: false,
@@ -5251,6 +5284,29 @@ impl Emitter<'_, '_> {
             Builtin::RecordCopy => {
                 self.call("imre_record_shallow_copy", returns, &[&args[0].value])
             }
+            Builtin::NamespaceWrap | Builtin::NamespaceDict => self.call(
+                if matches!(builtin, Builtin::NamespaceWrap) {
+                    "imre_namespace_wrap"
+                } else {
+                    "imre_namespace_dict"
+                },
+                returns,
+                &[&args[0].value],
+            ),
+            Builtin::NamespaceGet => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_namespace_get(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.decode_word(word, returns)
+            }
+            Builtin::NamespaceDelete => {
+                self.checked_line(format!(
+                    "call void @imre_namespace_delete(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
             Builtin::DictCopy => self.call("imre_dict_copy", returns, &[&args[0].value]),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::CounterNew => {
@@ -5627,6 +5683,7 @@ impl Emitter<'_, '_> {
                     | Type::ClockTime
                     | Type::StrDescriptor(_)
                     | Type::PlainObject
+                    | Type::SimpleNamespace(_)
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -5875,6 +5932,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::SimpleNamespace(_)
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -5949,6 +6007,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
+            | Type::SimpleNamespace(_)
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6536,6 +6595,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ClockTime
         | Type::StrDescriptor(_)
         | Type::PlainObject
+        | Type::SimpleNamespace(_)
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -6708,6 +6768,8 @@ declare ptr @imre_cache_table(ptr)
 declare i1 @imre_cache_probe(ptr, i64, i64)
 declare void @imre_cache_insert(ptr, i64, i64, i64)
 declare i64 @imre_cache_stat(ptr, i32)
+declare void @imre_callable_copy_cache_policy(ptr, ptr, i64, i32) nounwind
+declare ptr @imre_callable_cache_parameter(ptr, i32)
 declare void @imre_cache_clear(ptr, i32, i32)
 declare ptr @imre_module_cache(i64, i32, i32)
 declare i64 @imre_document(i32, i64, i64, i64)
@@ -6765,6 +6827,7 @@ declare ptr @imre_shutil_confstr_cs_path()
 declare ptr @imre_shutil_os_defpath()
 declare void @imre_shutil_rmtree(ptr, i32, i32, i64, i32, ptr, ptr, ptr, ptr)
 declare i64 @imre_shutil_copy(i32, ptr, i32, ptr, i32, i32)
+declare void @imre_os_unlink(ptr, i32, i64, i32)
 declare void @imre_subprocess_check(ptr)
 declare i64 @imre_subprocess_error_field(ptr, i32)
 declare i64 @imre_subprocess_timeout_field(ptr, i32)
@@ -6831,6 +6894,7 @@ declare ptr @imre_tempdir_new(ptr, ptr, ptr)
 declare void @imre_tempdir_cleanup(ptr)
 declare ptr @imre_path_iter(ptr, ptr)
 declare ptr @imre_path_glob(ptr, ptr, i64, i32, i32)
+declare ptr @imre_path_walk(ptr, i32, i32, ptr)
 declare ptr @imre_path_next(ptr)
 declare i64 @imre_float_box(double)
 declare double @imre_float_unbox(i64)
@@ -7044,6 +7108,10 @@ define internal i64 @imre_seq_borrow_index_proven_fast(ptr %sequence, i64 %index
 }
 declare ptr @imre_seq_repeat(ptr, i64)
 declare ptr @imre_dict_new(i32, i32)
+declare ptr @imre_namespace_wrap(ptr)
+declare ptr @imre_namespace_dict(ptr)
+declare i64 @imre_namespace_get(ptr, ptr)
+declare void @imre_namespace_delete(ptr, ptr)
 declare ptr @imre_dict_copy(ptr)
 declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
@@ -7100,6 +7168,8 @@ declare i64 @imre_str_find(ptr, ptr, i64)
 declare void @imre_str_partition(ptr, ptr, ptr)
 declare ptr @imre_str_unquote(ptr)
 declare ptr @imre_str_splitlines(ptr)
+declare ptr @imre_str_splitlines_options(ptr, i32)
+declare i32 @imre_str_isspace(ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
@@ -7137,12 +7207,15 @@ declare i32 @imre_text_close(ptr)
 declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
-declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
+declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_os_name()
+declare void @imre_doctest_capture_start()
+declare ptr @imre_doctest_capture_take()
+declare ptr @imre_doctest_ascii(ptr)
 declare i64 @imre_sys_stream_write(i32, ptr)
 declare void @imre_sys_stream_flush(i32)
 declare ptr @imre_system_exit_new(i32, i64)

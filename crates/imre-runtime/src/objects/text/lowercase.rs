@@ -36,6 +36,30 @@ fn is_final_sigma(before: &str, after: &str) -> bool {
         && !after.chars().find(significant).is_some_and(is_cased)
 }
 
+fn case_chars(source: &str, capitalize: bool) -> impl Iterator<Item = char> {
+    source.char_indices().flat_map(move |(i, ch)| {
+        let mapping = if capitalize && i == 0 {
+            unicode_case_mapping::to_titlecase(ch)
+        } else if ch == 'Σ' && is_final_sigma(&source[..i], &source[i + ch.len_utf8()..]) {
+            ['ς' as u32, 0, 0]
+        } else {
+            let [a, b] = unicode_case_mapping::to_lowercase(ch);
+            [a, b, 0]
+        };
+        let chars = if mapping[0] == 0 {
+            [Some(ch), None, None]
+        } else {
+            mapping.map(|value| (value != 0).then(|| char::from_u32(value).unwrap()))
+        };
+        chars.into_iter().flatten()
+    })
+}
+
+/// Yield the same Unicode mapping as str.lower() without storing the result.
+pub(in crate::objects) fn lowercase_chars(source: &str) -> impl Iterator<Item = char> {
+    case_chars(source, false)
+}
+
 /// CPython titlecases just the first code point for capitalize, then lowercases
 /// the rest in the context of the original string (not of the suffix alone).
 fn convert(source: &str, capitalize: bool) -> Result<Str, ReserveError> {
@@ -49,25 +73,9 @@ fn convert(source: &str, capitalize: bool) -> Result<Str, ReserveError> {
         return Ok(result);
     }
     let mut result = Str::try_with_capacity(source.len())?;
-    for (i, ch) in source.char_indices() {
-        let mapping = if capitalize && i == 0 {
-            unicode_case_mapping::to_titlecase(ch)
-        } else if ch == 'Σ' && is_final_sigma(&source[..i], &source[i + ch.len_utf8()..]) {
-            ['ς' as u32, 0, 0]
-        } else {
-            let [a, b] = unicode_case_mapping::to_lowercase(ch);
-            [a, b, 0]
-        };
-        if mapping[0] == 0 {
-            result.try_reserve(ch.len_utf8())?;
-            result.push(ch);
-        } else {
-            for value in mapping.into_iter().take_while(|v| *v != 0) {
-                let mapped = char::from_u32(value).unwrap();
-                result.try_reserve(mapped.len_utf8())?;
-                result.push(mapped);
-            }
-        }
+    for ch in case_chars(source, capitalize) {
+        result.try_reserve(ch.len_utf8())?;
+        result.push(ch);
     }
     Ok(result)
 }

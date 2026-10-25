@@ -26,6 +26,7 @@ mod counter;
 mod csv;
 mod dataclass_values;
 mod dispatch;
+mod doctest;
 mod documents;
 mod enums;
 mod expansions;
@@ -49,6 +50,7 @@ mod logging_records;
 mod matching;
 mod module_values;
 mod namedtuples;
+mod namespaces;
 mod native_generators;
 mod os;
 mod partials;
@@ -58,6 +60,7 @@ mod posixpath;
 mod powers;
 mod processes;
 mod projected_equality;
+mod properties;
 mod record_inputs;
 mod records;
 mod regex;
@@ -99,6 +102,7 @@ struct ClassInfo {
     declarations: Classes,
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
+    setters: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
@@ -289,6 +293,7 @@ impl ClassInfo {
         Ok(Self {
             parsers,
             methods: vec![HashMap::new(); fields.len()],
+            setters: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
@@ -322,6 +327,14 @@ impl ClassInfo {
                             states[id] = 1;
                             pending.push(Step::Finish(id));
                             pending.extend(fields[id].iter().copied().map(Step::Visit));
+                            // A base-typed field can own any concrete subclass.
+                            pending.extend(
+                                types
+                                    .concrete_subclasses(id)
+                                    .iter()
+                                    .copied()
+                                    .map(Step::Visit),
+                            );
                         }
                     },
                     Step::Visit(ty) => {
@@ -576,6 +589,7 @@ pub(crate) fn lower_with_owners(
                     .map_err(|error| format!("{}:{error}", module.path.display()))?;
             }
         }
+        let mut instance_signatures = HashMap::<_, Signature>::new();
         for (index, method) in class.methods.iter().enumerate() {
             let module_id = class.method_origins[index].module;
             let module = &graph.modules[module_id];
@@ -583,6 +597,25 @@ pub(crate) fn lower_with_owners(
                 class: class_id,
                 index,
             };
+            let origin = (class.method_origins[index], method.range());
+            let kind = class.method_kinds[index];
+            // property(get, set) retains the original functions. Both spellings
+            // must infer one signature even if only the property is used.
+            if matches!(
+                kind,
+                crate::classes::MethodKind::Property | crate::classes::MethodKind::PropertySetter
+            ) && let Some(original) = instance_signatures.get(&origin)
+            {
+                let mut alias = original.clone();
+                alias.method = Some(context);
+                let table = if kind == crate::classes::MethodKind::PropertySetter {
+                    &mut classes.setters[class_id]
+                } else {
+                    &mut classes.methods[class_id]
+                };
+                table.insert(method.name.to_string(), alias);
+                continue;
+            }
             let mut method =
                 records::executable_method(method, context, &classes.declarations, graph, &types)?;
             let keyword_copy =
@@ -633,7 +666,15 @@ pub(crate) fn lower_with_owners(
             if keyword_copy {
                 classes.keyword_copies.insert(signature.id);
             }
-            classes.methods[class_id].insert(method.name.to_string(), signature.clone());
+            if kind == crate::classes::MethodKind::Instance {
+                instance_signatures.insert(origin, signature.clone());
+            }
+            let table = if class.method_kinds[index] == crate::classes::MethodKind::PropertySetter {
+                &mut classes.setters[class_id]
+            } else {
+                &mut classes.methods[class_id]
+            };
+            table.insert(method.name.to_string(), signature.clone());
             if contexts::decorated(&class.methods[index], graph, module_id) {
                 if !contexts::single_yield(&method) {
                     return Err(module.error(&method, "a context manager requires one bare yield on each successful path and an optional finally suite"));
@@ -750,6 +791,8 @@ pub(crate) fn lower_with_owners(
                 &globals,
             );
             checker.returns = signature.returns;
+            checker.interactive_names =
+                module.is_doctest_case() && definition.name.as_str() == "_run_case";
             checker.asynchronous = signature.asynchronous;
             checker.method_context(signature.method);
             checker.generator_item = classes.producer_items.get(&signature.id).copied();
@@ -1037,7 +1080,9 @@ fn signature(
         .filter(|context| {
             matches!(
                 context.kind(classes),
-                crate::classes::MethodKind::Instance | crate::classes::MethodKind::Property
+                crate::classes::MethodKind::Instance
+                    | crate::classes::MethodKind::Property
+                    | crate::classes::MethodKind::PropertySetter
             )
         })
         .map(|context| classes.instance(context.class));
@@ -1724,6 +1769,8 @@ enum Iteration {
 }
 
 struct Checker<'a> {
+    /// Doctest prompts share an exec-style namespace until the case ends.
+    interactive_names: bool,
     /// A later local assignment shadows builtin iter throughout a function.
     local_iter: bool,
     context_method: bool,
@@ -1785,6 +1832,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            interactive_names: false,
             local_iter: false,
             zip_sum_rhs: None,
             asynchronous: false,
@@ -1908,12 +1956,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Resolves a fixed field without evaluating its receiver more than once.
-    fn field(&mut self, attribute: &ast::ExprAttribute) -> Result<(Expr, usize, Type), String> {
-        let receiver = self.expr(&attribute.value)?;
-        self.writable_field_value(attribute, receiver)
-    }
-
     fn writable_field_value(
         &self,
         attribute: &ast::ExprAttribute,
@@ -2011,6 +2053,12 @@ impl<'a> Checker<'a> {
         }
         if value.ty == expected {
             return Ok(value);
+        }
+        if self.types.cache_signature(value.ty) == Some(expected) {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            });
         }
         if expected == Type::StringIterable
             && (self.types.element(value.ty) == Some(Type::Str)
@@ -3345,7 +3393,9 @@ impl<'a> Checker<'a> {
         if self.block_depth == 0 && !self.module_scope {
             self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
-            let mut names: Vec<_> = unbound_locals::candidates(statements).into_iter().collect();
+            let mut names: Vec<_> = unbound_locals::candidates(statements, self.interactive_names)
+                .into_iter()
+                .collect();
             names.sort_unstable();
             for name in names {
                 // Arguments enter already bound; deletion and nonordinary stores were excluded.
@@ -3531,7 +3581,30 @@ impl<'a> Checker<'a> {
                     self.expect(element, result, statement)?;
                     Some(Statement::AugmentItem(list, index, op, value))
                 } else if let ast::Expr::Attribute(target) = &*assign.target {
-                    let (receiver, field, ty) = self.field(target)?;
+                    let receiver = self.expr(&target.value)?;
+                    if let Some(class) = self.writable_property(receiver.ty, target) {
+                        let slot = self.hidden(receiver.ty);
+                        let old =
+                            self.class_attribute(target, class, Some(self.local(slot)), None)?;
+                        let rhs = self.expr(&assign.value)?;
+                        let combined = self.binary_expr(assign.op, old, rhs, statement)?;
+                        if self.types.element(combined.ty).is_some() {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "in-place list operations are unsupported",
+                            ));
+                        }
+                        let put = self.set_property(class, target, self.local(slot), combined)?;
+                        return Ok((
+                            vec![Statement::Scope {
+                                body: vec![Statement::Assign(slot, receiver), put],
+                                clear: vec![slot],
+                            }],
+                            true,
+                        ));
+                    }
+                    let (receiver, field, ty) = self.writable_field_value(target, receiver)?;
                     if !matches!(ty, Type::Int | Type::Float) {
                         return Err(error(
                             self.source,
@@ -3643,19 +3716,36 @@ impl<'a> Checker<'a> {
                 for target in &delete.targets {
                     if let ast::Expr::Name(name) = target
                         && let Some(&slot) = self.names.get(name.id.as_str())
-                        && matches!(self.locals[slot], Type::Cursor(_))
+                        && matches!(
+                            self.locals[slot],
+                            Type::Cursor(_) | Type::SimpleNamespace(_)
+                        )
                     {
                         if !self.assigned.contains(&slot) {
                             return Err(error(
                                 self.source,
                                 target,
-                                "iterator deletion requires a bound local",
+                                "deletion requires a bound local",
                             ));
                         }
                         self.assigned.remove(&slot);
                         self.narrowed.remove_mut(&slot);
                         statements.push(Statement::Clear(slot));
                         continue;
+                    }
+                    if let ast::Expr::Attribute(attr) = target {
+                        let receiver = self.expr(&attr.value)?;
+                        if matches!(receiver.ty, Type::SimpleNamespace(_)) {
+                            let name = self.namespace_attr_name(attr)?;
+                            statements.push(Statement::Expr(Expr {
+                                ty: Type::None,
+                                kind: ExprKind::Builtin(
+                                    Builtin::NamespaceDelete,
+                                    vec![receiver, name],
+                                ),
+                            }));
+                            continue;
+                        }
                     }
                     let ast::Expr::Subscript(target) = target else {
                         return Err(error(
@@ -4614,9 +4704,15 @@ impl<'a> Checker<'a> {
                 &format!("no native implementation for {symbol}"),
             ));
         }
+        if let Some(target @ (Binding::Module(_) | Binding::IntrinsicModule(_))) =
+            self.resolve(expression)
+            && let Some(module) = self.module_docs(target, expression)?
+        {
+            return Ok(module);
+        }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
-            | Intrinsic::SignalNumber(level)
+            | Intrinsic::IntConstant(level)
             | Intrinsic::AnnotationFormat(level),
         )) = self.resolve(expression)
         {
@@ -5551,6 +5647,9 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
                     return self.zip_attribute(receiver, attribute);
                 }
+                if let Type::SimpleNamespace(id) = receiver.ty {
+                    return self.namespace_attribute(receiver, id, attribute);
+                }
                 if receiver.ty == Type::CsvReader && attribute.attr.as_str() == "line_num" {
                     return Ok(Expr {
                         ty: Type::Int,
@@ -5808,6 +5907,9 @@ impl<'a> Checker<'a> {
         if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
         }
+        if let Some(suite) = self.doctest_suite(call)? {
+            return Ok(suite);
+        }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
@@ -5973,6 +6075,9 @@ impl<'a> Checker<'a> {
                 call,
                 "argument unpacking requires a source-defined function or method",
             ));
+        }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) {
+            return self.simple_namespace(call);
         }
         calls::reject_unpacking(call, self.source)?;
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
@@ -6257,7 +6362,7 @@ impl<'a> Checker<'a> {
                 return self.system_path_call(intrinsic, call);
             }
             Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
-                return self.text_function(call, "text", ir::TextOperation::Dedent);
+                return self.dedent_call(call);
             }
             Some(Binding::Intrinsic(Intrinsic::UrlsafeB64encode)) => {
                 let args = self.arguments(
@@ -6519,6 +6624,15 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
+            if matches!(attribute.attr.as_str(), "splitlines" | "isspace")
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.line_method(
+                    Self::string_value(receiver),
+                    attribute.attr.as_str(),
+                    call,
+                );
+            }
             if matches!(attribute.attr.as_str(), "lower" | "capitalize")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
@@ -6682,20 +6796,6 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(builtin, vec![receiver]),
                     });
                 }
-            }
-            if receiver.ty == Type::Str
-                && attribute.attr.as_str() == "splitlines"
-                && call.arguments.args.is_empty()
-            {
-                return Ok(Expr {
-                    ty: self.types.list(Type::Str),
-                    kind: match receiver.kind {
-                        ExprKind::Builtin(Builtin::Decode, bytes) => {
-                            ExprKind::Builtin(Builtin::DecodeSplitLines, bytes)
-                        }
-                        _ => ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
-                    },
-                });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
                 if attribute.attr.as_str() == "clear"
@@ -7155,6 +7255,12 @@ impl<'a> Checker<'a> {
                 rendered
             });
         }
+        if name.id == "vars"
+            && let [receiver] = args.as_slice()
+            && let Type::SimpleNamespace(id) = receiver.ty
+        {
+            return Ok(namespaces::backing(receiver.clone(), id));
+        }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
             if name.id == "repr" || (name.id == "str" && self.types.element(args[0].ty).is_some()) {
                 if !dataclass_values::can_format(args[0].ty, self.types, self.classes) {
@@ -7174,6 +7280,7 @@ impl<'a> Checker<'a> {
                     args[0].ty,
                     Type::Class(_)
                         | Type::CompletedProcess(..)
+                        | Type::SimpleNamespace(_)
                         | Type::Dict(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
@@ -7523,6 +7630,18 @@ scan("a\nb", Path("lines.txt"), "4")
             let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
             assert!(llvm.contains("call ptr @imre_seq_new("), "{source}");
         }
+    }
+
+    #[test]
+    fn fields_can_own_a_concrete_subclass_of_the_declared_type() {
+        use super::{ClassInfo, Type, Types};
+
+        let types = Types::default();
+        types.add_concrete_subclass(1, &[0]);
+        let mut fields = vec![vec![], vec![], vec![types.list(Type::Class(0))]];
+        assert_eq!(ClassInfo::cyclic_field_root(&fields, &types), None);
+        fields[1].push(Type::Class(2));
+        assert!(ClassInfo::cyclic_field_root(&fields, &types).is_some());
     }
 
     #[test]

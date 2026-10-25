@@ -13,6 +13,7 @@ use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation};
 use crate::watch::FileSystem;
 
 mod declarations;
+pub(crate) mod doctest;
 mod empty_keywords;
 mod entry_profile;
 mod namedtuple_fields;
@@ -63,9 +64,11 @@ pub(crate) enum IntrinsicModule {
     Argparse,
     Future,
     Sys,
+    SysJit,
     Typing,
     Dataclasses,
     Difflib,
+    DoctestRuntime,
     Logging,
     LoggingConfig,
     LoggingHandlers,
@@ -82,6 +85,7 @@ pub(crate) enum IntrinsicModule {
     Shutil,
     Sysconfig,
     Signal,
+    Opcode,
     Unidiff,
     Pathlib,
     Shlex,
@@ -100,6 +104,7 @@ pub(crate) enum IntrinsicModule {
     Io,
     Gzip,
     Hashlib,
+    Types,
     Base64,
     Zipfile,
     Csv,
@@ -107,6 +112,8 @@ pub(crate) enum IntrinsicModule {
     Enum,
     Zlib,
     Json,
+    JsonEncoder,
+    JsonDecoder,
     Imre,
     ImreJson,
     ImreToml,
@@ -172,7 +179,7 @@ pub(crate) enum Intrinsic {
     Devnull,
     CheckOutput,
     NullContext,
-    SignalNumber(i64),
+    IntConstant(i64),
     WallTime,
     TimeSleep,
     PatchSet,
@@ -186,6 +193,7 @@ pub(crate) enum Intrinsic {
     SysPlatform,
     SysEncoding(&'static str),
     SysException,
+    SysJitPredicate(&'static str),
     Stdin,
     OsName,
     GetSysconfigPath,
@@ -196,6 +204,11 @@ pub(crate) enum Intrinsic {
     ShlexQuote,
     ShlexJoin,
     Ndiff,
+    DocCaptureStart,
+    DocCaptureTake,
+    DocDisplay,
+    DocAscii,
+    DocExecute,
     Final,
     Argv,
     OrigArgv,
@@ -217,6 +230,7 @@ pub(crate) enum Intrinsic {
     UrlsafeB64encode,
     Sha256,
     HashNew,
+    SimpleNamespace,
     HashAvailable,
     ZipFile,
     ZipInfo,
@@ -327,12 +341,14 @@ impl IntrinsicModule {
             "shutil" => Some(Self::Shutil),
             "sysconfig" => Some(Self::Sysconfig),
             "signal" => Some(Self::Signal),
+            "_opcode" => Some(Self::Opcode),
             "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
             "difflib" => Some(Self::Difflib),
+            "_imre_doctest" => Some(Self::DoctestRuntime),
             "pathlib" => Some(Self::Pathlib),
             "shlex" => Some(Self::Shlex),
             "tempfile" => Some(Self::Tempfile),
@@ -349,6 +365,7 @@ impl IntrinsicModule {
             "textwrap" => Some(Self::Textwrap),
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
+            "types" => Some(Self::Types),
             "hashlib" => Some(Self::Hashlib),
             "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
@@ -357,6 +374,8 @@ impl IntrinsicModule {
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
             "json" => Some(Self::Json),
+            "json.encoder" => Some(Self::JsonEncoder),
+            "json.decoder" => Some(Self::JsonDecoder),
             "imre" => Some(Self::Imre),
             "imre.json" => Some(Self::ImreJson),
             "imre.toml" => Some(Self::ImreToml),
@@ -375,6 +394,9 @@ impl IntrinsicModule {
         if self == Self::Logging && name == "config" {
             return Some(Binding::IntrinsicModule(Self::LoggingConfig));
         }
+        if self == Self::Sys && name == "_jit" {
+            return Some(Binding::IntrinsicModule(Self::SysJit));
+        }
         if self == Self::Os {
             if name == "path" {
                 return Some(Binding::IntrinsicModule(Self::PosixPath));
@@ -382,6 +404,13 @@ impl IntrinsicModule {
             if let Some(symbol) = os::symbol(name) {
                 return Some(Binding::Intrinsic(symbol));
             }
+        }
+        if self == Self::Json && matches!(name, "encoder" | "decoder") {
+            return Some(Binding::IntrinsicModule(if name == "encoder" {
+                Self::JsonEncoder
+            } else {
+                Self::JsonDecoder
+            }));
         }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
@@ -441,8 +470,12 @@ impl IntrinsicModule {
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
-            (Self::Signal, "SIGINT") => Intrinsic::SignalNumber(2),
-            (Self::Signal, "SIGTERM") => Intrinsic::SignalNumber(15),
+            (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
+            (Self::Signal, "SIGTERM") => Intrinsic::IntConstant(15),
+            // Native executables have no adaptive bytecode interpreter.
+            (Self::Opcode, "ENABLE_SPECIALIZATION" | "ENABLE_SPECIALIZATION_FT") => {
+                Intrinsic::IntConstant(0)
+            }
             (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
             (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
@@ -479,6 +512,9 @@ impl IntrinsicModule {
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
+            (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
+            (Self::SysJit, "is_enabled") => Intrinsic::SysJitPredicate("_jit.is_enabled"),
+            (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
             (Self::Sys, "flags") => Intrinsic::SysFlags,
@@ -513,6 +549,11 @@ impl IntrinsicModule {
             (Self::Shlex, "quote") => Intrinsic::ShlexQuote,
             (Self::Shlex, "join") => Intrinsic::ShlexJoin,
             (Self::Difflib, "ndiff") => Intrinsic::Ndiff,
+            (Self::DoctestRuntime, "capture_start") => Intrinsic::DocCaptureStart,
+            (Self::DoctestRuntime, "capture_take") => Intrinsic::DocCaptureTake,
+            (Self::DoctestRuntime, "display") => Intrinsic::DocDisplay,
+            (Self::DoctestRuntime, "ascii_output") => Intrinsic::DocAscii,
+            (Self::DoctestRuntime, "execute") => Intrinsic::DocExecute,
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
@@ -529,6 +570,7 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
@@ -821,6 +863,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::MissingArgument(call));
     }
 
+    /// This exact operand is excessive for a resolved native method that raises TypeError.
+    pub(crate) fn checked_excess_argument(&self, module: ModuleId, argument: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::ExcessArgument(argument));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,
@@ -1091,27 +1139,33 @@ fn resolve_binding(
 }
 
 const LOGGING_CLASSES: &str = "__imre_logging_classes__";
+const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
 
-/// Public logging classes can be compiled from Python alongside the module's
-/// native operations. Only local class definitions are exported from the bundle.
+/// Resolve the public definitions compiled from Python alongside sealed native operations.
 fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
     module.symbol(name).or_else(|| {
-        if module != IntrinsicModule::Logging || name.starts_with('_') {
-            return None;
-        }
+        let implementation = match module {
+            IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
+            IntrinsicModule::Textwrap if name == "indent" => TEXTWRAP_FUNCTIONS,
+            _ => return None,
+        };
         let (id, source) = modules
             .iter()
             .enumerate()
-            .find(|(_, m)| m.bundled && m.name == LOGGING_CLASSES)?;
+            .find(|(_, m)| m.bundled && m.name == implementation)?;
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
-                matches!(&source.parsed.syntax().body[d.statement], ast::Stmt::ClassDef(_)))
+                matches!((module, &source.parsed.syntax().body[d.statement]),
+                    (IntrinsicModule::Logging, ast::Stmt::ClassDef(_))
+                    | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_))))
         })
     })
 }
 
 struct Loader<'a> {
     fs: FileSystem<'a>,
+    /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
+    checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     inputs: crate::SourceInputs,
     root: PathBuf,
     extension_roots: Vec<PathBuf>,
@@ -1153,6 +1207,7 @@ impl<'a> Loader<'a> {
             session: Session::new(&root, &extension_roots)?,
             extension_roots,
             inputs: crate::SourceInputs::default(),
+            checked_builtin_imports: Vec::new(),
             root,
             modules: Vec::new(),
             by_name: HashMap::new(),
@@ -1299,12 +1354,17 @@ impl<'a> Loader<'a> {
                 }
             }
         }
+        self.doctest_program()?;
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
+        let mut checked_diagnostics = vec![Vec::new(); self.modules.len()];
+        for (id, name) in self.checked_builtin_imports {
+            checked_diagnostics[id].push(CheckedDiagnostic::BuiltinImport(name));
+        }
         let mut graph = SourceGraph {
             command_startup: None,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
-            checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -1527,7 +1587,7 @@ impl<'a> Loader<'a> {
                 }
                 for alias in &import.names {
                     let name = alias.name.as_str();
-                    if let Some(module) = self.intrinsic_module(name)? {
+                    if let Some(module) = self.intrinsic_module(name, None)? {
                         if alias.asname.is_none()
                             && let Some((local, _)) = name.split_once('.')
                             && let Some(namespace) = IntrinsicModule::named(local)
@@ -1537,6 +1597,9 @@ impl<'a> Loader<'a> {
                         }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
+                        if module == IntrinsicModule::Opcode {
+                            self.checked_builtin_imports.push((id, alias.range()));
+                        }
                         continue;
                     }
                     let leaf = self.load_module(name)?;
@@ -1558,7 +1621,7 @@ impl<'a> Loader<'a> {
                 }
                 let name = self.import_name(id, import)?;
                 if import.level == 0
-                    && let Some(module) = self.intrinsic_module(&name)?
+                    && let Some(module) = self.intrinsic_module(&name, Some(&import.names))?
                 {
                     for alias in &import.names {
                         let binding = stdlib_symbol(&self.modules, module, alias.name.as_str())
@@ -1580,6 +1643,11 @@ impl<'a> Loader<'a> {
                             })?;
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), binding, alias)?;
+                    }
+                    if module == IntrinsicModule::Opcode
+                        && let Some(name) = &import.module
+                    {
+                        self.checked_builtin_imports.push((id, name.range()));
                     }
                     return Ok(());
                 }
@@ -1633,31 +1701,48 @@ impl<'a> Loader<'a> {
 
     /// Intrinsic imports use fixed identities, but never silently accept a
     /// first-party file that attempts to shadow the standard-library namespace.
-    fn intrinsic_module(&mut self, name: &str) -> Result<Option<IntrinsicModule>, String> {
+    fn intrinsic_module(
+        &mut self,
+        name: &str,
+        imports: Option<&[ast::Alias]>,
+    ) -> Result<Option<IntrinsicModule>, String> {
         let module = IntrinsicModule::named(name).filter(|module| {
             self.reachable_only || !matches!(module, IntrinsicModule::Declaration(_))
         });
         if module.is_some() {
             self.reject_stdlib_shadow(name)?;
         }
-        if name.split('.').next() == Some("logging")
-            && module.is_some()
-            && !self.by_name.contains_key(LOGGING_CLASSES)
+        let bundle = match (name.split('.').next(), module) {
+            (Some("logging"), Some(_)) => Some((
+                LOGGING_CLASSES,
+                include_str!("../stdlib/logging/classes.py"),
+            )),
+            // A named import of a native operation needs no bundled function definitions.
+            (_, Some(module @ IntrinsicModule::Textwrap))
+                if imports.is_none_or(|names| {
+                    names
+                        .iter()
+                        .any(|alias| module.symbol(alias.name.as_str()).is_none())
+                }) =>
+            {
+                Some((
+                    TEXTWRAP_FUNCTIONS,
+                    include_str!("../stdlib/textwrap/functions.py"),
+                ))
+            }
+            _ => None,
+        };
+        if let Some((implementation, source)) = bundle
+            && !self.by_name.contains_key(implementation)
         {
-            let path = self.root.join(format!("{LOGGING_CLASSES}.py"));
+            let path = self.root.join(format!("{implementation}.py"));
             if self.fs.exists(&path) {
                 return Err(format!(
-                    "standard-library shadowing is unsupported: {LOGGING_CLASSES:?}"
+                    "standard-library shadowing is unsupported: {implementation:?}"
                 ));
             }
             self.inputs.missing.push(path.clone());
-            let id = self.add(
-                path.clone(),
-                path,
-                LOGGING_CLASSES.into(),
-                false,
-                include_str!("../stdlib/logging/classes.py"),
-            )?;
+            let id = self.add(path.clone(), path, implementation.into(), false, source)?;
             self.modules[id].bundled = true;
             self.scan(id)?;
         }
@@ -1712,6 +1797,9 @@ impl<'a> Loader<'a> {
         if name == LOGGING_CLASSES {
             return Err("the private logging implementation is not an importable module".into());
         }
+        if name == TEXTWRAP_FUNCTIONS {
+            return Err("the private textwrap implementation is not an importable module".into());
+        }
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {
                 return Err(format!(
@@ -1721,24 +1809,22 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "string" => Some((
                 "string/__init__.py",
                 include_str!("../stdlib/string/__init__.py"),
-                true,
             )),
             "unittest" => Some((
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),
-                true,
             )),
             "unittest.mock" => Some((
                 "unittest/mock.py",
                 include_str!("../stdlib/unittest/mock.py"),
-                false,
             )),
             _ => None,
         };
-        if let Some((relative, source, package)) = bundled {
+        if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
             let parent = if let Some((parent, child)) = name.rsplit_once('.') {
                 Some((self.load_module(parent)?, child))
@@ -1747,8 +1833,14 @@ impl<'a> Loader<'a> {
             };
             // ty resolves this immutable source at its Python import path in the
             // in-memory project. It is part of the compiler, not a disk input.
-            let path = self.root.join(relative);
-            let id = self.add(path.clone(), path, name.into(), package, source)?;
+            let path = self.root.join(filename);
+            let id = self.add(
+                path.clone(),
+                path,
+                name.into(),
+                filename.ends_with("/__init__.py"),
+                source,
+            )?;
             self.modules[id].bundled = true;
             self.scan(id)?;
             self.bind_child(name, id, parent)?;
