@@ -53,7 +53,19 @@ With `annotationlib` from #586, all eight [untouched import and runner
 probes](startup-linux.json) advance to `Lib/test/support/__init__.py:9` and
 stop at `import inspect`. Staging the original files from the pinned CPython
 Git checkout or the repository’s offline fixtures gives identical diagnostics.
-Neither run executes a test case.
+Neither run executes a test case. After inspect #784 landed, the same eight
+[checks on the prospective merge](startup-inspect-linux.json) reach `import
+_opcode` at line 11 of `test.support`. The pinned support module refers to
+`ENABLE_SPECIALIZATION` and `ENABLE_SPECIALIZATION_FT` in its specialization
+decorators. Both fixture sources give the same diagnostics after replacing
+the randomly generated staging directory with `<staged>`. When #800 supplied
+those flags, [the same eight checks](startup-specialization-linux.json) reached
+`import types` at line 19. That result predates `types.SimpleNamespace` (#828).
+With #828, [all eight probes](startup-types-linux.json) get past `types`.
+Normal checking stops at `import warnings` in `test.support` for both suites.
+With `--reachable-only`, itertools reaches a starred tuple in
+`test/support/threading_helper.py:277`, while JSON reaches `import _imp` in
+`test/support/import_helper.py:2`. Both fixture sources agree; no test body ran.
 
 ```sh
 dir=benchmarks/cpython_stdlib/full/doctest
