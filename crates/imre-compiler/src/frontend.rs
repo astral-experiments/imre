@@ -4590,14 +4590,42 @@ impl<'a> Checker<'a> {
                     let tuple_list = self.types.element(ty).is_some_and(|item| {
                         matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
-                    if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
-                        || matches!(
-                            ty,
-                            Type::Set(_) | Type::StringKeys | Type::Optional(_) | Type::Union(_)
-                        )
-                        || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
-                        || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
-                    {
+                    let comparable = match ty {
+                        Type::List(_) => tuple_list,
+                        Type::Dict(_) => self.types.is_counter(ty),
+                        Type::Tuple(_) => self.types.hashable_key(ty),
+                        Type::ListInt
+                        | Type::Set(_)
+                        | Type::StringKeys
+                        | Type::Optional(_)
+                        | Type::Union(_) => false,
+                        Type::Bool
+                        | Type::None
+                        | Type::Int
+                        | Type::Float
+                        | Type::Str
+                        | Type::StrLiteral(_)
+                        | Type::StrEnum(_)
+                        | Type::Enum(_)
+                        | Type::Bytes
+                        | Type::Path
+                        | Type::Class(_)
+                        | Type::Sha256
+                        | Type::Exception
+                        | Type::ExitCode
+                        | Type::TimeoutExpired
+                        | Type::TextIO
+                        | Type::CompletedProcess(_)
+                        | Type::BinaryIO => true,
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                expression,
+                                "unsupported comparison for these types",
+                            ));
+                        }
+                    };
+                    if !comparable {
                         return Err(error(
                             self.source,
                             expression,

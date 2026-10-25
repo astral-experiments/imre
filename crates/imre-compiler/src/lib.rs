@@ -437,6 +437,22 @@ mod tests {
     use super::{CompileOptions, compile};
 
     #[test]
+    fn unsupported_handle_comparisons_are_diagnosed_before_lowering() {
+        for source in [
+            "import tomli\nv = tomli.loads('x = 1')\nprint(v == v != v)\n",
+            "import logging\nv = logging.getLogger('x')\nprint(v != v)\n",
+            "import asyncio\nv = asyncio.Semaphore(1)\nprint(v != v)\n",
+            "from tempfile import TemporaryDirectory\nv = TemporaryDirectory()\nprint(v == v)\n",
+        ] {
+            let error = super::check(source).unwrap_err();
+            assert!(
+                error.contains("unsupported comparison for these types"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn unsupported_operations_on_shared_tuple_types_have_bounded_diagnostics() {
         let mut source = String::from("def f(x0: int) -> None:\n");
         for i in 0..14 {
