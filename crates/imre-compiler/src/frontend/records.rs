@@ -1127,6 +1127,8 @@ impl Checker<'_> {
                     Builtin::NamedException {
                         kind,
                         message_field: decl.fields.len() - 1,
+                        tuple_args: self.classes.fields[class].last()
+                            == Some(&Type::ExceptionField),
                         text,
                         repr,
                         dataclass_repr: decl.dataclass.is_some_and(|d| d.repr),
@@ -1143,8 +1145,41 @@ impl Checker<'_> {
         let ty = self.types.optional(Type::Str);
         let message_value = self.expr_expected(message, Type::Str)?;
         let value = self.coerce(message_value, ty, message)?;
+        Ok(self.store_exception_arguments(class, value))
+    }
+
+    /// Materialize all base arguments before exposing the tuple through the exception.
+    fn set_exception_arguments(
+        &mut self,
+        class: usize,
+        nodes: &[ast::Expr],
+    ) -> Result<Expr, String> {
+        let mut values = Vec::with_capacity(nodes.len());
+        for node in nodes {
+            let value = Self::string_value(self.expr(node)?);
+            if !self.import_argument_supported(value.ty) {
+                return Err(error(
+                    self.source,
+                    node,
+                    "unsupported native exception argument type",
+                ));
+            }
+            values.push(value);
+        }
+        let tuple = Expr {
+            ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
+            kind: ExprKind::Tuple(values),
+        };
+        let args = Expr {
+            ty: Type::ExceptionField,
+            kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![tuple]),
+        };
+        Ok(self.store_exception_arguments(class, args))
+    }
+
+    fn store_exception_arguments(&self, class: usize, value: Expr) -> Expr {
         let field = self.classes.fields[class].len() - 1;
-        Ok(Expr {
+        Expr {
             ty: Type::None,
             kind: ExprKind::Scope {
                 body: vec![Statement::SetField(self.local(0), field, value)],
@@ -1154,7 +1189,7 @@ impl Checker<'_> {
                 }),
                 clear: Vec::new(),
             },
-        })
+        }
     }
 
     pub(super) fn explicit_exception_initializer(
@@ -1169,11 +1204,11 @@ impl Checker<'_> {
                 .declarations
                 .exceptions
                 .contains_key(&self.classes.declarations.definitions[class].definition)
-            && let Some((base, message)) =
+            && let Some((base, args)) =
                 crate::classes::explicit_message_initializer(&self.graph.modules[self.module], call)
             && !self.names.contains_key(base)
         {
-            return self.set_exception_message(class, message).map(Some);
+            return self.set_exception_arguments(class, args).map(Some);
         }
         Ok(None)
     }
@@ -1190,6 +1225,11 @@ impl Checker<'_> {
                 .bindings
                 .contains_key("super")
         {
+            if self.classes.fields[class].last() == Some(&Type::ExceptionField)
+                && call.arguments.keywords.is_empty()
+            {
+                return self.set_exception_arguments(class, &call.arguments.args);
+            }
             let [message] = call.arguments.args.as_ref() else {
                 return Err(error(
                     self.source,

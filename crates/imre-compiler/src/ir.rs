@@ -569,6 +569,7 @@ pub(crate) enum Builtin {
     NamedException {
         kind: u32,
         message_field: usize,
+        tuple_args: bool,
         text: Option<usize>,
         repr: Option<usize>,
         dataclass_repr: bool,
@@ -584,6 +585,7 @@ pub(crate) enum Builtin {
     ImportErrorField(u32),
     ImportErrorReset,
     ImportErrorRejectReset,
+    ExceptionTupleView,
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,

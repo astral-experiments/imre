@@ -76,14 +76,12 @@ fn builtin_mro(kind: u32) -> Vec<u32> {
 pub(crate) fn explicit_message_initializer<'a>(
     module: &SourceModule,
     call: &'a ast::ExprCall,
-) -> Option<(&'a str, &'a ast::Expr)> {
+) -> Option<(&'a str, &'a [ast::Expr])> {
     let ast::Expr::Attribute(method) = call.func.as_ref() else {
         return None;
     };
     let base = method.value.as_name_expr()?.id.as_str();
-    let [receiver, message] = call.arguments.args.as_ref() else {
-        return None;
-    };
+    let (receiver, values) = call.arguments.args.split_first()?;
     (method.attr.as_str() == "__init__"
         && matches!(base, "Exception" | "BaseException")
         && !module.bindings.contains_key(base)
@@ -91,12 +89,10 @@ pub(crate) fn explicit_message_initializer<'a>(
             .as_name_expr()
             .is_some_and(|receiver| receiver.id == "self")
         && call.arguments.keywords.is_empty())
-    .then_some((base, message))
+    .then_some((base, values))
 }
 
-/// Every admitted payload constructor explicitly establishes its string argument.
-/// BaseException.__new__ also accepts arbitrary positional arguments, whose
-/// heterogeneous tuple is outside this fixed-layout subset.
+/// A fixed payload must establish its base arguments exactly once before it can escape.
 fn validate_layout(module: &SourceModule, node: &ast::StmtClassDef) -> Result<(), String> {
     let methods = node
         .body

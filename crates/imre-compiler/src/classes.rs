@@ -17,6 +17,8 @@ pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
 pub(crate) use exceptions::explicit_message_initializer;
 pub(crate) use inheritance::super_init;
 
+pub(crate) const EXCEPTION_ARGS_SLOT: &str = "<exception arguments>";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MethodKind {
     Instance,
@@ -122,14 +124,25 @@ impl Classes {
         for def in &resolved.layouts {
             let c = &mut definitions[ids[def]];
             // This ABI slot is not a Python identifier, constructor parameter,
-            // dataclass comparison field, or repr field. Zero means no argument.
+            // dataclass comparison field, or repr field. The frontend gives
+            // the tuple slot its native exception field type during layout.
+            let module = &graph.modules[def.module];
+            let tuple_args = c.methods.iter().filter(|m| matches!(m.name.as_str(), "__init__" | "__post_init__"))
+                .flat_map(|m| &m.body).any(|stmt| matches!(stmt, ast::Stmt::Expr(e)
+                    if matches!(&*e.value, ast::Expr::Call(call) if explicit_message_initializer(module, call).is_some()
+                        || super_init(call) && call.arguments.args.len() != 1)));
             let annotation = ruff_python_parser::parse_expression("str | None")
                 .expect("static annotation")
                 .expr()
                 .clone();
             c.fields.push(Field {
                 module: def.module,
-                name: "<exception message>".into(),
+                name: if tuple_args {
+                    EXCEPTION_ARGS_SLOT
+                } else {
+                    "<exception message>"
+                }
+                .into(),
                 annotation,
                 default: None,
                 kw_only: false,
@@ -681,10 +694,12 @@ fn check_initializer(
         if exception_layout
             && let ast::Stmt::Expr(stmt) = statement
             && let ast::Expr::Call(call) = &*stmt.value
-            && let Some((_, message)) = explicit_message_initializer(module, call)
+            && let Some((_, args)) = explicit_message_initializer(module, call)
         {
             let mut use_self = SelfUse(receiver, None, &initialized);
-            use_self.visit_expr(message);
+            for arg in args {
+                use_self.visit_expr(arg);
+            }
             if let Some(expr) = use_self.1 {
                 return Err(module.error(
                     expr,

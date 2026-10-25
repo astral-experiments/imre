@@ -71,7 +71,9 @@ impl Builtin {
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
-            Self::ExceptionFieldRepr => Contract::new(false, PreservesOwners),
+            Self::ExceptionTupleView | Self::ExceptionFieldRepr => {
+                Contract::new(false, PreservesOwners)
+            }
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
