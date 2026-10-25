@@ -87,6 +87,7 @@ mod sys;
 mod text;
 mod timed_handlers;
 mod truthiness;
+mod tuple_index;
 mod unbound_locals;
 mod unions;
 mod unittest;
@@ -133,6 +134,19 @@ impl ClassInfo {
     fn new(graph: &SourceGraph, types: &Types) -> Result<Self, String> {
         let mut declarations = Classes::collect(graph)?;
         types.set_exception_declarations(declarations.exception_declarations.clone());
+        types.set_value_structs(
+            declarations
+                .definitions
+                .iter()
+                .enumerate()
+                .filter_map(|(id, class)| {
+                    class
+                        .dataclass
+                        .is_some_and(|d| d.value_struct)
+                        .then_some(id)
+                })
+                .collect(),
+        );
         types.set_pathlike_records(
             declarations
                 .definitions
@@ -197,6 +211,15 @@ impl ClassInfo {
                             Some(class_id),
                         )
                         .and_then(|ty| {
+                            if class.dataclass.is_some_and(|d| d.value_struct)
+                                && !matches!(ty, Type::Float | Type::Bool)
+                            {
+                                return Err(error(
+                                    &graph.modules[field.module].source,
+                                    &field.annotation,
+                                    "imre.struct fields must be float or bool",
+                                ));
+                            }
                             records::field_default(
                                 field,
                                 ty,
@@ -246,6 +269,9 @@ impl ClassInfo {
             let before = hashable.len();
             hashable.retain(|&id| {
                 declarations.definitions[id].toml_hash
+                    || declarations.definitions[id]
+                        .dataclass
+                        .is_some_and(|d| d.value_struct)
                     || declarations.definitions[id]
                         .fields
                         .iter()
@@ -933,6 +959,9 @@ pub(crate) fn lower_with_owners(
                     definition,
                     "not every path returns the declared type",
                 ));
+            }
+            if classes.generators.contains(&signature.id) {
+                body = checker.generator_body(body);
             }
             Ok((
                 ir::Function {
@@ -3029,14 +3058,12 @@ impl<'a> Checker<'a> {
         if let ast::Expr::Call(call) = expression
             && let ast::Expr::Attribute(attribute) = &*call.func
             && attribute.attr.as_str() == "items"
+            && self.class_reference(&attribute.value).is_none()
         {
-            if self.class_reference(&attribute.value).is_some() {
-                return Ok((self.call(call)?, false));
-            }
             let receiver = self.expr(&attribute.value)?;
             if let Type::Class(class) = receiver.ty {
                 return Ok((
-                    self.class_method_call(call, attribute, class, Some(receiver))?,
+                    self.iteration_method_call(call, attribute, class, receiver)?,
                     false,
                 ));
             }
@@ -3092,7 +3119,17 @@ impl<'a> Checker<'a> {
             return Ok(Iteration::Range(args));
         }
         let (iterable, items) = self.iteration_source(expression)?;
-        if let Some(prepared) = self.record_iteration(&iterable, expression)? {
+        self.iteration_value(iterable, items, expression)
+    }
+
+    /// Prepare cursors and generators for pulling while preserving concrete container iteration.
+    fn iteration_value(
+        &mut self,
+        iterable: Expr,
+        items: bool,
+        node: &impl Ranged,
+    ) -> Result<Iteration, String> {
+        if let Some(prepared) = self.record_iteration(&iterable, node)? {
             return Ok(Iteration::Prepared(prepared));
         }
         Ok(Iteration::Container {
@@ -4885,11 +4922,11 @@ impl<'a> Checker<'a> {
     ) -> Result<Expr, String> {
         if op == ast::Operator::Mod
             && left.ty == Type::Str
-            && matches!(right.ty, Type::Int | Type::Str)
+            && (matches!(right.ty, Type::Int | Type::Str) || self.types.percent_tuple(right.ty))
         {
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::PercentScalar, vec![left, right]),
+                kind: ExprKind::Builtin(Builtin::PercentFormat, vec![left, right]),
             });
         }
         if op == ast::Operator::Pow {
@@ -5461,6 +5498,10 @@ impl<'a> Checker<'a> {
                             .or((receiver.ty == Type::StringKeys).then_some(Type::Str))
                         {
                             (element, Builtin::SetContains)
+                        } else if let Some(ty) = self.types.element(receiver.ty)
+                            && self.types.is_value_struct(ty)
+                        {
+                            (ty, Builtin::StructListContains)
                         } else if self.types.element(receiver.ty) == Some(Type::Str) {
                             (Type::Str, Builtin::StringListContains)
                         } else {
@@ -5721,7 +5762,8 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     let tuple_list = self.types.element(ty).is_some_and(|item| {
-                        matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
+                        self.types.is_value_struct(item)
+                            || matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
                     if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
                         || matches!(
@@ -5763,7 +5805,7 @@ impl<'a> Checker<'a> {
                 let list = Self::enum_text(self.expr(&subscript.value)?);
                 if self.mapping_class(list.ty).is_some() {
                     let key = self.expr(&subscript.slice)?;
-                    return self.mapping_primitive(list, "__getitem__", &[key], expression);
+                    return self.record_primitive(list, "__getitem__", &[key], expression);
                 }
                 if list.ty == Type::BuiltinClass {
                     // Python evaluates type arguments before invoking __class_getitem__.
@@ -5856,48 +5898,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Some(fields) = self.types.fields(list.ty) {
-                    let (literal, negative) = if let ast::Expr::UnaryOp(unary) = &*subscript.slice {
-                        if unary.op != ast::UnaryOp::USub {
-                            return Err(error(
-                                self.source,
-                                expression,
-                                "tuple indexes must be integer literals",
-                            ));
-                        }
-                        (&*unary.operand, true)
-                    } else {
-                        (&*subscript.slice, false)
-                    };
-                    let index = if let ast::Expr::NumberLiteral(value) = literal
-                        && let ast::Number::Int(value) = &value.value
-                    {
-                        value.to_string().parse::<i64>().ok()
-                    } else {
-                        None
-                    }
-                    .ok_or_else(|| {
-                        error(
-                            self.source,
-                            expression,
-                            "tuple indexes must be bounded integer literals",
-                        )
-                    })?;
-                    let index = if negative { -index } else { index };
-                    let index = if index < 0 {
-                        index + fields.len() as i64
-                    } else {
-                        index
-                    };
-                    let field = usize::try_from(index)
-                        .ok()
-                        .filter(|&index| index < fields.len())
-                        .ok_or_else(|| {
-                            error(self.source, expression, "tuple index is out of bounds")
-                        })?;
-                    return Ok(Expr {
-                        ty: fields[field],
-                        kind: ExprKind::Field(Box::new(list), field),
-                    });
+                    return self.fixed_tuple_item(list, &fields, &subscript.slice, expression);
                 }
                 let element = self.types.element(list.ty).ok_or_else(|| {
                     error(
@@ -6576,6 +6577,10 @@ impl<'a> Checker<'a> {
             return Ok(copy);
         }
         if calls::starred(call) {
+            if let Some(Binding::Intrinsic(Intrinsic::Credential(name))) = self.resolve(&call.func)
+            {
+                return self.credential_call(call, name);
+            }
             if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
                 && let Some(signature) = self.functions.get(&definition)
             {
@@ -6846,6 +6851,9 @@ impl<'a> Checker<'a> {
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
+            Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
+                return self.credential_call(call, name);
+            }
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
                 return Ok(Expr {
@@ -7297,7 +7305,7 @@ impl<'a> Checker<'a> {
             }
             if matches!(
                 attribute.attr.as_str(),
-                "splitlines" | "isspace" | "isupper"
+                "splitlines" | "isalnum" | "isspace" | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.splitlines_or_predicate(
@@ -7772,7 +7780,12 @@ impl<'a> Checker<'a> {
             };
             let builtin = match value.ty {
                 Type::Str | Type::StrLiteral(_) => Builtin::HashStr,
-                Type::Class(id) if self.classes.declarations.definitions[id].toml_hash => {
+                Type::Class(id)
+                    if self.classes.declarations.definitions[id].toml_hash
+                        || self.classes.declarations.definitions[id]
+                            .dataclass
+                            .is_some_and(|d| d.value_struct) =>
+                {
                     Builtin::HashRecord
                 }
                 _ => {
