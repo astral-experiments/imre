@@ -19,6 +19,7 @@ CASES = {
     ],
     "groups": [[], ["--help"], ["foo", "check", "--help"], ["foo", "check"],
                ["--first", "a", "-v", "--alt=b", "foo", "check", "--long-setting", "c"]],
+    "explicit_args": [[], ["first"], ["--", "-x"], ["first", "extra"], ["--help"]],
     "reader": [
         [],
         ["--help"],

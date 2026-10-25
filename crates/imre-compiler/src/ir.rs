@@ -34,6 +34,8 @@ pub(crate) enum Type {
     Iterator,
     /// A sealed builtin exception with an immutable category and owned payload.
     Exception,
+    /// An exception object known to own the given fixed payload layout.
+    NamedException(usize),
     /// An owned view of the immutable None, bool, int or str in SystemExit.code.
     ExitCode,
     /// A proved catch-only timeout with readonly float and nullable bytes fields.
@@ -62,6 +64,7 @@ pub(crate) enum Type {
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
+    ZipInfo,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
@@ -131,7 +134,7 @@ impl std::fmt::Display for Type {
             Self::ByteOutput => "private byte output",
             Self::None => "None",
             Self::Iterator => "iterator",
-            Self::Exception => "Exception",
+            Self::Exception | Self::NamedException(_) => "Exception",
             Self::ExitCode => "SystemExit.code",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::TextIO => "typing.TextIO",
@@ -151,6 +154,7 @@ impl std::fmt::Display for Type {
             Self::Logger => "logging.Logger",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
+            Self::ZipInfo => "zipfile.ZipInfo",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
@@ -407,6 +411,18 @@ pub(crate) enum Compare {
     GreaterEqual,
 }
 
+/// Public ZIP entry metadata read from the central directory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ZipField {
+    Name,
+    Size,
+    CompressedSize,
+    Crc,
+    Method,
+    ExternalAttr,
+    IsDir,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     DirectoryContextView,
@@ -452,7 +468,8 @@ pub(crate) enum Builtin {
     SystemExitCodeEqual {
         reversed: bool,
     },
-    SysExit,
+    /// Evaluates and roots all arguments, then raises the last (an exception).
+    RaiseException,
     WallTime,
     Logging(LogOperation),
     Input,
@@ -462,6 +479,19 @@ pub(crate) enum Builtin {
     IntSignAsFloat,
     Bool,
     Str,
+    /// Wrap a fixed record after constructor/post-init, preserving exception identity.
+    NamedException {
+        kind: u32,
+        message_field: usize,
+        text: Option<usize>,
+        repr: Option<usize>,
+        dataclass_repr: bool,
+    },
+    /// Borrowing a payload from its exception returns one owned record reference.
+    ExceptionRecord,
+    /// A single non-string Python argument, retained for str/repr.
+    ExceptionArgument(u32),
+    ExceptionRepr,
     /// Python representation of a value with a fully known storage shape.
     Repr,
     Len,
@@ -540,11 +570,25 @@ pub(crate) enum Builtin {
     Decode,
     Sha256Hex,
     Sha256New,
+    HashNew,
+    HashAvailable,
     Sha256Update,
     Sha256Digest {
         hex: bool,
     },
     Sha256Copy,
+    BytesIo,
+    BinarySeek,
+    BinaryTell,
+    ZipOpenFile,
+    ZipGetInfo,
+    ZipInfoList,
+    ZipMember,
+    ZipRead,
+    ZipTest,
+    ZipFilename,
+    ZipMinReadSize,
+    ZipField(ZipField),
     ZipOpen,
     ZipNamelist,
     ZipClose,
@@ -576,7 +620,10 @@ pub(crate) enum Builtin {
     RStrip,
     SysArgv,
     /// The child layout descriptors follow the literal subcommand order.
-    ParseArgs(Vec<usize>),
+    ParseArgs {
+        children: Vec<usize>,
+        process_argv: bool,
+    },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
     ExactRecord(usize),
@@ -652,6 +699,7 @@ pub(crate) enum Builtin {
     KeyUnion,
     KeySet,
     KeyIntersection,
+    KeyDifference,
     /// Produces sorted unique string keys from a small union of local dictionaries.
     SortedStringKeys,
     /// Each generated field reads the sorted key (0) or one input dictionary (1-based).
@@ -772,6 +820,9 @@ pub(crate) enum PathOperation {
     OsExists,
     New,
     Join,
+    Match {
+        full: bool,
+    },
     WithName,
     Text,
     Name,
@@ -811,6 +862,7 @@ pub(crate) enum PathOperation {
 pub(crate) enum PosixPathOperation {
     Join,
     MixedJoin { path_in_tail: bool },
+    Commonpath,
     Basename,
     Dirname,
     Splitext,
@@ -822,7 +874,15 @@ pub(crate) enum PosixPathOperation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
     Get,
+    AddLevel,
+    LevelName,
+    LevelForName,
+    CheckLevel,
+    Names,
+    Numbers,
+    NamesCopy,
     Configure,
+    ConfigureName,
     Name,
     Level,
     Root,
@@ -929,7 +989,10 @@ impl InstanceType {
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
             Self::Tuple => matches!(ty, Type::Tuple(_)),
-            Self::Exception(_) => matches!(ty, Type::Exception | Type::TimeoutExpired),
+            Self::Exception(_) => matches!(
+                ty,
+                Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+            ),
         }
     }
 }

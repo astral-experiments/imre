@@ -15,7 +15,7 @@ Run `tests/text.py` with the compiler, runtime, Python oracle and clang paths.
 
 `native_hashlib.py` takes the same arguments as the JSON runner. In each of CPython’s four `test_case_sha256_*` vectors, the original unittest checks the hex digest, raw digest and digest size from a single native hash object. Alternate constructors and `file_digest` run on CPython and are counted separately.
 
-The runner also compiles the unchanged `test_sha256_gil` and `test_sha256_update_over_4gb` method bodies and their equality checks. CPython supplies the private extension threshold for the first fixture. The second updates the same object with a 1 MiB buffer 4,096 times, then adds a final 11 bytes and checks CPython’s expected digest.
+The runner also compiles the unchanged `test_sha256_gil`, `test_sha256_update_over_4gb`, and `test_new_upper_to_lower` method bodies and their equality checks. CPython supplies the private extension threshold for the first fixture. The second updates the same object with a 1 MiB buffer 4,096 times, then adds a final 11 bytes and checks CPython’s expected digest.
 
 ## Native POSIX path cases
 
@@ -59,7 +59,7 @@ Stream assertions receive the bytes that the native program wrote to its file.
 
 ## Native POSIX os.path calls with upstream unittest assertions
 
-`native_os_path.py` runs complete upstream POSIX tests for `join`, `basename`, `dirname`, `splitext`, `normpath` and `abspath`. CPython supplies unittest assertions and filesystem setup. Each tested operation calls a compiled Imre program in the fixture’s working directory. The result records each method’s native call count, including 100 calls from CPython’s 50 `normpath` cases for str and bytes. Pass the same compiler, runtime, clang, result and optional CPython source options as the JSON runner.
+`native_os_path.py` runs complete upstream POSIX tests for `join`, `basename`, `dirname`, `splitext`, `normpath` and `abspath`. CPython supplies unittest assertions and filesystem setup. Each tested operation calls a compiled Imre program in the fixture’s working directory. The result records each method’s native call count, including 100 calls from CPython’s 50 `normpath` cases for str and bytes. The unchanged `test_commonpath` accounts for 59 native calls, including the empty iterable, mixed types and absolute/relative conflicts. Pass the same compiler, runtime, clang, result and optional CPython source options as the JSON runner.
 
 The two user-defined `__fspath__` tests are outside the typed path subset. On Linux the upstream non-ASCII `abspath` test requests a surrogateescaped string; the result records that exclusion. Separate comparisons check raw bytes in an undecodable directory, text paths that normalize away that directory, and relative and absolute paths after the working directory is deleted.
 
@@ -78,6 +78,8 @@ reference_python=/path/to/cpython-3.14.5/python
 ```
 
 This run records what upstream passes and skips on the host. Native compatibility uses the separate Imre results. An infrastructure error in a stripped interpreter is visible until it is reproduced with a test-enabled CPython build.
+
+`native_zip_members.py` drives the original stored and deflated bad-CRC test methods. The host makes fixtures and runs unittest assertions; the child opens its own `BytesIO`, reads members, checks CRCs, and returns the sequence of reads and errors. A separate control checks duplicate entries, metadata, independent readers and caller-owned stream lifetimes.
 
 ## Native Counter cases
 

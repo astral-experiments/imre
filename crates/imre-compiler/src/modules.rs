@@ -104,6 +104,10 @@ pub(crate) enum Intrinsic {
     FutureAnnotations,
     TypeChecking,
     GetLogger,
+    GetLevelName,
+    AddLevelName,
+    LevelNamesMapping,
+    LevelMap { names: bool },
     BasicConfig,
     LogLevel(i64),
     Abc,
@@ -138,8 +142,11 @@ pub(crate) enum Intrinsic {
     Stdout,
     SysExecutable,
     SysPlatform,
+    SysEncoding(&'static str),
+    Stdin,
     GetSysconfigPath,
     OsPathExists,
+    OsDevnull,
     SysExit,
     ShlexSplit,
     Ndiff,
@@ -159,13 +166,18 @@ pub(crate) enum Intrinsic {
     UnsupportedOperation,
     GzipOpen,
     Sha256,
+    HashNew,
+    HashAvailable,
     ZipFile,
+    ZipInfo,
+    BytesIo,
     BadZipFile,
     BadGzipFile,
     RegexCompile,
     RegexSearch,
     RegexSub,
     RegexVerbose,
+    RegexUnicode,
     RegexPattern,
     RegexMatch,
     StrEnum,
@@ -192,6 +204,7 @@ pub(crate) enum Intrinsic {
     DataclassField,
     AsDict,
     SelfType,
+    ClassVar,
     AssertNever,
     Cast,
     Path,
@@ -280,6 +293,11 @@ impl IntrinsicModule {
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
+            (Self::Logging, "getLevelName") => Intrinsic::GetLevelName,
+            (Self::Logging, "addLevelName") => Intrinsic::AddLevelName,
+            (Self::Logging, "getLevelNamesMapping") => Intrinsic::LevelNamesMapping,
+            (Self::Logging, "_nameToLevel") => Intrinsic::LevelMap { names: true },
+            (Self::Logging, "_levelToName") => Intrinsic::LevelMap { names: false },
             (Self::Logging, "basicConfig") => Intrinsic::BasicConfig,
             (Self::Logging, "DEBUG") => Intrinsic::LogLevel(10),
             (Self::Logging, "INFO") => Intrinsic::LogLevel(20),
@@ -313,8 +331,11 @@ impl IntrinsicModule {
             (Self::Subprocess, "DEVNULL") => Intrinsic::Devnull,
             (Self::Subprocess, "check_output") => Intrinsic::CheckOutput,
             (Self::Typing, "TYPE_CHECKING") => Intrinsic::TypeChecking,
-            (Self::Sys, "stderr") => Intrinsic::Stderr,
-            (Self::Sys, "stdout") => Intrinsic::Stdout,
+            (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
+            (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
+            (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
+            (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
+            (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
@@ -345,6 +366,7 @@ impl IntrinsicModule {
             (Self::Typing, "Union") => Intrinsic::Union,
             (Self::Typing, "Literal") => Intrinsic::Literal,
             (Self::Typing, "Self") => Intrinsic::SelfType,
+            (Self::Typing, "ClassVar") => Intrinsic::ClassVar,
             (Self::Typing, "Any") => Intrinsic::Any,
             (Self::Typing, "assert_never") => Intrinsic::AssertNever,
             (Self::Typing, "cast") => Intrinsic::Cast,
@@ -355,13 +377,18 @@ impl IntrinsicModule {
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
+            (Self::Hashlib, "new") => Intrinsic::HashNew,
+            (Self::Hashlib, "algorithms_available") => Intrinsic::HashAvailable,
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
+            (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
+            (Self::Io, "BytesIO") => Intrinsic::BytesIo,
             (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
             (Self::Re, "sub") => Intrinsic::RegexSub,
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
+            (Self::Re, "UNICODE") => Intrinsic::RegexUnicode,
             (Self::Re, "Pattern") => Intrinsic::RegexPattern,
             (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
@@ -386,7 +413,7 @@ impl IntrinsicModule {
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
-            (Self::Pathlib, "Path") => Intrinsic::Path,
+            (Self::Pathlib, "Path" | "PosixPath") => Intrinsic::Path,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
@@ -403,7 +430,9 @@ impl IntrinsicModule {
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
             (Self::Os, "fspath") => Intrinsic::FsPath,
+            (Self::Os, "devnull") => Intrinsic::OsDevnull,
             (Self::PosixPath, "exists") => Intrinsic::OsPathExists,
+            (Self::PosixPath, "commonpath") => Intrinsic::PosixPath(PosixPathOperation::Commonpath),
             (Self::PosixPath, "join") => Intrinsic::PosixPath(PosixPathOperation::Join),
             (Self::PosixPath, "basename") => Intrinsic::PosixPath(PosixPathOperation::Basename),
             (Self::PosixPath, "dirname") => Intrinsic::PosixPath(PosixPathOperation::Dirname),
@@ -421,6 +450,7 @@ pub(crate) struct SourceModule {
     pub(crate) path: PathBuf,
     pub(crate) name: String,
     pub(crate) source: String,
+    bundled: bool,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
@@ -467,6 +497,26 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// Keep module indices stable for the semantic cache. Only after lowering
+    /// expose the files a disk build must revalidate and protect from writes.
+    pub(crate) fn disk_inputs(
+        &mut self,
+        profile: Option<&Path>,
+    ) -> (crate::SourceInputs, Vec<PathBuf>) {
+        let mut inputs = std::mem::take(&mut self.inputs);
+        let mut modules = self.modules.iter();
+        inputs
+            .files
+            .retain(|_| !modules.next().expect("one input per module").bundled);
+        let paths = inputs
+            .files
+            .iter()
+            .map(|(path, _, _)| path.clone())
+            .chain(profile.map(Path::to_path_buf))
+            .collect();
+        (inputs, paths)
+    }
+
     /// Keep read-only JSON views in programs that never parse or modify a TOML document.
     fn uses_mutable_documents(&self) -> bool {
         use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
@@ -828,6 +878,7 @@ impl<'a> Loader<'a> {
             path,
             name,
             source,
+            bundled: false,
             parsed,
             is_package,
             root_index: 0,
@@ -1147,7 +1198,14 @@ impl<'a> Loader<'a> {
     /// first-party file that attempts to shadow the standard-library namespace.
     fn intrinsic_module(&mut self, name: &str) -> Result<Option<IntrinsicModule>, String> {
         let module = IntrinsicModule::named(name);
-        if module.is_some() && self.allow_imports {
+        if module.is_some() {
+            self.reject_stdlib_shadow(name)?;
+        }
+        Ok(module)
+    }
+
+    fn reject_stdlib_shadow(&mut self, name: &str) -> Result<(), String> {
+        if self.allow_imports {
             for base in [
                 self.root.join(name.split('.').next().unwrap()),
                 self.root.join(name.replace('.', "/")),
@@ -1162,7 +1220,7 @@ impl<'a> Loader<'a> {
                 }
             }
         }
-        Ok(module)
+        Ok(())
     }
 
     fn import_name(&self, id: ModuleId, import: &ast::StmtImportFrom) -> Result<String, String> {
@@ -1191,9 +1249,6 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
-        if !self.allow_imports {
-            return Err("imports require a source file and a first-party module root".into());
-        }
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {
                 return Err(format!(
@@ -1201,6 +1256,25 @@ impl<'a> Loader<'a> {
                 ));
             }
             return Ok(id);
+        }
+        if name == "unittest" {
+            self.reject_stdlib_shadow(name)?;
+            // ty resolves this immutable source at its Python import path in the
+            // in-memory project. It is part of the compiler, not a disk input.
+            let path = self.root.join("unittest/__init__.py");
+            let id = self.add(
+                path.clone(),
+                path,
+                name.into(),
+                true,
+                include_str!("../stdlib/unittest/__init__.py"),
+            )?;
+            self.modules[id].bundled = true;
+            self.scan(id)?;
+            return Ok(id);
+        }
+        if !self.allow_imports {
+            return Err("imports require a source file and a first-party module root".into());
         }
         // Both scanning an import and resolving a dotted package parent can
         // re-enter the loader. Count active calls, including unresolved parents.

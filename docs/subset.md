@@ -21,7 +21,7 @@ This is a deliberately restricted Python dialect for closed, statically typed so
 | Comprehensions | Eager list, dictionary, and set comprehensions; immediately consumed generator expressions; nested `for` clauses and truth-tested filters; isolated target bindings |
 | Tuples | Fixed length and a type per position; literals, bounded literal indexing, nested/starred unpacking into names, fields, and subscripts, and `len(...)`; immutable slots; value equality for immutable field shapes and lexicographic ordering for ordered scalar shapes |
 | Strings | Immutable UTF-8 text, literals, scalar, record, and list f-strings and `!r`, named `str.format` fields, signed decimal integer and bounded fixed/percent formats, `textwrap.dedent`, concatenation, equality/inequality, Unicode scalar length, indexing, slicing and iteration, bounded `split`/`rsplit`, `splitlines()`, stripping, prefix/suffix checks, `find`, `partition`, `isspace`, `join(iterable)`, `replace(old, new)`, input and output |
-| Regular expressions | Fixed text patterns in `re.compile` and `re.search`, named and numbered groups, character offsets, and `re.VERBOSE` |
+| Regular expressions | Fixed text patterns in `re.compile` and `re.search`, named and numbered groups, character offsets, and `re.VERBOSE` / `re.UNICODE` |
 | Bytes | Immutable bytes; literals, construction from an integer count or `list[int]`, concatenation/repetition, all value comparisons, indexing/slicing/iteration, `len`, Python byte repr, strict UTF-8 encode/decode |
 | Paths | Native POSIX `pathlib.Path`; lexical joining and components, equality, text I/O, filesystem predicates, directory creation/removal, unlink/replace, immediately consumed directory iteration and single-component globbing |
 | Workspaces | Stored or direct `TemporaryDirectory` and `nullcontext` scopes with typed enter values and recursive cleanup |
@@ -35,7 +35,7 @@ Indentation must use spaces; tabs and form feeds remain valid inside string data
 
 The compiler bounds syntax complexity before parsing each module. Deeply nested blocks, delimiters, or long chains of operators can exceed the limit. Splitting a long expression into intermediate assignments reduces its depth.
 
-Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, async generators, slice assignment/deletion, tuple display expansion, call argument expansion, variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, async generators, slice assignment/deletion, tuple display expansion, dynamic call argument expansion, variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
 
 ## Inferred function signatures and iterable consumers
 
@@ -265,7 +265,7 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 
 ## Fixed regular expressions
 
-`re.compile` accepts a literal string and an optional flag of `0` or `re.VERBOSE`.
+`re.compile` accepts a literal string and an optional literal `0`, `re.VERBOSE`, `re.UNICODE`, or their bitwise union. Unicode matching is already the default for text.
 `re.search(pattern, text)` accepts a literal or a compiled `re.Pattern[str]`.
 A compiled pattern has `search(text)` and `match(text)` methods. The latter
 starts at offset zero. The compiler checks each
@@ -377,7 +377,7 @@ keys = {*{"one": 1, "two": 2}}
 merged = {**{"one": 1}, "one": 2, "three": 3}
 ```
 
-Destination annotations can type empty source literals and promote copied values into optional storage. Existing source containers keep their own exact layout and aliases. Tuple result displays, argument expansion in calls, variadic parameters, and user-defined iteration protocols remain outside this milestone.
+Destination annotations can type empty source literals and promote copied values into optional storage. Existing source containers keep their own exact layout and aliases. A direct call to a source function, ordinary method, classmethod, or staticmethod can expand an exact fixed tuple at any positional argument. Receivers, each starred tuple (including an empty tuple), and keywords evaluate once in Python order. Dynamic iterables and keyword mapping expansion in calls, tuple result display expansion, variadic parameters, and user-defined iteration protocols remain outside this subset.
 
 ## Assignment expressions
 
@@ -507,7 +507,7 @@ A string template can substitute named `str` and `int` arguments, as in `url.for
 
 ## Immutable bytes
 
-`hashlib.sha256(data=b"", *, usedforsecurity=True)` constructs a mutable SHA-256 hash from exact bytes. `update(data)` adds bytes and returns `None`. `digest()` returns 32 bytes and `hexdigest()` returns 64 lowercase hexadecimal digits; neither prevents further updates. An assignment shares the same hash, while `copy()` creates an independent state. The read-only attributes are `name`, `digest_size`, and `block_size`. Both values of the boolean `usedforsecurity` select the same SHA-256 implementation. The immediate `sha256(data).hexdigest()` spelling can hash the bytes directly without allocating a mutable object.
+`hashlib.sha256(data=b"", *, usedforsecurity=True)` constructs a mutable SHA-256 hash from exact bytes. `update(data)` adds bytes and returns `None`. `digest()` returns 32 bytes and `hexdigest()` returns 64 lowercase hexadecimal digits; neither prevents further updates. An assignment shares the same hash, while `copy()` creates an independent state. The read-only attributes are `name`, `digest_size`, and `block_size`. Both values of the boolean `usedforsecurity` select the same SHA-256 implementation. The named constructor `hashlib.new(name, data=b"", *, usedforsecurity=True)` resolves SHA-256 aliases at runtime. `hashlib.algorithms_available` is a shared mutable set of the provider’s supported canonical names (currently `sha256`); adding a name to the set does not install a new algorithm. Unknown names raise `ValueError`. The immediate `sha256(data).hexdigest()` spelling can hash the bytes directly without allocating a mutable object.
 
 `bytes` is an exact immutable type distinct from `str`. Ordinary, raw, escaped, and adjacent byte literals use Python's literal rules. Every byte from 0 through 255 is valid, including NUL and invalid UTF-8. Bytes can appear in classes, tuples, lists, dictionary keys/values, sets, and optionals. Literal bytes are also accepted as immutable parameter defaults.
 
@@ -518,6 +518,8 @@ Indexing uses exact integer indexes, including negative indexes, and returns an 
 `text.encode()` produces UTF-8 bytes; `data.decode()` performs strict UTF-8 decoding. They accept no arguments or keywords in this milestone. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Existing strings contain only Unicode scalar values, so encoding is always valid. Mutable `bytearray`, memory views, implicit text/byte conversions, additional codecs, error policies, and other byte methods are not supported.
 
 ## Native paths and directory traversal
+
+On POSIX, `os.devnull` is `"/dev/null"`. `os.path.commonpath(paths)` compares path components for lists of `str`, `bytes`, or native `Path` objects and literal list or tuple displays. It removes redundant separators and `.` components, preserves `..`, and rejects an empty sequence, mixed string and byte paths, or mixed absolute and relative paths.
 
 On POSIX, `os.path.join(a, *parts)`, `basename(p)`, `dirname(p)`, and `splitext(p)` take strings, bytes, or native `pathlib.Path` values. Calls can also use `posixpath`, aliased modules, and imported function names. String and byte spellings preserve redundant slashes, dots, and trailing separators according to each function. A native `Path` supplies its normalized string spelling. A join accepts fixed positional components and raises `TypeError` when string and byte paths are mixed. `splitext` returns a pair of the input string or byte type.
 
@@ -547,6 +549,8 @@ for path in sorted(root.glob("*.json"), key=lambda path: path.name):
 `Path.open()` defaults to a UTF-8 text reader. It accepts literal read, write, append, and exclusive-create modes in text or binary form, with an optional literal `encoding="utf-8"` for text. It uses the same stream operations and context manager cleanup as builtin `open`. Update modes, custom buffering, newline and error handlers are outside the native subset. `read_bytes()` and `write_bytes(data)` read or write exact bytes without decoding. They close the stream before returning, including reporting a buffered output failure. `write_bytes` returns the number of bytes written.
 
 `replace(target)` accepts a string or native path, performs POSIX replacement, and returns the destination `Path`. Relative targets refer to the process working directory. The original path value remains unchanged. A string target reaches the filesystem before its returned path is normalized, so a trailing slash retains its operating-system meaning. Existing files or empty directories can be replaced, subject to normal type and filesystem restrictions; cross-filesystem replacement fails. The rename is atomic on one filesystem, but does not promise durable storage. All mutation arguments evaluate in source order before the operation; positional and keyword calls follow the corresponding Python signatures.
+
+`Path.match(path_pattern)` matches relative patterns from the right and anchored patterns against the whole path. `Path.full_match(pattern)` matches the entire normalized spelling and allows a `**` component to span directories. Both take strings or native paths and accept the keyword-only `case_sensitive` argument. `None` uses the POSIX case-sensitive default. These operations require no filesystem access.
 
 `iterdir()` and `glob(pattern)` are supported at immediate iteration boundaries, including loops, comprehensions, generator pipelines, `list`, `sorted`, `map`, `filter`, `enumerate`, `zip`, `any`, and `all`. They yield exact `Path` values and never include `.` or `..` directory entries. Iteration order is unspecified; sort by a scalar key when order matters. `glob` accepts one nonempty literal POSIX component containing ordinary names, `*`, `?`, or bracket character classes. Matching is case-sensitive and includes leading-dot names, directories, and broken symlinks. Separators, `**`, optional glob flags, recursive traversal, and escaping iterator values are rejected.
 
@@ -593,7 +597,9 @@ Both reader types support `readline()` and line iteration. Text reads incrementa
 
 `zipfile.ZipFile(path)` opens a ZIP archive for reading from a string or native path. The mode may be omitted or given as the literal `"r"`. Each `namelist()` returns a fresh list of names in central-directory order, preserving duplicate names without inflating file contents. A `with` statement closes the archive on all exits; aliases share the descriptor, `close()` is idempotent, and the list of names remains available after close. Invalid directories raise `zipfile.BadZipFile`.
 
-Final reference release closes a file best-effort without callbacks or a new pending exception. Use explicit `close` or `with` to observe close errors. Text append modes, update modes, seeking, sized text reads, gzip writing, arbitrary codecs, newline options, generic context-manager protocols, and user finalizers are outside this contract.
+Read-only archives also accept a seekable binary file or `io.BytesIO([initial_bytes])`. `infolist()` and `getinfo(name)` expose ordered `ZipInfo` metadata; opening a duplicate by `ZipInfo` selects that entry, while a filename selects the last occurrence. `read(name_or_info)` returns bytes. `open(name_or_info[, "r"])` exposes a binary member reader that streams stored and DEFLATE data and checks CRCs as it reads. Independent readers can outlive the archive. `testzip()` returns the first corrupt member name or `None`. Caller-owned binary files remain open after closing their archive; the binary reader supports `seek(offset[, whence])` and `tell()` on seekable inputs.
+
+Final reference release closes a file best-effort without callbacks or a new pending exception. Use explicit `close` or `with` to observe close errors. Text append modes, update modes, text seeking, sized text reads, gzip writing, arbitrary codecs, newline options, generic context-manager protocols, and user finalizers are outside this contract.
 
 Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueError`. Embedded NULs in paths raise `ValueError`. Missing files, permission failures, directories opened as files, and non-directory path components use `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`; exclusive-create collisions use `FileExistsError`, also an `OSError`; other operating-system errors use `OSError`. Runtime-generated message text is not a CPython compatibility promise.
 
@@ -601,7 +607,7 @@ Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueErr
 
 ## Command-line options
 
-A function can declare an `argparse.ArgumentParser`, add required positional arguments and named options, and return the result of `parse_args()`. Imre derives a read-only namespace with a concrete field for each option. Hyphens become underscores in field names. A choice of strings gives the field a string `Literal` type. A value option without a default or `required=True` produces an optional field.
+A function can declare an `argparse.ArgumentParser`, add required positional arguments and named options, and return the result of `parse_args()`. An explicit `list[str]` supplies the arguments to parse; omitting it or passing `None` reads `sys.argv[1:]`. Imre derives a read-only namespace with a concrete field for each option. Hyphens become underscores in field names. A choice of strings gives the field a string `Literal` type. A value option without a default or `required=True` produces an optional field.
 
 ```python
 from argparse import ArgumentParser
@@ -634,7 +640,7 @@ Keep each builder local. Declare parent options first, followed by each subparse
 
 `debug`, `info`, `warning`, `error`, `critical`, `fatal`, and `log(level, message, ...)` write to standard error. Scalar message arguments support literal `%s`, `%r`, `%d`, and `%%`. Arguments execute in source order and conversion waits until the event is enabled. The fallback handler emits warning and higher levels before configuration. The module-level convenience functions configure the root handler on first use.
 
-`logging.basicConfig` accepts `level`, `format`, `datefmt`, and `force`. A configured handler keeps its settings unless forced. Both configuration and `setLevel` accept the standard level-name literals. The percent-style format accepts `name`, `levelname`, `levelno`, `message`, and local-time `asctime`. Custom handlers and filters are outside this surface.
+`logging.basicConfig` accepts `level`, `format`, `datefmt`, and `force`. A configured handler keeps its settings unless forced. Both configuration and `setLevel` resolve string levels in the native registry. `addLevelName` updates the integer label and the reverse name lookup; `getLevelNamesMapping()` returns a fresh dictionary. `getLevelName(number)` returns a string. For a string argument, use `isinstance(result, int)` to distinguish a registered name from the fallback text. The percent-style format accepts `name`, `levelname`, `levelno`, `message`, and local-time `asctime`. Custom handlers and filters are outside this surface.
 
 ## Synchronous subprocesses
 
@@ -687,6 +693,8 @@ installations and in virtual environments. `os.path.exists(path)` checks
 whether the supplied path exists. `__file__` refers to
 the module’s source location at build time, so neighboring resources must
 remain available when the program accesses them.
+
+`sys.getdefaultencoding()` and `sys.getfilesystemencoding()` return the native text encoding (`"utf-8"`). The native standard streams expose that encoding as `.encoding`, including through `sys.__stdin__`, `sys.__stdout__` and `sys.__stderr__`.
 
 `sys.platform` gives the target platform name. `sys.stdout.write(text)` and `sys.stderr.write(text)` return the number of Unicode characters written. Each stream’s `flush()` flushes that stream.
 
@@ -836,7 +844,9 @@ A function returning `Sequence[T]` can return an exact `list[T]`.
 
 Direct `mapping.keys()` operands and sets of the same key type support `|`, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set. Stored key-view objects and arbitrary iterables as union operands are outside the supported subset.
 
-`set[T]` accepts the same exact scalar or immutable fixed-tuple shapes as dictionary keys, with the same value equality. Nonempty literals infer their element type and evaluate every element from left to right, including duplicates. Empty `set()` requires a concrete contextual type. `add(value)` inserts an element, `discard(value)` removes it when present, and both return `None`. Adding a duplicate or discarding a missing element is a no-op. `len`, single `in`/`not in` comparisons, direct iteration, and loop-head `enumerate` are supported. Set iteration order is unspecified and programs must not depend on dictionary-like insertion order. Iteration checks size changes and owns each yielded element before the body can remove it. Copy/iterable construction, intersection, difference, symmetric difference, comparisons, `remove`, `pop`, and `clear` are not implemented.
+`set[T]` accepts the same exact scalar or immutable fixed-tuple shapes as dictionary keys, with the same value equality. Nonempty literals infer their element type and evaluate every element from left to right, including duplicates. Empty `set()` requires a concrete contextual type. `add(value)` inserts an element, `discard(value)` removes it when present, and both return `None`. Adding a duplicate or discarding a missing element is a no-op. `len`, single `in`/`not in` comparisons, direct iteration, and loop-head `enumerate` are supported. Set iteration and display order are unspecified. Iteration checks size changes and owns each yielded element before the body can remove it.
+
+Sets with the same checked element type support equality, inequality and f-string display. Union (`|`), intersection (`&`) and difference (`-`) on sets or dictionary key views return a fresh set. Symmetric difference, subset/superset comparisons, `remove`, `pop`, and `clear` are unsupported.
 
 Tuple types name each position, for example `tuple[str, int, list[Counter]]`; `tuple[()]` is empty. A tuple's slots cannot be reassigned, but a referenced list or instance can still be mutated. Indexes must be in-range integer literals, optionally negative. Variable indexes, computed indexes, variadic tuple annotations, tuple concatenation, and tuple repetition are rejected. Tuple equality and inequality require the same concrete immutable shape accepted for dictionary keys. Ordered scalar tuple shapes additionally support lexicographic `<`, `<=`, `>`, and `>=`, including nested tuples and fields whose exact type is `None`. Nullable tuple fields permit equality but exclude ordering. Lists of matching immutable scalar tuples support `==` and `!=`. They compare lengths and then tuple values in order. Mutable tuple fields and float fields are outside this comparison.
 
@@ -914,7 +924,17 @@ Exceptions contain an immutable category, message, optional explicit cause, and 
 
 ## Exceptions and cleanup
 
-The constructible builtin categories are `Exception`, `ArithmeticError`, `ZeroDivisionError`, `OverflowError`, `LookupError`, `IndexError`, `KeyError`, `ValueError`, `AssertionError`, `RuntimeError`, `StopIteration`, `EOFError`, `OSError`, `TypeError`, `AttributeError`, `MemoryError`, `SystemError`, `UnicodeError`, `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`, plus the imported `io.UnsupportedOperation`. A constructor takes zero arguments or one string message. `raise Category` constructs the zero-argument form; `raise value` requires an exception instance. The annotation `Exception` admits this sealed family and can be used in parameters, returns, fields, containers, and optional values. Specific subclass annotations are currently rejected rather than erasing their narrower contracts. `BaseException` and `UnicodeDecodeError` are supported as handler categories, but not as constructors or storage annotations.
+User exception classes keep their nominal identity in both builtin and user
+handlers. A marker class may inherit several exception bases with a consistent
+Python method resolution order. A class that carries fields can use an ordinary
+typed initializer or a dataclass initializer with `__post_init__`. Its constructor
+must call `super().__init__(message)` once with a string. Keyword arguments,
+typed fields, `.args` on the concrete exception, and custom `__str__` and
+`__repr__` methods use the same object after a raise. A class attribute can name
+such a constructor. Inheriting a user payload layout, dynamic constructors, and
+reinitializing an exception are outside this subset.
+
+The constructible builtin categories are `Exception`, `ArithmeticError`, `ZeroDivisionError`, `OverflowError`, `LookupError`, `IndexError`, `KeyError`, `ValueError`, `AssertionError`, `RuntimeError`, `StopIteration`, `EOFError`, `OSError`, `TypeError`, `AttributeError`, `MemoryError`, `SystemError`, `UnicodeError`, `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`, plus the imported `io.UnsupportedOperation`. A constructor takes zero arguments or one supported argument (a string, number, bytes, container, or `None`). Mutable arguments remain live through `.args` and formatting. `raise Category` constructs the zero-argument form; `raise value` requires an exception instance. The annotation `Exception` admits this sealed family and can be used in parameters, returns, fields, containers, and optional values. Specific subclass annotations are currently rejected rather than erasing their narrower contracts. `BaseException` and `UnicodeDecodeError` are supported as handler categories, but not as constructors or storage annotations.
 
 Handlers select the first matching fixed builtin category or nonempty tuple of categories, using the builtin hierarchy. A bare handler catches any supported exception. `except Category as name` binds an owned exception and deletes that name on every handler exit, even if it previously existed or was rebound inside the handler. Save it under another name to retain it. Bare `raise` uses the dynamically active exception, including from a called function or a `finally` block unwinding an exception; without an active exception it raises `RuntimeError`.
 
@@ -1132,3 +1152,18 @@ A profile can select a named arm of a simple `match`, or exclude the true arm of
 ### Native asyncio subprocesses
 
 Typed coroutines support `await`, `asyncio.TaskGroup`, `asyncio.gather` and `asyncio.Semaphore` for subprocess-backed work. A coroutine starts when it is awaited or scheduled. A callback with an `Awaitable[T]` return type must be an `async def` function. A synchronous function that creates a coroutine can be called directly. A task retains its result across awaits. Exceptions returned by `gather(..., return_exceptions=True)` retain their positions among the results. Standard output and standard error are drained concurrently. Ruff’s live ecosystem checker also exercises loop signal handlers, `functools.cache`, suspended generator context managers, and `TemporaryDirectory` cleanup on exception paths.
+
+## Native unittest cases and results
+
+`from unittest import TestCase, TestResult, SkipTest` loads a small library
+compiled into the program. A fixed-layout subclass can use `fail`, `skipTest`,
+`countTestCases` and the default setup/teardown hooks. The boolean truth
+assertions and integer equality and ordering assertions accept an optional
+string message and honor the instance's `longMessage` setting. A result can
+count started cases, record skips and unexpected successes, stop a run, and
+receive run and test boundary notifications.
+
+The [shared suite runner](../benchmarks/cpython_stdlib/SUITE_RUNNER.md) shows
+which parts of a complete pinned test run natively. The full CPython unittest
+API, dynamic method discovery in a native process, traceback reports, and
+arbitrary assertion operand types are not supported by this implementation.

@@ -176,7 +176,7 @@ fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
 }
 
 impl Checker<'_> {
-    fn is_builtin_iter(&self, call: &ast::ExprCall) -> bool {
+    pub(super) fn is_builtin_iter(&self, call: &ast::ExprCall) -> bool {
         matches!(&*call.func, ast::Expr::Name(name) if name.id == "iter")
             && !self.local_iter
             && !self.names.contains_key("iter")
