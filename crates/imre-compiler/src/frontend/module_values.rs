@@ -143,6 +143,15 @@ impl Initialization {
                     continue;
                 }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => continue,
+                _ if crate::modules::value_name(statement).is_some_and(|name| {
+                    module.bindings.get(name) == Some(&Binding::Definition(definition))
+                }) =>
+                {
+                    // A statically declared class factory binds a definition, not a
+                    // stored module value. Its source position still controls use.
+                    available.insert(definition);
+                    continue;
+                }
                 _ => {}
             }
             if checker.module == checker.graph.entry
