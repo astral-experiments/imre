@@ -32,7 +32,7 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
 - `test_43581`: the complete method, both stream attributes, equality and assertion execute in the native binary.
-- `test_intern`: the gate tries the complete native method before running the original parent with one child for string handles. Each call observes that same table, and the parent compares the returned identities. For the local class `S(str)`, the fixture compiles the original class and its `__hash__` in a separate child. A compiler rejection blocks the occurrence at that call.
+- `test_intern`: the gate tries the complete native method before running the original parent with one child for string handles. Each call observes that same table, and the parent compares the returned identities. For the local class `S(str)`, the fixture compiles the original class and its `__hash__` in a separate child. At O0 and O3, four argument errors and five string identity or status checks reached Imre. The compiler rejected the original subclass before the tenth call. Both occurrences remain blocked.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.
 - `test_jit_is_available` and `test_jit_is_enabled`: Imre answers the parent capability query and executes both original child assertions under `PYTHON_JIT=0` and `=1`. CPython runs the parent, fixtures and child-status assertions. The fixture builds the original child source directly; its automatic `-X faulthandler` option is outside this check.
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
@@ -53,7 +53,7 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40173735073) executed source `35158607886bce3fec10dd8e965d891e803e1088` (tree `f80a4bcd512cdb24ff2f279f59adb6d2075bef8a`). Its `sys-evidence-linux` artifact contains both optimization reports, the legacy outcomes, and the tested commit and tree. The checked-in reports match those records. The pinned suite has no companion module; `native-O*.json` describes the same occurrences.
+The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40179084540) executed source `d583f2dd2cc78051c053d93d9765135dafaeb049` (tree `6c1fd240e3769ce746d2acfeccf43c8f284508ad`). Its `sys-evidence-linux` artifact contains both optimization reports, the legacy outcomes, and the tested commit and tree. The checked-in reports match those records. The pinned suite has no companion module; `native-O*.json` describes the same occurrences.
 
 At each level the two JIT capability methods add two mixed results. `test_jit_is_active` made one native availability query in the parent; its first original child stopped at line 2 on `import _testcapi` before any `is_active` call or child assertion. The second child was not reached. Its individual private-API proposal remains unapproved.
 
