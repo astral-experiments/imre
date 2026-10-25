@@ -21,6 +21,7 @@ sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import Toolchain, native_method, run_in_fixtures
 from native_counter import assertion_fixture
+from chainmap_methods import OPERATIONS as CHAINMAP_OPERATIONS, fixture as chainmap_fixture
 
 
 COUNTER_OPERATIONS = {
@@ -156,6 +157,9 @@ def main():
                 if case_id == f"test.test_collections.TestCounter.{method}" and method in COUNTER_OPERATIONS:
                     fixture = assertion_fixture(method, "NativeCase")
                     operation = ("imre", COUNTER_OPERATIONS[method])
+                elif case_id == f"test.test_collections.TestChainMap.{method}" and method in CHAINMAP_OPERATIONS:
+                    fixture = chainmap_fixture(method)
+                    operation = ("imre", CHAINMAP_OPERATIONS[method])
                 elif case_id in EMPTY:
                     if len(node.body) != 1 or not isinstance(node.body[0], ast.Pass):
                         raise ValueError(f"{case_id} is no longer an empty upstream test")

@@ -450,6 +450,9 @@ impl Builtin {
             Self::BytesIter
             | Self::DefaultListDict
             | Self::CounterNew
+            | Self::ChainMapNew
+            | Self::ChainMapMaps
+            | Self::ChainMapSetMaps
             | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictClear

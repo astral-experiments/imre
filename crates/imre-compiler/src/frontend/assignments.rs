@@ -540,7 +540,18 @@ impl Checker<'_> {
         probe.narrowed = self.narrowed.clone();
         probe.comprehension_targets = self.comprehension_targets.clone();
         match target {
-            ast::Expr::Attribute(attribute) => probe.field(attribute).ok().map(|(_, _, ty)| ty),
+            ast::Expr::Attribute(attribute) => {
+                let receiver = probe.expr(&attribute.value).ok()?;
+                if let Type::ChainMap(id) = receiver.ty
+                    && attribute.attr.as_str() == "maps"
+                {
+                    return Some(self.types.list(Type::Dict(id)));
+                }
+                probe
+                    .writable_field_value(attribute, receiver)
+                    .ok()
+                    .map(|(_, _, ty)| ty)
+            }
             ast::Expr::Subscript(subscript) => {
                 let receiver = probe.expr(&subscript.value).ok()?;
                 if matches!(receiver.ty, Type::Document(_)) {

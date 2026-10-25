@@ -264,6 +264,15 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
                     }));
                 }
+                if let Type::ChainMap(id) = receiver.ty
+                    && attribute.attr.as_str() == "maps"
+                {
+                    let maps = self.coerce(value, self.types.list(Type::Dict(id)), target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::ChainMapSetMaps, vec![maps, receiver]),
+                    }));
+                }
                 let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
                 let value = self.coerce(value, ty, target)?;
                 Ok(Statement::SetField(receiver, field, value))

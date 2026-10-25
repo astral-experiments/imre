@@ -10,6 +10,7 @@ mod argparse;
 mod args;
 mod asyncio;
 mod bytes;
+mod chainmap;
 mod contexts;
 mod copying;
 mod csv;
@@ -55,6 +56,7 @@ pub struct Object(StorageCell<Storage>);
 enum Storage {
     Sequence(Words),
     Dictionary(Box<mappings::Mapping>),
+    ChainMap(Rc<Object>),
     Set(Box<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),

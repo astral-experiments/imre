@@ -78,6 +78,7 @@ impl Types {
                 Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
             ),
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
+            Type::ChainMap(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
             Type::Tuple(id) => matches!(
                 storage.shapes.get(id),
                 Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
@@ -173,6 +174,7 @@ impl Types {
                 | Type::Cursor(child_id)
                 | Type::List(child_id)
                 | Type::Dict(child_id)
+                | Type::ChainMap(child_id)
                 | Type::Set(child_id)
                 | Type::Tuple(child_id)
                 | Type::Callable(child_id)
@@ -632,6 +634,11 @@ impl Types {
         }
     }
 
+    /// A ChainMap and its concrete dictionaries share their key/value shape.
+    pub(crate) fn chainmap(&self, key: Type, value: Type) -> Type {
+        Type::ChainMap(self.intern(Shape::Dict(key, value)))
+    }
+
     pub(crate) fn dict(&self, key: Type, value: Type) -> Type {
         Type::Dict(self.intern(Shape::Dict(key, value)))
     }
@@ -781,6 +788,9 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
+        if let Type::ChainMap(id) = ty {
+            return vec![Type::Dict(id)];
+        }
         if let Some(element) = self
             .element(ty)
             .or_else(|| self.payload(ty))
@@ -852,6 +862,7 @@ impl TypeDescription<'_> {
             | Type::Tuple(id)
             | Type::Callable(id)
             | Type::Dict(id)
+            | Type::ChainMap(id)
             | Type::Set(id)
             | Type::Optional(id)
             | Type::Union(id) => id,
@@ -898,7 +909,9 @@ impl TypeDescription<'_> {
                 self.write_type(*key)?;
             }
             Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => {
-                self.write_str(if matches!(shape, Shape::Dict(..)) {
+                self.write_str(if matches!(ty, Type::ChainMap(_)) {
+                    "ChainMap["
+                } else if matches!(shape, Shape::Dict(..)) {
                     "dict["
                 } else {
                     "defaultdict["

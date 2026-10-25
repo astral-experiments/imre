@@ -59,6 +59,7 @@ impl Type {
             | Self::Callable(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::ChainMap(_)
             | Self::Set(_)
             | Self::StringKeys
             | Self::Iterator
@@ -116,6 +117,7 @@ impl Type {
             | Self::Callable(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::ChainMap(_)
             | Self::Set(_)
             | Self::StringKeys
             | Self::Iterator
@@ -704,6 +706,7 @@ impl Emitter<'_, '_> {
             }
             Type::List(_)
             | Type::Dict(_)
+            | Type::ChainMap(_)
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
@@ -3335,6 +3338,7 @@ impl Emitter<'_, '_> {
                 )),
                 Type::ListInt
                 | Type::StringKeys
+                | Type::ChainMap(_)
                 | Type::Iterator
                 | Type::Cursor(_)
                 | Type::ByteOutput
@@ -5176,6 +5180,15 @@ impl Emitter<'_, '_> {
             }
             Builtin::DictCopy => self.call("imre_dict_copy", returns, &[&args[0].value]),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::ChainMapNew => self.call("imre_chainmap_new", returns, &[&args[0].value]),
+            Builtin::ChainMapMaps => self.call("imre_chainmap_maps", returns, &[&args[0].value]),
+            Builtin::ChainMapSetMaps => {
+                self.line(format!(
+                    "call void @imre_chainmap_set_maps(ptr {}, ptr {})",
+                    args[1].value.operand, args[0].value.operand
+                ));
+                none()
+            }
             Builtin::CounterNew => {
                 let (key, _) = self.module.types.mapping(returns).unwrap();
                 Value {
@@ -5519,6 +5532,7 @@ impl Emitter<'_, '_> {
                     | Type::Class(_)
                     | Type::List(_)
                     | Type::Dict(_)
+                    | Type::ChainMap(_)
                     | Type::Set(_)
                     | Type::StringKeys
                     | Type::Iterator
@@ -5763,6 +5777,7 @@ impl Emitter<'_, '_> {
             | Type::Callable(_)
             | Type::List(_)
             | Type::Dict(_)
+            | Type::ChainMap(_)
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
@@ -5834,6 +5849,7 @@ impl Emitter<'_, '_> {
             | Type::Callable(_)
             | Type::List(_)
             | Type::Dict(_)
+            | Type::ChainMap(_)
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
@@ -6419,6 +6435,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => 6,
         Type::List(_)
         | Type::Dict(_)
+        | Type::ChainMap(_)
         | Type::Set(_)
         | Type::StringKeys
         | Type::Iterator
@@ -6943,6 +6960,10 @@ declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
 declare ptr @imre_counter_new(i32)
+declare ptr @imre_chainmap_new(ptr)
+declare ptr @imre_chainmap_maps(ptr)
+declare void @imre_chainmap_set_maps(ptr, ptr)
+declare i32 @imre_chainmap_truth(ptr)
 declare void @imre_counter_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
