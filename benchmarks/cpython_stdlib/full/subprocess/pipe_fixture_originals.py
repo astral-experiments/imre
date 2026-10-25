@@ -506,7 +506,9 @@ def main():
         p.add_argument("--" + name, required=True, type=Path)
     p.add_argument("--opt-level", type=int, required=True, choices=(0, 3))
     p.add_argument(
-        "--test-id", action="append", choices=sorted(IDS),
+        "--test-id",
+        action="append",
+        choices=sorted(IDS),
         help="run only the named original occurrence (repeatable)",
     )
     a = p.parse_args()

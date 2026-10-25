@@ -1,0 +1,296 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre_revision": "45a13687f0e217102998b0968865de5b4a61b495",
+  "tested_tree": "fe180c9d4550a21757e022162afaead621d05463",
+  "fixture_revision": "a70b4b59c6441b94760baa81ccf83c172ce90bdd",
+  "fixture_tree": "30ae67540aee05013d23e96ae8703e6213e8fc85",
+  "fixture_sources": {
+    "readiness_original": "d663efa42d7ded1a0eec812b57ce72f2cd0ed2e5e2d1b652f1f31a1a7b8b9b6a",
+    "pipe_fixture_originals": "74fafed7fde1c880e2723e502dd5578664dbf4582b4808c2fe2d05b4a3f558b2"
+  },
+  "operand_driver_sha256": "3be330e6a688a598563921f4b43a062fab08fb25d0c86d92e98909fe22d5a77e",
+  "reports": [
+    {
+      "opt_level": 0,
+      "procfs": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 0,
+        "toolchain": {
+          "imre": "e1dc9b5d5e47044b6466ba3c8971962b2f0e218e26d1f33a34945f3bb9d78355",
+          "runtime": "633a18a1a27d7f50594f0e68882eebe7d8fb44ab4fc355d0efa2f7bf418ecded",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "mixed",
+                "fixture": "cpython"
+              },
+              "observed": {
+                "native_parent_sha256": "2206a4b07bd1b4f76ee178869a0bbf1b19d4d05a76bc09ff55217dd2caaa8cce",
+                "data_child_argv": [
+                  "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                  "-c",
+                  "import sys;sys.stdout.write(\"apple\")"
+                ],
+                "native_read_request": 4,
+                "native_read_result": 4,
+                "native_returned": "appl",
+                "unread_kernel_bytes": 1,
+                "host_select_returned_original_stream": true,
+                "data_child_alive_at_select": null,
+                "native_pipe_closes": 1,
+                "native_reaps": 1
+              }
+            }
+          ]
+        },
+        "controls": {
+          "raw-held": {
+            "native_parent_sha256": "b37d312c3f7b319578ea4191e55beb8d54d7a22588ea8d6e4b6abe9c7e285978",
+            "data_child_argv": [
+              "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+              "-c",
+              "import os; os.write(1, b'apple'); os.read(0, 1)"
+            ],
+            "native_read_request": 4,
+            "native_read_result": 4,
+            "native_returned": "appl",
+            "unread_kernel_bytes": 1,
+            "host_select_returned_original_stream": true,
+            "data_child_alive_at_select": true,
+            "native_pipe_closes": 1,
+            "native_reaps": 1
+          },
+          "buffered-held": {
+            "native_parent_sha256": "79f2a9142e2272c6429bbddf0673d7378b048a0a5a4145c53ab7a32d1015316f",
+            "data_child_argv": [
+              "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+              "-c",
+              "import os; os.write(1, b'apple'); os.read(0, 1)"
+            ],
+            "native_read_request": 131072,
+            "native_read_result": 5,
+            "native_returned": "appl",
+            "unread_kernel_bytes": 0,
+            "host_select_returned_original_stream": false,
+            "data_child_alive_at_select": true,
+            "native_pipe_closes": 1,
+            "native_reaps": 1
+          }
+        }
+      },
+      "descriptor_transfer": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 0,
+        "fixture_sha256": "00e7fdc6d9313f3c93263f7a33f241ba102506e2241be64bcd8d97c79761d23b",
+        "toolchain": {
+          "imre": "e1dc9b5d5e47044b6466ba3c8971962b2f0e218e26d1f33a34945f3bb9d78355",
+          "runtime": "633a18a1a27d7f50594f0e68882eebe7d8fb44ab4fc355d0efa2f7bf418ecded",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "mixed",
+                "fixture": "mixed"
+              },
+              "observed": {
+                "actor_sha256": "8dad7fe4d21991cae2a4a1abc64cc1d448fef8cb16914d264ee3b1e35d30fdb2",
+                "read_bytes": 4,
+                "remaining_kernel_bytes": 1,
+                "same_open_file_description": "SCM_RIGHTS",
+                "host_select_returned_original_stream": true,
+                "native_stream_closed": true,
+                "native_reaps": 1
+              }
+            }
+          ]
+        }
+      },
+      "operands": {
+        "stream": {
+          "source_sha256": "eace5a42c1146c2a01aeb9bc087977d0af10404642e14af7f3e68cf8c0043577",
+          "cpython": [
+            "b'appl'",
+            "True",
+            "0"
+          ],
+          "native": "compile-error",
+          "diagnostic": "<case>/case.py:9:26: Imre: expected int, got typing.BinaryIO; annotations are enforced contracts"
+        },
+        "integer": {
+          "source_sha256": "ba56e0792ec6ab233f23ef44ea127a86486226be70dcf3e08f7acba6696c0fef",
+          "cpython": [
+            "b'appl'",
+            "True",
+            "0"
+          ],
+          "native": "pass",
+          "stdout": [
+            "b'appl'",
+            "True",
+            "0"
+          ],
+          "native_readiness_syscalls": 1,
+          "native_reaps": 1
+        }
+      }
+    },
+    {
+      "opt_level": 3,
+      "procfs": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 3,
+        "toolchain": {
+          "imre": "e1dc9b5d5e47044b6466ba3c8971962b2f0e218e26d1f33a34945f3bb9d78355",
+          "runtime": "633a18a1a27d7f50594f0e68882eebe7d8fb44ab4fc355d0efa2f7bf418ecded",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "mixed",
+                "fixture": "cpython"
+              },
+              "observed": {
+                "native_parent_sha256": "19c74b575a8ffee5b2edfd3f667631beafbd6b3338c1b278352ef8ab58951d80",
+                "data_child_argv": [
+                  "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+                  "-c",
+                  "import sys;sys.stdout.write(\"apple\")"
+                ],
+                "native_read_request": 4,
+                "native_read_result": 4,
+                "native_returned": "appl",
+                "unread_kernel_bytes": 1,
+                "host_select_returned_original_stream": true,
+                "data_child_alive_at_select": null,
+                "native_pipe_closes": 1,
+                "native_reaps": 1
+              }
+            }
+          ]
+        },
+        "controls": {
+          "raw-held": {
+            "native_parent_sha256": "0fb8fb5e78bb74b22e06bee1b2adeb0992fa6a7c08fdef609b630cad8191ce1c",
+            "data_child_argv": [
+              "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+              "-c",
+              "import os; os.write(1, b'apple'); os.read(0, 1)"
+            ],
+            "native_read_request": 4,
+            "native_read_result": 4,
+            "native_returned": "appl",
+            "unread_kernel_bytes": 1,
+            "host_select_returned_original_stream": true,
+            "data_child_alive_at_select": true,
+            "native_pipe_closes": 1,
+            "native_reaps": 1
+          },
+          "buffered-held": {
+            "native_parent_sha256": "19f38053dbe89489230c696973332d3ed85fe63a448790c2f61bd566a9c8d053",
+            "data_child_argv": [
+              "/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python",
+              "-c",
+              "import os; os.write(1, b'apple'); os.read(0, 1)"
+            ],
+            "native_read_request": 131072,
+            "native_read_result": 5,
+            "native_returned": "appl",
+            "unread_kernel_bytes": 0,
+            "host_select_returned_original_stream": false,
+            "data_child_alive_at_select": true,
+            "native_pipe_closes": 1,
+            "native_reaps": 1
+          }
+        }
+      },
+      "descriptor_transfer": {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 3,
+        "fixture_sha256": "00e7fdc6d9313f3c93263f7a33f241ba102506e2241be64bcd8d97c79761d23b",
+        "toolchain": {
+          "imre": "e1dc9b5d5e47044b6466ba3c8971962b2f0e218e26d1f33a34945f3bb9d78355",
+          "runtime": "633a18a1a27d7f50594f0e68882eebe7d8fb44ab4fc355d0efa2f7bf418ecded",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "operation": "mixed",
+                "fixture": "mixed"
+              },
+              "observed": {
+                "actor_sha256": "056d309e635457f9066e91247b9461a4f4e180e0df1cc4fae1b601b1b5518c1c",
+                "read_bytes": 4,
+                "remaining_kernel_bytes": 1,
+                "same_open_file_description": "SCM_RIGHTS",
+                "host_select_returned_original_stream": true,
+                "native_stream_closed": true,
+                "native_reaps": 1
+              }
+            }
+          ]
+        }
+      },
+      "operands": {
+        "stream": {
+          "source_sha256": "eace5a42c1146c2a01aeb9bc087977d0af10404642e14af7f3e68cf8c0043577",
+          "cpython": [
+            "b'appl'",
+            "True",
+            "0"
+          ],
+          "native": "compile-error",
+          "diagnostic": "<case>/case.py:9:26: Imre: expected int, got typing.BinaryIO; annotations are enforced contracts"
+        },
+        "integer": {
+          "source_sha256": "ba56e0792ec6ab233f23ef44ea127a86486226be70dcf3e08f7acba6696c0fef",
+          "cpython": [
+            "b'appl'",
+            "True",
+            "0"
+          ],
+          "native": "pass",
+          "stdout": [
+            "b'appl'",
+            "True",
+            "0"
+          ],
+          "native_readiness_syscalls": 1,
+          "native_reaps": 1
+        }
+      }
+    }
+  ]
+}

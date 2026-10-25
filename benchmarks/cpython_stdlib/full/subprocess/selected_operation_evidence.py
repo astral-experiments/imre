@@ -6,7 +6,8 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from suite_evidence import build_report, validate_pair, write_reports
+from readiness_evidence import ID as READINESS_ID, verify_case
+from suite_evidence import build_report, validate_pair
 
 HERE = Path(__file__).resolve().parent
 
@@ -192,6 +193,55 @@ def load(name):
     return json.loads(name.read_text())
 
 
+def integrated_readiness(data, level, reference):
+    """Keep the upstream host fixture and validate both observations of its pipe."""
+    [raw] = [item for item in data["reports"] if item["opt_level"] == level]
+    primary, transfer = raw["procfs"], raw["descriptor_transfer"]
+    case = verify_case(primary)
+    [other] = transfer["rows"][READINESS_ID]
+    observed = other["observed"]
+    stream, integer = (raw["operands"][key] for key in ("stream", "integer"))
+    if not (
+        data["cpython_commit"]
+        == primary["cpython_commit"]
+        == transfer["cpython_commit"]
+        == reference["cpython_commit"]
+        and primary["opt_level"] == transfer["opt_level"] == level
+        and primary["toolchain"] == transfer["toolchain"]
+        and other["body_attempt"] == case["body_attempt"]
+        and other["roles"] == {**case["roles"], "fixture": "mixed"}
+        and observed["same_open_file_description"] == "SCM_RIGHTS"
+        and observed["read_bytes"] == 4
+        and observed["remaining_kernel_bytes"] == observed["native_reaps"] == 1
+        and observed["host_select_returned_original_stream"]
+        and observed["native_stream_closed"]
+        and stream["native"] == "compile-error"
+        and "expected int, got typing.BinaryIO" in stream["diagnostic"]
+        and integer["native"] == "pass"
+        and integer["native_readiness_syscalls"] == integer["native_reaps"] == 1
+        and stream["cpython"]
+        == integer["cpython"]
+        == integer["stdout"]
+        == ["b'appl'", "True", "0"]
+    ):
+        raise ValueError(
+            "readiness observations disagree with the original stream, fixtures or operand controls"
+        )
+    return dict(
+        outcome="pass",
+        roles=case["roles"],
+        evidence=dict(
+            opt_level=level,
+            imre_revision=data["imre_revision"],
+            tested_tree=data["tested_tree"],
+            source="pipe-readiness-integrated-linux.json",
+            operation="Imre launches the original CPython data child, reads four bytes, closes its raw pipe and reaps once. CPython select returns that stream with one byte left. Native select accepts its integer fd but rejects the stream operand used by the original.",
+            fixture="CPython runs the original test, assertions and addCleanup. The independent SCM_RIGHTS fixture observes the same open file description. Held-open controls distinguish a queued byte from EOF.",
+            native_body_diagnostic=case["body_attempt"]["reason"],
+        ),
+    )
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--previous", type=Path, required=True)
@@ -207,6 +257,7 @@ def main():
     if bool(args.raw_directory) != bool(args.imre_revision and args.tested_tree):
         p.error("supply the measured revision and tree with --raw-directory")
     ref = load(HERE / "reference-linux.json")
+    readiness = load(HERE / "pipe-readiness-integrated-linux.json")
     previous = load(args.previous)
     validate_pair(previous, ref)
     if args.raw_directory:
@@ -266,6 +317,7 @@ def main():
         )
         new = selected(obs, attempts, sample["imre_revision"], sample["tested_tree"])
         assert len(new) == 25
+        new[READINESS_ID] = integrated_readiness(readiness, level, ref)
         seen, exceptions, discovered = {}, {}, []
         for row in old["records"]:
             key = row["id"], row["occurrence"]
@@ -283,7 +335,8 @@ def main():
                 }
         assert not new
         out.append(build_report(ref, level, discovered, seen, exceptions=exceptions))
-    write_reports(args.result, out, ref)
+    validate_pair(out, ref)
+    args.result.write_text(json.dumps(out, indent=2) + "\n")
     for report in out:
         print(report["opt_level"], report["denominator"], report["counts"])
 

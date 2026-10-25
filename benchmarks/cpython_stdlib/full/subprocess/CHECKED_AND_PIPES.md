@@ -47,6 +47,20 @@ method, with one byte left in the kernel. Imre closed the stream and reaped the
 child. The small [C fixture](fixture_pipes.c) transfers signal disposition or an
 existing fd.
 
+The [integrated readiness run](pipe-readiness-integrated-linux.json) repeats
+the unchanged method through two observers. Its hooks, assertions, and cleanup
+ran in CPython. The native parent read `appl`, left one byte queued, closed
+stdout, and reaped the original Python data child once. Both the procfs and
+SCM_RIGHTS observers saw host `select()` return the original stream. With the
+writer held open, the raw pipe remained ready; the buffered pipe had read all
+five bytes and was not ready.
+
+The [operand control](readiness_operands.py) distinguishes the public calls:
+`select([f.fileno()], [], [], 0.0)` makes one native kernel readiness call;
+`select([f], [], [], 0.0)`, the call in the original test, rejects `BinaryIO`
+where Imre expects an integer. The occurrence remains mixed at O0 and O3.
+The complete native method attempt still stops at `import test`.
+
 ### Reproduction on Linux
 
 Build the named source revision and use the pinned 3.14.5 interpreter,
@@ -65,3 +79,9 @@ done
 
 The generator applies only the measured operations. Other observations,
 failures, reference outcomes and their fixture roles are preserved.
+
+To reproduce the overlap independently, run `readiness_original.py`,
+`pipe_fixture_originals.py --test-id test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered`,
+and `readiness_operands.py` with the same compiler, runtime, Clang and level
+arguments shown above. By default `pipe_fixture_originals.py` also exercises
+both selector variants of `test_communicate_eintr`.
