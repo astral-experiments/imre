@@ -8,14 +8,17 @@ use ruff_python_ast::visitor::{Visitor, walk_expr};
 use crate::ir::Type;
 use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule};
 
+mod constants;
 mod dataclasses;
 mod enums;
 mod exceptions;
 mod inheritance;
+mod init_hooks;
 mod record_hash;
+pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
 pub(crate) use exceptions::explicit_message_initializer;
-pub(crate) use inheritance::super_init;
+pub(crate) use inheritance::{super_init, super_method};
 
 pub(crate) const EXCEPTION_ARGS_SLOT: &str = "<exception arguments>";
 
@@ -23,6 +26,7 @@ pub(crate) const EXCEPTION_ARGS_SLOT: &str = "<exception arguments>";
 pub(crate) enum MethodKind {
     Instance,
     Property,
+    PropertySetter,
     Class,
     Static,
 }
@@ -46,6 +50,8 @@ pub(crate) struct Class {
     pub(crate) node: ast::StmtClassDef,
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
+    /// Field writes required of every override called during construction.
+    pub(crate) init_hooks: HashMap<String, Vec<String>>,
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
@@ -57,7 +63,7 @@ pub(crate) struct Class {
     pub(crate) dataclass: Option<DataclassOptions>,
     pub(crate) enum_members: Option<enums::Members>,
     pub(crate) exception_aliases: HashMap<String, ExceptionAlias>,
-    pub(crate) static_bindings: HashMap<String, Binding>,
+    pub(crate) static_bindings: HashMap<String, ClassValue>,
     pub(crate) generated_initializer: bool,
     /// Index into `methods`, including the initializer itself.
     pub(crate) initializer: Option<usize>,
@@ -75,6 +81,15 @@ pub(crate) struct Field {
 }
 
 impl Classes {
+    /// Even an entry module with no ordinary globals must initialize its owned class tuples.
+    pub(crate) fn owns_class_tuples(&self, module: usize) -> bool {
+        self.definitions.iter().any(|class| {
+            class.definition.module == module && class.static_bindings.values().any(|value| {
+                matches!(value, ClassValue::Strings { owner, .. } if *owner == class.definition)
+            })
+        })
+    }
+
     pub(crate) fn instance(&self, id: usize) -> Type {
         if let Some(members) = &self.definitions[id].enum_members {
             if members.plain {
@@ -221,10 +236,10 @@ fn collect_class(
     {
         return Err(module.error(node, "incompatible base for a fixed-layout class"));
     }
-    let mut methods = Vec::new();
+    let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
     let mut method_kinds = Vec::new();
     let mut initializer = None;
-    for statement in &node.body {
+    for (ordinal, statement) in node.body.iter().enumerate() {
         // A call through an upcast uses its declared layout. Do not erase an
         // override which could select a different callable at runtime.
         let member = match statement {
@@ -361,7 +376,7 @@ fn collect_class(
                 }
                 let unary_protocol = matches!(
                     name,
-                    "__str__" | "__bool__" | "__iter__" | "__copy__" | "__fspath__"
+                    "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__" | "__fspath__"
                 );
                 if name.starts_with("__")
                     && name != "__init__"
@@ -374,7 +389,24 @@ fn collect_class(
                     );
                 }
                 let kind = method_kind(graph, definition.module, method, &class_bindings)?;
-                if !names.insert(name.to_owned()) {
+                if kind == MethodKind::PropertySetter {
+                    let mut accessors = methods
+                        .iter()
+                        .zip(&method_kinds)
+                        .filter(|(m, _)| m.name.as_str() == name);
+                    let getter = accessors.next().is_some_and(|(m, kind)| {
+                        *kind == MethodKind::Property
+                            && !m.decorator_list.iter().any(|d| {
+                                graph.resolve(definition.module, &d.expression)
+                                    == Some(Binding::Intrinsic(Intrinsic::CachedProperty))
+                            })
+                    });
+                    if !getter || accessors.next().is_some() {
+                        return Err(
+                            module.error(method, "a property setter needs its preceding getter")
+                        );
+                    }
+                } else if !names.insert(name.to_owned()) {
                     return Err(module.error(method, &format!("duplicate class member {name:?}")));
                 }
                 let first = method
@@ -383,7 +415,9 @@ fn collect_class(
                     .first()
                     .or_else(|| method.parameters.args.first());
                 let receiver = match kind {
-                    MethodKind::Instance | MethodKind::Property => Some("self"),
+                    MethodKind::Instance | MethodKind::Property | MethodKind::PropertySetter => {
+                        Some("self")
+                    }
                     MethodKind::Class => Some("cls"),
                     MethodKind::Static => None,
                 };
@@ -401,6 +435,14 @@ fn collect_class(
                     && (method.parameters.len() != 1 || first.unwrap().default.is_some())
                 {
                     return Err(module.error(method, "a property getter must take only self"));
+                }
+                if kind == MethodKind::PropertySetter
+                    && (method.parameters.posonlyargs.len() + method.parameters.args.len() != 2
+                        || method.parameters.len() != 2)
+                {
+                    return Err(
+                        module.error(method, "a property setter must take self and a value")
+                    );
                 }
                 if (unary_protocol || matches!(name, "__repr__" | "__post_init__"))
                     && (kind != MethodKind::Instance
@@ -424,12 +466,54 @@ fn collect_class(
             }
             ast::Stmt::Assign(assign)
                 if let [ast::Expr::Name(name)] = assign.targets.as_slice()
-                    && let Some(binding) = class_static_binding(
+                    && !class_bindings.contains("property")
+                    && let Some((read, write)) =
+                        property_accessors(graph, definition.module, &assign.value) =>
+            {
+                if !names.insert(name.id.to_string()) {
+                    return Err(module.error(name, "duplicate property binding"));
+                }
+                for (accessor, kind, arity) in [
+                    (Some(read), MethodKind::Property, 1),
+                    (write, MethodKind::PropertySetter, 2),
+                ] {
+                    let Some(accessor) = accessor else { continue };
+                    let Some((method, _)) = methods
+                        .iter()
+                        .zip(&method_kinds)
+                        .find(|(m, k)| m.name.as_str() == accessor && **k == MethodKind::Instance)
+                    else {
+                        return Err(module.error(
+                            assign,
+                            "property accessors must be preceding instance methods",
+                        ));
+                    };
+                    if method.parameters.len() != arity
+                        || method.parameters.posonlyargs.len() + method.parameters.args.len()
+                            != arity
+                    {
+                        return Err(module.error(
+                            assign,
+                            "property accessor has the wrong number of positional parameters",
+                        ));
+                    }
+                    let mut alias = method.clone();
+                    alias.name = ast::Identifier::new(name.id.as_str(), name.range);
+                    methods.push(alias);
+                    method_kinds.push(kind);
+                }
+                class_bindings.insert(name.id.to_string());
+            }
+            ast::Stmt::Assign(assign)
+                if let [ast::Expr::Name(name)] = assign.targets.as_slice()
+                    && let Some(binding) = constants::value(
                         graph,
-                        definition.module,
+                        definition,
+                        ordinal,
                         &assign.value,
                         &class_bindings,
-                    ) =>
+                        &static_bindings,
+                    )? =>
             {
                 if !names.insert(name.id.to_string())
                     || name.id.starts_with("__")
@@ -484,6 +568,15 @@ fn collect_class(
     {
         inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
     }
+    if fields
+        .iter()
+        .any(|field| static_bindings.contains_key(&field.name))
+    {
+        return Err(module.error(
+            node,
+            "an instance field cannot shadow a fixed class binding",
+        ));
+    }
     let generated_initializer =
         initializer.is_none() && dataclass.is_some_and(|options| options.init);
     let initializer = if generated_initializer {
@@ -525,21 +618,6 @@ fn collect_class(
             ));
         }
     };
-    if let Some(initializer) = initializer
-        && method_origins[initializer] == definition
-    {
-        check_initializer(
-            module,
-            &methods[initializer],
-            &fields,
-            if generated_initializer {
-                &[]
-            } else {
-                inherited_fields
-            },
-            exception_layout,
-        )?;
-    }
     let mut bases = Vec::new();
     if let Some((id, base)) = base {
         bases.push(id);
@@ -557,9 +635,42 @@ fn collect_class(
             }
         }
     }
+    let mut init_hooks = base
+        .map(|(_, parent)| parent.init_hooks.clone())
+        .unwrap_or_default();
+    for (name, expected) in &init_hooks {
+        if names.contains(name) {
+            let actual =
+                init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name);
+            if actual.transpose()?.as_ref() != Some(expected) {
+                return Err(module.error(
+                    node,
+                    "an initializer hook override must initialize the same fields",
+                ));
+            }
+        }
+    }
+    if let Some(initializer) = initializer
+        && method_origins[initializer] == definition
+    {
+        check_initializer(
+            module,
+            &methods[initializer],
+            &fields,
+            if generated_initializer {
+                &[]
+            } else {
+                inherited_fields
+            },
+            exception_layout,
+            &mut init_hooks,
+            |name| init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name),
+        )?;
+    }
     Ok(Class {
         definition,
         name: node.name.as_str().to_owned(),
+        init_hooks,
         node: node.clone(),
         fields,
         toml_hash: hash.is_some(),
@@ -576,6 +687,30 @@ fn collect_class(
         generated_initializer,
         initializer,
     })
+}
+
+/// Recognize a fixed property declared from locally named accessors.
+pub(crate) fn property_accessors<'a>(
+    graph: &SourceGraph,
+    module: usize,
+    value: &'a ast::Expr,
+) -> Option<(&'a str, Option<&'a str>)> {
+    let ast::Expr::Call(call) = value else {
+        return None;
+    };
+    if !matches!(&*call.func, ast::Expr::Name(n) if n.id == "property")
+        || graph.resolve(module, &call.func).is_some()
+        || !call.arguments.keywords.is_empty()
+    {
+        return None;
+    }
+    match call.arguments.args.as_ref() {
+        [ast::Expr::Name(get)] => Some((get.id.as_str(), None)),
+        [ast::Expr::Name(get), ast::Expr::Name(set)] => {
+            Some((get.id.as_str(), Some(set.id.as_str())))
+        }
+        _ => None,
+    }
 }
 
 /// Resolve declarations whose descriptor cannot bind an instance: a sealed
@@ -610,6 +745,23 @@ fn class_static_binding(
     }
     let binding = graph.resolve(module, value)?;
     match (wrapped, binding) {
+        (false, Binding::Value(id)) => {
+            // A compiled regex is an immutable object in a fixed module binding.
+            let stmt = &graph.modules[id.module].parsed.syntax().body[id.statement];
+            let init = match stmt {
+                ast::Stmt::Assign(a) => Some(a.value.as_ref()),
+                ast::Stmt::AnnAssign(a) => a.value.as_deref(),
+                _ => None,
+            };
+            if let Some(ast::Expr::Call(call)) = init
+                && graph.resolve(id.module, &call.func)
+                    == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
+            {
+                Some(binding)
+            } else {
+                None
+            }
+        }
         (false, Binding::IntrinsicModule(_)) | (true, Binding::Intrinsic(_)) => Some(binding),
         (true, Binding::Definition(id))
             if matches!(
@@ -661,9 +813,17 @@ fn method_kind(
             _ => {}
         }
     }
+    if let ast::Expr::Attribute(attr) = &decorator.expression
+        && attr.attr.as_str() == "setter"
+        && let ast::Expr::Name(name) = &*attr.value
+        && name.id == method.name.id
+        && class_names.contains(name.id.as_str())
+    {
+        return Ok(MethodKind::PropertySetter);
+    }
     Err(module.error(
         decorator,
-        "method decorators must be unshadowed @property, @classmethod, or @staticmethod; properties are read-only",
+        "unsupported method decorator on a fixed-layout class",
     ))
 }
 
@@ -675,6 +835,8 @@ fn check_initializer(
     fields: &[Field],
     inherited: &[Field],
     exception_layout: bool,
+    hooks: &mut init_hooks::Hooks,
+    lookup: impl Fn(&str) -> Option<Result<Vec<String>, String>>,
 ) -> Result<(), String> {
     let receiver = initializer
         .parameters
@@ -709,6 +871,27 @@ fn check_initializer(
             // Calling BaseException directly bypasses any user base initializer.
             // Its ordinary fields still have to be initialized by this method.
             called_exception_base = true;
+            continue;
+        }
+        if let Some(name) = init_hooks::called_method(statement, receiver)
+            && name != "__init__"
+            && let Some(writes) = lookup(name)
+        {
+            let writes = writes?;
+            for field in &writes {
+                let Some(&declared_field) = declared.get(field.as_str()) else {
+                    return Err(
+                        module.error(statement, "initializer hook writes an undeclared field")
+                    );
+                };
+                if !initialized.insert(declared_field) {
+                    return Err(module.error(
+                        statement,
+                        "initializer hook writes an already initialized field",
+                    ));
+                }
+            }
+            hooks.insert(name.to_owned(), writes);
             continue;
         }
         let assignment = match statement {

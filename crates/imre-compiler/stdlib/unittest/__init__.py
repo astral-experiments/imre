@@ -2,6 +2,7 @@
 
 
 import difflib
+from types import ModuleType
 from typing import ClassVar
 
 
@@ -141,6 +142,18 @@ class TestCase:
     def skipTest(self, reason: str) -> None:
         raise SkipTest(reason)
 
+    def _raise_missing_callable(self, kind: str, name: str) -> None:
+        raise self.failureException(self._formatMessage(None, kind + " not raised by " + name))
+
+    def _bound_assertEqual(self) -> _BoundEqual:
+        return _BoundEqual(self)
+
+    def _bound_assertListEqual(self) -> _BoundListEqual:
+        return _BoundListEqual(self)
+
+    def _bound_assertRaises(self) -> _BoundRaises:
+        return _BoundRaises(self)
+
     def assertTrue(self, expr: bool, msg: str | None = None) -> None:
         if not expr:
             self.fail(self._formatMessage(msg, repr(expr) + " is not true"))
@@ -253,11 +266,42 @@ class TestCase:
         if first == second:
             self.fail(self._formatMessage(msg, f"{first!r} == {second!r}"))
 
+    def assertHasAttr(self, obj: ModuleType, name: str, msg: str | None = None) -> None:
+        if not hasattr(obj, name):
+            self.fail(self._formatMessage(msg, "module " + repr(obj.__name__) + " has no attribute " + repr(name)))
+
+    def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+        if member not in container:
+            self.fail(self._formatMessage(msg, repr(member) + " not found in " + repr(container)))
+
     def setUp(self) -> None:
         pass
 
     def tearDown(self) -> None:
         pass
+
+
+class _BoundAssertion:
+    _receiver: TestCase
+
+    def __init__(self, case: TestCase) -> None:
+        self._receiver = case
+
+
+class _BoundEqual(_BoundAssertion):
+    pass
+
+
+class _BoundListEqual(_BoundAssertion):
+    pass
+
+
+class _BoundRaises(_BoundAssertion):
+    pass
+
+
+def _raise_call_type_error(message: str) -> None:
+    raise TypeError(message)
 
 
 def _checked_expected(kinds: list[int], error: str | None) -> list[int]:

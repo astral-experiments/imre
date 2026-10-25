@@ -59,6 +59,10 @@ def check_commands(compiler, flags, root):
     compare(["-I"], flag_code, changes=env)
     compare(["-BI", "-X", "utf8=0"], flag_code, changes=env)
     compare(["-I", "-Xutf8=1"], flag_code, changes=dict(env, PYTHONUTF8="invalid"))
+    compare(["-Xutf8=1", "-X", "utf8=0"], flag_code, changes=env)
+    compare(["-Xutf8=0", "-Xutf8=1"], flag_code, changes=env)
+    compare([], flag_code, changes=dict(env, PYTHONNOUSERSITE="\u00a00", PYTHONDONTWRITEBYTECODE="\u20030"))
+    compare([], flag_code, changes=dict(env, PYTHONNOUSERSITE="\t0", PYTHONDONTWRITEBYTECODE="\v0"))
     compare([], "     print(123)\n", changes=env)  # 3.14 dedents the command
     compare([], "\n\tif 1:\n\t\tprint('tab')\n\tprint('end')\n")
     compare(["-I"], "    import sys\n    print(sys.orig_argv[3])", ["kept"])

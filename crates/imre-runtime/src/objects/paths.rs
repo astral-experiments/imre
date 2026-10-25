@@ -15,16 +15,38 @@ use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
 mod components;
 mod matching;
+mod metadata;
 mod pure;
 mod traversal;
+mod walking;
+pub(super) use metadata::Info;
 pub(super) use pure::PurePath;
+pub(super) use walking::Walker;
 
 #[derive(Clone)]
 pub(super) enum PathText {
     Flat(Rc<Str>),
+    /// Like pathlib's _from_parsed_string: str and filesystem calls keep the
+    /// supplied spelling, while name, parent and joins use parsed components.
+    Parsed {
+        spelling: Rc<Str>,
+        components: Rc<Str>,
+    },
     WithParent {
         text: Rc<Str>,
         parent: Weak<Str>,
+    },
+    /// Keep readdir's type alongside the spelling until someone asks for info.
+    Scanned {
+        spelling: Rc<Str>,
+        components: Option<Rc<Str>>,
+        parent: Weak<Str>,
+        kind: rustix::fs::FileType,
+    },
+    /// Only paths whose info was requested pay for the persistent view.
+    WithInfo {
+        lexical: Box<PathText>,
+        view: Rc<Object>,
     },
     Joined {
         parts: JoinedParts,
@@ -47,7 +69,91 @@ enum Prefix {
 }
 
 impl PathText {
+    fn from_entry(spelling: Str, kind: rustix::fs::FileType) -> Self {
+        let (spelling, components) = match Self::from_parsed_string(spelling) {
+            Self::Flat(s) => (s, None),
+            Self::Parsed {
+                spelling,
+                components,
+            } => (spelling, Some(components)),
+            _ => unreachable!(),
+        };
+        Self::Scanned {
+            spelling,
+            components,
+            parent: Weak::new(),
+            kind,
+        }
+    }
+
+    fn info(&mut self) -> Rc<Object> {
+        if let Self::WithInfo { view, .. } = self {
+            return Rc::clone(view);
+        }
+        let entry = if let Self::Scanned { kind, .. } = self {
+            Some(*kind)
+        } else {
+            None
+        };
+        let spelling = Rc::clone(self.spelling());
+        let view = Info::object(Rc::clone(&spelling), entry);
+        let lexical = std::mem::replace(self, Self::Flat(spelling));
+        *self = Self::WithInfo {
+            lexical: Box::new(lexical),
+            view: Rc::clone(&view),
+        };
+        view
+    }
+
+    fn from_parsed_string(spelling: Str) -> Self {
+        if spelling.is_empty() {
+            Self::Flat(Rc::new(Str::from(".")))
+        } else if is_normalized(&spelling) {
+            Self::Flat(Rc::new(spelling))
+        } else {
+            Self::Parsed {
+                components: Rc::new(normalize(&spelling)),
+                spelling: Rc::new(spelling),
+            }
+        }
+    }
+
+    fn components(&self) -> &Rc<Str> {
+        match self {
+            Self::Parsed { components, .. } => components,
+            Self::Scanned {
+                spelling,
+                components,
+                ..
+            } => components.as_ref().unwrap_or(spelling),
+            Self::WithInfo { lexical, .. } => lexical.components(),
+            _ => self.spelling(),
+        }
+    }
+
     fn parent(&mut self) -> Rc<Str> {
+        if let Self::WithInfo { lexical, .. } = self {
+            return lexical.parent();
+        }
+        if let Self::Scanned {
+            spelling,
+            components,
+            parent: cached,
+            ..
+        } = self
+        {
+            if let Some(p) = cached.upgrade() {
+                return p;
+            }
+            let p = Rc::new(Str::from(parent(components.as_ref().unwrap_or(spelling))));
+            if p.len() > size_of::<Str>() {
+                *cached = Rc::downgrade(&p);
+            }
+            return p;
+        }
+        if let Self::Parsed { components, .. } = self {
+            return Rc::new(Str::from(parent(components)));
+        }
         if let Self::WithParent { parent, .. } = self
             && let Some(shared) = parent.upgrade()
         {
@@ -69,6 +175,9 @@ impl PathText {
     fn cached(&self) -> Option<&Rc<Str>> {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => Some(text),
+            Self::Parsed { components, .. } => Some(components),
+            Self::Scanned { .. } => Some(self.components()),
+            Self::WithInfo { lexical, .. } => lexical.cached(),
             Self::Joined { spelling, .. } => spelling.get(),
         }
     }
@@ -76,6 +185,9 @@ impl PathText {
     fn prefix(&self) -> Prefix {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => Prefix::Flat(Rc::clone(text)),
+            Self::Parsed { components, .. } => Prefix::Flat(Rc::clone(components)),
+            Self::Scanned { .. } => Prefix::Flat(Rc::clone(self.components())),
+            Self::WithInfo { lexical, .. } => lexical.prefix(),
             Self::Joined { parts, spelling } => match spelling.get() {
                 Some(text) => Prefix::Flat(Rc::clone(text)),
                 None => Prefix::Joined(Rc::new(parts.clone())),
@@ -86,6 +198,9 @@ impl PathText {
     fn is_absolute(&self) -> bool {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => text.starts_with('/'),
+            Self::Parsed { components, .. } => components.starts_with('/'),
+            Self::Scanned { .. } => self.components().starts_with('/'),
+            Self::WithInfo { lexical, .. } => lexical.is_absolute(),
             Self::Joined { parts, .. } => parts.absolute,
         }
     }
@@ -93,6 +208,9 @@ impl PathText {
     fn spelling(&self) -> &Rc<Str> {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => text,
+            Self::Parsed { spelling, .. } => spelling,
+            Self::Scanned { spelling, .. } => spelling,
+            Self::WithInfo { lexical, .. } => lexical.spelling(),
             Self::Joined { parts, spelling } => spelling.get_or_init(|| parts.render()),
         }
     }
@@ -156,7 +274,7 @@ impl Storage {
     fn basename(&self) -> &str {
         match self {
             Self::PurePath(p) => p.basename(),
-            _ => name(self.path()),
+            _ => name(self.path_value().components()),
         }
     }
 
@@ -168,7 +286,7 @@ impl Storage {
             fail("SystemError", "expected a path object");
         };
         cached.get_or_init(|| {
-            let text = self.path_text();
+            let text = self.path_value().components();
             let component = name(text);
             if component.len() == text.len() {
                 Rc::clone(text)
@@ -182,6 +300,13 @@ impl Storage {
         match self {
             Self::PurePath(p) => &p.text,
             _ => self.path_value().spelling(),
+        }
+    }
+
+    fn component_text(&self) -> &Rc<Str> {
+        match self {
+            Self::PurePath(p) => &p.text,
+            _ => self.path_value().components(),
         }
     }
 
@@ -299,7 +424,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
     let mut resolved = if path.starts_with('/') {
         Str::from("/")
     } else {
-        let directory = std::env::current_dir().map_err(files::os_error)?;
+        let directory = std::env::current_dir().map_err(files::errno_error)?;
         path_utf8(directory.into_os_string())?
     };
     let mut source = path.split('/');
@@ -335,9 +460,10 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         // Validate at the actual lookup, so an earlier strict filesystem error
         // still precedes a later component containing a NUL.
         check_nul(&next)?;
+        let component_error = |error| files::errno_with_filename(error, Some(&next));
         let metadata = match fs::symlink_metadata(next.as_str()) {
             Ok(metadata) => metadata,
-            Err(error) if strict => return Err(files::os_error(error)),
+            Err(error) if strict => return Err(component_error(error)),
             Err(_) => {
                 resolved = next;
                 continue;
@@ -345,7 +471,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         };
         if !metadata.file_type().is_symlink() {
             if strict && remaining != 0 && !metadata.is_dir() {
-                return Err(files::os_error(io::Error::from_raw_os_error(libc::ENOTDIR)));
+                return Err(component_error(io::Error::from_raw_os_error(libc::ENOTDIR)));
             }
             resolved = next;
             continue;
@@ -357,7 +483,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
             }
             Some(None) => {
                 if strict {
-                    return Err(files::os_error(io::Error::from_raw_os_error(libc::ELOOP)));
+                    return Err(component_error(io::Error::from_raw_os_error(libc::ELOOP)));
                 }
                 resolved = next;
                 continue;
@@ -366,7 +492,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         }
         let target = match fs::read_link(next.as_str()) {
             Ok(target) => path_utf8(target.into_os_string())?,
-            Err(error) if strict => return Err(files::os_error(error)),
+            Err(error) if strict => return Err(component_error(error)),
             Err(_) => {
                 resolved = next;
                 continue;
@@ -460,13 +586,18 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
     unsafe {
         object(path).0.with(|storage| {
             if let Storage::PurePath(p) = storage {
-                return p
-                    .join([super::acquire_rc::<Str>(child as usize)])
-                    .into_object();
+                return finish(
+                    p.join(std::iter::once(super::acquire_rc::<Str>(child as usize)))
+                        .map(PurePath::into_object),
+                    std::ptr::null(),
+                );
             }
             let parent = storage.path_value();
             let child_text = &*child;
             if matches!(child_text.as_str(), "" | ".") {
+                if let PathText::Parsed { components, .. } = parent {
+                    return new_path(Rc::clone(components));
+                }
                 return path_with_text(parent.clone());
             }
             if let Some(base) = parent.cached()
@@ -521,7 +652,7 @@ pub unsafe extern "C" fn imre_path_count_part(path: *const Object, part: *const 
             if let Storage::PurePath(p) = storage {
                 return p.count_part(part);
             }
-            let path = storage.path();
+            let path = storage.component_text();
             let tail = path.trim_start_matches('/');
             let anchor = &path[..path.len() - tail.len()];
             usize::from(!anchor.is_empty() && part == anchor)
@@ -625,7 +756,7 @@ pub unsafe extern "C" fn imre_path_parent(path: *const Object) -> *const Object 
                 return path;
             }
             if let Storage::PurePath(p) = storage {
-                return p.parent().into_object();
+                return finish(p.parent().map(PurePath::into_object), std::ptr::null());
             }
             let Storage::Path { text, .. } = storage else {
                 fail("SystemError", "expected a path object");
@@ -792,6 +923,33 @@ fn check_nul(path: &str) -> Result<()> {
     }
 }
 
+/// # Safety
+/// The caller roots an exact Path. Its spelling is retained if readlink fails;
+/// a successful call transfers a fresh Path containing the stored link target.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_readlink(path: *const Object) -> *const Object {
+    // SAFETY: the caller keeps the original Path rooted through conversion.
+    let result = unsafe { super::os::links::readlink(path) }.and_then(|target| {
+        let target = target.to_str().ok_or_else(|| {
+            Error::new(
+                Kind::UnicodeDecodeError,
+                "symlink target is not valid UTF-8",
+            )
+        })?;
+        Ok(new_path(normalize(target)))
+    });
+    finish(result, std::ptr::null())
+}
+
+/// # Safety
+/// The caller roots the destination Path and exact str or bytes target matching
+/// the tag. Both original spellings are retained by any resulting OS exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_link(path: *const Object, word: usize, tag: u32, kind: u32) {
+    // SAFETY: the caller roots both path operands and supplies their representation.
+    finish(unsafe { super::os::links::link(path, word, tag, kind) }, ());
+}
+
 /// Match pathlib's retry order: create the leaf first, make missing parents with
 /// their default mode, then retry each child without creating its parents again.
 fn mkdir(path: &str, mode: u32, parents: bool, exist_ok: bool) -> io::Result<()> {
@@ -911,23 +1069,33 @@ pub(super) struct PathIterator {
 
 enum IterationState {
     Glob(traversal::Glob),
-    Snapshot(std::vec::IntoIter<OsString>),
+    Snapshot(std::vec::IntoIter<(OsString, rustix::fs::FileType)>),
     Exhausted,
 }
 
-/// Takes the complete name snapshot and closes the directory handle before any
-/// Path can escape, matching CPython's scandir-based iterator acquisition.
-fn snapshot(root: &str, suppress_errors: bool) -> Result<Vec<OsString>> {
+fn check_directory_path(root: &str) -> Result<()> {
     if root.contains('\0') {
-        return Err(Error::new(Kind::ValueError, "embedded null byte"));
+        return Err(Error::new(
+            Kind::ValueError,
+            "scandir: embedded null character in path",
+        ));
     }
-    let entries = fs::read_dir(root)
-        .and_then(|entries| {
-            entries
-                .map(|entry| entry.map(|entry| entry.file_name()))
-                .collect()
-        })
-        .map_err(files::os_error);
+    Ok(())
+}
+
+/// Snapshot directory entries and close their descriptor before yielding to callers.
+fn directory_entries<T>(
+    root: &str,
+    mut visit: impl FnMut(fs::DirEntry) -> T,
+) -> io::Result<Vec<T>> {
+    fs::read_dir(root)?
+        .map(|entry| entry.map(&mut visit))
+        .collect()
+}
+
+fn snapshot(root: &str, suppress_errors: bool) -> Result<Vec<OsString>> {
+    check_directory_path(root)?;
+    let entries = directory_entries(root, |entry| entry.file_name()).map_err(files::os_error);
     if suppress_errors {
         Ok(entries.unwrap_or_default())
     } else {
@@ -946,19 +1114,25 @@ impl PathIterator {
                 false,
             )?)
         } else {
-            IterationState::Snapshot(snapshot(&root, false)?.into_iter())
+            check_directory_path(&root)?;
+            let entries = super::os::directory_entry_types(&root).map_err(files::os_error)?;
+            IterationState::Snapshot(entries.into_iter())
         };
         Ok(Self { root, state })
     }
 
     pub(super) fn next(&mut self) -> Result<*const Object> {
         let next = match &mut self.state {
-            IterationState::Glob(glob) => glob.next(),
+            IterationState::Glob(glob) => glob
+                .next()
+                .map(|next| next.map(|path| path_with_text(PathText::from_parsed_string(path)))),
             IterationState::Snapshot(names) => names
                 .next()
-                .map(|name| {
+                .map(|(name, kind)| {
                     name.into_string()
-                        .map(|name| join(&self.root, &name))
+                        .map(|name| {
+                            path_with_text(PathText::from_entry(join(&self.root, &name), kind))
+                        })
                         .map_err(|_| {
                             Error::new(
                                 Kind::UnicodeDecodeError,
@@ -970,7 +1144,7 @@ impl PathIterator {
             IterationState::Exhausted => Ok(None),
         };
         match next {
-            Ok(Some(path)) => Ok(new_path(path)),
+            Ok(Some(path)) => Ok(path),
             result => {
                 self.state = IterationState::Exhausted;
                 result.map(|_| std::ptr::null())
@@ -1262,6 +1436,74 @@ mod tests {
         let text = Rc::new(Str::from(text));
         // SAFETY: the input is rooted and the new path transfers one owner.
         unsafe { Rc::from_raw(imre_path_new(Rc::as_ptr(&text))) }
+    }
+
+    #[test]
+    fn metadata_views_distinguish_regular_paths_and_scanned_entries_after_mutation() {
+        let directory = Directory::new();
+        let filename = directory.0.join("entry");
+        let entry_name = filename.to_str().unwrap();
+        let ordinary = path(entry_name);
+        // SAFETY: each ABI result transfers one owner; take the view before dropping
+        // its path to also check the independently retained spelling.
+        let view =
+            |p: &Rc<Object>| unsafe { Rc::from_raw(metadata::imre_path_info(Rc::as_ptr(p))) };
+        // SAFETY: both object kinds accepted by this predicate remain rooted here.
+        let query = |p: &Rc<Object>, kind, follow| unsafe {
+            metadata::imre_path_query(Rc::as_ptr(p), kind, u32::from(follow)) != 0
+        };
+        let first = view(&ordinary);
+        assert!(Rc::ptr_eq(&first, &view(&ordinary)));
+        assert!(!query(&first, 0, true));
+        drop(ordinary);
+        fs::write(&filename, "file").unwrap();
+        assert!(!query(&first, 2, true));
+        assert!(query(&first, 2, false));
+        assert!(query(&view(&path(entry_name)), 2, true));
+
+        // SAFETY: the directory is rooted until acquisition; the single entry
+        // and its view outlive the directory iterator's snapshot.
+        let scanned = unsafe {
+            let dir = directory.path();
+            let it = Rc::from_raw(imre_path_iter(Rc::as_ptr(&dir), std::ptr::null()));
+            let item = imre_path_next(Rc::as_ptr(&it));
+            assert!(!item.is_null());
+            Rc::from_raw(item)
+        };
+        let entry = view(&scanned);
+        fs::remove_file(&filename).unwrap();
+        assert!(query(&entry, 0, false));
+        assert!(query(&entry, 2, true));
+        assert!(!query(&entry, 0, true));
+        fs::create_dir(&filename).unwrap();
+        assert!(query(&entry, 0, true));
+        assert!(query(&entry, 2, false));
+        assert!(!query(&entry, 1, true));
+        assert!(query(&scanned, 1, true));
+
+        // Filesystems that report DT_UNKNOWN defer both type and link detection.
+        // Exercise this independently of whether the machine's temp fs supplies it.
+        let unknown = || {
+            let text = PathText::from_entry(Str::from(entry_name), rustix::fs::FileType::Unknown);
+            // SAFETY: recover the sole path owner, then take its independently owned view.
+            view(&unsafe { Rc::from_raw(path_with_text(text)) })
+        };
+        let remembered = unknown();
+        let unqueried = unknown();
+        assert!(query(&remembered, 1, false));
+        fs::remove_dir(&filename).unwrap();
+        symlink("late-target", &filename).unwrap();
+        assert!(query(&remembered, 1, true)); // share successful non-link lstat
+        assert!(!query(&remembered, 3, false));
+        assert!(query(&unqueried, 0, false)); // no stat needed
+        assert!(query(&unqueried, 3, false));
+        assert!(!query(&unqueried, 0, true)); // a failed follow lookup can retry
+        let target = directory.0.join("late-target");
+        fs::write(&target, "target").unwrap();
+        assert!(query(&unqueried, 2, true));
+        fs::remove_file(target).unwrap();
+        assert!(query(&unqueried, 0, true)); // retain successful target stat
+        assert!(!query(&unqueried, 2, false));
     }
 
     #[test]

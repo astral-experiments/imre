@@ -38,7 +38,7 @@ pub(super) fn copy(view: &View, root: usize, output: &mut Vec<Node>) -> usize {
 /// Compare a child at a time; a wide array needs only one pending frame.
 pub(super) fn equal(left: &View, right: &View) -> bool {
     let mut stack = vec![(left, left.index, right, right.index, 0)];
-    while let Some((a, i, b, j, next)) = stack.pop() {
+    while let Some((a, i, b, j, mut next)) = stack.pop() {
         let (a, i) = a.resolved(i);
         let (b, j) = b.resolved(j);
         let (l, r) = (&a.nodes[i], &b.nodes[j]);
@@ -56,11 +56,14 @@ pub(super) fn equal(left: &View, right: &View) -> bool {
                 if next == 0 && rs.iter().any(|(key, _)| l.lookup(key).is_none()) {
                     return false;
                 }
-                if let Some((key, _)) = ls.get(next) {
+                while next < ls.len() && ls.is_shadowed(next) {
+                    next += 1;
+                }
+                if let Some((key, value)) = ls.get(next) {
                     let Some(target) = r.lookup(key) else {
                         return false;
                     };
-                    Some((l.lookup(key).unwrap(), target))
+                    Some((*value, target))
                 } else {
                     None
                 }

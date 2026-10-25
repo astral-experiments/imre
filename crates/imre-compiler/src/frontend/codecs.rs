@@ -1,6 +1,5 @@
 //! Native codec registry lookup and stateless byte/text conversion.
 use super::*;
-use crate::analysis::CheckedDiagnostic;
 
 fn argument_type(ty: Type) -> Option<String> {
     Some(match ty {
@@ -43,10 +42,8 @@ impl Checker<'_> {
         let positional = call.arguments.args.len();
         let count = values.len() - 1;
         if let Some(extra) = call.arguments.args.get(2) {
-            self.graph.checked_argument(
-                self.module,
-                CheckedDiagnostic::ExcessPositional(extra.range()),
-            );
+            self.graph
+                .checked_excess_argument(self.module, extra.range());
         }
         let mut binding_error = None;
         let names = ["encoding", "errors"];
@@ -58,15 +55,14 @@ impl Checker<'_> {
             let key = kw.arg.as_ref().unwrap().as_str();
             let Some(slot) = names.iter().position(|name| *name == key).map(|i| i + 1) else {
                 self.graph
-                    .checked_argument(self.module, CheckedDiagnostic::Keyword(kw.range()));
+                    .checked_keywords(self.module, std::iter::once(kw.range()));
                 binding_error.get_or_insert_with(|| {
                     format!("encode() got an unexpected keyword argument '{key}'")
                 });
                 continue;
             };
             if order[slot] != 0 {
-                self.graph
-                    .checked_argument(self.module, CheckedDiagnostic::RepeatedKeyword(kw.range()));
+                self.graph.checked_repeated_keyword(self.module, kw.range());
                 binding_error.get_or_insert_with(|| {
                     format!("argument for encode() given by name ('{key}') and position ({slot})")
                 });

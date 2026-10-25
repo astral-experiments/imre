@@ -64,8 +64,9 @@ pub unsafe extern "C" fn imre_check_output_config(
 /// Run a native command and return either an exact CompletedProcess or checked stdout.
 ///
 /// # Safety
-/// Launch fields, the deadline and input must remain rooted and have the stated
-/// types. A present result descriptor has the original command's exact layout.
+/// Launch fields (including a trailer when a stream is borrowed), the deadline
+/// and input must remain rooted and have the stated types. A present result
+/// descriptor has the original command's exact layout.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_run_config(
     config: *const LaunchConfig,
@@ -78,7 +79,7 @@ pub unsafe extern "C" fn imre_run_config(
     descriptor: *const RecordDescriptor,
 ) -> *const () {
     // SAFETY: the caller roots this immutable configuration throughout launch.
-    let mut config = unsafe { *config };
+    let (mut config, redirects) = unsafe { (*config, LaunchConfig::redirect_words(config)) };
     let mut validation = validation;
     if !descriptor.is_null() && input != 0 {
         // run(input=None) inherits stdin; a present value, even empty, demands a pipe.
@@ -106,7 +107,7 @@ pub unsafe extern "C" fn imre_run_config(
         (
             Deadline::from_word(deadline_kind, deadline),
             input_bytes(input as *const (), config.streams & (1 << 16) != 0),
-            spawn(&config),
+            spawn(&config, redirects),
         )
     };
     let kind = if config.streams & (1 << 16) != 0 {
@@ -150,7 +151,7 @@ pub unsafe extern "C" fn imre_run_config(
                     0
                 };
                 let stderr = stream(stderr, stderr_kind)?;
-                let code = p.status.expect("communicate reaped the child");
+                let code = p.control.status().expect("communicate reaped the child");
                 if check && code != 0 {
                     raise_process(ProcessError {
                         cmd: p.args.clone(),
