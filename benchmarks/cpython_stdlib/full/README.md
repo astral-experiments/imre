@@ -6,6 +6,8 @@ Run `python3 benchmarks/cpython_stdlib/full/reference_report.py` to summarize th
 
 ## Scope
 
+The [shared fixtures](shared/README.md) and per-module files can be staged directly from this checkout for offline discovery and execution using a test-enabled CPython 3.14.5. The staging command verifies the original Git blobs and the discovery command checks the release's complete test IDs.
+
 Run `python3.14 -B benchmarks/cpython_stdlib/full/inventory.py` using **CPython 3.14.5**. It enumerates the interpreter's publicly named top-level modules, checks that assignments do not overlap, and prints every unassigned entry. Use `--json` for machine-readable output. The initial priority is the common application and data-processing modules. A proposed exclusion needs a reason; being unassigned or platform-specific does not remove a module. Include relevant dotted APIs, private implementation dependencies, package tests, and companion suites when a module is assigned.
 
 ## When a module is complete
