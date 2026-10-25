@@ -35,3 +35,23 @@ try:
 except ValueError as error:
     print(str(error))
 print(counter.reads)
+
+
+@dataclass
+class Item:
+    value: int
+
+    @property
+    def double(self) -> int:
+        return self.value * 2
+
+    @double.setter
+    def double(self, value: int) -> None:
+        self.value = value // 2
+
+
+item = Item(1)
+item.double = 9
+print(item.value, item.double)
+item.double += 7
+print(item.value, item.double)

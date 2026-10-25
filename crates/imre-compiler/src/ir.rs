@@ -78,6 +78,10 @@ pub(crate) enum Type {
     Logger,
     TimedFileHandler,
     ClockTime,
+    /// An exact instance of Python's plain, identity-only object.
+    PlainObject,
+    /// An exact immutable method descriptor on the builtin str class.
+    StrDescriptor(StrDescriptor),
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -211,6 +215,8 @@ impl std::fmt::Display for Type {
             Self::Logger => "logging.Logger",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
+            Self::PlainObject => "object",
+            Self::StrDescriptor(_) => "method_descriptor",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -593,6 +599,7 @@ pub(crate) enum Builtin {
     NamedException {
         kind: u32,
         message_field: usize,
+        tuple_args: bool,
         text: Option<usize>,
         repr: Option<usize>,
         dataclass_repr: bool,
@@ -608,6 +615,7 @@ pub(crate) enum Builtin {
     ImportErrorField(u32),
     ImportErrorReset,
     ImportErrorRejectReset,
+    ExceptionTupleView,
     ExceptionFieldRepr,
     ExceptionFieldLen,
     ExceptionFieldIndex,
@@ -698,6 +706,9 @@ pub(crate) enum Builtin {
     Sha256Hex,
     Sha256New,
     HashNew,
+    NewPlainObject,
+    StrDescriptor(StrDescriptor),
+    InspectSentinel,
     HashAvailable,
     Sha256Update,
     Sha256Digest {
@@ -969,6 +980,35 @@ pub(crate) enum RegexCapture {
     End,
 }
 
+/// These descriptor values call the same native operation as their bound string methods.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[repr(u32)]
+pub(crate) enum StrDescriptor {
+    Lower,
+    Strip,
+    LStrip,
+    RStrip,
+}
+impl StrDescriptor {
+    pub(crate) fn named(name: &str) -> Option<Self> {
+        Some(match name {
+            "lower" => Self::Lower,
+            "strip" => Self::Strip,
+            "lstrip" => Self::LStrip,
+            "rstrip" => Self::RStrip,
+            _ => return None,
+        })
+    }
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Lower => "lower",
+            Self::Strip => "strip",
+            Self::LStrip => "lstrip",
+            Self::RStrip => "rstrip",
+        }
+    }
+}
+
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
@@ -1044,6 +1084,7 @@ pub(crate) enum PathOperation {
     ContextExit,
     UnionText,
     Iterdir,
+    Walk,
     Glob {
         recursive: bool,
     },

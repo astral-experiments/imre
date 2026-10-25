@@ -143,6 +143,8 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -250,6 +252,15 @@ impl Types {
 
     pub(crate) fn set_custom_truth(&self, records: HashSet<usize>) {
         self.0.borrow_mut().custom_truth = records;
+    }
+
+    pub(crate) fn concrete_subclasses(&self, class: usize) -> Ref<'_, [Type]> {
+        Ref::map(self.0.borrow(), |storage| {
+            storage
+                .concrete_subclasses
+                .get(&class)
+                .map_or(&[][..], Vec::as_slice)
+        })
     }
 
     pub(crate) fn add_concrete_subclass(&self, class: usize, bases: &[usize]) {
@@ -500,6 +511,8 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -812,9 +825,7 @@ impl Types {
                 Type::Class(class) => {
                     pending.extend_from_slice(&class_fields[class]);
                     // A base-typed reference can own fields introduced by its concrete layout.
-                    if let Some(subclasses) = self.0.borrow().concrete_subclasses.get(&class) {
-                        pending.extend_from_slice(subclasses);
-                    }
+                    pending.extend(self.concrete_subclasses(class).iter().copied());
                 }
                 _ => pending.extend(self.children(ty)),
             }

@@ -71,7 +71,9 @@ impl Builtin {
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
-            Self::ExceptionFieldRepr => Contract::new(false, PreservesOwners),
+            Self::ExceptionTupleView | Self::ExceptionFieldRepr => {
+                Contract::new(false, PreservesOwners)
+            }
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
@@ -131,6 +133,7 @@ impl Builtin {
                     | PathOperation::TemporaryDirectory
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
+                    | PathOperation::Walk
                     | PathOperation::Glob { .. } => true,
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
@@ -336,6 +339,9 @@ impl Builtin {
             | Self::CsvLineNumber
             | Self::Sha256Hex
             | Self::Sha256New
+            | Self::StrDescriptor(_)
+            | Self::NewPlainObject
+            | Self::InspectSentinel
             | Self::HashAvailable
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
@@ -373,7 +379,6 @@ impl Builtin {
             | Self::SequenceGetInBounds
             | Self::SetContains
             | Self::Split
-            | Self::StringListCopy
             | Self::StringListFilter(_)
             | Self::StringListNonempty
             | Self::Str
@@ -395,6 +400,7 @@ impl Builtin {
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
+            | Self::StringListCopy
             | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
@@ -868,6 +874,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_repeat"
                 | "imre_str_repeat"
                 | "imre_seq_slice"
+                | "imre_str_list_copy"
                 | "imre_record_shallow_copy"
                 | "imre_dict_copy"
                 | "imre_dict_get"
