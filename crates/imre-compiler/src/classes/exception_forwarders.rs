@@ -145,20 +145,6 @@ impl ForwardingInitializer {
                     if field.value.as_name_expr()?.id != receiver || !is_parameter(input) {
                         return None;
                     }
-                    // These assignments invoke inherited data descriptors, even inside __init__.
-                    if matches!(
-                        field.attr.as_str(),
-                        "args"
-                            | "__cause__"
-                            | "__context__"
-                            | "__traceback__"
-                            | "__suppress_context__"
-                            | "__dict__"
-                            | "__class__"
-                            | "__weakref__"
-                    ) {
-                        return None;
-                    }
                     let name = private_field(node.name.as_str(), field.attr.as_str())
                         .unwrap_or_else(|| field.attr.to_string());
                     stores.push((name, input.to_owned()));
