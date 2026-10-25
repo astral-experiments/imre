@@ -37,6 +37,7 @@ mod json;
 mod literals;
 mod local_functions;
 mod logging;
+mod logging_formatters;
 mod logging_records;
 mod matching;
 mod module_values;
@@ -1316,6 +1317,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return Ok(Type::LogFormatter),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
@@ -4309,6 +4311,12 @@ impl<'a> Checker<'a> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if op == ast::Operator::Mod && left.ty == Type::Str && right.ty == Type::Int {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::PercentInteger, vec![left, right]),
+            });
+        }
         let left = Self::integer_addend(op, left, right.ty);
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
@@ -5229,6 +5237,9 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::TimedFileHandler | Type::ClockTime) {
                     return self.timed_attribute(receiver, attribute);
                 }
+                if receiver.ty == Type::LogFormatter {
+                    return self.formatter_attr(receiver, attribute);
+                }
                 if receiver.ty == Type::LogRecord {
                     return self.log_record_field(receiver, attribute);
                 }
@@ -5733,6 +5744,7 @@ impl<'a> Checker<'a> {
                 };
                 return self.fspath_argument(path);
             }
+            Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
             Some(Binding::Intrinsic(Intrinsic::MakeLogRecord)) => {
                 return self.make_log_record(call);
             }
@@ -5754,6 +5766,31 @@ impl<'a> Checker<'a> {
                 return self.root_log(level, call);
             }
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
+                self.reject_builtin_keywords(call)?;
+                let [arg] = call.arguments.args.as_ref() else {
+                    return Err(error(self.source, call, "time.sleep takes one number"));
+                };
+                let value = self.expr(arg)?;
+                let seconds = match value.ty {
+                    Type::Float => value,
+                    Type::Int | Type::Bool => Expr {
+                        ty: Type::Float,
+                        kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+                    },
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            arg,
+                            "time.sleep requires an integer or float",
+                        ));
+                    }
+                };
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::TimeSleep, vec![seconds]),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::WallTime)) if call.arguments.is_empty() => {
                 return Ok(Expr {
                     ty: Type::Float,
@@ -5997,6 +6034,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::TimedFileHandler {
                 return self.timed_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::LogFormatter {
+                return self.formatter_method(receiver, attribute, call);
             }
             if receiver.ty == Type::LogRecord {
                 return self.log_record_method(receiver, attribute, call);
