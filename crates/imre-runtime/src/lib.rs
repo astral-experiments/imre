@@ -905,10 +905,8 @@ fn parse_decimal_int(original: &str) -> Option<Int> {
         for character in source.chars() {
             if character.is_ascii() {
                 normalized.push(character);
-            } else if let Some(digit) = integer_text::decimal_digit(character) {
-                normalized.push(char::from(b'0' + digit));
             } else {
-                return None;
+                normalized.push(char::from(b'0' + integer_text::decimal_digit(character)?));
             }
         }
         if let Ok(value) = normalized.parse::<i64>()
