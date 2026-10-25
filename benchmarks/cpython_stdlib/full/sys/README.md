@@ -34,6 +34,7 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 - `test_43581`: the complete method reads both stream attributes and executes the shared native unittest string equality assertion. CPython runs the original fixture.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations and the filesystem codec lookup execute in the native driver. The original method, helper, unittest assertions and lifecycle run on CPython. Compiling the original method and helper together is currently blocked by inference of the helper’s unannotated `expected=None` parameter.
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
+- `test_executable`: the original decorated method remains on the host. Its adapter obtains each parent executable value from an Imre command and preserves the child's `argv[0]`, `executable=`, working directory and exact source. The stock child reports an empty path here. The versioned records change only when the integrated native run has been captured.
 
 The existing [stream and exit smoke runner](../../native_sys.py) exercises four
 `test_subprocess` IDs and additional native program fixtures. Those are outside this

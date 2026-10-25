@@ -4603,6 +4603,11 @@ impl Emitter<'_, '_> {
                 self.call("imre_codec_lookup", Type::CodecInfo, &[&args[0].value])
             }
             Builtin::CodecName => self.call("imre_codec_name", Type::Str, &[&args[0].value]),
+            Builtin::StrEncodeOptions => self.call(
+                "imre_str_encode_options",
+                Type::Bytes,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::CodecEncode | Builtin::CodecDecode => self.call(
                 if matches!(builtin, Builtin::CodecEncode) {
                     "imre_codec_encode"
@@ -6928,6 +6933,7 @@ declare ptr @imre_bytes_concat(ptr, ptr)
 declare ptr @imre_bytes_repeat(ptr, i64)
 declare ptr @imre_bytes_iter(ptr)
 declare ptr @imre_str_encode(ptr)
+declare ptr @imre_str_encode_options(ptr, ptr, ptr)
 declare ptr @imre_bytes_decode_splitlines(ptr)
 declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_bytes_decode_ascii(ptr)

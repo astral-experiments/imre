@@ -97,6 +97,28 @@ pub unsafe extern "C" fn imre_codec_encode(
     )
 }
 
+/// Encode a string using the same codec implementation as registry entries and files.
+///
+/// # Safety
+/// All three operands are rooted strings for the duration of the conversion.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_encode_options(
+    text: *const Str,
+    encoding: *const Str,
+    errors: *const Str,
+) -> *const Bytes {
+    // SAFETY: the typed compiler passes three live, immutable strings.
+    let (text, encoding, errors) = unsafe { (&*text, &*encoding, &*errors) };
+    if encoding.contains('\0') || errors.contains('\0') {
+        return Error::new(Kind::ValueError, "embedded null character").returning(std::ptr::null());
+    }
+    let encoded = Codec::lookup(encoding).and_then(|codec| codec.encode(text, Some(errors)));
+    finish(
+        encoded.map(|b| Rc::into_raw(Rc::new(b.into_owned()))),
+        std::ptr::null(),
+    )
+}
+
 /// # Safety
 /// The caller roots a codec info, byte buffer, and error handler name.
 #[unsafe(no_mangle)]

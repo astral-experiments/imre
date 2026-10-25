@@ -77,6 +77,11 @@ impl Checker<'_> {
             }
             args.push(self.expr(&keyword.value)?);
         }
+        Ok(Self::type_error_after(args, ty, message))
+    }
+
+    /// Evaluate the supplied operands before raising the callable's argument error.
+    pub(super) fn type_error_after(mut args: Vec<Expr>, ty: Type, message: String) -> Expr {
         args.push(Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
@@ -84,10 +89,10 @@ impl Checker<'_> {
                 message: Some(Box::new(unpacking::string(message))),
             },
         });
-        Ok(Expr {
+        Expr {
             ty,
             kind: ExprKind::Builtin(Builtin::RaiseException, args),
-        })
+        }
     }
 
     pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {

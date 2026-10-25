@@ -725,6 +725,7 @@ pub(crate) enum Builtin {
     UrlsafeB64encode,
     CodecLookup,
     CodecName,
+    StrEncodeOptions,
     CodecEncode,
     CodecDecode,
     Sha256Hex,
