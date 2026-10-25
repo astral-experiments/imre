@@ -5,7 +5,7 @@
     "collections.Counter": {
       "examples": 18,
       "status": "compile-blocked",
-      "diagnostic": "case.py:17:16: Imre: supported dictionary methods are get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
+      "diagnostic": "case.py:17:16: Imre: supported dictionary methods are clear(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union"
     },
     "collections.Counter.__add__": {
       "examples": 1,
@@ -71,5 +71,5 @@
       "diagnostic": "case.py:137:1: Imre: definitions must precede executable module statements"
     }
   },
-  "compiler_revision": "d041aeb3fd052afabd1b2ea807caa3f63a5c048e"
+  "compiler_revision": "8bed1fe034374b90860cfde5fe7f6324dfebb4de"
 }
