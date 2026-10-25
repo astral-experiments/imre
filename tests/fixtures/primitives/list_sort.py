@@ -24,6 +24,7 @@ class Inspect:
                     self.values.pop()
             elif self.actions == 4:
                 self.values.sort(key=lambda value: value)
+                self.values.clear()
                 self.values.extend([])
                 self.values.extend(reversed([]))
                 self.values.extend(self.glob("empty"))
@@ -78,6 +79,7 @@ class IntKey:
 
     def unhinted(self, value: int) -> int:
         self.items.extend(n for n in range(0))
+        self.items.clear()
         return value
 
 

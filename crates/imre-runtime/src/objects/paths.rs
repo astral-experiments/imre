@@ -15,9 +15,11 @@ use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
 mod components;
 mod matching;
+mod metadata;
 mod pure;
 mod traversal;
 mod walking;
+pub(super) use metadata::Info;
 pub(super) use pure::PurePath;
 pub(super) use walking::Walker;
 
@@ -33,6 +35,18 @@ pub(super) enum PathText {
     WithParent {
         text: Rc<Str>,
         parent: Weak<Str>,
+    },
+    /// Keep readdir's type alongside the spelling until someone asks for info.
+    Scanned {
+        spelling: Rc<Str>,
+        components: Option<Rc<Str>>,
+        parent: Weak<Str>,
+        kind: rustix::fs::FileType,
+    },
+    /// Only paths whose info was requested pay for the persistent view.
+    WithInfo {
+        lexical: Box<PathText>,
+        view: Rc<Object>,
     },
     Joined {
         parts: JoinedParts,
@@ -55,6 +69,42 @@ enum Prefix {
 }
 
 impl PathText {
+    fn from_entry(spelling: Str, kind: rustix::fs::FileType) -> Self {
+        let (spelling, components) = match Self::from_parsed_string(spelling) {
+            Self::Flat(s) => (s, None),
+            Self::Parsed {
+                spelling,
+                components,
+            } => (spelling, Some(components)),
+            _ => unreachable!(),
+        };
+        Self::Scanned {
+            spelling,
+            components,
+            parent: Weak::new(),
+            kind,
+        }
+    }
+
+    fn info(&mut self) -> Rc<Object> {
+        if let Self::WithInfo { view, .. } = self {
+            return Rc::clone(view);
+        }
+        let entry = if let Self::Scanned { kind, .. } = self {
+            Some(*kind)
+        } else {
+            None
+        };
+        let spelling = Rc::clone(self.spelling());
+        let view = Info::object(Rc::clone(&spelling), entry);
+        let lexical = std::mem::replace(self, Self::Flat(spelling));
+        *self = Self::WithInfo {
+            lexical: Box::new(lexical),
+            view: Rc::clone(&view),
+        };
+        view
+    }
+
     fn from_parsed_string(spelling: Str) -> Self {
         if spelling.is_empty() {
             Self::Flat(Rc::new(Str::from(".")))
@@ -71,11 +121,36 @@ impl PathText {
     fn components(&self) -> &Rc<Str> {
         match self {
             Self::Parsed { components, .. } => components,
+            Self::Scanned {
+                spelling,
+                components,
+                ..
+            } => components.as_ref().unwrap_or(spelling),
+            Self::WithInfo { lexical, .. } => lexical.components(),
             _ => self.spelling(),
         }
     }
 
     fn parent(&mut self) -> Rc<Str> {
+        if let Self::WithInfo { lexical, .. } = self {
+            return lexical.parent();
+        }
+        if let Self::Scanned {
+            spelling,
+            components,
+            parent: cached,
+            ..
+        } = self
+        {
+            if let Some(p) = cached.upgrade() {
+                return p;
+            }
+            let p = Rc::new(Str::from(parent(components.as_ref().unwrap_or(spelling))));
+            if p.len() > size_of::<Str>() {
+                *cached = Rc::downgrade(&p);
+            }
+            return p;
+        }
         if let Self::Parsed { components, .. } = self {
             return Rc::new(Str::from(parent(components)));
         }
@@ -101,6 +176,8 @@ impl PathText {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => Some(text),
             Self::Parsed { components, .. } => Some(components),
+            Self::Scanned { .. } => Some(self.components()),
+            Self::WithInfo { lexical, .. } => lexical.cached(),
             Self::Joined { spelling, .. } => spelling.get(),
         }
     }
@@ -109,6 +186,8 @@ impl PathText {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => Prefix::Flat(Rc::clone(text)),
             Self::Parsed { components, .. } => Prefix::Flat(Rc::clone(components)),
+            Self::Scanned { .. } => Prefix::Flat(Rc::clone(self.components())),
+            Self::WithInfo { lexical, .. } => lexical.prefix(),
             Self::Joined { parts, spelling } => match spelling.get() {
                 Some(text) => Prefix::Flat(Rc::clone(text)),
                 None => Prefix::Joined(Rc::new(parts.clone())),
@@ -120,6 +199,8 @@ impl PathText {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => text.starts_with('/'),
             Self::Parsed { components, .. } => components.starts_with('/'),
+            Self::Scanned { .. } => self.components().starts_with('/'),
+            Self::WithInfo { lexical, .. } => lexical.is_absolute(),
             Self::Joined { parts, .. } => parts.absolute,
         }
     }
@@ -128,6 +209,8 @@ impl PathText {
         match self {
             Self::Flat(text) | Self::WithParent { text, .. } => text,
             Self::Parsed { spelling, .. } => spelling,
+            Self::Scanned { spelling, .. } => spelling,
+            Self::WithInfo { lexical, .. } => lexical.spelling(),
             Self::Joined { parts, spelling } => spelling.get_or_init(|| parts.render()),
         }
     }
@@ -958,7 +1041,7 @@ pub(super) struct PathIterator {
 
 enum IterationState {
     Glob(traversal::Glob),
-    Snapshot(std::vec::IntoIter<OsString>),
+    Snapshot(std::vec::IntoIter<(OsString, rustix::fs::FileType)>),
     Exhausted,
 }
 
@@ -1003,19 +1086,25 @@ impl PathIterator {
                 false,
             )?)
         } else {
-            IterationState::Snapshot(snapshot(&root, false)?.into_iter())
+            check_directory_path(&root)?;
+            let entries = super::os::directory_entry_types(&root).map_err(files::os_error)?;
+            IterationState::Snapshot(entries.into_iter())
         };
         Ok(Self { root, state })
     }
 
     pub(super) fn next(&mut self) -> Result<*const Object> {
         let next = match &mut self.state {
-            IterationState::Glob(glob) => glob.next(),
+            IterationState::Glob(glob) => glob
+                .next()
+                .map(|next| next.map(|path| path_with_text(PathText::from_parsed_string(path)))),
             IterationState::Snapshot(names) => names
                 .next()
-                .map(|name| {
+                .map(|(name, kind)| {
                     name.into_string()
-                        .map(|name| join(&self.root, &name))
+                        .map(|name| {
+                            path_with_text(PathText::from_entry(join(&self.root, &name), kind))
+                        })
                         .map_err(|_| {
                             Error::new(
                                 Kind::UnicodeDecodeError,
@@ -1027,7 +1116,7 @@ impl PathIterator {
             IterationState::Exhausted => Ok(None),
         };
         match next {
-            Ok(Some(path)) => Ok(path_with_text(PathText::from_parsed_string(path))),
+            Ok(Some(path)) => Ok(path),
             result => {
                 self.state = IterationState::Exhausted;
                 result.map(|_| std::ptr::null())
@@ -1319,6 +1408,74 @@ mod tests {
         let text = Rc::new(Str::from(text));
         // SAFETY: the input is rooted and the new path transfers one owner.
         unsafe { Rc::from_raw(imre_path_new(Rc::as_ptr(&text))) }
+    }
+
+    #[test]
+    fn metadata_views_distinguish_regular_paths_and_scanned_entries_after_mutation() {
+        let directory = Directory::new();
+        let filename = directory.0.join("entry");
+        let entry_name = filename.to_str().unwrap();
+        let ordinary = path(entry_name);
+        // SAFETY: each ABI result transfers one owner; take the view before dropping
+        // its path to also check the independently retained spelling.
+        let view =
+            |p: &Rc<Object>| unsafe { Rc::from_raw(metadata::imre_path_info(Rc::as_ptr(p))) };
+        // SAFETY: both object kinds accepted by this predicate remain rooted here.
+        let query = |p: &Rc<Object>, kind, follow| unsafe {
+            metadata::imre_path_query(Rc::as_ptr(p), kind, u32::from(follow)) != 0
+        };
+        let first = view(&ordinary);
+        assert!(Rc::ptr_eq(&first, &view(&ordinary)));
+        assert!(!query(&first, 0, true));
+        drop(ordinary);
+        fs::write(&filename, "file").unwrap();
+        assert!(!query(&first, 2, true));
+        assert!(query(&first, 2, false));
+        assert!(query(&view(&path(entry_name)), 2, true));
+
+        // SAFETY: the directory is rooted until acquisition; the single entry
+        // and its view outlive the directory iterator's snapshot.
+        let scanned = unsafe {
+            let dir = directory.path();
+            let it = Rc::from_raw(imre_path_iter(Rc::as_ptr(&dir), std::ptr::null()));
+            let item = imre_path_next(Rc::as_ptr(&it));
+            assert!(!item.is_null());
+            Rc::from_raw(item)
+        };
+        let entry = view(&scanned);
+        fs::remove_file(&filename).unwrap();
+        assert!(query(&entry, 0, false));
+        assert!(query(&entry, 2, true));
+        assert!(!query(&entry, 0, true));
+        fs::create_dir(&filename).unwrap();
+        assert!(query(&entry, 0, true));
+        assert!(query(&entry, 2, false));
+        assert!(!query(&entry, 1, true));
+        assert!(query(&scanned, 1, true));
+
+        // Filesystems that report DT_UNKNOWN defer both type and link detection.
+        // Exercise this independently of whether the machine's temp fs supplies it.
+        let unknown = || {
+            let text = PathText::from_entry(Str::from(entry_name), rustix::fs::FileType::Unknown);
+            // SAFETY: recover the sole path owner, then take its independently owned view.
+            view(&unsafe { Rc::from_raw(path_with_text(text)) })
+        };
+        let remembered = unknown();
+        let unqueried = unknown();
+        assert!(query(&remembered, 1, false));
+        fs::remove_dir(&filename).unwrap();
+        symlink("late-target", &filename).unwrap();
+        assert!(query(&remembered, 1, true)); // share successful non-link lstat
+        assert!(!query(&remembered, 3, false));
+        assert!(query(&unqueried, 0, false)); // no stat needed
+        assert!(query(&unqueried, 3, false));
+        assert!(!query(&unqueried, 0, true)); // a failed follow lookup can retry
+        let target = directory.0.join("late-target");
+        fs::write(&target, "target").unwrap();
+        assert!(query(&unqueried, 2, true));
+        fs::remove_file(target).unwrap();
+        assert!(query(&unqueried, 0, true)); // retain successful target stat
+        assert!(!query(&unqueried, 2, false));
     }
 
     #[test]

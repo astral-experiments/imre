@@ -3,11 +3,49 @@
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
-use super::{Bytes, Int, Str};
+use super::{Bytes, Int, Str, c_int};
 use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
 use std::rc::Rc;
+
+/// Query the same POSIX metadata for Path views, fresh predicates, and metadata copies.
+pub(super) fn metadata(
+    path: impl AsRef<std::path::Path>,
+    follow: bool,
+) -> io::Result<std::fs::Metadata> {
+    if follow {
+        std::fs::metadata(path)
+    } else {
+        std::fs::symlink_metadata(path)
+    }
+}
+
+/// Snapshot names and the kernel's directory-entry types without looking up an inode.
+pub(super) fn directory_entry_types(
+    root: &str,
+) -> io::Result<Vec<(std::ffi::OsString, rustix::fs::FileType)>> {
+    use rustix::fs::{Dir, Mode, OFlags, open};
+    use std::os::unix::ffi::OsStringExt;
+
+    let fd = open(
+        root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    let mut entries = Vec::new();
+    for item in Dir::new(fd)? {
+        let entry = item?;
+        let name = entry.file_name().to_bytes();
+        if !matches!(name, b"." | b"..") {
+            entries.push((
+                std::ffi::OsString::from_vec(name.to_vec()),
+                entry.file_type(),
+            ));
+        }
+    }
+    Ok(entries)
+}
 
 macro_rules! descriptor_constants {
     ($($name:ident = $flag:ident),* $(,)?) => {$(
@@ -134,19 +172,6 @@ unsafe fn directory_fd(fd: usize) -> Result<libc::c_int> {
             )
         })?
     })
-}
-
-// All C ints fit in the immediate representation. Heap integers cannot fit.
-pub(super) fn c_int(word: usize) -> Result<libc::c_int> {
-    (word & 1 != 0)
-        .then_some((word as i64) >> 1)
-        .and_then(|n| libc::c_int::try_from(n).ok())
-        .ok_or_else(|| {
-            Error::new(
-                Kind::OverflowError,
-                "Python int too large to convert to C int",
-            )
-        })
 }
 
 fn checked(ret: libc::c_int) -> Result<libc::c_int> {

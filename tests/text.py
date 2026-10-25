@@ -15,6 +15,8 @@ REJECTED = {
     "splitlines_nested_argument": 'def number(value: int) -> int:\n    return value\n"x".splitlines(number("x"))',
     "isspace_nested_argument": 'def number(value: int) -> int:\n    return value\n"x".isspace(number("x"))',
     "splitlines_unproven_unpack": 'def lines(options: list[int]) -> list[str]:\n    return "x".splitlines(*options)',
+    "expandtabs_deprecated_index": "class Width:\n    def __index__(self) -> bool:\n        return True\n'x'.expandtabs(Width())",
+    "expandtabs_dynamic_args": "def run(args: list[int]) -> str:\n    return 'x'.expandtabs(*args)",
     "split_bytes": '"abc".split(b"b")',
     "split_wrong_limit": '"abc".split("b", True)',
     "split_duplicate": '"abc".split("b", sep="c")',

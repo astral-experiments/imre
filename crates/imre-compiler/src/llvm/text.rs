@@ -57,6 +57,10 @@ impl Emitter<'_, '_> {
                     "call ptr @imre_str_splitlines_options(ptr {source}, i32 {keep})"
                 ))
             }
+            TextOperation::ExpandTabs => self.checked_instruction(format!(
+                "call ptr @imre_str_expandtabs(ptr {source}, i64 {})",
+                args[1].value.operand,
+            )),
             TextOperation::Lower => {
                 self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))
             }
