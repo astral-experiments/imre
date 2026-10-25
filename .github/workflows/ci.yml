@@ -231,7 +231,7 @@ jobs:
             Lib/ensurepip/_bundled
             Modules
           persist-credentials: false
-      - name: Check native string line boundaries and whitespace against CPython
+      - name: Check native string line boundaries and Unicode predicates against CPython
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
         run: python3 tests/text_line_methods_upstream.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
@@ -301,11 +301,12 @@ jobs:
             python3 benchmarks/cpython_stdlib/full/pathlib/native_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-files-O$level.json"
             python3 benchmarks/cpython_stdlib/full/pathlib/walk_matrix.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$level"
           done
-          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --cohort basics --cohort metadata --cohort stat --result "$RUNNER_TEMP/cpython-path-cohorts.json"
+          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --cohort basics --cohort metadata --cohort stat --cohort segments --result "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --links "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --stat "$RUNNER_TEMP/cpython-path-cohorts.json"
-          python3 tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --fixture metadata_views --fixture links --fixture link_protocols --fixture path_stat --fixture stat_options
+          python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --segments "$RUNNER_TEMP/cpython-path-cohorts.json"
+          python3 tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --fixture metadata_views --fixture links --fixture link_protocols --fixture path_stat --fixture stat_options --fixture constructor_protocol --fixture path_protocol_descriptors
           python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/pathlib/reference-linux.json benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
       - name: Account for every CPython itertools ID under its original fixtures
         run: |
@@ -342,6 +343,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_shutil.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil.json"
           python3 benchmarks/cpython_stdlib/full/shutil/native_copy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copy.json"
           python3 benchmarks/cpython_stdlib/full/shutil/native_rmtree.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-rmtree.json"
+          python3 benchmarks/cpython_stdlib/full/shutil/rmtree_identity_controls.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-shutil-directory-identity.json"
           python3 benchmarks/cpython_stdlib/full/shutil/tree_ops.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copytree.json"
           python3 benchmarks/cpython_stdlib/full/shutil/move_ops.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-move.json"
           python3 benchmarks/cpython_stdlib/full/shutil/move_cross_device.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
@@ -370,6 +372,7 @@ jobs:
             python3 benchmarks/cpython_stdlib/full/logging/native_hierarchy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-children-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_formatters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-formatters-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-files-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/logging/native_rotation.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-rotation-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_filters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-filters-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_handlers.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-handlers-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/descriptor_seek.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-descriptor-seek-O$opt.json"

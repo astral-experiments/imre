@@ -153,6 +153,7 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) -> Result<()
                         current = (word as *const usize, 0);
                         continue 'tuples;
                     }
+                    7 if layout.is_value_struct() => super::structs::float_key(word).hash(state),
                     8 => (&*(word as *const Bytes)).hash(state),
                     _ => unreachable!("the checker excludes mutable and float tuple keys"),
                 }
@@ -1216,6 +1217,14 @@ impl Set {
         let mut tables = Tables::new(self.tables.key_kind());
         self.tables.copy_keys(&mut tables)?;
         Ok(Self { tables })
+    }
+
+    /// Borrow these integer keys while the caller copies a child descriptor set.
+    pub(super) fn integers(&self) -> impl Iterator<Item = &Int> {
+        let Tables::Int(table) = &self.tables else {
+            fail("SystemError", "expected a native integer set");
+        };
+        table.entries.iter().flatten().map(|entry| &entry.key.0)
     }
 
     /// # Safety

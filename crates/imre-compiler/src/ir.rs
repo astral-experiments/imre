@@ -295,6 +295,7 @@ pub(crate) struct ClassMetadata {
     pub enum_members: Vec<(String, String)>,
     /// A closed frozen layout whose generated constructor only stores its fields.
     pub frozen_initializer: Option<usize>,
+    pub value_struct: bool,
     pub dataclass_eq: bool,
     pub dataclass_repr: bool,
     pub toml_hash: bool,
@@ -647,6 +648,7 @@ pub(crate) enum Builtin {
     ExceptionMatchesAny,
     LiteralStringView,
     StringListContains,
+    StructListContains,
     StringContains,
     /// Immutable byte subsequence; operands are evaluated needle first.
     BytesContains,
@@ -766,6 +768,7 @@ pub(crate) enum Builtin {
         percent: bool,
         positive_sign: u8,
     },
+    TupleGet,
     ListGet,
     /// A live-length guard proves a private cursor or constant index is in
     /// bounds, with no intervening mutation or user code. Returns an owned
@@ -1167,6 +1170,7 @@ pub(crate) enum StrDescriptor {
     Strip,
     LStrip,
     RStrip,
+    IsAlnum,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
@@ -1175,6 +1179,7 @@ impl StrDescriptor {
             "strip" => Self::Strip,
             "lstrip" => Self::LStrip,
             "rstrip" => Self::RStrip,
+            "isalnum" => Self::IsAlnum,
             _ => return None,
         })
     }
@@ -1184,6 +1189,7 @@ impl StrDescriptor {
             Self::Strip => "strip",
             Self::LStrip => "lstrip",
             Self::RStrip => "rstrip",
+            Self::IsAlnum => "isalnum",
         }
     }
 }
@@ -1191,8 +1197,7 @@ impl StrDescriptor {
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
-    IsSpace,
-    IsUpper,
+    Predicate(TextPredicate),
     SplitLineEnds,
     ExpandTabs,
     Lower,
@@ -1210,6 +1215,13 @@ pub(crate) enum TextOperation {
     Dedent,
     ShlexSplit,
     ShlexQuote,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum TextPredicate {
+    Alnum,
+    Space,
+    Upper,
 }
 
 /// Numeric selectors for the runtime's imre_path_query ABI.
