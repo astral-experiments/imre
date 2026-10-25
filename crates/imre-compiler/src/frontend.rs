@@ -3636,7 +3636,7 @@ impl<'a> Checker<'a> {
         }
         let stored = self.types.directory_value(manager.ty);
         let archive = manager.ty == Type::ZipFile;
-        let popen = matches!(manager.ty, Type::Popen(_));
+        let popen = matches!(manager.ty, Type::Popen(..));
         if temporary.is_none()
             && stored.is_none()
             && !archive
@@ -5056,7 +5056,7 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::AsyncProcess(_)) {
                     return self.async_returncode(receiver, attribute);
                 }
-                if matches!(receiver.ty, Type::Popen(_)) {
+                if matches!(receiver.ty, Type::Popen(..)) {
                     return self.popen_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::CompletedProcess(_)) {
@@ -5669,7 +5669,7 @@ impl<'a> Checker<'a> {
             if receiver.ty.is_path() {
                 return self.path_method(receiver, attribute, call);
             }
-            if matches!(receiver.ty, Type::Popen(_)) {
+            if matches!(receiver.ty, Type::Popen(..)) {
                 return self.popen_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::CompletedProcess(_)) {
@@ -5809,6 +5809,7 @@ impl<'a> Checker<'a> {
                     ),
                     ("flush", 0) => (Builtin::TextFlush, Type::None),
                     ("close", 0) => (Builtin::TextClose, Type::None),
+                    ("fileno", 0) => (Builtin::FileFileno, Type::Int),
                     _ => {
                         return Err(error(
                             self.source,

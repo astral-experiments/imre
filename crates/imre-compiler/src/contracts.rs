@@ -180,9 +180,11 @@ impl Builtin {
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
                 | ProcessOperation::PopenPid
+                | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
                 | ProcessOperation::PopenStatus { .. }
                 | ProcessOperation::PopenExit
+                | ProcessOperation::PopenCommunicate { .. }
                 | ProcessOperation::PopenWait
                 | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncSpawn { .. }
@@ -371,6 +373,7 @@ impl Builtin {
             | Self::SysPlatform
             | Self::OsName
             | Self::SysArgv
+            | Self::FileFileno
             | Self::TextClose
             | Self::TextEnter
             | Self::TextFlush
