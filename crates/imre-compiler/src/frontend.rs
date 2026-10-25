@@ -2064,18 +2064,6 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             });
         }
-        if expected == Type::ModuleMember
-            && matches!(
-                value.ty,
-                Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_) | Type::Bytes
-            )
-        {
-            return Ok(errno::op(
-                crate::ir::ErrnoOperation::BoxValue,
-                expected,
-                vec![value],
-            ));
-        }
         if expected == Type::StringIterable
             && (self.types.element(value.ty) == Some(Type::Str)
                 || self
@@ -2087,6 +2075,18 @@ impl<'a> Checker<'a> {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
             });
+        }
+        if expected == Type::ModuleMember
+            && matches!(
+                value.ty,
+                Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_) | Type::Bytes
+            )
+        {
+            return Ok(errno::op(
+                crate::ir::ErrnoOperation::BoxValue,
+                expected,
+                vec![value],
+            ));
         }
         if let (Some(source), Some(destination)) = (
             self.types.directory_value(value.ty),

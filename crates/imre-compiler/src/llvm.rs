@@ -61,6 +61,9 @@ impl Type {
             | Self::Dict(_)
             | Self::Set(_)
             | Self::StringKeys
+            | Self::NativeModule
+            | Self::ModuleNamespace
+            | Self::ModuleMember
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
@@ -83,9 +86,6 @@ impl Type {
             | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
-            | Self::NativeModule
-            | Self::ModuleNamespace
-            | Self::ModuleMember
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -125,6 +125,9 @@ impl Type {
             | Self::Dict(_)
             | Self::Set(_)
             | Self::StringKeys
+            | Self::NativeModule
+            | Self::ModuleNamespace
+            | Self::ModuleMember
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
@@ -147,9 +150,6 @@ impl Type {
             | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
-            | Self::NativeModule
-            | Self::ModuleNamespace
-            | Self::ModuleMember
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
