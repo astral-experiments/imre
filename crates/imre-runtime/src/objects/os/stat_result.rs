@@ -80,6 +80,17 @@ fn signed(value: i64) -> Int {
     Int::small(value).unwrap_or_else(|| Int::new(value.into()))
 }
 
+/// Match the rounding of CPython's C stat expression on its baseline targets.
+fn float_seconds(seconds: f64, nanoseconds: i64) -> f64 {
+    let fraction = nanoseconds as f64;
+    if cfg!(target_arch = "aarch64") {
+        // AArch64 fuses the multiply and add, which matters just before the epoch.
+        fraction.mul_add(1e-9, seconds)
+    } else {
+        seconds + 1e-9 * fraction
+    }
+}
+
 /// # Safety
 /// The compiler supplies a permanent ten-int tuple descriptor with the stat attribute flag.
 unsafe fn pack(meta: Metadata, layout: *const RecordDescriptor) -> *mut usize {
@@ -114,8 +125,10 @@ unsafe fn pack(meta: Metadata, layout: *const RecordDescriptor) -> *mut usize {
             #[cfg(target_os = "macos")]
             darwin: DarwinFields {
                 // CPython's POSIX stat packs birthtime via an unsigned long.
-                birthtime: meta.st_birthtime() as u64 as f64
-                    + 1e-9 * meta.st_birthtime_nsec() as f64,
+                birthtime: float_seconds(
+                    meta.st_birthtime() as u64 as f64,
+                    meta.st_birthtime_nsec(),
+                ),
                 flags: meta.st_flags(),
                 generation: meta.st_gen(),
             },
@@ -155,7 +168,7 @@ pub unsafe extern "C" fn imre_stat_time(result: *const usize, index: u32) -> f64
     }
     // SAFETY: the index is fixed by the compiler's named attribute lookup.
     let (seconds, ns) = unsafe { timestamp(result, index as usize) };
-    seconds as f64 + 1e-9 * ns as f64
+    float_seconds(seconds as f64, ns)
 }
 
 fn absent(name: &str) -> super::Error {
