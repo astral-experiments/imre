@@ -61,7 +61,8 @@ impl Builtin {
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
-                    TextOperation::Split(_)
+                    TextOperation::Lower
+                    | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit => true,
@@ -567,6 +568,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"
+                | "imre_str_lower"
                 | "imre_str_join"
                 | "imre_str_replace"
                 | "imre_print_str"
