@@ -12,6 +12,9 @@ from comprehensions import require_result, run
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "text"
 STDLIB = FIXTURES.parents[2] / "benchmarks" / "cpython_stdlib"
 REJECTED = {
+    "ord_bytearray": 'ord(bytearray(b"x"))',
+    "ord_memoryview": 'ord(memoryview(b"x"))',
+    "ord_nested_argument": 'def required(x: str) -> str:\n    return x\nord(c=required())',
     "splitlines_nested_argument": 'def number(value: int) -> int:\n    return value\n"x".splitlines(number("x"))',
     "isspace_nested_argument": 'def number(value: int) -> int:\n    return value\n"x".isspace(number("x"))',
     "splitlines_unproven_unpack": 'def lines(options: list[int]) -> list[str]:\n    return "x".splitlines(*options)',

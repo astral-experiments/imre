@@ -16,6 +16,7 @@ pub(super) fn static_type(modules: &[SourceModule], module: ModuleId, value: &as
             matches!(
                 n.id.as_str(),
                 "str"
+                    | "object"
                     | "bytes"
                     | "bool"
                     | "int"
@@ -38,9 +39,8 @@ pub(super) fn static_type(modules: &[SourceModule], module: ModuleId, value: &as
                             | Intrinsic::Iterator
                             | Intrinsic::Sequence
                             | Intrinsic::NominalClass("collections.abc.Sequence")
-                            | Intrinsic::Declaration(
-                                "collections.abc.Mapping" | "collections.abc.Collection"
-                            )
+                            | Intrinsic::Mapping
+                            | Intrinsic::Declaration("collections.abc.Collection")
                             | Intrinsic::Literal
                     )
             )
@@ -61,9 +61,8 @@ pub(super) fn static_type(modules: &[SourceModule], module: ModuleId, value: &as
                         | Intrinsic::Iterator
                         | Intrinsic::Sequence
                         | Intrinsic::NominalClass("collections.abc.Sequence")
-                        | Intrinsic::Declaration(
-                            "collections.abc.Mapping" | "collections.abc.Collection"
-                        )
+                        | Intrinsic::Mapping
+                        | Intrinsic::Declaration("collections.abc.Collection")
                         | Intrinsic::Literal
                 ))
             );
