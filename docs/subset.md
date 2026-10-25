@@ -678,6 +678,13 @@ for path in sorted(root.glob("*.json"), key=lambda path: path.name):
 
 `exists()`, `is_file()`, and `is_dir()` follow symlinks and return false for failed filesystem queries, matching Python 3.14, including invalid NUL-containing paths.
 
+`Path.stat(*, follow_symlinks=True)` and `Path.lstat()` return a native
+`os.stat_result`. Its ten tuple entries include integral timestamps; the
+named time attributes include fractions, and their `_ns` counterparts retain
+nanoseconds. Linux and macOS also expose block size, blocks and device type.
+macOS exposes birth time, file flags and generation. OS failures retain the
+original path spelling in `OSError.filename`.
+
 `Path.read_text(encoding=None, errors=None, newline=None)` and `write_text(data, encoding=None, errors=None, newline=None)` use the same native file backend as binary reads and writes. UTF-8 is the default; UTF-8 with signature, Latin-1 and ASCII are also supported. Strict, ignore, replace and backslash-replace error modes work for these encodings; single-byte writes also support XML character references. With no newline override, reads translate CRLF and CR to LF. Empty or explicit newline strings keep the input line endings; on POSIX, write-side CR and CRLF overrides replace each LF. Writes return the number of input Unicode scalars, independent of encoded length. Data of the wrong type raises `TypeError` before opening the target. An invalid newline or codec name on an otherwise valid write is diagnosed after opening and truncating the file.
 
 `mkdir(mode=0o777, parents=False, exist_ok=False)` creates a directory. The mode is an exact integer within the signed C-int range; larger values raise `OverflowError`. Boolean options require exact booleans. The process umask applies, and missing parents use mode `0o777` independently of the leaf mode. `exist_ok=True` accepts an existing directory, including a symlink to one, without changing its permissions. `unlink(missing_ok=False)` removes a file or symlink; its flag suppresses only `FileNotFoundError`. `rmdir()` removes an empty directory. These methods return `None` and preserve their normal filesystem error categories.
@@ -755,7 +762,9 @@ Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueErr
 
 `sys.argv` and `sys.orig_argv` are independent mutable lists, each shared across aliases and modules. In a standalone executable both start with the arguments passed to its main function. With `imre run`, `sys.argv` starts with the source path followed by the program arguments after `--`; `sys.orig_argv` contains the actual Imre command, flags, and program arguments. Element writes and list mutation are supported; rebinding a module attribute or imported name is not. Native arguments must be valid UTF-8. Invalid Unix argument bytes raise `UnicodeDecodeError` when the list is first accessed; CPython's surrogateescaped strings are outside this runtime's string domain. Programs that never read process arguments emit no argument initialization or shutdown calls.
 
-`imre [-I] [-B] [-X utf8[=0|1]] -c CODE [ARG ...]` compiles the command in memory and runs it as `__main__`. Python 3.14's command dedent applies before parsing. The program sees `['-c', *args]` in `sys.argv`; `sys.orig_argv` preserves the complete invocation, including the original indentation and option spelling. `sys.executable` identifies the Imre launcher. Commands may import supported source modules from the working directory and `PYTHONPATH`. `-I` excludes the working directory and ignores `PYTHONPATH` and other Python startup environment flags. The selected `isolated`, `ignore_environment`, `safe_path`, `no_user_site`, `dont_write_bytecode`, and `utf8_mode` fields are available through `sys.flags` in command mode. The native compiler's existing text, filesystem, and import restrictions still apply. `IMRE_ENCODED_FLAGS` and `IMREFLAGS` select the native compiler and linker settings independently of Python startup flags.
+`imre [-I] [-B] [-O ...] [-X utf8[=0|1]] -c CODE [ARG ...]` compiles the command in memory and runs it as `__main__`. Python 3.14's command dedent applies before parsing. The program sees `['-c', *args]` in `sys.argv`; `sys.orig_argv` preserves the complete invocation, including the original indentation and option spelling. `sys.executable` identifies the Imre launcher. Commands may import supported source modules from the working directory and `PYTHONPATH`. `-I` excludes the working directory and ignores `PYTHONPATH` and other Python startup environment flags. The selected `isolated`, `ignore_environment`, `safe_path`, `no_user_site`, `dont_write_bytecode`, and `utf8_mode` fields are available through `sys.flags` in command mode. The native compiler's existing text, filesystem, and import restrictions still apply. `IMRE_ENCODED_FLAGS` and `IMREFLAGS` select the native compiler and linker settings independently of Python startup flags.
+
+In command mode, each `-O` raises `sys.flags.optimize` by one. `PYTHONOPTIMIZE` can raise that level unless `-I` ignores it. At level one or higher, `__debug__` is false and assertions do not evaluate their conditions or messages. At level two or higher, the module docstring is `None`. File builds use level zero, including when LLVM code generation uses `--opt-level 3`.
 
 ## Command-line options
 
@@ -1049,6 +1058,10 @@ the empty dictionary; a `Counter` still returns zero for a missing key, and a
 methods `Counter.clear(mapping)` and `defaultdict.clear(mapping)` do the same.
 
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
+
+`mapping.copy()` on a plain typed dictionary returns a fresh dictionary in
+insertion order. Each key and value is shared with the source; inserting or
+deleting an entry in the copy leaves the source dictionary unchanged.
 
 `dict.fromkeys(iterable, value)` builds a fresh dictionary in first-key order.
 It evaluates the value once, defaults it to `None`, and shares that object

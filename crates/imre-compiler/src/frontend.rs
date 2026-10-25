@@ -27,6 +27,7 @@ mod count_elements;
 mod counter;
 mod csv;
 mod dataclass_values;
+mod defaultdict_factory;
 mod deque;
 mod dispatch;
 mod doctest;
@@ -404,6 +405,7 @@ const RESERVED: &[&str] = &[
     "None",
     "True",
     "False",
+    "__debug__",
     "__name__",
     "__doc__",
     "__file__",
@@ -417,6 +419,8 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
         "RecursionError" => return Some(43),
+        "Warning" => return Some(80),
+        "RuntimeWarning" => return Some(81),
         _ => {}
     }
     if name == "ImportError" {
@@ -1538,6 +1542,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
         Some(Binding::Intrinsic(Intrinsic::ModuleType)) => return Ok(Type::NativeModule),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
+        Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(
@@ -2025,7 +2030,7 @@ impl<'a> Checker<'a> {
 
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
-        if reserved(name)
+        if (name != "__doc__" && reserved(name))
             || self.graph.modules[self.module].bindings.contains_key(name)
             || self.local_functions.contains_key(name)
             || self.class_receiver.as_deref() == Some(name)
@@ -2411,6 +2416,11 @@ impl<'a> Checker<'a> {
         self.reject_class_receiver_value(expression)?;
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
         if let ast::Expr::Call(call) = expression
+            && let Some(raised) = self.defaultdict_factory_error(call, expected)?
+        {
+            return Ok(raised);
+        }
+        if let ast::Expr::Call(call) = expression
             && let Some(shape) = self.types.mapping(concrete)
             && let Some(result) = self.fromkeys_call(call, Some(shape))?
         {
@@ -2536,9 +2546,7 @@ impl<'a> Checker<'a> {
             {
                 self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
             }
-            ast::Expr::Call(call)
-                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
-            {
+            ast::Expr::Call(call) if self.is_defaultdict_constructor(&call.func) => {
                 let (key, value) = self.types.mapping(concrete).ok_or_else(|| {
                     error(
                         self.source,
@@ -2547,7 +2555,8 @@ impl<'a> Checker<'a> {
                     )
                 })?;
                 if self.types.element(value).is_none()
-                    || !matches!(call.arguments.args.as_slice(), [ast::Expr::Name(name)] if name.id == "list")
+                    || !matches!(call.arguments.args.as_slice(), [factory @ ast::Expr::Name(name)]
+                        if name.id == "list" && !self.names.contains_key("list") && self.resolve(factory).is_none())
                     || !call.arguments.keywords.is_empty()
                 {
                     return Err(error(
@@ -4050,6 +4059,7 @@ impl<'a> Checker<'a> {
                     false,
                 ));
             }
+            ast::Stmt::Assert(_) if self.graph.python_optimization() > 0 => None,
             ast::Stmt::Assert(assert) => {
                 let test = self.condition(&assert.test)?;
                 let successful = self.local_state();
@@ -4769,16 +4779,11 @@ impl<'a> Checker<'a> {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
         if binary.op == ast::Operator::Mod
-            && let ExprKind::Str(pattern) = &left.kind
+            && matches!(left.ty, Type::Str | Type::StrLiteral(_))
             && matches!(right.ty, Type::Str | Type::StrLiteral(_))
         {
-            return self.percent_string(pattern, right).ok_or_else(|| {
-                error(
-                    self.source,
-                    binary,
-                    "literal percent formatting supports one %s field and %% escapes",
-                )
-            });
+            left = Self::string_value(left);
+            right = Self::string_value(right);
         }
         if binary.op == ast::Operator::Add
             && left.ty == Type::JsonValue
@@ -5138,9 +5143,16 @@ impl<'a> Checker<'a> {
             ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
-            ast::Expr::Name(name) if name.id == "__doc__" => {
+            ast::Expr::Name(name) if name.id == "__debug__" => (
+                Type::Bool,
+                ExprKind::Bool(self.graph.python_optimization() == 0),
+            ),
+            ast::Expr::Name(name)
+                if name.id == "__doc__" && !self.names.contains_key("__doc__") =>
+            {
                 let module = &self.graph.modules[self.module];
-                if let Some(ast::Stmt::Expr(doc)) = module.parsed.syntax().body.first()
+                if self.graph.python_optimization() < 2
+                    && let Some(ast::Stmt::Expr(doc)) = module.parsed.syntax().body.first()
                     && let ast::Expr::StringLiteral(text) = &*doc.value
                 {
                     check_string(text, self.source)?;
@@ -5923,6 +5935,9 @@ impl<'a> Checker<'a> {
                     return self.descriptor_attribute(receiver, method, attribute);
                 }
                 if let Some(declaration) = self.types.tuple_metadata(receiver.ty) {
+                    if self.types.is_stat_result(receiver.ty) {
+                        return self.stat_result_attribute(receiver, attribute, &declaration);
+                    }
                     return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
@@ -6288,6 +6303,11 @@ impl<'a> Checker<'a> {
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
         if receiver.is_none()
+            && let Some(raised) = self.defaultdict_factory_error(call, Type::None)?
+        {
+            return Ok(raised);
+        }
+        if receiver.is_none()
             && let Some(result) = self.fromkeys_call(call, None)?
         {
             return Ok(result);
@@ -6300,6 +6320,22 @@ impl<'a> Checker<'a> {
         }
         if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::MockCallList { mark })) = self.resolve(&call.func)
+        {
+            self.reject_builtin_keywords(call)?;
+            let [values] = call.arguments.args.as_ref() else {
+                return Err(error(self.source, call, "expected a mock call list"));
+            };
+            let values = self.expr(values)?;
+            if !matches!(self.types.element(values.ty), Some(Type::Class(c)) if self.bundled_mock_class(c, "_Call"))
+            {
+                return Err(error(self.source, call, "expected a mock call list"));
+            }
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::MockCallList { mark }, vec![values]),
+            });
         }
         if let Some(suite) = self.doctest_suite(call)? {
             return Ok(suite);
@@ -7375,6 +7411,17 @@ impl<'a> Checker<'a> {
                 if attribute.attr.as_str() == "fromkeys" {
                     return self.dict_fromkeys(call, None, Some(receiver));
                 }
+                if attribute.attr.as_str() == "copy"
+                    && receiver.ty == self.types.dict(key_type, value_type)
+                {
+                    if !call.arguments.is_empty() {
+                        return Err(error(self.source, call, "dict.copy() takes no arguments"));
+                    }
+                    return Ok(Expr {
+                        ty: receiver.ty,
+                        kind: ExprKind::Builtin(Builtin::DictCopy, vec![receiver]),
+                    });
+                }
                 if attribute.attr.as_str() == "clear"
                     && call.arguments.args.is_empty()
                     && call.arguments.keywords.is_empty()
@@ -7398,7 +7445,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "supported dictionary methods are clear(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
+                        "supported dictionary methods are clear(), copy() on a plain dictionary, get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
                     ));
                 }
                 let key = self.expr_expected(&call.arguments.args[0], key_type)?;
@@ -7890,6 +7937,7 @@ impl<'a> Checker<'a> {
                         | Type::ForwardRef(_)
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)
+                        | Type::Tuple(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
