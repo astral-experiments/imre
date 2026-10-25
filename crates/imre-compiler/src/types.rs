@@ -100,6 +100,7 @@ impl Types {
             | Type::Logger
             | Type::Sha256
             | Type::ZipFile
+            | Type::ZipInfo
             | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
@@ -407,6 +408,7 @@ impl Types {
             | Type::Logger
             | Type::Sha256
             | Type::ZipFile
+            | Type::ZipInfo
             | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch

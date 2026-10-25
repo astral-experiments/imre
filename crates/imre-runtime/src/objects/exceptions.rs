@@ -371,6 +371,10 @@ impl Error {
         }
     }
 
+    pub(super) fn is_kind(&self, kind: Kind) -> bool {
+        self.kind == kind
+    }
+
     pub(crate) fn allocation() -> Self {
         Self {
             kind: Kind::MemoryError,

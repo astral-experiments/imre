@@ -475,7 +475,7 @@ impl OptionSpec {
     }
 }
 
-/// Parses the current contents of sys.argv[1..] into the fixed namespace layout.
+/// Parses an explicit string list or the current sys.argv[1..] into a namespace.
 ///
 /// # Safety
 /// The compiler roots the inputs. `layout` and each descriptor in `children`
@@ -488,6 +488,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
     schema: *const Str,
     description: *const Str,
     argv: *const Object,
+    process_argv: bool,
 ) -> *mut usize {
     // SAFETY: these immutable inputs remain rooted during parsing and construction.
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
@@ -502,7 +503,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
             sequence
                 .values
                 .iter()
-                .skip(1)
+                .skip(usize::from(process_argv))
                 .map(|&word| super::acquire_rc::<Str>(word))
                 .collect::<Vec<_>>()
         })

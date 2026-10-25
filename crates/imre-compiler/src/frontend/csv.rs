@@ -27,6 +27,7 @@ impl Checker<'_> {
             ));
         }
         let (mut delimiter, mut quote, mut escape, mut flags) = (',', Some('"'), None, 1);
+        let mut args = vec![input];
         let mut seen = HashSet::new();
         for option in &call.arguments.keywords {
             let name = option.arg.as_deref().unwrap_or("");
@@ -36,6 +37,7 @@ impl Checker<'_> {
             match name {
                 "dialect" if matches!(&option.value, ast::Expr::StringLiteral(s) if s.value.to_str() == "excel") =>
                     {}
+                "lineterminator" => args.extend(self.csv_terminator(&option.value)?),
                 "delimiter" | "quotechar" | "escapechar" => {
                     let value = match &option.value {
                         ast::Expr::NoneLiteral(_) if name != "delimiter" => None,
@@ -90,8 +92,81 @@ impl Checker<'_> {
                     escape,
                     flags,
                 },
-                vec![input],
+                args,
             ),
         })
+    }
+    /// Forward the checked text or the exact invalid type name to the runtime.
+    /// Validation follows source iteration, including a closed file's own error.
+    fn csv_terminator(&mut self, option: &ast::Expr) -> Result<[Expr; 2], String> {
+        let value = Self::enum_text(self.expr(option)?);
+        let ty = value.ty;
+        let payload = self.types.payload(ty);
+        let string = |name: &str| Expr {
+            ty: Type::Str,
+            kind: ExprKind::Str(name.to_owned()),
+        };
+        if matches!(payload.unwrap_or(ty), Type::Str | Type::StrLiteral(_)) {
+            return Ok([value, string("NoneType")]);
+        }
+        let invalid = match payload.unwrap_or(ty) {
+            Type::None => "NoneType",
+            Type::Bool => "bool",
+            Type::Int => "int",
+            Type::Float => "float",
+            Type::Bytes => "bytes",
+            Type::ListInt | Type::List(_) => "list",
+            Type::Dict(_) => "dict",
+            Type::Set(_) => "set",
+            Type::Tuple(_) => "tuple",
+            Type::Class(id) => self.classes.declarations.definitions[id].name.as_str(),
+            _ => {
+                return Err(error(
+                    self.source,
+                    option,
+                    "unsupported csv.reader lineterminator type",
+                ));
+            }
+        };
+        let invalid = string(invalid);
+        let name = if payload.is_some() {
+            let slot = self.hidden(ty);
+            let test = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::IsNone, vec![self.local(slot)]),
+            };
+            Expr {
+                ty: Type::Str,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Assign(slot, value)],
+                    clear: vec![slot],
+                    value: Box::new(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Conditional(
+                            Box::new(test),
+                            Box::new(string("NoneType")),
+                            Box::new(invalid),
+                        ),
+                    }),
+                },
+            }
+        } else {
+            Expr {
+                ty: Type::Str,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(value)],
+                    clear: vec![],
+                    value: Box::new(invalid),
+                },
+            }
+        };
+        let absent = Expr {
+            ty: self.types.optional(Type::Str),
+            kind: ExprKind::Absent(Box::new(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            })),
+        };
+        Ok([absent, name])
     }
 }

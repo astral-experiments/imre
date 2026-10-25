@@ -66,7 +66,18 @@ struct Dialect {
 }
 
 impl Dialect {
-    fn validate(&self) -> Result<()> {
+    fn new(delimiter: u32, quote: u32, escape: u32, flags: u32) -> Self {
+        Self {
+            delimiter: char::from_u32(delimiter).unwrap(),
+            quote: char::from_u32(quote),
+            escape: char::from_u32(escape),
+            doublequote: flags & 1 != 0,
+            skip_space: flags & 2 != 0,
+            strict: flags & 4 != 0,
+        }
+    }
+
+    fn validate(&self, terminator: &str) -> Result<()> {
         let chars = [
             ("delimiter", Some(self.delimiter)),
             ("escapechar", self.escape),
@@ -77,6 +88,12 @@ impl Dialect {
                 || name != "delimiter" && self.skip_space && value == Some(' ')
             {
                 return Err(Error::new(Kind::ValueError, format!("bad {name} value")));
+            }
+            if value.is_some_and(|ch| terminator.contains(ch)) {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("bad {name} or lineterminator value"),
+                ));
             }
         }
         for (i, (name, value)) in chars.iter().enumerate() {
@@ -288,14 +305,54 @@ pub unsafe extern "C" fn imre_csv_reader(
     escape: u32,
     flags: u32,
 ) -> *const Object {
-    let dialect = Dialect {
-        delimiter: char::from_u32(delimiter).unwrap(),
-        quote: char::from_u32(quote),
-        escape: char::from_u32(escape),
-        doublequote: flags & 1 != 0,
-        skip_space: flags & 2 != 0,
-        strict: flags & 4 != 0,
-    };
+    // SAFETY: the default dialect borrows only the checked source.
+    unsafe {
+        create(
+            source,
+            kind,
+            Dialect::new(delimiter, quote, escape, flags),
+            Ok("\r\n"),
+        )
+    }
+}
+
+/// Create a reader with an explicitly evaluated lineterminator.
+///
+/// # Safety
+/// The source matches kind. A nonnull terminator is a rooted str; otherwise
+/// bad_type is a rooted str naming the supplied Python type.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_csv_reader_terminator(
+    source: *const Object,
+    kind: u32,
+    delimiter: u32,
+    quote: u32,
+    escape: u32,
+    flags: u32,
+    terminator: *const Str,
+    bad_type: *const Str,
+) -> *const Object {
+    // SAFETY: the compiler evaluates and roots the option and its diagnostic.
+    unsafe {
+        let value = terminator
+            .as_ref()
+            .map(Str::as_str)
+            .ok_or_else(|| (*bad_type).as_str());
+        create(
+            source,
+            kind,
+            Dialect::new(delimiter, quote, escape, flags),
+            value,
+        )
+    }
+}
+
+unsafe fn create(
+    source: *const Object,
+    kind: u32,
+    dialect: Dialect,
+    terminator: std::result::Result<&str, &str>,
+) -> *const Object {
     // SAFETY: the checked owner and kind agree; entering checks file closure as iter(file) does.
     let lines = unsafe {
         match kind {
@@ -311,15 +368,23 @@ pub unsafe extern "C" fn imre_csv_reader(
         }
     };
     finish(
-        dialect.validate().map(|()| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::CsvReader(
-                Box::new(Reader {
-                    lines,
-                    dialect,
-                    line_num: 0,
-                }),
-            )))))
-        }),
+        terminator
+            .map_err(|name| {
+                Error::new(
+                    Kind::TypeError,
+                    format!("\"lineterminator\" must be a string, not {name}"),
+                )
+            })
+            .and_then(|terminator| dialect.validate(terminator))
+            .map(|()| {
+                Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::CsvReader(
+                    Box::new(Reader {
+                        lines,
+                        dialect,
+                        line_num: 0,
+                    }),
+                )))))
+            }),
         ptr::null(),
     )
 }

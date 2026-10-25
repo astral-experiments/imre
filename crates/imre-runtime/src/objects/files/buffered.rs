@@ -1,7 +1,7 @@
 //! Buffered binary and UTF-8 streams with Python's read and write boundaries.
 
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, IsTerminal, Read, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::mem::MaybeUninit;
 
 use smallvec::SmallVec;
@@ -135,6 +135,37 @@ impl Input {
 
     pub(super) fn preserve_newlines(&mut self) {
         self.text.preserve_newlines = true;
+    }
+
+    /// Seek a plain BufferedReader at its logical position, discarding read-ahead
+    /// only after a successful move.
+    pub(super) fn seek(&mut self, mut at: SeekFrom) -> Result<u64> {
+        let buffered = self.raw.buffer().len();
+        let Source::Plain(file) = self.raw.get_mut().get_mut() else {
+            return Err(Error::new(Kind::UnsupportedOperation, "seek"));
+        };
+        if let SeekFrom::Current(delta) = at {
+            if delta == 0 {
+                return file
+                    .stream_position()
+                    .map(|pos| pos - buffered as u64)
+                    .map_err(super::errno_error);
+            }
+            let pos = i128::from(file.stream_position().map_err(super::errno_error)?)
+                - buffered as i128
+                + i128::from(delta);
+            at = SeekFrom::Start(
+                u64::try_from(pos)
+                    .map_err(|_| super::errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?,
+            );
+        }
+        let pos = file.seek(at).map_err(super::errno_error)?;
+        self.raw.consume(buffered);
+        Ok(pos)
+    }
+
+    pub(super) fn read_into(&mut self, bytes: &mut [u8]) -> Result<usize> {
+        self.raw.read(bytes).map_err(os_error)
     }
 
     pub(super) fn read_bytes(&mut self, size: Option<usize>) -> Result<Bytes> {
