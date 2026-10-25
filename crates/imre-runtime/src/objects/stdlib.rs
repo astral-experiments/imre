@@ -444,6 +444,13 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
     unsafe {
         let separator = &*separator;
         object(values).0.with(|storage| {
+            if let Some(joined) = storage
+                .sequence_storage()
+                .plan()
+                .and_then(|plan| plan.join_ranges(separator))
+            {
+                return joined;
+            }
             let values = storage.sequence();
             values.check_kind(3);
             if let [word] = values.values.as_slice() {

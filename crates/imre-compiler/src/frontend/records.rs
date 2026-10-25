@@ -583,7 +583,7 @@ impl Checker<'_> {
                     kind: ExprKind::Builtin(Builtin::StringIterationList, vec![value]),
                 }
             } else {
-                self.document_iteration(value)
+                self.patch_iteration(self.document_iteration(value))
             }
         })
     }

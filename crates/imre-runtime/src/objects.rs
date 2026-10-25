@@ -30,6 +30,7 @@ mod format_cursors;
 mod hashlib;
 mod inspect;
 mod itertools;
+mod joined_lines;
 mod json;
 mod linecache;
 mod logging;
@@ -37,6 +38,7 @@ mod mappings;
 mod module_specs;
 mod namespaces;
 mod os;
+mod patchset;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
@@ -142,6 +144,9 @@ enum Storage {
     PathInfo(Box<paths::Info>),
     PurePath(Box<paths::PurePath>),
     PathIterator(Box<paths::PathIterator>),
+    PatchSet(patchset::PatchSet),
+    PatchedFile(patchset::PatchedFile),
+    Hunk(Box<patchset::Hunk>),
     RegexPattern(Box<regexes::Pattern>),
     Logger(Rc<Str>),
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
@@ -544,10 +549,15 @@ pub unsafe extern "C" fn imre_seq_len(value: *const Object) -> usize {
     // SAFETY: only the copied length leaves storage.
     let length = unsafe {
         object(value).0.with(|storage| {
-            storage
-                .sequence_storage()
-                .rows()
-                .map_or_else(|| storage.sequence().values.len(), structs::Rows::len)
+            let words = storage.sequence_storage();
+            words.rows().map_or_else(
+                || {
+                    words
+                        .plan()
+                        .map_or_else(|| words.values.len(), deferred_diff::Deferred::len)
+                },
+                structs::Rows::len,
+            )
         })
     };
     debug_assert!(length <= MAX_LIST_LEN);
@@ -1327,6 +1337,13 @@ pub unsafe extern "C" fn imre_str_splitlines_options(
 unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
+    if !KEEP {
+        match deferred_diff::Deferred::split_lines(&value) {
+            Ok(Some(lines)) => return lines,
+            Ok(None) => {}
+            Err(error) => return finish(Err(error), std::ptr::null()),
+        }
+    }
     finish(
         split_lines(&value, |mut range| {
             // The shared scanner has already found the boundary. Its first

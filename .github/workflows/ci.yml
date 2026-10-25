@@ -467,6 +467,7 @@ jobs:
       - name: Compare Ruff’s ecosystem check with CPython on local Git repositories
         run: |
           python3 -m pip install --no-deps tomli==2.5.0 tomli-w==1.2.0 unidiff==1.0.0
+          python3 tests/patchset.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
           target/release/imre check --entry-profile examples/ruff_ecosystem/check-entry.json examples/ruff_ecosystem/ruff_ecosystem/__main__.py
           python3 tests/ruff_ecosystem_live.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
       - name: Compare fixed-offset datetime operations and original methods with CPython

@@ -115,6 +115,7 @@ impl Type {
             | Self::ZipFile
             | Self::ZipInfo
             | Self::CsvReader
+            | Self::Patch(_)
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -193,6 +194,7 @@ impl Type {
             | Self::ZipFile
             | Self::ZipInfo
             | Self::CsvReader
+            | Self::Patch(_)
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -832,6 +834,7 @@ impl Emitter<'_, '_> {
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
+            | Type::Patch(_)
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -3588,6 +3591,7 @@ impl Emitter<'_, '_> {
                 | Type::LogFormatter
                 | Type::LogRecord
                 | Type::Logger
+                | Type::Patch(_)
                 | Type::RegexPattern
                 | Type::JsonRoot
                 | Type::JsonValue
@@ -4001,14 +4005,23 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::StringListContains | Builtin::StructListContains => {
-                let helper = if matches!(builtin, Builtin::StructListContains) {
+            Builtin::IntListContains
+            | Builtin::StringListContains
+            | Builtin::StructListContains => {
+                let helper = if matches!(builtin, Builtin::IntListContains) {
+                    "imre_int_list_contains"
+                } else if matches!(builtin, Builtin::StructListContains) {
                     "imre_struct_list_contains"
                 } else {
                     "imre_str_list_contains"
                 };
+                let needle_ty = if matches!(builtin, Builtin::IntListContains) {
+                    "i64"
+                } else {
+                    "ptr"
+                };
                 let byte = self.instruction(format!(
-                    "call i32 @{helper}(ptr {}, ptr {})",
+                    "call i32 @{helper}({needle_ty} {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
                 Value {
@@ -4018,6 +4031,21 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
+            Builtin::Patch(operation) => self.call(
+                match operation {
+                    crate::ir::PatchOperation::Len => "imre_patch_len",
+                    crate::ir::PatchOperation::Parse => "imre_patch_parse",
+                    crate::ir::PatchOperation::Files => "imre_patch_files",
+                    crate::ir::PatchOperation::ModifiedFiles => "imre_patch_modified_files",
+                    crate::ir::PatchOperation::ModifiedCount => "imre_patch_modified_count",
+                    crate::ir::PatchOperation::Hunks => "imre_patch_hunks",
+                    crate::ir::PatchOperation::Path => "imre_patch_path",
+                    crate::ir::PatchOperation::SourceStart => "imre_patch_source_start",
+                    crate::ir::PatchOperation::HunkText => "imre_patch_hunk_text",
+                },
+                returns,
+                &[&args[0].value],
+            ),
             Builtin::RegexCompile { source, spelling } => {
                 // Distinct Python spellings may compile to the same engine pattern.
                 // A non-UTF-8 prefix separates this record from legacy UTF-8 literals.
@@ -6555,6 +6583,11 @@ impl Emitter<'_, '_> {
             Builtin::DecodeSplitLines => {
                 self.call("imre_bytes_decode_splitlines", returns, &[&args[0].value])
             }
+            Builtin::JoinedSplitLines => self.call(
+                "imre_splitlines_joined_tail",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::SplitLines => self.call("imre_str_splitlines", returns, &[&args[0].value]),
             Builtin::Ndiff => self.call(
                 "imre_ndiff_deferred",
@@ -6720,6 +6753,7 @@ impl Emitter<'_, '_> {
                     | Type::ZipFile
                     | Type::ZipInfo
                     | Type::CsvReader
+                    | Type::Patch(_)
                     | Type::RegexPattern
                     | Type::JsonRoot
                     | Type::JsonValue
@@ -6999,6 +7033,7 @@ impl Emitter<'_, '_> {
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
+            | Type::Patch(_)
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -7091,6 +7126,7 @@ impl Emitter<'_, '_> {
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
+            | Type::Patch(_)
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -7701,6 +7737,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ZipFile
         | Type::ZipInfo
         | Type::CsvReader
+        | Type::Patch(_)
         | Type::RegexPattern
         | Type::JsonRoot
         | Type::JsonValue
@@ -8453,6 +8490,7 @@ declare ptr @imre_str_splitlines(ptr)
 declare ptr @imre_str_splitlines_options(ptr, i32)
 declare i32 @imre_str_isspace(ptr)
 declare i32 @imre_str_isalnum(ptr)
+declare ptr @imre_splitlines_joined_tail(ptr, ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
@@ -8543,6 +8581,15 @@ declare i32 @imre_sys_is_interned(ptr)
 declare ptr @imre_regex_compile(ptr, i64)
 declare ptr @imre_regex_spelling(ptr)
 declare ptr @imre_unittest_compile_pattern(ptr)
+declare i64 @imre_patch_len(ptr)
+declare ptr @imre_patch_parse(ptr)
+declare ptr @imre_patch_files(ptr)
+declare ptr @imre_patch_modified_files(ptr)
+declare i64 @imre_patch_modified_count(ptr)
+declare ptr @imre_patch_hunks(ptr)
+declare ptr @imre_patch_path(ptr)
+declare i64 @imre_patch_source_start(ptr)
+declare ptr @imre_patch_hunk_text(ptr)
 declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
@@ -8687,6 +8734,7 @@ declare i32 @imre_str_truthy(ptr)
 declare i32 @imre_bytes_truthy(ptr)
 declare i32 @imre_str_contains(ptr, ptr)
 declare i32 @imre_str_list_contains(ptr, ptr)
+declare i32 @imre_int_list_contains(i64, ptr)
 declare void @imre_str_enum_table(ptr, i64)
 declare i64 @imre_enum_lookup(ptr, i64, i64)
 declare ptr @imre_enum_string(i64)

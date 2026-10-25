@@ -77,6 +77,8 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 `left + right` evaluates both lists before copying their elements into a fresh list. Both inputs have the same element type. If an element is a nested list or a record, the result shares that object with the input lists.
 
+`in` and `not in` support integer and string lists. An integer needle may be optional: a subprocess return code of `None` is absent from `[0, 1]`. Integer membership uses value equality, including for integers too large to fit in a machine word.
+
 `sorted(source, key=callback, reverse=condition)` returns a fresh list. Both keywords are optional. `key=None` compares the elements themselves, and `reverse` defaults to false and requires an exact `bool`. Keys may be exact integers, booleans, strings, string enums, bytes, or fixed tuples recursively containing those scalar types. Tuple fields whose exact type is `None` are also allowed; nullable fields, floats, mutable containers, and records are not. Every key has the same concrete shape, and tuples compare lexicographically. Input and keyword expressions evaluate in source order, then the source is fully materialized before any key callback runs. Each key is evaluated once in input order. Sorting is stable in both directions, so equal keys retain their input order even with `reverse=True`. A callback may mutate the original source or its elements and may raise. The copy already contains all input elements when the first callback runs.
 
 `values.sort(key=callback, reverse=condition)` accepts the same keys and updates the list in place. It returns `None`. Aliases observe the new order. During key evaluation the list appears empty until a callback adds elements. If a key raises, the list regains its original membership and order and the exception propagates. If keys succeed after a callback appends to the list, the sorted original elements are restored and the sort raises `ValueError`.
@@ -127,6 +129,15 @@ The list snapshots both inputs. Changing an input or a shallow copy afterward
 preserves ordinary list semantics. A program that selects added or removed rows
 and sorts by the text after the two-character tag can skip intraline comparisons.
 Reading the raw rows yields the original ordering and `? ` guides.
+
+`unidiff.PatchSet(text)` reads unified text patches, including Git file metadata.
+Iterating a patch set yields files; iterating a file yields hunks. The supported
+projections are `patch_set.modified_files` (a fresh list), `file.path`,
+`hunk.source_start`, and `str(hunk)`. The hunk string includes its canonical
+header and preserves the line endings and no-newline markers in the patch.
+Invalid hunk boundaries raise `unidiff.UnidiffParseError`. These patch objects
+are read-only; mutation, per-line objects, byte inputs, and metadata-only parsing
+are outside this surface.
 
 `itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
 `for key, group` loop, the first statement must assign `list(group)` to a separate
