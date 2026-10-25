@@ -125,6 +125,7 @@ pub(crate) enum IntrinsicModule {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
     GetAnnotations,
+    ForwardRef,
     AnnotationTypeRepr,
     AnnotationFormat(i64),
     Declaration(&'static str),
@@ -436,6 +437,7 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
         let symbol = match (self, name) {
+            (Self::AnnotationLib, "ForwardRef") => Intrinsic::ForwardRef,
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
             (Self::AnnotationFormat, "VALUE") => Intrinsic::AnnotationFormat(1),
@@ -902,6 +904,11 @@ impl SourceGraph {
     /// This exact operand is excessive for a resolved native method that raises TypeError.
     pub(crate) fn checked_excess_argument(&self, module: ModuleId, argument: TextRange) {
         self.checked_diagnostic(module, "too-many-positional-arguments", argument);
+    }
+
+    /// The native positional-only binder already raises at this exact keyword.
+    pub(crate) fn checked_positional_keyword(&self, module: ModuleId, keyword: TextRange) {
+        self.checked_diagnostic(module, "positional-only-parameter-as-kwarg", keyword);
     }
 
     pub(crate) fn checked_keywords(

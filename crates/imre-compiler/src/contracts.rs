@@ -89,6 +89,7 @@ impl Builtin {
                     | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
+                    | TextOperation::Translate
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit
                     | TextOperation::ShlexQuote => true,
@@ -370,6 +371,7 @@ impl Builtin {
             | Self::IntBounded { .. }
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
+            | Self::IsBuiltinSubclass
             | Self::IsNone
             | Self::JsonIsInt
             | Self::Len
@@ -401,6 +403,8 @@ impl Builtin {
             | Self::NominalIdentity
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
+            | Self::ForwardRefField(_)
+            | Self::NewForwardRef
             | Self::ClassNameView
             | Self::StrEnumName
             | Self::StrEnumValue
@@ -818,6 +822,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
                 | "imre_str_splitlines_options"
+                | "imre_str_translate"
                 | "imre_exception_field_index"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
