@@ -25,18 +25,18 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The replay of [`93a8abf`](https://github.com/astral-sh/imre/commit/93a8abfac3dce8ea9e6d9526be8452e5d7ab9d21)
+The replay of [`773d272`](https://github.com/astral-sh/imre/commit/773d2724a141eb8fb0bb4fda1dd88858b517faec)
 includes logger hierarchy and handler propagation, the level registry, ordinary
 and timed file handlers, records, formatters, filters and configuration.
 Both levels have the same counts:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 16 |
+| Imre | Imre | Imre | CPython hooks and native child | 17 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 35 |
-| CPython | CPython | Imre | CPython hooks and native child | 4 |
-| Blocked before execution | | | | 210 |
+| CPython | CPython | Imre | CPython hooks and native child | 5 |
+| Blocked before execution | | | | 208 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -52,6 +52,7 @@ Four further original configuration bodies run on CPython. They check the native
 Four bodies verify native stderr with the original
 CPython output helper. The 35 host-driven methods exercise named handler registration, the registry, timed
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
+The two [Logger.makeRecord methods](records.md#loggermakerecord-and-extra) check insertion into a live record dictionary and all 23 protected names. The first runs the entire body and membership assertion in Imre; the second drives native operations from its original CPython loop and assertions.
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
 compiler or adapter blockers, and the three pinned skip conditions. It
 does not treat a compiled source or a passing CPython reference as a native pass.

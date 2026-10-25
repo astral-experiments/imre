@@ -31,7 +31,7 @@ pinned CPython at O0 and O3. It checks that the original format and mutable argu
 mapping survive delivery, that formatting errors wait for `getMessage()`, and that the
 caller, paths and both enum display styles use their original Python values. A disabled
 logger still evaluates its arguments; the last-resort handler only renders eligible events.
-The [full replay](evidence-linux.json) at `93a8abf` reproduced all 272 individual records at each level, including the CP1251 bytes. The direct comparisons add no occurrences.
+The [full replay of record delivery](https://github.com/astral-sh/imre/blob/1939e394d9e795686a5bb1887c61923f33c693e7/benchmarks/cpython_stdlib/full/logging/evidence-linux.json) at `93a8abf` reproduced all 272 individual records at each level, including the CP1251 bytes. The direct comparisons add no occurrences.
 
 ## Logger.makeRecord and extra
 
@@ -43,8 +43,10 @@ The [focused replay](make-record-extra-linux.json) runs the two unchanged
 | `test_make_record_with_extra_no_overwrite` | Imre runs the entire method and checks native dictionary membership on the two original operands. The stock TestCase cannot yet compile `assertIn` for this mapping. |
 | `test_make_record_with_extra_overwrite` | CPython runs the original loop and `assertRaises`. One native child constructs the default record, enumerates its 21 original fields, and rejects all 23 attempts: those fields plus `message` and `asctime`. The full native body stops at `tuple(rv.__dict__.keys())`. |
 
-The [differential](make_record_values.py) checks argument evaluation order,
+The [58-observation differential](make_record_values.py) checks argument evaluation order,
 protected names, mutation through a live dictionary alias, copies from that
 dictionary, original field values, and their catchable errors. Its controls add
 no suite occurrences. The default record factory is covered; replacing it with
 a Python callable is separate. No host logging operation is credited as native.
+
+The [full per-occurrence report](evidence-linux.json) at `773d272` changes exactly these two rows at each optimization level. The 270 other occurrence records, including the exact CP1251 bytes and all three reference skips, are identical to the preceding replay.
