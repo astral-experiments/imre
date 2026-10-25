@@ -64,20 +64,7 @@ impl Checker<'_> {
         } = &mut input
             && iterable.ty == receiver.ty
         {
-            let absent = Expr {
-                ty: self.types.optional(Type::Int),
-                kind: ExprKind::Absent(Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                })),
-            };
-            *iterable = Expr {
-                ty: iterable.ty,
-                kind: ExprKind::Builtin(
-                    Builtin::Slice,
-                    vec![iterable.clone(), absent.clone(), absent.clone(), absent],
-                ),
-            };
+            *iterable = self.list_snapshot(iterable.clone());
         }
         let mut body = vec![Statement::Assign(destination, receiver)];
         // CPython reserves space on acquiring an iterator with no length hint,
@@ -86,7 +73,7 @@ impl Checker<'_> {
             Iteration::Prepared(_) => !matches!(source, ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "reversed")),
             Iteration::Container { iterable, .. } => {
-                matches!(iterable.ty, Type::TextIO | Type::BinaryIO)
+                matches!(iterable.ty, Type::TextIO | Type::BinaryIO | Type::CsvReader)
             }
             Iteration::Range(_) => false,
         };
