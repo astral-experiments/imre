@@ -240,6 +240,7 @@ impl Reachable {
                                     "__init__"
                                         | "__post_init__"
                                         | "__hash__"
+                                        | "__index__"
                                         | "__bool__"
                                         | "__fspath__"
                                         | "__iter__"

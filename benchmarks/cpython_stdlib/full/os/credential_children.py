@@ -14,7 +14,67 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from native_descriptors import HERE, descriptor_suite, verify_sources
 from method_preflight import methods
+from credential_boundaries import observe_boundaries
+from credential_errors import run_errors
 from suite_native import NativeCompileError, Toolchain, testcase_fixture
+
+POSIX_ASSERTIONS = {"test_getresuid": 4, "test_getresgid": 4, "test_setresuid": 2, "test_setresgid": 2}
+POSIX_CASE = """import posix
+
+class Case:
+    checks: int
+
+    def __init__(self) -> None:
+        self.checks = 0
+
+    def assertEqual(self, actual: int, expected: int) -> None:
+        assert actual == expected
+        self.checks += 1
+
+    def assertGreaterEqual(self, actual: int, expected: int) -> None:
+        assert actual >= expected
+        self.checks += 1
+
+    def assertIsNone(self, actual: None) -> None:
+        assert actual is None
+        self.checks += 1
+
+"""
+
+
+def execute_saved_ids(case, tools, root):
+    method = case._testMethodName
+    body, _ = methods(HERE / "upstream/Lib/test/test_posix.py")[f"PosixTester.{method}"]
+    directory = root / method
+    directory.mkdir()
+    source = POSIX_CASE.encode() + body + f"\ncase = Case()\ncase.{method}()\nprint(case.checks)\n".encode()
+    binary = tools.build(source, directory)
+    ref = subprocess.run([sys.executable, "-IB", directory / "case.py"], cwd=directory,
+                         start_new_session=True, capture_output=True, timeout=30, check=True)
+    run = subprocess.run([binary], cwd=directory, start_new_session=True,
+                         capture_output=True, timeout=30, check=True)
+    expected = f"{POSIX_ASSERTIONS[method]}\n".encode()
+    if ref.stdout != expected or run.stdout != expected or ref.stderr or run.stderr:
+        raise AssertionError((case.id(), ref.stdout, run.stdout, ref.stderr, run.stderr))
+    return {"status": "native_body_host_fixture", "assertions": POSIX_ASSERTIONS[method],
+            "method_sha256": hashlib.sha256(body).hexdigest(),
+            "host_fixtures": ["PosixTester.setUp and cleanups; upstream feature guard; test_posix.tearDownModule",
+                              "fresh process and temporary directory for each saved-ID operation"]}
+
+
+def verify_converters(tools, root):
+    source = (HERE / "credential_arguments.py").read_bytes()
+    directory = root / "converter"
+    directory.mkdir()
+    binary = tools.build(source, directory)
+    ref = subprocess.run([sys.executable, "-IB", directory / "case.py"], cwd=directory,
+                         start_new_session=True, capture_output=True, timeout=30, check=True)
+    run = subprocess.run([binary], cwd=directory, start_new_session=True,
+                         capture_output=True, timeout=30, check=True)
+    if run.stdout != ref.stdout or run.stderr != ref.stderr:
+        raise AssertionError((run.stdout, ref.stdout, run.stderr, ref.stderr))
+    return {"source_sha256": hashlib.sha256(source).hexdigest(), "output_sha256": hashlib.sha256(ref.stdout).hexdigest(),
+            "matching_lines": len(ref.stdout.splitlines())}
 
 
 def execute(case, tools, root):
@@ -84,10 +144,22 @@ def main():
         selected = {"test.test_os.PosixUidGidTests.test_" + op + "_neg1":
                     lambda case, original: execute(case, tools, root) for op in ("setregid", "setreuid")}
         rows = descriptor_suite(modules["test_os"], selected)
-        if any(row.get("status") not in {"native_body_host_operation", "native_body_host_fixture"}
+        saved = {"test.test_posix.PosixTester." + name:
+                 (lambda case, original: execute_saved_ids(case, tools, root)) for name in POSIX_ASSERTIONS}
+        rows.update(descriptor_suite(modules["test_posix"], saved))
+        rows.update(run_errors(modules, tools, root))
+        converter = verify_converters(tools, root)
+        boundaries = observe_boundaries(tools, root)
+        # The unchanged decorators decide availability before any callback is
+        # entered. Expose the reason without feeding an unexecuted ID to the ledger.
+        skipped = {name: row["reference_skip"] for name, row in rows.items() if "reference_skip" in row}
+        rows = {name: row for name, row in rows.items() if name not in skipped}
+        if any(row.get("status") not in {"native_body_host_operation", "native_body_host_fixture", "host_driven_native"}
                for row in rows.values()):
             raise ValueError(rows)
-    result.write_text(json.dumps({"cpython_commit": pin, "opt_level": args.opt_level, "cases": rows}, indent=2) + "\n")
+    result.write_text(json.dumps({"cpython_commit": pin, "opt_level": args.opt_level, "cases": rows,
+                                  "reference_skips": skipped, "converter": converter,
+                                  "supplemental_boundaries": boundaries}, indent=2) + "\n")
 
 
 if __name__ == "__main__":
