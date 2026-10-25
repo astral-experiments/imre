@@ -144,6 +144,7 @@ pub(crate) enum Intrinsic {
     SysPlatform,
     SysEncoding(&'static str),
     Stdin,
+    OsName,
     GetSysconfigPath,
     OsPathExists,
     OsDevnull,
@@ -334,6 +335,7 @@ impl IntrinsicModule {
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
+            (Self::Os, "name") => Intrinsic::OsName,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {

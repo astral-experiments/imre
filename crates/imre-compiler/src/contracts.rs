@@ -321,6 +321,7 @@ impl Builtin {
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
+            | Self::OsName
             | Self::SysArgv
             | Self::TextClose
             | Self::TextEnter
