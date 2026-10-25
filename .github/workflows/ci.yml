@@ -219,6 +219,8 @@ jobs:
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
       - run: cargo build --workspace --release --locked --features imre-compiler/verify-ir
+      - name: Verify the standard library support table
+        run: python3 -B benchmarks/cpython_stdlib/full/support_table.py --imre target/release/imre --check
       - name: Get the pinned CPython unittest support and extension docstrings
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -344,6 +346,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_shutil.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil.json"
           python3 benchmarks/cpython_stdlib/full/shutil/native_copy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copy.json"
           python3 benchmarks/cpython_stdlib/full/shutil/native_rmtree.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-rmtree.json"
+          python3 benchmarks/cpython_stdlib/full/shutil/rmtree_identity_controls.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-shutil-directory-identity.json"
           python3 benchmarks/cpython_stdlib/full/shutil/tree_ops.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copytree.json"
           python3 benchmarks/cpython_stdlib/full/shutil/move_ops.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-move.json"
           python3 benchmarks/cpython_stdlib/full/shutil/move_cross_device.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
