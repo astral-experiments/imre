@@ -513,11 +513,28 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             let reason = err.utf8_error();
             super::super::bytes::decode_owned_error(Rc::new(err.into_bytes()), reason)
         })?,
-        "latin-1" | "latin1" | "iso-8859-1" => bytes.iter().map(|&b| char::from(b)).collect(),
+        "latin-1" | "latin1" | "iso-8859-1" => {
+            let capacity = bytes.len() + bytes.iter().filter(|b| !b.is_ascii()).count();
+            let mut text = String::new();
+            text.try_reserve_exact(capacity)
+                .map_err(|_| Error::allocation())?;
+            text.extend(bytes.into_iter().map(char::from));
+            text
+        }
         _ => return Err(unsupported(&format!("file encoding {encoding}"))),
     };
     let source = if source.contains('\r') {
-        source.replace("\r\n", "\n").replace('\r', "\n")
+        let mut bytes = source.into_bytes();
+        let mut previous_cr = false;
+        bytes.retain_mut(|byte| {
+            let skip = previous_cr && *byte == b'\n';
+            previous_cr = *byte == b'\r';
+            if previous_cr {
+                *byte = b'\n';
+            }
+            !skip
+        });
+        String::from_utf8(bytes).expect("normalizing ASCII line endings preserves UTF-8")
     } else {
         source
     };

@@ -59,6 +59,7 @@ pub(crate) enum Type {
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
     TextIO,
     StringIO,
+    HandlerLock,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
@@ -215,6 +216,7 @@ impl std::fmt::Display for Type {
             Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
             Self::StringIO => "io.StringIO",
+            Self::HandlerLock => "_thread.RLock",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
             Self::PathInfo => "pathlib.types.PathInfo",
@@ -356,10 +358,15 @@ impl Module {
         let mut argv = false;
         let mut original = false;
         for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |value| match value.kind {
+            walk_expressions(&function.body, &mut |value| match &value.kind {
                 ExprKind::Builtin(Builtin::SysArgv, _) => argv = true,
                 ExprKind::Builtin(Builtin::SysOrigArgv, _) => original = true,
                 ExprKind::Builtin(Builtin::Linecache(..), _) => linecache = true,
+                ExprKind::Builtin(Builtin::WarningFormat { .. }, args)
+                    if args[5].ty != Type::Str =>
+                {
+                    linecache = true
+                }
                 _ => {}
             });
         }
@@ -670,6 +677,8 @@ pub(crate) enum Builtin {
     SysVersionInfo {
         implementation: bool,
     },
+    SysIntern,
+    SysIsInterned,
     OsName,
     DocCaptureStart,
     DocCaptureTake,
@@ -696,6 +705,13 @@ pub(crate) enum Builtin {
         invalid: u32,
     },
     WarningReset,
+    WarningFormat {
+        entry: Type,
+        environment: bool,
+    },
+    WarningWrite {
+        stdout: bool,
+    },
     PercentFormat,
     Logging(LogOperation),
     Timed(TimedOperation),
@@ -1422,6 +1438,16 @@ pub(crate) enum LogRecordOperation {
 pub(crate) enum LogOperation {
     Get,
     HandlerRename,
+    LockNew,
+    LockAcquire,
+    LockAcquireInt,
+    LockRelease,
+    LockCount,
+    LockOwned,
+    LockLocked,
+    LockEnter,
+    LockExit,
+    LockReset,
     HandlerLookup,
     PrintActiveException,
     AddLevel,

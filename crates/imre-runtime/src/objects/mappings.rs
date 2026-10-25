@@ -2568,26 +2568,25 @@ unsafe fn key_filter(
                 _ => unreachable!("expected dictionary keys or set"),
             };
             let result = Rc::from_raw(imre_set_new(kind));
-            let mut inserted = Ok(());
             object(right).0.with(|right| {
-                let mut select = |key| {
+                let select = |key| {
                     let present = match right {
-                        Storage::Dictionary(dict) => dict.tables.lookup(key).is_some(),
-                        Storage::Set(set) => set.tables.lookup(key).is_some(),
+                        Storage::Dictionary(dict) => dict.tables.try_lookup(key)?.is_some(),
+                        Storage::Set(set) => set.tables.try_lookup(key)?.is_some(),
                         _ => unreachable!("expected dictionary keys or set"),
                     };
                     if present == keep_present {
-                        inserted = set_add(Rc::as_ptr(&result), key);
+                        set_add(Rc::as_ptr(&result), key)?;
                     }
-                    inserted.is_ok()
+                    Ok(())
                 };
                 match left {
-                    Storage::Dictionary(dict) => dict.tables.all(|key, _| select(key)),
-                    Storage::Set(set) => set.tables.all(|key, ()| select(key)),
+                    Storage::Dictionary(dict) => dict.tables.try_for_each(|key, _| select(key)),
+                    Storage::Set(set) => set.tables.try_for_each(|key, ()| select(key)),
                     _ => unreachable!(),
-                };
-            });
-            inserted.map(|()| Rc::into_raw(result))
+                }
+            })?;
+            Ok(Rc::into_raw(result))
         })
     };
     crate::finish(result, std::ptr::null())
