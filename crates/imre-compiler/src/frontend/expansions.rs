@@ -168,7 +168,11 @@ impl Checker<'_> {
             Iteration::Container { iterable, .. } => {
                 matches!(
                     iterable.ty,
-                    Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
+                    Type::TextIO
+                        | Type::StringIO
+                        | Type::BinaryIO
+                        | Type::BytesIO
+                        | Type::CsvReader
                 )
             }
             Iteration::Range(_) => false,

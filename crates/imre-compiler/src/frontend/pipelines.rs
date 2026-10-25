@@ -1005,7 +1005,7 @@ impl Checker<'_> {
     /// A file is its own iterator. Acquiring it checks for closure, and pulls
     /// share its position with every reader, including a nested loop on it.
     pub(super) fn prepare_file_lines(&mut self, file: Expr) -> Prepared {
-        let line_type = if file.ty == Type::BinaryIO {
+        let line_type = if file.ty.is_binary_stream() {
             Type::Bytes
         } else {
             Type::Str
@@ -1049,7 +1049,7 @@ impl Checker<'_> {
         if !reverse && iterable.ty == Type::CsvReader {
             return Ok(self.prepare_csv_reader(iterable));
         }
-        if !reverse && matches!(iterable.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
+        if !reverse && iterable.ty.is_file_stream() {
             return Ok(self.prepare_file_lines(iterable));
         }
         let mapping = self.types.mapping(iterable.ty);

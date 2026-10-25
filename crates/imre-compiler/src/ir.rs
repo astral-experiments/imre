@@ -58,6 +58,8 @@ pub(crate) enum Type {
     StringIO,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
+    /// A byte buffer and its cursor from io.BytesIO.
+    BytesIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
     PurePath(PathFlavor),
@@ -161,6 +163,14 @@ impl Type {
         }
     }
 
+    pub(crate) fn is_binary_stream(self) -> bool {
+        matches!(self, Self::BinaryIO | Self::BytesIO)
+    }
+
+    pub(crate) fn is_file_stream(self) -> bool {
+        self.is_binary_stream() || matches!(self, Self::TextIO | Self::StringIO)
+    }
+
     pub(crate) fn is_path(self) -> bool {
         matches!(self, Self::Path | Self::PurePath(_))
     }
@@ -208,6 +218,7 @@ impl std::fmt::Display for Type {
             Self::TextIO => "typing.TextIO",
             Self::StringIO => "io.StringIO",
             Self::BinaryIO => "typing.BinaryIO",
+            Self::BytesIO => "io.BytesIO",
             Self::Path => "pathlib.Path",
             Self::PathInfo => "pathlib.types.PathInfo",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
@@ -592,7 +603,7 @@ pub(crate) enum Builtin {
     Tee,
     Cycle,
     DirectoryContextView,
-    TextStreamView,
+    FileStreamView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
     ExtensionImport(String),
@@ -801,6 +812,7 @@ pub(crate) enum Builtin {
     StringIo(StringIoOperation),
     BinarySeek,
     BinaryTell,
+    BytesIoValue,
     ZipOpenFile,
     ZipGetInfo,
     ZipInfoList,

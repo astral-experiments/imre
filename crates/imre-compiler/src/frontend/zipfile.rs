@@ -38,7 +38,7 @@ impl Checker<'_> {
         }
         let file = file.ok_or_else(|| error(self.source, call, "ZipFile requires a file"))?;
         let value = self.expr(file)?;
-        let (op, value) = if value.ty == Type::BinaryIO {
+        let (op, value) = if value.ty.is_binary_stream() {
             (Builtin::ZipOpenFile, value)
         } else {
             (Builtin::ZipOpen, self.path_text(value, file)?)

@@ -398,7 +398,7 @@ impl Builtin {
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
             | Self::DirectoryContextView
-            | Self::TextStreamView
+            | Self::FileStreamView
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile(_)
@@ -450,6 +450,7 @@ impl Builtin {
             | Self::StringIo(_)
             | Self::BinarySeek
             | Self::BinaryTell
+            | Self::BytesIoValue
             | Self::ZipOpenFile
             | Self::ZipGetInfo
             | Self::ZipInfoList
@@ -909,6 +910,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_string_io_position"
                 | "imre_binary_seek"
                 | "imre_binary_tell"
+                | "imre_bytes_io_value"
                 | "imre_zip_open_file"
                 | "imre_zip_getinfo"
                 | "imre_zip_infolist"

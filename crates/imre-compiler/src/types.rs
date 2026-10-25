@@ -153,6 +153,7 @@ impl Types {
             | Type::TextIO
             | Type::StringIO
             | Type::BinaryIO
+            | Type::BytesIO
             | Type::Path
             | Type::PurePath(_)
             | Type::CompletedProcess(_, None)
@@ -577,7 +578,8 @@ impl Types {
             | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
-            | Type::BinaryIO => Some(true),
+            | Type::BinaryIO
+            | Type::BytesIO => Some(true),
             Type::Optional(_) if self.truthiness(self.payload(ty).unwrap()) == Some(false) => {
                 Some(false)
             }
@@ -977,6 +979,7 @@ impl Types {
                 | Type::TextIO
                 | Type::StringIO
                 | Type::BinaryIO
+                | Type::BytesIO
                 | Type::CsvReader
                 | Type::ZipFile
                 | Type::Popen(..)

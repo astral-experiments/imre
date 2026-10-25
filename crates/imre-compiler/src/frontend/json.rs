@@ -222,7 +222,7 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(text)?;
-        let text = if file && value.ty == Type::BinaryIO {
+        let text = if file && value.ty.is_binary_stream() {
             Expr {
                 ty: Type::Bytes,
                 kind: ExprKind::Builtin(Builtin::BinaryRead, vec![value]),

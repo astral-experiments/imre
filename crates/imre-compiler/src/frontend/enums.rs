@@ -304,6 +304,7 @@ impl Checker<'_> {
                     .any(|ty| self.types.struct_sequence_fields(*ty).is_some()))
             || types == [Type::Logger; 2]
             || types == [Type::StringIO; 2]
+            || types.iter().all(|ty| ty.is_binary_stream())
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
             || types == [Type::PathInfo; 2]

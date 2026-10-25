@@ -110,6 +110,7 @@ impl Type {
             | Self::JsonObject
             | Self::RegexMatch
             | Self::BinaryIO
+            | Self::BytesIO
             | Self::Tuple(_) => "ptr",
             Self::None => "i8",
         }
@@ -179,6 +180,7 @@ impl Type {
             | Self::JsonObject
             | Self::RegexMatch
             | Self::BinaryIO
+            | Self::BytesIO
             | Self::Tuple(_) => "null",
             Self::Bool
             | Self::None
@@ -780,7 +782,8 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
-            | Type::BinaryIO => "object",
+            | Type::BinaryIO
+            | Type::BytesIO => "object",
             Type::Float | Type::Bool | Type::StrEnum(_) | Type::Enum(_) | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
         };
@@ -3399,7 +3402,8 @@ impl Emitter<'_, '_> {
                 | Type::TextIO
                 | Type::StringIO
                 | Type::CompletedProcess(..)
-                | Type::BinaryIO => self.instruction(format!(
+                | Type::BinaryIO
+                | Type::BytesIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
                     left.ty.llvm(),
                     left.operand,
@@ -3628,7 +3632,7 @@ impl Emitter<'_, '_> {
                 | Builtin::DictAsBase
                 | Builtin::RecordView
                 | Builtin::DirectoryContextView
-                | Builtin::TextStreamView
+                | Builtin::FileStreamView
         ) {
             let value = self.expr(&expressions[0]);
             return Value {
@@ -3763,7 +3767,7 @@ impl Emitter<'_, '_> {
             | Builtin::DictAsBase
             | Builtin::RecordView
             | Builtin::DirectoryContextView
-            | Builtin::TextStreamView => {
+            | Builtin::FileStreamView => {
                 unreachable!("representation-preserving views transfer the operand owner directly")
             }
             Builtin::StringContains | Builtin::BytesContains | Builtin::ExceptionMatchesAny => {
@@ -4883,6 +4887,7 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
             Builtin::BinaryTell => self.call("imre_binary_tell", returns, &[&args[0].value]),
+            Builtin::BytesIoValue => self.call("imre_bytes_io_value", returns, &[&args[0].value]),
             Builtin::ZipOpenFile => self.call("imre_zip_open_file", returns, &[&args[0].value]),
             Builtin::ZipGetInfo => self.call(
                 "imre_zip_getinfo",
@@ -6125,6 +6130,7 @@ impl Emitter<'_, '_> {
                     | Type::JsonObject
                     | Type::RegexMatch
                     | Type::BinaryIO
+                    | Type::BytesIO
                     | Type::CompletedProcess(..)
                     | Type::Tuple(_)
                     | Type::Optional(_)
@@ -6348,6 +6354,7 @@ impl Emitter<'_, '_> {
             | Type::TextIO
             | Type::StringIO
             | Type::BinaryIO
+            | Type::BytesIO
             | Type::EventLoop
             | Type::Coroutine(_)
             | Type::Task(_)
@@ -6431,6 +6438,7 @@ impl Emitter<'_, '_> {
             | Type::TextIO
             | Type::StringIO
             | Type::BinaryIO
+            | Type::BytesIO
             | Type::EventLoop
             | Type::Coroutine(_)
             | Type::Task(_)
@@ -7060,7 +7068,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::JsonValue
         | Type::JsonObject
         | Type::RegexMatch
-        | Type::BinaryIO => 5,
+        | Type::BinaryIO
+        | Type::BytesIO => 5,
         Type::Optional(_) => 256 | representation_kind(types.payload(ty).unwrap(), types),
     }
 }
@@ -7430,6 +7439,7 @@ declare i64 @imre_string_io_seek(ptr, i64, i64)
 declare i64 @imre_string_io_position(ptr, i64, i1)
 declare i64 @imre_binary_seek(ptr, i64, i64)
 declare i64 @imre_binary_tell(ptr)
+declare ptr @imre_bytes_io_value(ptr)
 declare ptr @imre_zip_open_file(ptr)
 declare ptr @imre_zip_getinfo(ptr, ptr)
 declare ptr @imre_zip_infolist(ptr)

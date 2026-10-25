@@ -222,6 +222,24 @@ pub unsafe extern "C" fn imre_bytes_io(initial: *const Bytes) -> *const Object {
     Rc::into_raw(FileState::memory(data))
 }
 
+/// Return all bytes without moving the cursor. Later writes detach the shared buffer.
+///
+/// # Safety
+/// The caller roots an exact BytesIO until this function returns an owned byte buffer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_io_value(file: *const Object) -> *const Bytes {
+    // SAFETY: memory streams have no callbacks, and no storage reference escapes.
+    let result = unsafe {
+        object(file).0.with_mut(|s| {
+            let Stream::Memory(memory) = s.file_mut().stream()? else {
+                unreachable!("getvalue requires BytesIO")
+            };
+            Ok(Rc::into_raw(memory.data.clone()))
+        })
+    };
+    finish(result, std::ptr::null())
+}
+
 /// Reposition the cursor using Python's signed offset and integer whence.
 ///
 /// # Safety

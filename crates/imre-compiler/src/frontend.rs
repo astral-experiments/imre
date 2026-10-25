@@ -1467,7 +1467,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) => return Ok(Type::JsonDecoder),
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
-        Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BytesIO),
         Some(Binding::Intrinsic(Intrinsic::StringIo)) => return Ok(Type::StringIO),
         Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return Ok(Type::LogFormatter),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
@@ -2119,12 +2119,14 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             });
         }
-        if value.ty == Type::StringIO
-            && self.types.payload(expected).unwrap_or(expected) == Type::TextIO
-        {
+        let stream_type = self.types.payload(expected).unwrap_or(expected);
+        if matches!(
+            (value.ty, stream_type),
+            (Type::StringIO, Type::TextIO) | (Type::BytesIO, Type::BinaryIO)
+        ) {
             let stream = Expr {
-                ty: Type::TextIO,
-                kind: ExprKind::Builtin(Builtin::TextStreamView, vec![value]),
+                ty: stream_type,
+                kind: ExprKind::Builtin(Builtin::FileStreamView, vec![value]),
             };
             return self.coerce(stream, expected, node);
         }
@@ -3175,7 +3177,7 @@ impl<'a> Checker<'a> {
         };
         if matches!(
             iterable.ty,
-            Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
+            Type::TextIO | Type::StringIO | Type::BinaryIO | Type::BytesIO | Type::CsvReader
         ) {
             let input = if iterable.ty == Type::CsvReader {
                 self.prepare_csv_reader(iterable)
@@ -4074,7 +4076,7 @@ impl<'a> Checker<'a> {
             && stored.is_none()
             && !archive
             && !popen
-            && !matches!(manager.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
+            && !manager.ty.is_file_stream()
         {
             return Err(error(
                 self.source,
@@ -6008,9 +6010,7 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(value);
                 }
-                if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
-                    && attribute.attr.as_str() == "closed"
-                {
+                if receiver.ty.is_file_stream() && attribute.attr.as_str() == "closed" {
                     return Ok(Expr {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::TextClosed, vec![receiver]),
@@ -6533,7 +6533,7 @@ impl<'a> Checker<'a> {
                     }],
                     None,
                 )?;
-                return Ok(self.ordered_builtin(Builtin::BytesIo, Type::BinaryIO, args));
+                return Ok(self.ordered_builtin(Builtin::BytesIo, Type::BytesIO, args));
             }
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Deque)) => return self.deque_new(call, None),
@@ -7106,8 +7106,8 @@ impl<'a> Checker<'a> {
             {
                 return Ok(value);
             }
-            if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
-                let binary = receiver.ty == Type::BinaryIO;
+            if receiver.ty.is_file_stream() {
+                let binary = receiver.ty.is_binary_stream();
                 let data_type = if binary { Type::Bytes } else { Type::Str };
                 if binary
                     && attribute.attr.as_str() == "seek"
@@ -7141,6 +7141,9 @@ impl<'a> Checker<'a> {
                     ),
                     ("read", 1) if binary => (Builtin::BinaryReadSize, Type::Bytes),
                     ("tell", 0) if binary => (Builtin::BinaryTell, Type::Int),
+                    ("getvalue", 0) if receiver.ty == Type::BytesIO => {
+                        (Builtin::BytesIoValue, Type::Bytes)
+                    }
                     ("readline", 0) => (Builtin::FileReadline, data_type),
                     ("write", 1) => (
                         if binary {

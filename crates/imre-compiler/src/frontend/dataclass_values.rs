@@ -53,6 +53,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::TextIO
         | Type::StringIO
         | Type::BinaryIO
+        | Type::BytesIO
         | Type::Iterator
         | Type::Callable(_) => false,
         Type::Class(_) => true,
