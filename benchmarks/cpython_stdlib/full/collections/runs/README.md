@@ -10,6 +10,7 @@ coordinator's coverage rollup.
 | --- | ---: | ---: | ---: | ---: | ---: |
 | [Deque](f5244fce979c/evidence-linux.json) ([run](https://github.com/astral-sh/imre/actions/runs/40176364237), [PR #561](https://github.com/astral-sh/imre/pull/561)) | 11 | 13 | 4 | 3 | 628 |
 | [Mapping ABC](35d411f67cd1/evidence-linux.json) ([run](https://github.com/astral-sh/imre/actions/runs/40176537143), [PR #642](https://github.com/astral-sh/imre/pull/642)) | 7 | 13 | 4 | 3 | 632 |
+| [Mapping with the stock argparse consumer](c1033e365c27/README.md) ([run](https://github.com/astral-sh/imre/actions/runs/40187086014), [PR #642](https://github.com/astral-sh/imre/pull/642)) | 7 | 13 | 4 | 3 | 632 |
 | [Counter unary and plain dict construction](7e9a095996d0/evidence-linux.json) ([run](https://github.com/astral-sh/imre/actions/runs/40176910489), [PR #868](https://github.com/astral-sh/imre/pull/868)) | 8 | 13 | 4 | 3 | 631 |
 | [Deque after callable-cache integration](ff93ef08bb84/evidence-linux.json) ([run](https://github.com/astral-sh/imre/actions/runs/40179123294), [PR #561](https://github.com/astral-sh/imre/pull/561)) | 11 | 13 | 4 | 3 | 628 |
 | [OrderedDict](69df05ce8627/evidence-linux.json) ([run](https://github.com/astral-sh/imre/actions/runs/40179772139), [PR #881](https://github.com/astral-sh/imre/pull/881)) | 9 | 13 | 4 | 3 | 630 |
