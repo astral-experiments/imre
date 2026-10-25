@@ -51,6 +51,7 @@ impl Type {
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
+            | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
@@ -110,6 +111,7 @@ impl Type {
             Self::Int => "1",
             Self::Float => "0.0",
             Self::Str
+            | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
@@ -700,7 +702,7 @@ impl Emitter<'_, '_> {
         let family = match ty {
             Type::Int => "int",
             Type::Union(_) | Type::StringIterable => "union",
-            Type::Str | Type::StrLiteral(_) => "str",
+            Type::Str | Type::StrLiteral(_) | Type::BuiltinClass => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
             Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => {
@@ -3209,7 +3211,7 @@ impl Emitter<'_, '_> {
                     "icmp {predicate} i64 {}, {}",
                     left.operand, right.operand
                 )),
-                Type::Str | Type::StrLiteral(_) | Type::Optional(_) => {
+                Type::Str | Type::StrLiteral(_) | Type::BuiltinClass | Type::Optional(_) => {
                     let equal = if matches!(left.ty, Type::Optional(_))
                         || matches!(right.ty, Type::Optional(_))
                     {
@@ -3533,6 +3535,7 @@ impl Emitter<'_, '_> {
         if matches!(
             builtin,
             Builtin::LiteralStringView
+                | Builtin::ClassNameView
                 | Builtin::DictAsBase
                 | Builtin::RecordView
                 | Builtin::DirectoryContextView
@@ -3664,6 +3667,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::LiteralStringView
+            | Builtin::ClassNameView
             | Builtin::DictAsBase
             | Builtin::RecordView
             | Builtin::DirectoryContextView => {
@@ -5620,6 +5624,7 @@ impl Emitter<'_, '_> {
                     }
                     Type::None => self.void_call("imre_print_none", &[]),
                     Type::ListInt
+                    | Type::BuiltinClass
                     | Type::Class(_)
                     | Type::List(_)
                     | Type::Dict(_)
@@ -5862,6 +5867,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
@@ -5935,6 +5941,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
@@ -6522,6 +6529,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Int => 2,
         Type::Float => 7,
         Type::Str | Type::StrLiteral(_) => 3,
+        Type::BuiltinClass => 11,
         Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,

@@ -7,6 +7,8 @@ pub(crate) enum Type {
     Int,
     Float,
     Bool,
+    /// A builtin class object. Its name is interned; the handle is never a Python string.
+    BuiltinClass,
     Str,
     /// A closed domain of strings with ordinary string storage and ownership.
     StrLiteral(usize),
@@ -157,6 +159,7 @@ impl std::fmt::Display for Type {
             Self::Int => "int",
             Self::Float => "float",
             Self::Bool => "bool",
+            Self::BuiltinClass => "type",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -517,6 +520,7 @@ pub(crate) enum Builtin {
         member: usize,
     },
     StrEnumName,
+    ClassNameView,
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
