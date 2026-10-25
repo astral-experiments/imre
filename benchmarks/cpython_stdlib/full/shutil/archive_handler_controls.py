@@ -99,10 +99,33 @@ except tarfile.OutsideDestinationError:
     print("tar member versus fallback")
 '''
 
+WARNINGS = '''
+warnings.simplefilter("error", RuntimeWarning)
+try:
+    shutil.disk_usage(False)
+except (csv.Error, UnicodeEncodeError, OSError, shutil.RegistryError, tarfile.TarError):
+    raise AssertionError("a non-warning handler caught the descriptor warning")
+except RuntimeWarning:
+    print("descriptor warning")
+try:
+    shutil.disk_usage(True)
+except (csv.Error, UnicodeEncodeError, OSError, shutil.RegistryError, tarfile.TarError):
+    raise AssertionError("unrelated base caught the descriptor warning")
+except Warning:
+    print("warning base")
+try:
+    shutil.unpack_archive("damaged.tar", "dest")
+except Warning:
+    raise AssertionError("warning base caught the archive read error")
+except shutil.ReadError:
+    print("read error versus warning")
+'''
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--oracle-only', action='store_true', help='run the crossed handlers with this CPython only')
     parser.add_argument('--with-fastcopy', action='store_true', help='also check the native descriptor fallback on a combined head')
+    parser.add_argument('--with-warnings', action='store_true', help='cross warning and archive handlers on the shared-filter consumer')
     for arg in ('imre', 'runtime', 'clang'):
         parser.add_argument('--'+arg, type=lambda p: Path(p).resolve())
     args = parser.parse_args()
@@ -111,7 +134,8 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         source = root/'crossed.py'
-        source.write_text(SOURCE + (FASTCOPY if args.with_fastcopy else ''))
+        source.write_text(('import warnings\n' if args.with_warnings else '') + SOURCE
+                          + (FASTCOPY if args.with_fastcopy else '') + (WARNINGS if args.with_warnings else ''))
         (root/'file').write_bytes(b'keep')
         (root/'dest').mkdir()
         (root/'damaged.tar').write_bytes(b'not a tar file')
@@ -130,8 +154,10 @@ def main():
         expected_text = b'csv\nencoding\nsame file\nfilesystem FIFO\narchive\narchive OS base\nfilter\narchive FIFO\nformat conflict\nregistry Exception base\n'
         if args.with_fastcopy:
             expected_text += b"_GiveupOnFastCopy(UnsupportedOperation('fileno'))\nread error versus fallback\ntar member versus fallback\n"
+        if args.with_warnings:
+            expected_text += b'descriptor warning\nwarning base\nread error versus warning\n'
         assert expected == (expected_text, b'')
-        count = 13 if args.with_fastcopy else 10
+        count = 10 + 3 * args.with_fastcopy + 3 * args.with_warnings
         if args.oracle_only:
             print(f'CPython: {count} crossed handlers matched the expected classes and preserved the fixture')
             return
