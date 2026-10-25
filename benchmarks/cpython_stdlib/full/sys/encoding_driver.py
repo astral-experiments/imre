@@ -1,7 +1,6 @@
 """Transport native results as Python literals, including their types."""
-import codecs
 import sys
-from sys import getdefaultencoding, getfilesystemencoding
+from sys import getdefaultencoding
 
 def main() -> None:
     command = sys.argv[1]
@@ -10,12 +9,6 @@ def main() -> None:
     elif command == "default-argument":
         # The upstream method deliberately invokes this signature incorrectly.
         print(repr(getdefaultencoding(int(sys.argv[2]))))  # ty: ignore[too-many-positional-arguments]
-    elif command == "filesystem":
-        print(repr(getfilesystemencoding()))
-    elif command == "lookup":
-        print(repr(codecs.lookup(sys.argv[2]).name))
-    elif command == "platform":
-        print(repr(sys.platform))
     else:
         raise ValueError("unknown encoding operation")
 
