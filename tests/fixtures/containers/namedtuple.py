@@ -5,6 +5,7 @@ Pair = make_tuple("Pair", "left, right")
 Other = collections.namedtuple("Other", ("a", "b"))
 Single = make_tuple("Dot", ["x"])
 Zero = make_tuple("Zero", "")
+Separators = make_tuple("Separators", "a\x1cb\035c\u001ed\N{UNIT SEPARATOR}e")
 
 
 def fields(pair: Pair) -> str:
@@ -46,6 +47,7 @@ print(right)
 print(repr(pair))
 print(repr(Zero()))
 print(repr(Single(1)))
+print(repr(Separators(1, 2, 3, 4, e=5)))
 print(isinstance(pair, Pair))
 print(isinstance(pair, Other))
 print(isinstance(pair, tuple))
