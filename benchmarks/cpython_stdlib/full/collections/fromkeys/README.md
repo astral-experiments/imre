@@ -67,3 +67,9 @@ in all four modes, including the iterator exception and the aliased value. On th
 [merged in #910](runs/5059d6b15f75/source.json), the [original nested set expression](runs/5059d6b15f75/set_range-four-modes.json)
 also matched in all four modes. The [complete DictTest method](runs/5059d6b15f75/evidence-fromkeys-linux.json)
 still stops at the first dictionary assertion at both levels. These controls add no native test occurrence.
+
+On [public main after #905](runs/bea88ce2b9df/source.json), the stock expression
+returned all six ordered pairs at O0 and O3 in ordinary and reachable-only
+compilation. The [original class initializer and complete module](runs/bea88ce2b9df/textwrapper.json)
+both stopped at the computed class attribute at `Lib/textwrap.py:66`, before
+running the expression. This build includes merged #900 and #910.
