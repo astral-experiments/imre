@@ -88,7 +88,7 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                 field_metadata(output, name, layout),
             )
         }
-        Type::CompletedProcess(capture) => {
+        Type::CompletedProcess(capture, _) => {
             let layout = [
                 ("args", true),
                 ("returncode", true),

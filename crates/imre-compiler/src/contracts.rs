@@ -174,7 +174,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::TimeSleep | Self::PercentInteger => Contract::new(true, PreservesLists),
+            Self::TimeSleep | Self::PercentScalar => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
@@ -312,8 +312,8 @@ impl Builtin {
             | Self::JsonSelect(_)
             | Self::ListGet
             | Self::ListGetBounded { .. }
-            | Self::FunctionCacheProbe(..)
-            | Self::FunctionCacheInsert(..)
+            | Self::CacheProbe(_)
+            | Self::CacheInsert(_)
             | Self::ListGetI32
             | Self::ListSliceSum
             | Self::Slice
@@ -355,9 +355,12 @@ impl Builtin {
             | Self::Len
             | Self::JsonEmptyObject
             | Self::WallTime
-            | Self::FunctionCache(_)
-            | Self::FunctionCacheStat(..)
-            | Self::FunctionCacheClear(_)
+            | Self::CacheNew
+            | Self::CacheTable
+            | Self::CacheStat(_)
+            | Self::CacheClear
+            | Self::CallableContext
+            | Self::ModuleCache(_)
             | Self::HashStr
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
@@ -383,6 +386,7 @@ impl Builtin {
             | Self::EnumString
             | Self::StringListContains
             | Self::StringContains
+            | Self::BytesContains
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
@@ -394,6 +398,7 @@ impl Builtin {
             | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
+            | Self::BytesContainsInt
             | Self::DictDelete
             | Self::DictPop
             | Self::DictTryPop(_)
@@ -534,6 +539,31 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::CallableContext => {
+                matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+            }
+            Self::CacheNew | Self::ModuleCache(_) => {
+                args.is_empty() && result.cache_table().is_some()
+            }
+            Self::CacheTable => matches!(args, [state] if state.ty.cache_table() == Some(result)),
+            Self::CacheProbe(capacity) => {
+                *capacity >= -1
+                    && matches!(args, [state, key] if state.ty.cache_table().and_then(|t| types.mapping(t)).is_some_and(|(k, _)| k == key.ty))
+                    && result == Type::Bool
+            }
+            Self::CacheInsert(capacity) => {
+                *capacity > 0
+                    && matches!(args, [state, key, value] if state.ty.cache_table().and_then(|t| types.mapping(t)) == Some((key.ty, value.ty)))
+                    && result == Type::None
+            }
+            Self::CacheStat(field) => {
+                matches!(field, 0 | 1 | 3)
+                    && matches!(args, [state] if state.ty.cache_table().is_some())
+                    && result == Type::Int
+            }
+            Self::CacheClear => {
+                matches!(args, [state] if state.ty.cache_table().is_some()) && result == Type::None
+            }
             Self::TupleCacheNew => args.is_empty() && matches!(result, Type::Tuple(_)),
             Self::TupleCacheResult => matches!(args, [value]
                 if matches!(value.kind, ExprKind::Local(_)) && matches!(result, Type::Tuple(_)) && value.ty == result),
@@ -715,6 +745,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_roll"
                 | "imre_time_sleep"
                 | "imre_str_percent_int"
+                | "imre_str_percent_text"
                 | "imre_formatter_format"
                 | "imre_formatter_time"
                 | "imre_formatter_message"
@@ -735,6 +766,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bytes"
                 | "imre_bytes_count"
                 | "imre_bytes_list"
+                | "imre_bytes_contains_int"
                 | "imre_byte_output_finish"
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"

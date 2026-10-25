@@ -649,6 +649,10 @@ pub(crate) struct SourceModule {
 }
 
 impl SourceModule {
+    pub(crate) fn is_bundled(&self, name: &str) -> bool {
+        self.bundled && self.name == name
+    }
+
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
         let binding = *self.bindings.get(name)?;
@@ -1718,6 +1722,20 @@ impl<'a> Loader<'a> {
             // ty resolves bundled source at its Python import path in the in-memory project.
             let path = self.root.join(name).join("__init__.py");
             let id = self.add(path.clone(), path, name.into(), true, source)?;
+            self.modules[id].bundled = true;
+            self.scan(id)?;
+            return Ok(id);
+        }
+        if name == "stat" {
+            self.reject_stdlib_shadow(name)?;
+            let prefix = if cfg!(target_os = "macos") {
+                include_str!("../stdlib/stat/darwin.py")
+            } else {
+                include_str!("../stdlib/stat/linux.py")
+            };
+            let source = format!("{prefix}\n{}", include_str!("../stdlib/stat/common.py"));
+            let path = self.root.join("stat.py");
+            let id = self.add(path.clone(), path, name.into(), false, &source)?;
             self.modules[id].bundled = true;
             self.scan(id)?;
             return Ok(id);

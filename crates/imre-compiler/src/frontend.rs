@@ -15,6 +15,7 @@ mod annotations;
 mod argparse;
 mod assignments;
 mod asyncio;
+mod bytes;
 mod cached_properties;
 mod callables;
 mod calls;
@@ -1377,7 +1378,10 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
-            return Ok(Type::CompletedProcess(crate::ir::ProcessCapture::TEXT));
+            return Ok(Type::CompletedProcess(
+                crate::ir::ProcessCapture::TEXT,
+                None,
+            ));
         }
         _ => {}
     }
@@ -1458,7 +1462,7 @@ fn annotation_with_aliases(
                     ));
                 }
             };
-            Ok(Type::CompletedProcess(capture))
+            Ok(Type::CompletedProcess(capture, None))
         }
         ast::Expr::Subscript(value)
             if matches!(
@@ -4455,10 +4459,13 @@ impl<'a> Checker<'a> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        if op == ast::Operator::Mod && left.ty == Type::Str && right.ty == Type::Int {
+        if op == ast::Operator::Mod
+            && left.ty == Type::Str
+            && matches!(right.ty, Type::Int | Type::Str)
+        {
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::PercentInteger, vec![left, right]),
+                kind: ExprKind::Builtin(Builtin::PercentScalar, vec![left, right]),
             });
         }
         if op == ast::Operator::Pow {
@@ -4939,6 +4946,9 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
+                    if receiver.ty == Type::Bytes {
+                        return self.bytes_membership(key, receiver, compare.ops[0], expression);
+                    }
                     if let Some(fields) = self.types.fields(receiver.ty) {
                         return self.tuple_contains(key, receiver, &fields, compare);
                     }
@@ -5403,6 +5413,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
+                    return Ok(wrapped);
+                }
                 if receiver.ty == Type::BuiltinClass {
                     match attribute.attr.as_str() {
                         "__name__" | "__qualname__" => return Ok(annotations::type_name(receiver)),
@@ -5503,7 +5516,7 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::Popen(..)) {
                     return self.popen_attribute(receiver, attribute);
                 }
-                if matches!(receiver.ty, Type::CompletedProcess(_)) {
+                if matches!(receiver.ty, Type::CompletedProcess(..)) {
                     return self.process_attribute(receiver, attribute);
                 }
                 if matches!(
@@ -5701,7 +5714,10 @@ impl<'a> Checker<'a> {
         if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
             return Ok(self.materialize_fixed_tuple(tuple));
         }
-        if let Some(value) = self.cache_control(call)? {
+        if let Some(value) = self.cache_constructor(call)? {
+            return Ok(value);
+        }
+        if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
         }
         if let Some(value) = self.sys_call(call)? {
@@ -6360,7 +6376,7 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::Popen(..)) {
                 return self.popen_method(receiver, attribute, call);
             }
-            if matches!(receiver.ty, Type::CompletedProcess(_)) {
+            if matches!(receiver.ty, Type::CompletedProcess(..)) {
                 return self.process_method(receiver, attribute, call);
             }
             if matches!(
@@ -7030,7 +7046,7 @@ impl<'a> Checker<'a> {
                 && (matches!(
                     args[0].ty,
                     Type::Class(_)
-                        | Type::CompletedProcess(_)
+                        | Type::CompletedProcess(..)
                         | Type::Dict(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
