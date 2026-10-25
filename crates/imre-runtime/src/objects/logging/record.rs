@@ -273,9 +273,10 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
             if !is_dict(args) {
                 return Err(Error::new(Kind::TypeError, "format requires a mapping"));
             }
-            let (key, rest) = rest
-                .split_once(')')
-                .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format key"))?;
+            let (key, rest) = mapping_key(rest)?;
+            // A named conversion replaces the sole positional mapping with
+            // the looked-up value. Later named conversions can still use args.
+            let _ = positional.next();
             percent_value_in(rest, &mut std::iter::once(dict_item(args, key)?), Some(msg))?
         } else {
             percent_value_in(rest, &mut positional, Some(msg))?
@@ -291,6 +292,20 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
     }
     out.push_str(input);
     Ok(out)
+}
+
+/// Find the closing delimiter after "%(", allowing balanced parentheses in the key.
+pub(super) fn mapping_key(rest: &str) -> Result<(&str, &str)> {
+    let mut nested = 0usize;
+    for (i, b) in rest.bytes().enumerate() {
+        match b {
+            b'(' => nested += 1,
+            b')' if nested == 0 => return Ok((&rest[..i], &rest[i + 1..])),
+            b')' => nested -= 1,
+            _ => {}
+        }
+    }
+    Err(Error::new(Kind::ValueError, "incomplete format key"))
 }
 
 /// Reserve before filling a user-provided field width so it can raise a Python exception.

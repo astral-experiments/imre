@@ -35,3 +35,14 @@ for fmt, n in [("%*s", 3), ("%.*r", 2**40), ("%*d", 2**65), ("%*", 2),
         print(repr(error).split("(", 1)[0])
 record = logging.LogRecord("app", 20, "mod.py", 1, "[%*.*s] %d", (-6, 2, "λ🙂x", 3), None)
 print(record.getMessage())
+record.args = {"()": "yes"}
+for msg in ["%(())s", "%(()", "%(missing(x))s", "%(())s/%s", "%s/%(())s"]:
+    record.msg = msg
+    try:
+        print(record.getMessage())
+    except KeyError as error:
+        print(repr(error))
+    except Exception as error:
+        print(repr(error).split("(", 1)[0])
+formatter = logging.Formatter("%(message)s%(())s")
+print(formatter.format(logging.makeLogRecord({"()": "yes"})))
