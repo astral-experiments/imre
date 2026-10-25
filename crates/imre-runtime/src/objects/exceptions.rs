@@ -668,6 +668,25 @@ pub(super) fn kind_of(error: &Object) -> Kind {
     unsafe { error.0.with(Storage::exception_kind) }
 }
 
+/// PEP 479 converts a StopIteration escaping the generator into RuntimeError.
+pub(super) fn generator_stop(cause: Rc<Object>) -> Rc<Object> {
+    let error = new_exception(
+        Kind::RuntimeError,
+        Payload::Message(Rc::new("generator raised StopIteration".into())),
+    );
+    // SAFETY: the fresh wrapper has not escaped and cannot occur in its cause.
+    unsafe {
+        error.0.with_mut(|storage| {
+            let Storage::Exception(value) = storage else {
+                unreachable!()
+            };
+            value.details_mut().cause = Some(cause);
+            value.suppress_context = true;
+        });
+    }
+    error
+}
+
 pub(super) fn task_group_errors(errors: Vec<Rc<Object>>) -> Rc<Object> {
     new_exception(
         Kind::ExceptionGroup,
@@ -892,10 +911,10 @@ fn exit_text(code: Option<&OwnedWord>, missing: &str) -> Rc<Str> {
 }
 
 /// Construct SystemExit with its original code. Kind 4 denotes an omitted
-/// argument; 0, 1, 2 and 3 represent None, bool, int and str respectively.
+/// argument; 0, 1, 2, 3 and 6 represent None, bool, int, str and tuple.
 ///
 /// # Safety
-/// The caller roots the scalar or immutable string described by `kind`.
+/// The caller roots the scalar, string or tuple described by `kind`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_new(kind: u32, word: usize) -> *const Object {
     let code = (kind != 4).then(|| {
@@ -962,11 +981,26 @@ pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *co
     }
 }
 
-/// Compare the original exit code against a scalar or a second code view.
+/// Format the original payload, preserving string quotes and tuple shape.
+///
+/// # Safety
+/// The caller roots a code view from `imre_system_exit_code`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_system_exit_code_repr(value: *const Object) -> *const Str {
+    let mut text = String::new();
+    // SAFETY: the exit view keeps its correctly typed payload live throughout formatting.
+    unsafe {
+        let (kind, word) = exit_word(value);
+        super::values::write_repr(&mut text, word, kind);
+    }
+    Rc::into_raw(Rc::new(Str::from(text)))
+}
+
+/// Compare the original exit code against a scalar, tuple or a second code view.
 ///
 /// # Safety
 /// `value` is a rooted code view. `word` is rooted with kind 0 (None), 1
-/// (bool), 2 (int), 3 (str), or 5 (another code view).
+/// (bool), 2 (int), 3 (str), 5 (another code view) or 6 (tuple).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_equal(
     value: *const Object,
@@ -1006,6 +1040,8 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
+        // SAFETY: kind 6 roots the fixed tuple and its static descriptor.
+        6 => unsafe { super::records::descriptor(word as *const usize).length != 0 },
         _ => unreachable!(),
     })
 }
