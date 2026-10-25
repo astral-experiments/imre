@@ -287,12 +287,13 @@ impl Session {
             return false;
         };
         // Use the bundled stdlib source identity, never a user-controlled module name.
-        let path = path
-            .as_str()
-            .strip_suffix("/__init__.pyi")
-            .or_else(|| path.as_str().strip_suffix(".pyi"));
+        let module = match path.file_name() {
+            Some("__init__.pyi") => path.parent().and_then(|parent| parent.file_name()),
+            _ if path.extension() == Some("pyi") => path.file_stem(),
+            _ => None,
+        };
         matches!(
-            path.and_then(|path| path.rsplit('/').next()),
+            module,
             Some("zipfile" | "io" | "_io" | "pathlib" | "re" | "gzip" | "hashlib" | "_hashlib")
         )
     }
