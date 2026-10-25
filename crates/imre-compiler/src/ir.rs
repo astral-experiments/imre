@@ -7,6 +7,12 @@ pub(crate) enum Type {
     Int,
     Float,
     Bool,
+    /// A builtin class object. Its name is interned; the handle is never a Python string.
+    BuiltinClass,
+    /// An immutable annotation reference with a known layout for its owner.
+    ForwardRef(usize),
+    /// One of the exact values returned by a heterogeneous annotation dictionary.
+    AnnotationValue(usize),
     Str,
     /// A closed domain of strings with ordinary string storage and ownership.
     StrLiteral(usize),
@@ -80,6 +86,7 @@ pub(crate) enum Type {
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
     ZipInfo,
+    CsvReader,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
@@ -170,6 +177,9 @@ impl std::fmt::Display for Type {
             Self::Int => "int",
             Self::Float => "float",
             Self::Bool => "bool",
+            Self::BuiltinClass => "type",
+            Self::ForwardRef(_) => "annotationlib.ForwardRef",
+            Self::AnnotationValue(_) => "annotation value",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -208,6 +218,7 @@ impl std::fmt::Display for Type {
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
+            Self::CsvReader => "CSV reader",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
@@ -506,6 +517,14 @@ pub(crate) enum Builtin {
         member: usize,
     },
     StrEnumName,
+    ClassNameView,
+    NewForwardRef,
+    ForwardRefField(usize),
+    BoxAnnotation(usize),
+    AnnotationMember(usize),
+    AnnotationRef,
+    AnnotationIs,
+    StaticFunction(usize),
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
@@ -695,6 +714,7 @@ pub(crate) enum Builtin {
     /// Projects a member proved by local control flow, acquiring its own owner.
     UnionProject,
     IsInstance(Vec<InstanceType>),
+    IsBuiltinSubclass,
     Split,
     SplitLines,
     DecodeSplitLines,
@@ -718,6 +738,16 @@ pub(crate) enum Builtin {
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
     ExactRecord(usize),
+    CsvReader {
+        delimiter: char,
+        quote: Option<char>,
+        escape: Option<char>,
+        flags: u32,
+    },
+    CsvNext {
+        required: bool,
+    },
+    CsvLineNumber,
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
     JsonLoads,
@@ -1181,6 +1211,7 @@ pub(crate) enum ProcessOperation {
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceType {
     Exact(Type),
+    ForwardRef,
     StrEnum,
     List,
     Dict,
@@ -1198,6 +1229,7 @@ impl InstanceType {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
             Self::Exact(expected) => expected == ty,
+            Self::ForwardRef => matches!(ty, Type::ForwardRef(_)),
             Self::StrEnum => matches!(ty, Type::StrEnum(_)),
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),

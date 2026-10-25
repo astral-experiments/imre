@@ -11,6 +11,7 @@ use crate::modules::{Binding, DefinitionId, Intrinsic, ModuleId, SourceGraph};
 use crate::narrowing;
 use crate::types::Types;
 
+mod annotations;
 mod argparse;
 mod assignments;
 mod asyncio;
@@ -20,6 +21,7 @@ mod calls;
 mod comprehensions;
 mod contexts;
 mod counter;
+mod csv;
 mod dataclass_values;
 mod dispatch;
 mod documents;
@@ -324,6 +326,7 @@ const RESERVED: &[&str] = &[
     "sorted",
     "divmod",
     "isinstance",
+    "issubclass",
     "input",
     "print",
     "range",
@@ -1117,9 +1120,15 @@ fn signature(
                 && sign_parameters::only_compares_zero(function, parameter.name().as_str()),
         });
     }
+    // A .pyi describes the linked C function. Its ellipsis is not an executable body.
+    let inert = graph.modules[module].archive.is_none() && annotations::inert_body(function);
+    if inert && let Some(ast::Expr::Name(n)) = function.returns.as_deref() {
+        graph.deferred_name(module, n.range());
+    }
     let returns = function
         .returns
         .as_deref()
+        .filter(|_| !inert)
         .filter(|value| {
             graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
         })
@@ -1135,6 +1144,7 @@ fn signature(
             }
         })
         .transpose()?
+        .or(inert.then_some(Type::None))
         .or_else(|| match (receiver, function.name.as_str()) {
             (Some(_), "__init__" | "__post_init__") => Some(Type::None),
             (Some(_), "__str__" | "__repr__") => Some(Type::Str),
@@ -2941,8 +2951,12 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("range iteration returned above")
         };
-        if matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
-            let input = self.prepare_file_lines(iterable);
+        if matches!(iterable.ty, Type::TextIO | Type::BinaryIO | Type::CsvReader) {
+            let input = if iterable.ty == Type::CsvReader {
+                self.prepare_csv_reader(iterable)
+            } else {
+                self.prepare_file_lines(iterable)
+            };
             return self.lower_prepared_iteration(
                 target,
                 input,
@@ -3354,10 +3368,7 @@ impl<'a> Checker<'a> {
             return Ok((Vec::new(), true));
         }
         let result = match statement {
-            ast::Stmt::FunctionDef(function) => {
-                self.define_local_function(function)?;
-                None
-            }
+            ast::Stmt::FunctionDef(function) => self.define_local_function(function)?,
             ast::Stmt::Assign(assign) => {
                 return Ok((self.assignment_statement(assign)?, true));
             }
@@ -3478,6 +3489,9 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Stmt::Expr(expression) => {
+                if matches!(&*expression.value, ast::Expr::EllipsisLiteral(_)) {
+                    return Ok((Vec::new(), true));
+                }
                 if let ast::Expr::Yield(yielded) = &*expression.value
                     && let Some(element) = self.generator_item
                     && let Some(value) = &yielded.value
@@ -3968,6 +3982,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::TimeoutExpired)) => Some(27),
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
+            Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(67),
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),
@@ -4405,6 +4420,21 @@ impl<'a> Checker<'a> {
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let ast::Expr::Attribute(attr) = expression
+            && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
+                self.resolve(&attr.value)
+        {
+            match attr.attr.as_str() {
+                "value" => return Ok(pipelines::integer(number)),
+                "name" => {
+                    return Ok(unpacking::string(
+                        ["VALUE", "VALUE_WITH_FAKE_GLOBALS", "FORWARDREF", "STRING"]
+                            [(number - 1) as usize],
+                    ));
+                }
+                _ => {}
+            }
+        }
         if let Some(Binding::Intrinsic(Intrinsic::Declaration(symbol))) = self.resolve(expression) {
             return Err(error(
                 self.source,
@@ -4413,7 +4443,9 @@ impl<'a> Checker<'a> {
             ));
         }
         if let Some(Binding::Intrinsic(
-            Intrinsic::LogLevel(level) | Intrinsic::SignalNumber(level),
+            Intrinsic::LogLevel(level)
+            | Intrinsic::SignalNumber(level)
+            | Intrinsic::AnnotationFormat(level),
         )) = self.resolve(expression)
         {
             return Ok(Expr {
@@ -4422,7 +4454,10 @@ impl<'a> Checker<'a> {
             });
         }
         self.reject_class_receiver_value(expression)?;
-        if self.local_function_binding(expression).is_some() {
+        if let Some(binding) = self.local_function_binding(expression) {
+            if let Some(slot) = binding.value_slot {
+                return Ok(self.local(slot));
+            }
             return Err(error(
                 self.source,
                 expression,
@@ -4570,6 +4605,12 @@ impl<'a> Checker<'a> {
                 (Type::Str, ExprKind::Str(name.to_owned()))
             }
             ast::Expr::Name(name) => {
+                if !self.names.contains_key(name.id.as_str())
+                    && self.resolve(expression).is_none()
+                    && let Some(value) = annotations::builtin_type(name.id.as_str())
+                {
+                    return Ok(value);
+                }
                 if self.comprehension_targets.contains(name.id.as_str())
                     && !self.names.contains_key(name.id.as_str())
                 {
@@ -4848,6 +4889,21 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if values.iter().all(|v| matches!(v.ty, Type::ForwardRef(_))) {
+                    let ops = compare
+                        .ops
+                        .iter()
+                        .map(|op| match op {
+                            ast::CmpOp::Eq => Ok(Compare::Equal),
+                            ast::CmpOp::NotEq => Ok(Compare::NotEqual),
+                            _ => Err(error(self.source, expression, "ForwardRef has no ordering")),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    return Ok(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Compare(values, ops),
+                    });
+                }
                 if values.iter().any(|value| {
                     matches!(
                         value.ty,
@@ -4858,7 +4914,8 @@ impl<'a> Checker<'a> {
                 }
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
                     && let [left, right] = values.as_slice()
-                    && (matches!(left.ty, Type::Enum(_)) || matches!(right.ty, Type::Enum(_)))
+                    && (matches!(left.ty, Type::Enum(_) | Type::BuiltinClass)
+                        || matches!(right.ty, Type::Enum(_) | Type::BuiltinClass))
                     && left.ty != right.ty
                     && [left.ty, right.ty].into_iter().all(|ty| {
                         self.types.payload(ty).is_none() && self.types.members(ty).is_none()
@@ -5021,6 +5078,15 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
+                if list.ty == Type::BuiltinClass {
+                    // Python evaluates type arguments before invoking __class_getitem__.
+                    self.expr(&subscript.slice)?;
+                    return Err(error(
+                        self.source,
+                        subscript,
+                        "runtime generic aliases of builtin classes are unsupported",
+                    ));
+                }
                 if list.ty == Type::ExceptionField {
                     let index = self.expr_expected(&subscript.slice, Type::Int)?;
                     return Ok(Expr {
@@ -5197,6 +5263,28 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
                     return Ok(self.string_join_value(Some(receiver), attribute));
                 }
+                if matches!(receiver.ty, Type::AnnotationValue(_)) {
+                    return self.annotation_attribute(receiver, attribute);
+                }
+                if let Type::ForwardRef(layout) = receiver.ty {
+                    return self.forward_ref_attribute(layout, receiver, attribute);
+                }
+                if receiver.ty == Type::BuiltinClass {
+                    match attribute.attr.as_str() {
+                        "__name__" | "__qualname__" => return Ok(annotations::type_name(receiver)),
+                        "__module__" => {
+                            return Ok(Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Scope {
+                                    body: vec![Statement::Expr(receiver)],
+                                    value: Box::new(unpacking::string("builtins")),
+                                    clear: vec![],
+                                },
+                            });
+                        }
+                        _ => {}
+                    }
+                }
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
@@ -5244,6 +5332,12 @@ impl<'a> Checker<'a> {
                 }
                 if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
                     return self.zip_attribute(receiver, attribute);
+                }
+                if receiver.ty == Type::CsvReader && attribute.attr.as_str() == "line_num" {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::CsvLineNumber, vec![receiver]),
+                    });
                 }
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
@@ -5647,6 +5741,13 @@ impl<'a> Checker<'a> {
             return self.counter(call, None, Some(ty));
         }
         match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => return self.forward_ref(call),
+            Some(Binding::Intrinsic(Intrinsic::GetAnnotations)) => {
+                return self.get_annotations(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::AnnotationTypeRepr)) => {
+                return self.annotation_type_repr(call);
+            }
             Some(Binding::Intrinsic(
                 kind @ (Intrinsic::RunLoop
                 | Intrinsic::NewLoop
@@ -5777,6 +5878,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::CsvReader)) => return self.csv_reader(call),
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
                 self.reject_builtin_keywords(call)?;
@@ -5919,6 +6021,9 @@ impl<'a> Checker<'a> {
         }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance") {
             return self.isinstance(call);
+        }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "issubclass") {
+            return self.issubclass(call);
         }
         if let Some(kind) = self.exception_category(&call.func) {
             return self.simple_exception(call, kind);
@@ -6506,12 +6611,17 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1
-            && matches!(args[0].ty, Type::Enum(_))
+            && matches!(args[0].ty, Type::Enum(_) | Type::BuiltinClass)
             && matches!(name.id.as_str(), "str" | "print")
         {
+            let builtin = if args[0].ty == Type::BuiltinClass {
+                Builtin::Repr
+            } else {
+                Builtin::EnumString
+            };
             let text = Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::EnumString, args),
+                kind: ExprKind::Builtin(builtin, args),
             };
             return Ok(if name.id == "str" {
                 text
@@ -6666,9 +6776,12 @@ impl<'a> Checker<'a> {
             if matches!(name.id.as_str(), "str" | "print")
                 && (matches!(
                     args[0].ty,
-                    Type::Class(_) | Type::CompletedProcess(_) | Type::StringIterable
-                ) || self.types.is_counter(args[0].ty)
-                    || (name.id == "print" && self.types.element(args[0].ty).is_some()))
+                    Type::Class(_)
+                        | Type::CompletedProcess(_)
+                        | Type::ForwardRef(_)
+                        | Type::Dict(_)
+                        | Type::StringIterable
+                ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;
                 return Ok(if name.id == "str" {

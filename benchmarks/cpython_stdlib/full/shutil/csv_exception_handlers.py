@@ -3,6 +3,7 @@
 import csv
 import shutil
 import sys
+from pathlib import Path
 
 reader = csv.reader(['"unterminated'], strict=True)
 try:
@@ -43,3 +44,19 @@ except csv.Error:
     raise AssertionError("shutil.Error caught by csv.Error")
 except OSError:
     print("OS base")
+
+
+reader = csv.reader(['"unterminated'], strict=True)
+try:
+    next(reader)
+except UnicodeEncodeError:
+    raise AssertionError("CSV error caught by UnicodeEncodeError")
+except csv.Error:
+    print("CSV versus codec")
+
+try:
+    Path("encoding.txt").write_text("é", encoding="ascii")
+except csv.Error:
+    raise AssertionError("codec error caught by csv.Error")
+except UnicodeEncodeError:
+    print("codec versus CSV")

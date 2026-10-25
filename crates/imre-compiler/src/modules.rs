@@ -56,6 +56,8 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    AnnotationLib,
+    AnnotationFormat,
     Declaration(&'static str),
     Argparse,
     Future,
@@ -95,6 +97,7 @@ pub(crate) enum IntrinsicModule {
     Hashlib,
     Base64,
     Zipfile,
+    Csv,
     Re,
     Enum,
     Zlib,
@@ -107,6 +110,10 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    GetAnnotations,
+    ForwardRef,
+    AnnotationTypeRepr,
+    AnnotationFormat(i64),
     Declaration(&'static str),
     ArgumentParser,
     ArgparseNamespace,
@@ -201,6 +208,8 @@ pub(crate) enum Intrinsic {
     BytesIo,
     BadZipFile,
     BadGzipFile,
+    CsvReader,
+    CsvError,
     RegexCompile,
     RegexSearch,
     RegexSub,
@@ -272,6 +281,7 @@ pub(crate) enum Intrinsic {
 impl IntrinsicModule {
     fn named(name: &str) -> Option<Self> {
         match name {
+            "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
             "logging.handlers" => Some(Self::LoggingHandlers),
@@ -310,6 +320,7 @@ impl IntrinsicModule {
             "hashlib" => Some(Self::Hashlib),
             "base64" => Some(Self::Base64),
             "zipfile" => Some(Self::Zipfile),
+            "csv" => Some(Self::Csv),
             "re" => Some(Self::Re),
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
@@ -323,6 +334,9 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::AnnotationLib && name == "Format" {
+            return Some(Binding::IntrinsicModule(Self::AnnotationFormat));
+        }
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
@@ -347,6 +361,13 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
         let symbol = match (self, name) {
+            (Self::AnnotationLib, "ForwardRef") => Intrinsic::ForwardRef,
+            (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
+            (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
+            (Self::AnnotationFormat, "VALUE") => Intrinsic::AnnotationFormat(1),
+            (Self::AnnotationFormat, "VALUE_WITH_FAKE_GLOBALS") => Intrinsic::AnnotationFormat(2),
+            (Self::AnnotationFormat, "FORWARDREF") => Intrinsic::AnnotationFormat(3),
+            (Self::AnnotationFormat, "STRING") => Intrinsic::AnnotationFormat(4),
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
@@ -461,6 +482,8 @@ impl IntrinsicModule {
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
             (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
+            (Self::Csv, "reader") => Intrinsic::CsvReader,
+            (Self::Csv, "Error") => Intrinsic::CsvError,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
@@ -586,6 +609,7 @@ impl SourceModule {
 pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    deferred_names: std::cell::RefCell<Vec<Vec<TextRange>>>,
     checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
@@ -715,6 +739,10 @@ impl SourceGraph {
         self.checked_calls.borrow_mut()[module].push(call);
     }
 
+    pub(crate) fn deferred_name(&self, module: ModuleId, name: TextRange) {
+        self.deferred_names.borrow_mut()[module].push(name);
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,
@@ -767,6 +795,12 @@ impl SourceGraph {
                         keywords.sort_unstable_by_key(|range| (range.start(), range.end()));
                         keywords.dedup();
                         keywords.into_iter().map(CheckedDiagnostic::Keyword)
+                    })
+                    .chain({
+                        let mut names = self.deferred_names.borrow()[id].clone();
+                        names.sort_unstable_by_key(|range| (range.start(), range.end()));
+                        names.dedup();
+                        names.into_iter().map(CheckedDiagnostic::DeferredName)
                     })
                     .collect()
             })
@@ -1112,6 +1146,7 @@ impl<'a> Loader<'a> {
         let mut graph = SourceGraph {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            deferred_names: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))

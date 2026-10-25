@@ -11,10 +11,10 @@ mod groupby;
 /// successful `next` owns `value`, and its consumer clears that transient owner.
 pub(super) struct Prepared {
     pub evaluate: Vec<Statement>,
-    acquire: Vec<Statement>,
-    next: Vec<Statement>,
+    pub(super) acquire: Vec<Statement>,
+    pub(super) next: Vec<Statement>,
     pub(super) value: usize,
-    ready: usize,
+    pub(super) ready: usize,
     /// An empty tuple has no element type or executable item assignment.
     elementless: bool,
     /// Enclosing slots a later pull may replace, after constructor arguments.
@@ -663,7 +663,7 @@ impl Checker<'_> {
         })
     }
 
-    fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
+    pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
         let iterator = self.hidden(cursor.ty);
         let value = self.hidden(element);
         let ready = self.hidden(Type::Bool);
@@ -691,19 +691,39 @@ impl Checker<'_> {
     /// Runtime iterdir snapshots eagerly; glob waits for the first pull. Private
     /// nullable results own every yielded path until the consumer acquires it.
     fn prepare_path_iterator(&mut self, expression: Expr) -> Prepared {
-        let iterator = self.hidden(Type::Iterator);
-        let optional = self.hidden(self.types.optional(Type::Path));
-        let value = self.hidden(Type::Path);
+        self.prepare_pull_iterator(
+            expression,
+            Type::Path,
+            Builtin::Path(ir::PathOperation::Next),
+        )
+    }
+
+    pub(super) fn prepare_csv_reader(&mut self, reader: Expr) -> Prepared {
+        self.prepare_pull_iterator(
+            reader,
+            self.types.list(Type::Str),
+            Builtin::CsvNext { required: false },
+        )
+    }
+
+    fn prepare_pull_iterator(
+        &mut self,
+        expression: Expr,
+        element: Type,
+        operation: Builtin,
+    ) -> Prepared {
+        let iterator = self.hidden(expression.ty);
+        let optional = self.hidden(self.types.optional(element));
+        let value = self.hidden(element);
         let ready = self.hidden(Type::Bool);
         let done = self.hidden(Type::Bool);
         let pull = vec![
             Statement::Assign(
                 optional,
-                paths::operation(
-                    ir::PathOperation::Next,
-                    self.locals[optional],
-                    vec![self.local(iterator)],
-                ),
+                Expr {
+                    ty: self.locals[optional],
+                    kind: ExprKind::Builtin(operation, vec![self.local(iterator)]),
+                },
             ),
             Statement::Assign(
                 ready,
@@ -717,7 +737,7 @@ impl Checker<'_> {
                 vec![Statement::Assign(
                     value,
                     Expr {
-                        ty: Type::Path,
+                        ty: element,
                         kind: ExprKind::Unwrap(Box::new(self.local(optional))),
                     },
                 )],
@@ -982,6 +1002,9 @@ impl Checker<'_> {
         node: &impl Ranged,
         reverse: bool,
     ) -> Result<Prepared, String> {
+        if !reverse && iterable.ty == Type::CsvReader {
+            return Ok(self.prepare_csv_reader(iterable));
+        }
         if !reverse && matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
             return Ok(self.prepare_file_lines(iterable));
         }
@@ -1896,11 +1919,15 @@ impl Checker<'_> {
                 Some(slot),
             ));
         }
-        let (kind, captured) = if let ExprKind::Callable {
-            function,
-            receiver: None,
-        } = callback.kind
-        {
+        let direct = match &callback.kind {
+            ExprKind::Callable {
+                function,
+                receiver: None,
+            }
+            | ExprKind::Builtin(Builtin::StaticFunction(function), _) => Some(*function),
+            _ => None,
+        };
+        let (kind, captured) = if let Some(function) = direct {
             self.calls.insert(function);
             (ExprKind::Call(function, args), None)
         } else {

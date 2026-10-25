@@ -421,6 +421,7 @@ struct CheckedFile<'db> {
 pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
+    DeferredName(TextRange),
     Keyword(TextRange),
 }
 
@@ -431,6 +432,7 @@ impl CheckedDiagnostic {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
         }
     }

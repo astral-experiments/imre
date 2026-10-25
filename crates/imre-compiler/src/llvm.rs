@@ -1,6 +1,6 @@
 //! Ownership lowering and textual LLVM emission, with no C or interpreter layer.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
@@ -51,6 +51,9 @@ impl Type {
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
+            | Self::ForwardRef(_)
+            | Self::AnnotationValue(_)
+            | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
@@ -91,6 +94,7 @@ impl Type {
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
+            | Self::CsvReader
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -107,6 +111,9 @@ impl Type {
             Self::Int => "1",
             Self::Float => "0.0",
             Self::Str
+            | Self::ForwardRef(_)
+            | Self::AnnotationValue(_)
+            | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
@@ -147,6 +154,7 @@ impl Type {
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
+            | Self::CsvReader
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -283,6 +291,7 @@ fn emit_program(
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
         tuple_literals: BTreeMap::new(),
+        static_functions: BTreeSet::new(),
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
@@ -468,6 +477,7 @@ struct Emitter<'a, 'module> {
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     tuple_literals: BTreeMap<usize, Vec<String>>,
+    static_functions: BTreeSet<String>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
@@ -694,12 +704,15 @@ impl Emitter<'_, '_> {
         let family = match ty {
             Type::Int => "int",
             Type::Union(_) | Type::StringIterable => "union",
-            Type::Str | Type::StrLiteral(_) => "str",
+            Type::Str | Type::StrLiteral(_) | Type::BuiltinClass => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
-            Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => {
-                "record"
-            }
+            Type::Class(_)
+            | Type::Tuple(_)
+            | Type::Callable(_)
+            | Type::ForwardRef(_)
+            | Type::AnnotationValue(_)
+            | Type::CompletedProcess(_) => "record",
             Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
@@ -734,6 +747,7 @@ impl Emitter<'_, '_> {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -3172,6 +3186,23 @@ impl Emitter<'_, '_> {
             self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
         } else {
             match left.ty {
+                Type::ForwardRef(_) | Type::AnnotationValue(_) => {
+                    let symbol = if matches!(left.ty, Type::ForwardRef(_)) {
+                        "imre_forward_ref_equal"
+                    } else {
+                        "imre_annotation_equal"
+                    };
+                    let equal = self.instruction(format!(
+                        "call i32 @{symbol}(ptr {}, ptr {})",
+                        left.operand, right.operand
+                    ));
+                    let pred = if matches!(op, Compare::Equal) {
+                        "ne"
+                    } else {
+                        "eq"
+                    };
+                    self.instruction(format!("icmp {pred} i32 {equal}, 0"))
+                }
                 Type::Int if left.small_integer && right.small_integer => self.instruction(
                     format!("icmp {predicate} i64 {}, {}", left.operand, right.operand),
                 ),
@@ -3200,7 +3231,7 @@ impl Emitter<'_, '_> {
                     "icmp {predicate} i64 {}, {}",
                     left.operand, right.operand
                 )),
-                Type::Str | Type::StrLiteral(_) | Type::Optional(_) => {
+                Type::Str | Type::StrLiteral(_) | Type::BuiltinClass | Type::Optional(_) => {
                     let equal = if matches!(left.ty, Type::Optional(_))
                         || matches!(right.ty, Type::Optional(_))
                     {
@@ -3317,6 +3348,7 @@ impl Emitter<'_, '_> {
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
+                | Type::CsvReader
                 | Type::Exception
                 | Type::NamedException(_)
                 | Type::ExceptionField
@@ -3518,9 +3550,56 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
+        if let Builtin::StaticFunction(id) = builtin {
+            let root = self.output.global_ref(format!("static_function_{id}"));
+            self.static_functions.insert(root.clone());
+            return self.rooted_record(returns, &root, |emitter| emitter.expr(&expressions[0]));
+        }
+        if let Builtin::AnnotationMember(layout) = builtin {
+            let frame = Expr {
+                ty: Type::Tuple(*layout),
+                kind: ExprKind::Builtin(Builtin::RecordView, expressions.to_vec()),
+            };
+            return self.expression(&Expr {
+                ty: returns,
+                kind: ExprKind::Field(Box::new(frame), 0),
+            });
+        }
+        if let Builtin::BoxAnnotation(layout) = builtin {
+            return Value {
+                ty: returns,
+                ..self.fresh_record(Type::Tuple(*layout), expressions)
+            };
+        }
+        if let Builtin::ForwardRefField(index) = builtin {
+            let [reference] = expressions else {
+                unreachable!()
+            };
+            let Type::ForwardRef(id) = reference.ty else {
+                unreachable!()
+            };
+            let frame = Expr {
+                ty: Type::Tuple(id),
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![reference.clone()]),
+            };
+            return self.expression(&Expr {
+                ty: returns,
+                kind: ExprKind::Field(Box::new(frame), *index),
+            });
+        }
+        if matches!(builtin, Builtin::NewForwardRef) {
+            let Type::ForwardRef(id) = returns else {
+                unreachable!()
+            };
+            return Value {
+                ty: returns,
+                ..self.fresh_record(Type::Tuple(id), expressions)
+            };
+        }
         if matches!(
             builtin,
             Builtin::LiteralStringView
+                | Builtin::ClassNameView
                 | Builtin::DictAsBase
                 | Builtin::RecordView
                 | Builtin::DirectoryContextView
@@ -3651,7 +3730,13 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::LiteralStringView
+            Builtin::StaticFunction(_)
+            | Builtin::AnnotationMember(_)
+            | Builtin::BoxAnnotation(_)
+            | Builtin::ForwardRefField(_)
+            | Builtin::NewForwardRef
+            | Builtin::LiteralStringView
+            | Builtin::ClassNameView
             | Builtin::DictAsBase
             | Builtin::RecordView
             | Builtin::DirectoryContextView => {
@@ -4112,13 +4197,17 @@ impl Emitter<'_, '_> {
                     let text_indent =
                         u32::from(matches!(indent_ty, Type::Str | Type::StrLiteral(_)));
                     let nan = self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
+                    let sort =
+                        self.instruction(format!("zext i1 {} to i32", args[4].value.operand));
+                    let separators = self.word(&args[5].value);
+                    let sep_schema = self.output.global_ref(json::schema_name(args[5].value.ty));
                     let common = format!(
-                        "i64 {word}, ptr @{schema}, i64 {indent}, i32 {text_indent}, i32 {ascii}, i32 {nan}"
+                        "i64 {word}, ptr @{schema}, i64 {indent}, i32 {text_indent}, i32 {ascii}, i32 {nan}, i32 {sort}, i64 {separators}, ptr @{sep_schema}"
                     );
                     if matches!(builtin, Builtin::JsonDump(_)) {
                         self.checked_instruction(format!(
                             "call i32 @imre_json_dump({common}, ptr {})",
-                            args[4].value.operand
+                            args[6].value.operand
                         ));
                         "0".to_owned()
                     } else {
@@ -4188,6 +4277,33 @@ impl Emitter<'_, '_> {
             Builtin::UnionProject => {
                 let value = self.own_operand(args.into_iter().next().unwrap());
                 return self.union_project(value, returns);
+            }
+            Builtin::AnnotationRef => self.call(
+                "imre_annotation_ref",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::AnnotationIs => {
+                let bit = self.instruction(format!(
+                    "call i32 @imre_annotation_is(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::IsBuiltinSubclass => {
+                let result = self.instruction(format!(
+                    "call i32 @imre_builtin_issubclass(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {result}, 0")),
+                    small_integer: false,
+                }
             }
             Builtin::IsInstance(classes) => Value {
                 ty: Type::Bool,
@@ -4364,6 +4480,63 @@ impl Emitter<'_, '_> {
             },
             Builtin::Encode => self.call("imre_str_encode", Type::Bytes, &[&args[0].value]),
             Builtin::Decode => self.call("imre_bytes_decode", Type::Str, &[&args[0].value]),
+            Builtin::CsvReader {
+                delimiter,
+                quote,
+                escape,
+                flags,
+            } => {
+                let source = &args[0].value;
+                let source_kind = match source.ty {
+                    Type::TextIO => 1,
+                    Type::Str => 2,
+                    _ => 0,
+                };
+                let (function, terminator) = match args.as_slice() {
+                    [_, text, bad_type] => {
+                        let text = if matches!(text.value.ty, Type::Optional(_)) {
+                            self.instruction(format!("inttoptr i64 {} to ptr", text.value.operand))
+                        } else {
+                            text.value.operand.clone()
+                        };
+                        (
+                            "imre_csv_reader_terminator",
+                            format!(", ptr {text}, ptr {}", bad_type.value.operand),
+                        )
+                    }
+                    [_] => ("imre_csv_reader", String::new()),
+                    _ => unreachable!("checked CSV arguments"),
+                };
+                let operand = self.checked_instruction(format!(
+                    "call ptr @{function}(ptr {}, i32 {source_kind}, i32 {}, i32 {}, i32 {}, i32 {flags}{terminator})",
+                    source.operand, u32::from(*delimiter), quote.map_or(u32::MAX, u32::from), escape.map_or(u32::MAX, u32::from),
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::CsvNext { required } => {
+                let pointer = self.checked_instruction(format!(
+                    "call ptr @imre_csv_next(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*required)
+                ));
+                let operand = if *required {
+                    pointer
+                } else {
+                    self.instruction(format!("ptrtoint ptr {pointer} to i64"))
+                };
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::CsvLineNumber => {
+                self.call("imre_csv_line_number", Type::Int, &[&args[0].value])
+            }
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::HashNew => self.call(
                 "imre_hash_new",
@@ -5334,6 +5507,9 @@ impl Emitter<'_, '_> {
                     }
                     Type::None => self.void_call("imre_print_none", &[]),
                     Type::ListInt
+                    | Type::ForwardRef(_)
+                    | Type::AnnotationValue(_)
+                    | Type::BuiltinClass
                     | Type::Class(_)
                     | Type::List(_)
                     | Type::Dict(_)
@@ -5369,6 +5545,7 @@ impl Emitter<'_, '_> {
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
+                    | Type::CsvReader
                     | Type::RegexPattern
                     | Type::JsonRoot
                     | Type::JsonValue
@@ -5573,6 +5750,9 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::ForwardRef(_)
+            | Type::AnnotationValue(_)
+            | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
@@ -5613,6 +5793,7 @@ impl Emitter<'_, '_> {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -5643,6 +5824,9 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::ForwardRef(_)
+            | Type::AnnotationValue(_)
+            | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
@@ -5683,6 +5867,7 @@ impl Emitter<'_, '_> {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -6227,6 +6412,9 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Int => 2,
         Type::Float => 7,
         Type::Str | Type::StrLiteral(_) => 3,
+        Type::BuiltinClass => 11,
+        Type::ForwardRef(_) => 12,
+        Type::AnnotationValue(_) => 13,
         Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
@@ -6266,6 +6454,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
+        | Type::CsvReader
         | Type::RegexPattern
         | Type::JsonRoot
         | Type::JsonValue
@@ -6570,6 +6759,10 @@ declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_bytes_decode_ascii(ptr)
 declare ptr @imre_urlsafe_b64encode(ptr)
 declare ptr @imre_sha256_hex(ptr)
+declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
+declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
+declare ptr @imre_csv_next(ptr, i32)
+declare i64 @imre_csv_line_number(ptr)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()
@@ -6659,12 +6852,18 @@ declare i32 @imre_json_null(ptr)
 declare ptr @imre_toml_decode(ptr, ptr)
 declare ptr @imre_toml_keys(ptr)
 declare ptr @imre_json_encode(i64, ptr, i64, i32)
-declare ptr @imre_json_dumps(i64, ptr, i64, i32, i32, i32)
-declare i32 @imre_json_dump(i64, ptr, i64, i32, i32, i32, ptr)
+declare ptr @imre_json_dumps(i64, ptr, i64, i32, i32, i32, i32, i64, ptr)
+declare i32 @imre_json_dump(i64, ptr, i64, i32, i32, i32, i32, i64, ptr, ptr)
 declare ptr @imre_record_try_cached_result(ptr)
 declare void @imre_record_retain(ptr)
 declare void @imre_record_release(ptr)
 declare i32 @imre_record_equal(ptr, ptr) nounwind
+declare i32 @imre_forward_ref_equal(ptr, ptr) nounwind
+declare i32 @imre_annotation_kind(ptr) nounwind
+declare i32 @imre_annotation_equal(ptr, ptr) nounwind
+declare i32 @imre_annotation_is(ptr, ptr) nounwind
+declare ptr @imre_annotation_ref(ptr, ptr)
+declare i32 @imre_builtin_issubclass(ptr, ptr) nounwind
 declare i32 @imre_sequence_equal(ptr, ptr) nounwind
 declare i32 @imre_tuple_compare(ptr, ptr) nounwind
 declare ptr @imre_value_repr(i64, i32)

@@ -211,8 +211,11 @@ reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
 `json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
 a text stream. Both accept scalar values, typed lists, tuples, dictionaries
-with string or integer keys, and parsed documents. Keyword options include
-`indent` (integer, string, or `None`), `ensure_ascii` and `allow_nan`.
+with string or integer keys, and parsed documents. Fresh nested list and dict
+displays can mix JSON types. Both functions accept `indent` (integer, string,
+or `None`), `ensure_ascii`, `allow_nan`, `sort_keys`, and `separators`.
+Separators are unpacked as the item separator and key separator; sorting
+compares dictionary keys before converting them to JSON strings.
 Defaults match Python's separators, escaping and nonfinite number spellings.
 Dynamic hooks, arbitrary mapping keys, and general `Any` remain outside this
 boundary.
@@ -304,6 +307,18 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 `str.startswith(prefix)` and `str.endswith(suffix)` accept one positional string, without tuple alternatives or bounds. `str.find(sub[, start])` accepts a positional substring and an optional integer or `None` start, returning a Unicode scalar index or `-1`; an end bound and `rfind` are not yet supported. `str.partition(sep)` requires a nonempty positional string and returns a fixed `(before, separator, after)` tuple; a missing separator returns `(original, "", "")`. `str.isspace()` is false for an empty string and otherwise checks every character against Python's whitespace definition. These operations use native UTF-8 storage and do not import or call Python methods.
 
 `urllib.parse.unquote(string)` is a sealed native import for one positional or named string argument. It decodes percent escapes with the default UTF-8 replacement behavior. Byte inputs, configurable `encoding`/`errors`, and other URL parsing APIs remain unsupported.
+
+## CSV reader
+
+`csv.reader(lines)` returns a lazy iterator over lists of strings. The supported
+input types are a text file, a live `list[str]`, and a string (one character per
+input element). `for`, `list`, `iter(reader)` and `next(reader)` share the
+same cursor. `reader.line_num` counts physical lines, including lines pulled
+for multiline fields. Errors use `csv.Error`; the default field limit is
+131,072 characters. Excel is the supported dialect. Literal `delimiter`,
+`quotechar`, `escapechar`, `doublequote`, `skipinitialspace` and `strict`
+keywords customize it. Other dialects, writers, dictionary adapters, and
+changing the field limit are outside the subset. An explicit text `lineterminator` is validated against the dialect characters; the reader recognizes CR and LF independently of this setting. A nonstring raises `TypeError`.
 
 ## Fixed regular expressions
 
