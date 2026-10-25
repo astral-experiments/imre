@@ -3,6 +3,7 @@
 use super::exceptions::{Error, Kind};
 use super::words::{OwnedWord, WordKind};
 use super::{Object, Storage, StorageCell, Str, acquire_rc, finish, object, values};
+use crate::StrOwner;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
@@ -47,7 +48,7 @@ impl State {
     }
 }
 pub(super) struct Variable {
-    name: Rc<Str>,
+    name: StrOwner,
     default: Option<OwnedWord>,
 }
 pub(super) struct Token {
@@ -154,7 +155,7 @@ impl ReprView {
                 out.push_str("<ContextVar name=");
                 // SAFETY: both the name and default are rooted by this variable.
                 unsafe {
-                    values::write_repr(out, Rc::as_ptr(&var.name) as usize, WordKind::new(3))
+                    values::write_repr(out, StrOwner::as_ptr(&var.name) as usize, WordKind::new(3))
                 };
                 if let Some(value) = &var.default {
                     out.push_str(" default=");
@@ -216,7 +217,7 @@ pub unsafe extern "C" fn imre_contextvars_var(
     // SAFETY: u32::MAX denotes absence; otherwise this word matches the declared kind.
     let default = (kind != u32::MAX).then(|| unsafe { WordKind::new(kind).acquire(value) });
     // SAFETY: the name is an owned native str rooted by the caller.
-    let name = unsafe { acquire_rc(name as usize) };
+    let name = unsafe { StrOwner::acquire_word(name as usize) };
     wrap(Storage::ContextVar(Rc::new(Variable { name, default })))
 }
 /// # Safety
@@ -311,7 +312,9 @@ pub unsafe extern "C" fn imre_contextvars_reset(key: *const Object, tok: *const 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_contextvars_name(key: *const Object) -> *const Str {
     // SAFETY: the source attribute is checked against the receiver type.
-    variable(unsafe { object(key) }, |v| Rc::into_raw(v.name.clone()))
+    variable(unsafe { object(key) }, |v| {
+        StrOwner::into_raw(v.name.clone())
+    })
 }
 /// # Safety
 /// An exact token roots its originating variable.
