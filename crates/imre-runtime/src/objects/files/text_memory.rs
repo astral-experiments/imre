@@ -175,6 +175,7 @@ pub unsafe extern "C" fn imre_string_io(initial: usize, newline: usize) -> *cons
         Ok(Rc::into_raw(
             FileState {
                 fd: None,
+                raw: false,
                 name: None,
                 kind: FileKind::TextMemory,
                 stream: Some(Stream::TextMemory(memory)),
