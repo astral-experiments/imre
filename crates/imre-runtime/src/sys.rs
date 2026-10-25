@@ -1,5 +1,7 @@
 //! The process's two UTF-8 text output streams use the same buffering as print.
-use super::{Int, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initialize_io};
+mod intern;
+use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
+use crate::StrOwner;
 use crate::objects::errno_error;
 use std::io::{self, Write};
 
@@ -25,6 +27,15 @@ pub(super) fn write_stderr(text: &str, newline: bool) -> io::Result<()> {
     write_stream(&STDERR, text, newline)
 }
 
+/// sys stream methods and default warning display share the buffered destinations.
+pub(super) fn write_standard_stream(stderr: bool, text: &str) -> io::Result<()> {
+    if stderr {
+        write_stderr(text, false)
+    } else {
+        write_stream(&OUTPUT, text, false)
+    }
+}
+
 pub(super) fn stderr_writer() -> std::sync::MutexGuard<'static, Output<io::Stderr>> {
     STDERR.lock().unwrap_or_else(|poison| poison.into_inner())
 }
@@ -39,6 +50,14 @@ pub(super) fn flush_stderr() -> io::Result<()> {
     Ok(())
 }
 
+/// Write the default display hook's repr followed by a newline to stdout.
+pub(super) fn write_display_line(text: &str) -> bool {
+    match write_stream(&OUTPUT, text, true) {
+        Ok(()) => true,
+        Err(error) => errno_error(error).returning(false),
+    }
+}
+
 /// Return the Python platform name of the target that built this runtime.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_platform() -> *const Str {
@@ -47,13 +66,13 @@ pub extern "C" fn imre_sys_platform() -> *const Str {
         "windows" => "win32",
         other => other,
     };
-    Rc::into_raw(Rc::new(Str::new(platform)))
+    StrOwner::into_raw(StrOwner::new(Str::new(platform)))
 }
 
 /// Return the OS interface Python exposes on the target that built this runtime.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_name() -> *const Str {
-    Rc::into_raw(Rc::new(Str::new(if cfg!(windows) {
+    StrOwner::into_raw(StrOwner::new(Str::new(if cfg!(windows) {
         "nt"
     } else {
         "posix"
@@ -68,11 +87,7 @@ pub extern "C" fn imre_os_name() -> *const Str {
 pub unsafe extern "C" fn imre_sys_stream_write(stderr: u32, text: *const Str) -> usize {
     // SAFETY: the caller roots the string until the stream write finishes.
     let text = unsafe { &*text };
-    let result = if stderr != 0 {
-        write_stderr(text, false)
-    } else {
-        write_stream(&OUTPUT, text, false)
-    };
+    let result = write_standard_stream(stderr != 0, text);
     match result {
         Ok(()) => Int::from_usize(text.chars().count()).into_raw(),
         Err(error) => errno_error(error).returning(0),

@@ -408,9 +408,9 @@ fn start_section(output: &mut String) {
 
 impl Parser {
     /// Subparser names use the parent's uncolored usage without its options.
-    pub(super) fn set_child_programs(&mut self) {
+    pub(super) fn set_child_programs(&mut self) -> Result<(), Error> {
         let Some(commands) = &mut self.subcommands else {
-            return;
+            return Ok(());
         };
         let mut parts = vec![(len(&self.prog), self.prog.clone())];
         parts.extend(self.options.iter().filter(|o| o.positional()).map(|o| {
@@ -427,22 +427,30 @@ impl Parser {
         } else {
             usage_lines(&parts, len(&self.prog) + 1, 0, width)
         };
+        let prog = prog.trim_matches(python_whitespace);
         for child in &mut commands.choices {
-            child.parser.prog = format!("{} {}", prog.trim_matches(python_whitespace), child.name);
+            let child_prog = &mut child.parser.prog;
+            child_prog.clear();
+            child_prog
+                .try_reserve_exact(prog.len() + 1 + child.name.len())
+                .map_err(|_| Error::allocation())?;
+            child_prog.push_str(prog);
+            child_prog.push(' ');
+            child_prog.push_str(&child.name);
         }
+        Ok(())
     }
 
     fn description(&self, text: &str, width: usize, indent: usize) -> String {
-        let text = if text.contains("%(prog)") {
-            expand(text, &self.prog, None)
-        } else {
-            text.to_owned()
-        };
+        let expanded = text
+            .contains("%(prog)")
+            .then(|| expand(text, &self.prog, None));
+        let text = expanded.as_deref().unwrap_or(text);
         let prefix = " ".repeat(indent);
         if self.raw {
-            let mut offsets = super::super::LineOffsets::new(&text);
+            let mut offsets = super::super::LineOffsets::new(text);
             let mut result = String::new();
-            while let Some(line) = offsets.next(&text) {
+            while let Some(line) = offsets.next(text) {
                 result.push_str(&prefix);
                 result.push_str(&text[line.start..offsets.start]);
             }
@@ -451,7 +459,7 @@ impl Parser {
             // _format_text subtracts the current indent before textwrap.fill;
             // textwrap then counts its initial/subsequent indent in that width.
             let width = width.saturating_sub(indent).max(11);
-            wrap(&text, width.saturating_sub(indent).max(1))
+            wrap(text, width.saturating_sub(indent).max(1))
                 .into_iter()
                 .map(|line| format!("{prefix}{line}"))
                 .collect::<Vec<_>>()
@@ -465,21 +473,8 @@ impl Parser {
         if let Some([short, _]) = &self.help_flags {
             parts.push((len(short) + 2, format!("[{}]", paint(color, "32", short))));
         }
-        for option in self.options.iter().filter(|o| !o.positional()) {
-            let length = len(&option.label(true, false));
-            let styled = option.label(true, color);
-            parts.push(if option.required {
-                (length, styled)
-            } else {
-                (length + 2, format!("[{styled}]"))
-            });
-        }
-        let mut positional: Vec<_> = self
-            .options
-            .iter()
-            .filter(|o| o.positional())
-            .map(|option| (len(&option.label(true, false)), option.label(true, color)))
-            .collect();
+        let mut positional = Vec::new();
+        self.usage_actions(color, &mut parts, &mut positional);
         if let Some(commands) = &self.subcommands {
             let word = format!("{} ...", commands.metavar());
             positional.push((len(&word), paint(color, "32", &word)));
@@ -527,6 +522,90 @@ impl Parser {
         }
         text.push('\n');
         text
+    }
+
+    /// Keep positionals in declaration order, moving a group's options beside its first positional.
+    fn usage_actions(
+        &self,
+        color: bool,
+        optionals: &mut Vec<(usize, String)>,
+        positionals: &mut Vec<(usize, String)>,
+    ) {
+        let mut grouped = vec![Vec::new(); self.mutex_required.len()];
+        for (slot, option) in self.options.iter().enumerate() {
+            if !option.positional()
+                && let Some(id) = option.mutex
+            {
+                grouped[id].push(slot);
+            }
+        }
+        let mut used = vec![false; self.options.len()];
+        for positional in [true, false] {
+            for (slot, option) in self.options.iter().enumerate() {
+                if option.positional() != positional || used[slot] {
+                    continue;
+                }
+                let output = if positional {
+                    &mut *positionals
+                } else {
+                    &mut *optionals
+                };
+                if let Some(id) = option.mutex {
+                    let mut alternatives = std::mem::take(&mut grouped[id]);
+                    if positional {
+                        alternatives.push(slot);
+                    }
+                    for &other in &alternatives {
+                        used[other] = true;
+                    }
+                    self.usage_group(&alternatives, self.mutex_required[id], color, output);
+                } else {
+                    self.usage_group(&[slot], false, color, output);
+                }
+            }
+        }
+    }
+
+    fn usage_group(
+        &self,
+        slots: &[usize],
+        required: bool,
+        color: bool,
+        output: &mut Vec<(usize, String)>,
+    ) {
+        let alternatives = slots.len() > 1;
+        for (index, &slot) in slots.iter().enumerate() {
+            let option = &self.options[slot];
+            let plain = option.label(true, false);
+            let (mut length, mut styled) = if alternatives && option.positional() {
+                let label = plain
+                    .strip_prefix('[')
+                    .and_then(|s| s.strip_suffix(']'))
+                    .unwrap_or(&plain);
+                (len(label), paint(color, "32", label))
+            } else {
+                (len(&plain), option.label(true, color))
+            };
+            if alternatives {
+                if index == 0 {
+                    styled.insert(0, if required { '(' } else { '[' });
+                    length += 1;
+                }
+                let suffix = if index + 1 < slots.len() {
+                    " |"
+                } else if required {
+                    ")"
+                } else {
+                    "]"
+                };
+                styled.push_str(suffix);
+                length += suffix.len();
+            } else if !option.positional() && !option.required && !required {
+                styled = format!("[{styled}]");
+                length += 2;
+            }
+            output.push((length, styled));
+        }
     }
 
     fn open_group(&self, output: &mut String, group: &ArgumentGroup, width: usize, color: bool) {

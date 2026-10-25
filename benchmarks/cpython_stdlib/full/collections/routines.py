@@ -17,10 +17,11 @@ import tempfile
 import unittest
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1]))
+sys.path[:0] = [str(HERE.parents[1]), str(HERE)]
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import Toolchain, native_method, run_in_fixtures
 from native_counter import assertion_fixture
+from chainmap_methods import OPERATIONS as CHAINMAP_OPERATIONS, fixture as chainmap_fixture
 from deque_methods import BIG_METHODS, BIG_OPERATION, big_fixture
 
 
@@ -35,6 +36,10 @@ COUNTER_OPERATIONS = {
 }
 EMPTY = {f"test.test_deque.TestSequence.{method}" for method in
          ("test_getitem", "test_getslice", "test_subscript")}
+DEQUE_OPERATIONS = {
+    "test_clear": "Construct a deque, clear it twice, and inspect its native length and iteration",
+    "test_maxlen_zero": "Consume native range iterators in bounded deque construction, extend, and extendleft",
+}
 
 
 @cache
@@ -162,9 +167,14 @@ def main():
                 if case_id == f"test.test_collections.TestCounter.{method}" and method in COUNTER_OPERATIONS:
                     fixture = assertion_fixture(method, "NativeCase")
                     operation = ("imre", COUNTER_OPERATIONS[method])
+                elif case_id == f"test.test_collections.TestChainMap.{method}" and method in CHAINMAP_OPERATIONS:
+                    fixture = chainmap_fixture(method)
+                    operation = ("imre", CHAINMAP_OPERATIONS[method])
                 elif case_id == f"test.test_deque.TestBasic.{method}" and method in BIG_METHODS:
                     fixture = big_fixture(sys.modules[name].BIG)
                     operation = BIG_OPERATION
+                elif case_id == f"test.test_deque.TestBasic.{method}" and method in DEQUE_OPERATIONS:
+                    operation = ("imre", DEQUE_OPERATIONS[method])
                 elif case_id in EMPTY:
                     if len(node.body) != 1 or not isinstance(node.body[0], ast.Pass):
                         raise ValueError(f"{case_id} is no longer an empty upstream test")

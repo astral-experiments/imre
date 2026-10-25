@@ -1,6 +1,6 @@
 # Standard library conformance
 
-Start with the [module inventory](scope.toml). Each first-wave module has a directory here for its unchanged source, the reference run, and native evidence. Existing subset runners live [one directory up](../README.md).
+The [standard library support table](../../../docs/stdlib.md) covers every top-level name in CPython’s module registry, with native API examples and measured test counts. The [module inventory](scope.toml) sets implementation priorities. Each first-wave module has a directory here for its unchanged source, the reference run, and native evidence. Existing subset runners live [one directory up](../README.md).
 
 Run `python3 benchmarks/cpython_stdlib/full/reference_report.py` to summarize the pinned Linux reference runs, including companion suites and repeated test IDs. `--json` emits the same counts for tooling. Native execution is recorded separately in each module's evidence.
 
