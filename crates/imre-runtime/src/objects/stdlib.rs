@@ -30,17 +30,21 @@ fn ordered_indices(
 
 /// Walks each cycle with owner-preserving swaps, marking visited indices in the permutation.
 fn permute<T>(values: &mut [T], order: &mut [usize]) {
-    if values.len() != order.len() {
+    permute_with(values.len(), order, |a, b| values.swap(a, b));
+}
+
+fn permute_with(len: usize, order: &mut [usize], mut swap: impl FnMut(usize, usize)) {
+    if len != order.len() {
         fail("SystemError", "sort key count differs from value count");
     }
-    for start in 0..values.len() {
+    for start in 0..len {
         let mut current = start;
         while order[current] != current {
             let next = std::mem::replace(&mut order[current], current);
             if next == start {
                 break;
             }
-            values.swap(current, next);
+            swap(current, next);
             current = next;
         }
     }
@@ -225,8 +229,14 @@ pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const 
         // SAFETY: the exact descriptor and cached length travel with the owners.
         let saved = unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let words = storage.sequence_mut();
-                words.check_kind(kind);
+                let words = if storage.sequence_storage().rows().is_some() {
+                    debug_assert_eq!(kind, 6);
+                    storage.sequence_storage_mut()
+                } else {
+                    let words = storage.sequence_mut();
+                    words.check_kind(kind);
+                    words
+                };
                 std::mem::replace(words, Words::sorting_empty(kind))
             })
         };
@@ -255,7 +265,7 @@ pub unsafe extern "C" fn imre_list_extend_unhinted(list: *const (), kind: u32) {
         // SAFETY: the real length stays unchanged at zero.
         unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let words = storage.sequence_mut();
+                let words = storage.sequence_storage_mut();
                 if words.is_sorting_empty() {
                     words.update_header();
                 }
@@ -294,11 +304,11 @@ pub unsafe extern "C" fn imre_sort_restore(
         // any value during access. Normal scope cleanup later drops the additions.
         unsafe {
             object(list.cast()).0.with_mut(|storage| {
-                let current = storage.sequence_mut();
+                let current = storage.sequence_storage_mut();
                 let modified = !current.is_sorting_empty();
                 object(saved.cast())
                     .0
-                    .with_mut(|storage| std::mem::swap(current, storage.sequence_mut()));
+                    .with_mut(|storage| std::mem::swap(current, storage.sequence_storage_mut()));
                 modified
             })
         }
@@ -360,9 +370,17 @@ pub unsafe extern "C" fn imre_sort_by_keys(
         // SAFETY: no storage reference escapes and swaps never drop an owner.
         unsafe {
             object(values.cast()).0.with_mut(|storage| {
-                let values = storage.sequence_mut();
-                values.check_kind(element_kind);
-                permute(&mut values.values, &mut order);
+                if let Some(rows) = storage.sequence_storage_mut().rows_mut() {
+                    match rows.reorder_shared(&order) {
+                        Ok(false) => permute_with(rows.len(), &mut order, |a, b| rows.swap(a, b)),
+                        Ok(true) => {}
+                        Err(error) => error.raise(),
+                    }
+                } else {
+                    let values = storage.sequence_mut();
+                    values.check_kind(element_kind);
+                    permute(&mut values.values, &mut order);
+                }
             })
         };
     }
