@@ -3505,6 +3505,22 @@ impl<'a> Checker<'a> {
             ast::Stmt::Delete(delete) => {
                 let mut statements = Vec::new();
                 for target in &delete.targets {
+                    if let ast::Expr::Name(name) = target
+                        && let Some(&slot) = self.names.get(name.id.as_str())
+                        && matches!(self.locals[slot], Type::Cursor(_))
+                    {
+                        if !self.assigned.contains(&slot) {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "iterator deletion requires a bound local",
+                            ));
+                        }
+                        self.assigned.remove(&slot);
+                        self.narrowed.remove_mut(&slot);
+                        statements.push(Statement::Clear(slot));
+                        continue;
+                    }
                     let ast::Expr::Subscript(target) = target else {
                         return Err(error(
                             self.source,
@@ -3947,7 +3963,16 @@ impl<'a> Checker<'a> {
         let mut normal_exit = (body_falls && else_falls).then(|| self.local_state());
 
         let mut handler_assigned = before.clone();
-        for name in narrowing::deleted_names(&try_.body) {
+        // Releasing a definitely bound cursor cannot raise. A handler can only
+        // be reached before a trailing deletion of plain locals takes effect.
+        let protected_prefix = if let [prefix @ .., ast::Stmt::Delete(last)] = try_.body.as_slice()
+            && last.targets.iter().all(ast::Expr::is_name_expr)
+        {
+            prefix
+        } else {
+            try_.body.as_slice()
+        };
+        for name in narrowing::deleted_names(protected_prefix) {
             if let Some(slot) = self.names.get(&name) {
                 handler_assigned.remove(slot);
             }
@@ -5570,6 +5595,7 @@ impl<'a> Checker<'a> {
                 return self.cursor_length_hint(call);
             }
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
+            Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Islice | Intrinsic::Cycle)) => {
                 return self.source_adapter(call);

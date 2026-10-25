@@ -462,6 +462,7 @@ pub(crate) enum Builtin {
         bounded: bool,
     },
     Islice,
+    Tee,
     Cycle,
     DirectoryContextView,
     Document(DocumentOp),

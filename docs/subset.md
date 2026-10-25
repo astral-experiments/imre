@@ -84,6 +84,11 @@ keys, sets and homogeneous fixed tuples. A list stays live during iteration.
 with integer or floating-point steps. A floating-point step with an integer
 start requires a mixed numeric element type and is currently unsupported.
 
+`tee(source[, n])` forks one source cursor. Each fork reads each buffered
+item at its own pace. Forking an existing fork copies its current position and
+shares the buffer. Deleting a bound cursor local drops that reference. The
+current fixed-tuple return layout requires a literal fork count from 0 to 256.
+
 `itertools.chain` accepts a fixed number of positional iterables with one exact
 element type. A loop, comprehension, or immediate consumer can use the chain.
 It evaluates source expressions left to right, then acquires each iterator on

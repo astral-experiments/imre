@@ -399,6 +399,7 @@ impl Builtin {
             Self::Repeat
             | Self::CursorLengthHint
             | Self::Progression { .. }
+            | Self::Tee
             | Self::Islice
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
