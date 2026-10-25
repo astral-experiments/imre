@@ -23,6 +23,7 @@ mod errno;
 pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
+mod format_cursors;
 mod hashlib;
 mod inspect;
 mod itertools;

@@ -337,6 +337,7 @@ impl Builtin {
             | Self::RecordCopy
             | Self::JsonDecode(_)
             | Self::CsvReader { .. }
+            | Self::FormatCursor { .. }
             | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
