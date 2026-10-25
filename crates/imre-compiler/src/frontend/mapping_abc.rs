@@ -18,6 +18,18 @@ fn type_error(result: Type, message: String, mut inputs: Vec<Expr>) -> Expr {
 }
 
 impl Checker<'_> {
+    /// These imported ABCs have a runtime class value that a function local can shadow.
+    pub(super) fn mapping_class_import(&self, name: &str) -> bool {
+        matches!(
+            self.graph.modules[self.module].bindings.get(name),
+            Some(Binding::Intrinsic(
+                Intrinsic::Mapping {
+                    typing_alias: false
+                } | Intrinsic::NominalClass("collections.abc.MutableMapping")
+            ))
+        )
+    }
+
     /// A statically known abstract Mapping still fails when the call executes.
     pub(super) fn abstract_mapping_call(
         &mut self,

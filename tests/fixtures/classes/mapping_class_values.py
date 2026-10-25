@@ -19,6 +19,22 @@ def invalid(log: list[int]) -> int:
     return 1
 
 
+def parameter(Mapping):
+    print(issubclass(dict, Mapping))
+    print(issubclass(Mapping, TypingMapping))
+
+
+def before_assignment():
+    try:
+        print(MutableMapping)
+    except UnboundLocalError as exc:
+        print(str(exc))
+    MutableMapping = dict
+    print(issubclass(list, MutableMapping))
+
+
+before_assignment()
+parameter(list)
 shadowed()
 print(issubclass(array, Mapping))
 print(issubclass(MutableMapping, Mapping))

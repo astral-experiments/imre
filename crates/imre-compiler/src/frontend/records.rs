@@ -656,7 +656,11 @@ impl Checker<'_> {
         while let ast::Expr::Attribute(attribute) = root {
             root = &attribute.value;
         }
-        if self.is_class_receiver(root) {
+        if self.is_class_receiver(root)
+            || root.as_name_expr().is_some_and(|n| {
+                self.names.contains_key(n.id.as_str()) && self.mapping_class_import(n.id.as_str())
+            })
+        {
             None
         } else {
             let binding = self.graph.resolve(self.module, expression);
