@@ -1,15 +1,25 @@
 //! Native text codecs shared by the registry and text files.
+pub(super) mod writer;
 
 use super::bytes::decode_error;
+use super::charmaps::Charmap;
 use super::exceptions::Result;
 use super::{Bytes, Error, Kind, Object, Rc, Storage, StorageCell, Str, finish, object};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+static CP1251: LazyLock<Charmap> = LazyLock::new(|| Charmap::named("cp1251").unwrap());
+static CP1251_ENCODE: LazyLock<HashMap<char, u8>> = LazyLock::new(|| {
+    (0..=u8::MAX)
+        .filter_map(|b| CP1251.decode(b).map(|ch| (ch, b)))
+        .collect()
+});
 
 thread_local! {
     static REGISTRY: RefCell<HashMap<String, Rc<Object>>> = RefCell::default();
-    static NAMES: [Rc<Str>; 4] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig"].map(|s| Rc::new(Str::new(s)));
+    static NAMES: [Rc<Str>; 5] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig", "cp1251"].map(|s| Rc::new(Str::new(s)));
 }
 
 /// Collapse non-ASCII-alphanumeric separators, retaining dots in codec names.
@@ -72,12 +82,7 @@ unsafe fn codec(info: *const Object) -> Codec {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_codec_name(info: *const Object) -> *const Str {
     // SAFETY: the codec info was returned by the registry.
-    let index = match unsafe { codec(info) } {
-        Codec::Ascii => 0,
-        Codec::Latin1 => 1,
-        Codec::Utf8 { signature: false } => 2,
-        Codec::Utf8 { signature: true } => 3,
-    };
+    let index = unsafe { codec(info) }.index();
     NAMES.with(|names| Rc::into_raw(names[index].clone()))
 }
 
@@ -118,9 +123,20 @@ pub(super) enum Codec {
     Utf8 { signature: bool },
     Latin1,
     Ascii,
+    Cp1251,
 }
 
 impl Codec {
+    fn index(self) -> usize {
+        match self {
+            Self::Ascii => 0,
+            Self::Latin1 => 1,
+            Self::Utf8 { signature: false } => 2,
+            Self::Utf8 { signature: true } => 3,
+            Self::Cp1251 => 4,
+        }
+    }
+
     pub(super) fn lookup(value: &str) -> Result<Self> {
         Self::by_key(&normalize(value), value)
     }
@@ -131,6 +147,7 @@ impl Codec {
                 Ok(Self::Utf8 { signature: false })
             }
             "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
+            "cp1251" | "1251" | "windows_1251" => Ok(Self::Cp1251),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
                 Ok(Self::Latin1)
@@ -147,6 +164,24 @@ impl Codec {
 
     pub(super) fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
         match self {
+            Self::Cp1251 => {
+                let mut text = String::with_capacity(data.len());
+                for (i, &byte) in data.iter().enumerate() {
+                    if let Some(ch) = CP1251.decode(byte) {
+                        text.push(ch);
+                    } else {
+                        decoding_error(&mut text, errors, &[byte], || {
+                            Error::new(
+                                Kind::UnicodeDecodeError,
+                                format!(
+                                    "'charmap' codec can't decode byte 0x{byte:02x} in position {i}: character maps to <undefined>"
+                                ),
+                            )
+                        })?;
+                    }
+                }
+                Ok(text)
+            }
             Self::Latin1 => Ok(data.iter().copied().map(char::from).collect()),
             Self::Ascii => {
                 let mut text = String::with_capacity(data.len());
@@ -196,19 +231,26 @@ impl Codec {
     }
 
     pub(super) fn encode<'a>(self, text: &'a str, errors: Option<&str>) -> Result<Cow<'a, [u8]>> {
-        let (codec, limit) = match self {
+        let (codec, reason) = match self {
             Self::Utf8 { signature: false } => return Ok(Cow::Borrowed(text.as_bytes())),
             Self::Utf8 { signature: true } => {
                 return Ok(Cow::Owned([b"\xef\xbb\xbf", text.as_bytes()].concat()));
             }
-            Self::Ascii => ("ascii", 128),
-            Self::Latin1 => ("latin-1", 256),
+            Self::Ascii => ("ascii", "ordinal not in range(128)"),
+            Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
+            Self::Cp1251 => ("charmap", "character maps to <undefined>"),
+        };
+        let encoded = |ch: char| match self {
+            Self::Ascii => ch.is_ascii().then_some(ch as u8),
+            Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
+            Self::Cp1251 => CP1251_ENCODE.get(&ch).copied(),
+            Self::Utf8 { .. } => unreachable!(),
         };
         let mut out = Vec::with_capacity(text.len());
         let mut chars = text.chars().enumerate().peekable();
         while let Some((start, ch)) = chars.next() {
-            if u32::from(ch) < limit {
-                out.push(ch as u8);
+            if let Some(byte) = encoded(ch) {
+                out.push(byte);
                 continue;
             }
             match errors.unwrap_or("strict") {
@@ -218,7 +260,7 @@ impl Codec {
                 "xmlcharrefreplace" => out.extend(format!("&#{};", u32::from(ch)).as_bytes()),
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
-                    while let Some((i, _)) = chars.next_if(|(_, c)| u32::from(*c) >= limit) {
+                    while let Some((i, _)) = chars.next_if(|(_, c)| encoded(*c).is_none()) {
                         end = i;
                     }
                     let at = if start == end {
@@ -228,7 +270,7 @@ impl Codec {
                     };
                     return Err(Error::new(
                         Kind::UnicodeEncodeError,
-                        format!("'{codec}' codec can't encode {at}: ordinal not in range({limit})"),
+                        format!("'{codec}' codec can't encode {at}: {reason}"),
                     ));
                 }
                 name => return Err(unknown_handler(name)),

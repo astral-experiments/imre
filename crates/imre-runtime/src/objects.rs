@@ -11,6 +11,7 @@ mod args;
 mod asyncio;
 mod builtins;
 mod bytes;
+mod charmaps;
 mod codecs;
 mod contexts;
 mod copying;
@@ -91,6 +92,8 @@ enum Storage {
     Sha256(Box<sha2::Sha256>),
     CsvReader(Box<csv::Reader>),
     CodecInfo(codecs::Codec),
+    CodecWriterClass(codecs::writer::WriterClass),
+    CodecWriter(codecs::writer::Writer),
     Exception(exceptions::Exception),
     ValueView(OwnedWord),
     File(Box<files::FileState>),

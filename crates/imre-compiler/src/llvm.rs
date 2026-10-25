@@ -95,6 +95,8 @@ impl Type {
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
+            | Self::CodecWriterClass
+            | Self::CodecWriter
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -159,6 +161,8 @@ impl Type {
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
+            | Self::CodecWriterClass
+            | Self::CodecWriter
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -757,6 +761,8 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -3365,6 +3371,8 @@ impl Emitter<'_, '_> {
                 | Type::PlainObject
                 | Type::PathInfo
                 | Type::CodecInfo
+                | Type::CodecWriterClass
+                | Type::CodecWriter
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
@@ -4666,6 +4674,43 @@ impl Emitter<'_, '_> {
                 self.call("imre_codec_lookup", Type::CodecInfo, &[&args[0].value])
             }
             Builtin::CodecName => self.call("imre_codec_name", Type::Str, &[&args[0].value]),
+            Builtin::CodecWriter(op) => {
+                use crate::ir::WriterOperation::*;
+                let values = args.iter().map(|arg| &arg.value).collect::<Vec<_>>();
+                match op {
+                    Flush | Close | Reset => {
+                        let mode = match op {
+                            Flush => 0,
+                            Close => 1,
+                            _ => 2,
+                        };
+                        self.checked_line(format!(
+                            "call void @imre_codec_writer_control(ptr {}, i32 {mode})",
+                            args[0].value.operand
+                        ));
+                        none()
+                    }
+                    _ => {
+                        let name = match op {
+                            Class => "imre_codec_writer_class",
+                            New => "imre_codec_writer_new",
+                            Write => "imre_codec_writer_write",
+                            Encoding => "imre_codec_writer_encoding",
+                            SetEncoding => "imre_codec_writer_set_encoding",
+                            Stream => "imre_codec_writer_stream",
+                            Errors => "imre_codec_writer_errors",
+                            SetErrors => "imre_codec_writer_set_errors",
+                            Flush | Close | Reset => unreachable!(),
+                        };
+                        if returns == Type::None {
+                            self.void_call(name, &values);
+                            none()
+                        } else {
+                            self.call(name, returns, &values)
+                        }
+                    }
+                }
+            }
             Builtin::CodecEncode | Builtin::CodecDecode => self.call(
                 if matches!(builtin, Builtin::CodecEncode) {
                     "imre_codec_encode"
@@ -4798,6 +4843,9 @@ impl Emitter<'_, '_> {
                 )
             }
             Builtin::BytesIo => self.call("imre_bytes_io", returns, &[&args[0].value]),
+            Builtin::BytesIoValue => {
+                self.call("imre_bytes_io_value", Type::Bytes, &[&args[0].value])
+            }
             Builtin::BinarySeek => self.call(
                 "imre_binary_seek",
                 returns,
@@ -5880,6 +5928,8 @@ impl Emitter<'_, '_> {
                     | Type::SimpleNamespace(_)
                     | Type::PathInfo
                     | Type::CodecInfo
+                    | Type::CodecWriterClass
+                    | Type::CodecWriter
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -6132,6 +6182,8 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6210,6 +6262,8 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6801,6 +6855,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::SimpleNamespace(_)
         | Type::PathInfo
         | Type::CodecInfo
+        | Type::CodecWriterClass
+        | Type::CodecWriter
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -7164,6 +7220,15 @@ declare ptr @imre_codec_lookup(ptr)
 declare ptr @imre_codec_name(ptr)
 declare ptr @imre_codec_encode(ptr, ptr, ptr)
 declare ptr @imre_codec_decode(ptr, ptr, ptr)
+declare ptr @imre_codec_writer_class(ptr)
+declare ptr @imre_codec_writer_new(ptr, ptr, ptr)
+declare void @imre_codec_writer_write(ptr, ptr)
+declare void @imre_codec_writer_control(ptr, i32)
+declare ptr @imre_codec_writer_encoding(ptr)
+declare void @imre_codec_writer_set_encoding(ptr, ptr)
+declare ptr @imre_codec_writer_stream(ptr)
+declare ptr @imre_codec_writer_errors(ptr)
+declare void @imre_codec_writer_set_errors(ptr, ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()
 declare void @imre_sha256_update(ptr, ptr)
@@ -7171,6 +7236,7 @@ declare ptr @imre_sha256_digest(ptr)
 declare ptr @imre_sha256_hexdigest(ptr)
 declare ptr @imre_sha256_copy(ptr)
 declare ptr @imre_bytes_io(ptr)
+declare ptr @imre_bytes_io_value(ptr)
 declare ptr @imre_string_io(i64, i64)
 declare ptr @imre_string_io_value(ptr)
 declare ptr @imre_string_io_read(ptr, i64, i1)

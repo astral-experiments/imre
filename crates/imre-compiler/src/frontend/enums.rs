@@ -289,6 +289,9 @@ impl Checker<'_> {
             || types == [Type::ClockTime; 2]
             || types == [Type::PathInfo; 2]
             || types == [Type::CodecInfo; 2]
+            || types == [Type::CodecWriterClass; 2]
+            || types == [Type::CodecWriter; 2]
+            || types == [Type::BinaryIO; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(

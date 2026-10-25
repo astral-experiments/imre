@@ -240,6 +240,7 @@ pub(crate) enum Intrinsic {
     Sha256,
     CodecInfoClass,
     CodecLookup,
+    CodecGetWriter,
     CodecBom(&'static [u8]),
     HashNew,
     SimpleNamespace,
@@ -611,6 +612,7 @@ impl IntrinsicModule {
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
             (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
             (Self::Codecs, "lookup") => Intrinsic::CodecLookup,
+            (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
             (Self::Codecs, "BOM_UTF8") => Intrinsic::CodecBom(b"\xef\xbb\xbf"),
             (Self::Codecs, "BOM_UTF16_LE") => Intrinsic::CodecBom(b"\xff\xfe"),
             (Self::Codecs, "BOM_UTF16_BE") => Intrinsic::CodecBom(b"\xfe\xff"),
@@ -915,6 +917,12 @@ impl SourceGraph {
     pub(crate) fn checked_excess_argument(&self, module: ModuleId, argument: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::ExcessArgument(argument));
+    }
+
+    /// Record a keyword which the concrete callable accepted despite a narrower protocol stub.
+    pub(crate) fn checked_positional_keyword(&self, module: ModuleId, range: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::PositionalKeyword(range));
     }
 
     pub(crate) fn checked_keywords(

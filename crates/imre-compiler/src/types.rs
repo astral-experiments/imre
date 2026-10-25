@@ -159,6 +159,8 @@ impl Types {
             | Type::PlainObject
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -541,6 +543,8 @@ impl Types {
             | Type::PlainObject
             | Type::PathInfo
             | Type::CodecInfo
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
