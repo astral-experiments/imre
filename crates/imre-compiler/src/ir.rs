@@ -54,7 +54,7 @@ pub(crate) enum Type {
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
     /// A synchronous child with statically known captured stream types.
-    Popen(ProcessCapture),
+    Popen(ProcessCapture, bool),
     /// Async process handle, with bits for the captured stdout and stderr slots.
     AsyncProcess(u8),
     Coroutine(usize),
@@ -168,7 +168,7 @@ impl std::fmt::Display for Type {
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
             Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
-            Self::Popen(_) => "subprocess.Popen",
+            Self::Popen(..) => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
             Self::EventLoop => "asyncio.AbstractEventLoop",
@@ -744,6 +744,7 @@ pub(crate) enum Builtin {
     TextFlush,
     TextClose,
     TextClosed,
+    FileFileno,
     DictGet,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
@@ -863,6 +864,7 @@ pub(crate) enum RegexCapture {
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
+    Lower,
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -908,6 +910,10 @@ pub(crate) enum PathOperation {
     ReadBytes,
     WriteText,
     WriteBytes,
+    WriteTypeError,
+    WriteUnion {
+        binary: bool,
+    },
     Mkdir,
     Unlink,
     Rmdir,
@@ -1001,10 +1007,14 @@ pub(crate) enum ProcessOperation {
     },
     PopenPid,
     PopenArgs,
+    PopenPipe(u8),
     PopenStatus {
         poll: bool,
     },
     PopenWait,
+    PopenCommunicate {
+        text: bool,
+    },
     PopenExit,
     PopenSignal,
     AsyncSpawn {
@@ -1061,6 +1071,7 @@ pub(crate) enum ProcessOperation {
     EnvironGet,
     GetCwd,
     Which,
+    CopyFile,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

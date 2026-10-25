@@ -535,10 +535,24 @@ impl Parsers {
     ) -> Result<Self, String> {
         let mut parsers = Self::default();
         for (module_id, module) in graph.modules.iter().enumerate() {
-            for (statement, node) in module.parsed.syntax().body.iter().enumerate() {
-                let ast::Stmt::FunctionDef(function) = node else {
-                    continue;
-                };
+            let functions =
+                module
+                    .parsed
+                    .syntax()
+                    .body
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(statement, node)| {
+                        let declarations = match node {
+                            ast::Stmt::ClassDef(class) => class.body.as_ref(),
+                            _ => std::slice::from_ref(node),
+                        };
+                        declarations.iter().filter_map(move |node| match node {
+                            ast::Stmt::FunctionDef(function) => Some((statement, function)),
+                            _ => None,
+                        })
+                    });
+            for (statement, function) in functions {
                 for (start, stmt) in function.body.iter().enumerate() {
                     let ast::Stmt::Assign(assign) = stmt else {
                         continue;
@@ -756,11 +770,12 @@ impl Parsers {
                         });
                     }
                     let parse = match function.body.get(index) {
+                        Some(ast::Stmt::Expr(stmt)) => Some(&*stmt.value),
                         Some(ast::Stmt::Assign(stmt)) if stmt.targets.len() == 1 && stmt.targets[0].as_name_expr().is_some() => Some(&*stmt.value),
                         Some(ast::Stmt::Return(stmt)) => stmt.value.as_deref(),
                         _ => None,
                     }.and_then(|expr| method(expr, builder, "parse_args"))
-                        .ok_or_else(|| module.error(ctor, "literal add_argument declarations must be followed by an assignment or return of parse_args()"))?;
+                        .ok_or_else(|| module.error(ctor, "literal add_argument declarations must be followed by a parse_args() call"))?;
                     for builder in builders {
                         let mut outside = ContainsName(&builder, false);
                         outside.visit_body(&function.body[..start]);
@@ -886,6 +901,16 @@ impl Checker<'_> {
         let explicit = explicit.filter(|value| !matches!(value, ast::Expr::NoneLiteral(_)));
         let argv_type = self.types.list(Type::Str);
         let argv = match explicit {
+            Some(ast::Expr::Tuple(tuple)) => Expr {
+                ty: argv_type,
+                kind: ExprKind::List(
+                    tuple
+                        .elts
+                        .iter()
+                        .map(|value| self.expr_expected(value, Type::Str))
+                        .collect::<Result<_, _>>()?,
+                ),
+            },
             Some(value) => self.expr_expected(value, argv_type)?,
             None => Expr {
                 ty: argv_type,
