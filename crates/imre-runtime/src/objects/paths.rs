@@ -900,7 +900,7 @@ pub unsafe extern "C" fn imre_path_read_bytes(path: *const Object) -> *const Byt
             .with(|storage| files::read_path_bytes(storage.path()))
     };
     finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }

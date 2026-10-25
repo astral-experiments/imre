@@ -132,7 +132,7 @@ pub unsafe extern "C" fn imre_sha256_copy(hash: *const Object) -> *const Object 
 pub unsafe extern "C" fn imre_sha256_digest(hash: *const Object) -> *const Bytes {
     // SAFETY: only the copied state is consumed by finalize.
     let digest = unsafe { snapshot(hash) }.finalize();
-    Rc::into_raw(Rc::new(digest.to_vec()))
+    crate::BytesOwner::into_raw(crate::BytesOwner::new(digest.to_vec()))
 }
 
 /// # Safety
