@@ -165,6 +165,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
+                ProcessOperation::OpenFlag(_) => Contract::new(false, PreservesLists),
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
                 | ProcessOperation::Gather { .. }
@@ -214,6 +215,7 @@ impl Builtin {
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
+                | ProcessOperation::Fd(_)
                 | ProcessOperation::Which
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView

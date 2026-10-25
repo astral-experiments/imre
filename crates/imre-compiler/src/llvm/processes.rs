@@ -415,6 +415,81 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
+            ProcessOperation::OpenFlag(name) => {
+                // Target-specific flag values are stored as tagged ints in the runtime.
+                let operand = self.instruction(format!("load i64, ptr @imre_os_o_{name}"));
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
+                }
+            }
+            ProcessOperation::Fd(crate::ir::FdOperation::Open) => {
+                let bytes = u32::from(args[0].value.ty == Type::Bytes);
+                let dir_fd = if args[3].value.ty == Type::None {
+                    "0"
+                } else {
+                    &args[3].value.operand
+                };
+                let operand = self.checked_instruction(format!(
+                    "call i64 @imre_os_open(ptr {}, i32 {bytes}, i64 {}, i64 {}, i64 {dir_fd})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand
+                ));
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
+                }
+            }
+            ProcessOperation::Fd(op) => {
+                use crate::ir::FdOperation::*;
+                let name = match op {
+                    Open => unreachable!(),
+                    Pipe => {
+                        let tuple = self.record(returns);
+                        self.checked_line(format!(
+                            "call void @imre_os_pipe(ptr {})",
+                            tuple.operand
+                        ));
+                        return tuple;
+                    }
+                    Close => "close",
+                    Dup => "dup",
+                    Dup2 => "dup2",
+                    Isatty => "isatty",
+                    GetBlocking => "get_blocking",
+                    SetBlocking => "set_blocking",
+                    GetInheritable => "get_inheritable",
+                    SetInheritable => "set_inheritable",
+                };
+                let args = args
+                    .iter()
+                    .map(|arg| format!("i64 {}", arg.value.operand))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let repr = match returns {
+                    Type::None => "void",
+                    Type::Bool => "i32",
+                    _ => "i64",
+                };
+                let call = format!("call {repr} @imre_os_{name}({args})");
+                if returns == Type::None {
+                    self.checked_line(call);
+                    none()
+                } else {
+                    let raw = self.checked_instruction(call);
+                    let operand = if returns == Type::Bool {
+                        self.instruction(format!("trunc i32 {raw} to i1"))
+                    } else {
+                        raw
+                    };
+                    self.owned(Value {
+                        ty: returns,
+                        operand,
+                        small_integer: false,
+                    })
+                }
+            }
             ProcessOperation::Which => {
                 let path =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));

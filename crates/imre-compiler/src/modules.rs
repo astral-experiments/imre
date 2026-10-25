@@ -233,6 +233,8 @@ pub(crate) enum Intrinsic {
     Environ,
     GetEnv,
     GetCwd,
+    Fd(crate::ir::FdOperation),
+    OpenFlag(&'static str),
     FsPath,
     PosixPath(PosixPathOperation),
     Unquote,
@@ -291,6 +293,8 @@ impl IntrinsicModule {
     }
 
     fn symbol(self, name: &str) -> Option<Binding> {
+        use crate::ir::FdOperation;
+
         if self == Self::Logging && name == "handlers" {
             return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
         }
@@ -463,6 +467,27 @@ impl IntrinsicModule {
             (Self::Os, "environ") => Intrinsic::Environ,
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
+            (Self::Os, "close") => Intrinsic::Fd(FdOperation::Close),
+            (Self::Os, "open") => Intrinsic::Fd(FdOperation::Open),
+            (Self::Os, "O_RDONLY") => Intrinsic::OpenFlag("rdonly"),
+            (Self::Os, "O_WRONLY") => Intrinsic::OpenFlag("wronly"),
+            (Self::Os, "O_RDWR") => Intrinsic::OpenFlag("rdwr"),
+            (Self::Os, "O_APPEND") => Intrinsic::OpenFlag("append"),
+            (Self::Os, "O_CREAT") => Intrinsic::OpenFlag("creat"),
+            (Self::Os, "O_EXCL") => Intrinsic::OpenFlag("excl"),
+            (Self::Os, "O_TRUNC") => Intrinsic::OpenFlag("trunc"),
+            (Self::Os, "O_CLOEXEC") => Intrinsic::OpenFlag("cloexec"),
+            (Self::Os, "O_DIRECTORY") => Intrinsic::OpenFlag("directory"),
+            (Self::Os, "O_NOFOLLOW") => Intrinsic::OpenFlag("nofollow"),
+            (Self::Os, "O_NONBLOCK") => Intrinsic::OpenFlag("nonblock"),
+            (Self::Os, "dup") => Intrinsic::Fd(FdOperation::Dup),
+            (Self::Os, "dup2") => Intrinsic::Fd(FdOperation::Dup2),
+            (Self::Os, "pipe") => Intrinsic::Fd(FdOperation::Pipe),
+            (Self::Os, "isatty") => Intrinsic::Fd(FdOperation::Isatty),
+            (Self::Os, "get_blocking") => Intrinsic::Fd(FdOperation::GetBlocking),
+            (Self::Os, "set_blocking") => Intrinsic::Fd(FdOperation::SetBlocking),
+            (Self::Os, "get_inheritable") => Intrinsic::Fd(FdOperation::GetInheritable),
+            (Self::Os, "set_inheritable") => Intrinsic::Fd(FdOperation::SetInheritable),
             (Self::Os, "fspath") => Intrinsic::FsPath,
             (Self::Os, "devnull") => Intrinsic::OsDevnull,
             (Self::PosixPath, "exists") => Intrinsic::OsPathExists,

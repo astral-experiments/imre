@@ -37,6 +37,7 @@ mod logging;
 mod matching;
 mod module_values;
 mod native_generators;
+mod os;
 mod paths;
 mod pipelines;
 mod posixpath;
@@ -419,7 +420,13 @@ pub(crate) fn lower_with_owners(
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
-                && !(name == "open" && *binding == Binding::Intrinsic(Intrinsic::GzipOpen))
+                && !(name == "open"
+                    && matches!(
+                        binding,
+                        Binding::Intrinsic(
+                            Intrinsic::GzipOpen | Intrinsic::Fd(ir::FdOperation::Open)
+                        )
+                    ))
             {
                 return Err(module.error(
                     module.parsed.syntax(),
@@ -4298,6 +4305,15 @@ impl<'a> Checker<'a> {
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(Binding::Intrinsic(Intrinsic::OpenFlag(name))) = self.resolve(expression) {
+            return Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(
+                    Builtin::Process(ir::ProcessOperation::OpenFlag(name)),
+                    vec![],
+                ),
+            });
+        }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level) | Intrinsic::SignalNumber(level),
         )) = self.resolve(expression)
@@ -5514,6 +5530,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
                 return Ok(Expr {

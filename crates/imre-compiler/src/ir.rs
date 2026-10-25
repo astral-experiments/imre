@@ -970,6 +970,21 @@ pub(crate) enum LogOperation {
     Emit,
 }
 
+/// POSIX descriptor calls use the target's C int and file descriptor flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FdOperation {
+    Open,
+    Pipe,
+    Dup2,
+    Close,
+    Dup,
+    Isatty,
+    GetBlocking,
+    SetBlocking,
+    GetInheritable,
+    SetInheritable,
+}
+
 /// Synchronous process operations cannot invoke language callbacks.
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
@@ -1043,6 +1058,8 @@ pub(crate) enum ProcessOperation {
     EnvironCopy,
     EnvironGet,
     GetCwd,
+    Fd(FdOperation),
+    OpenFlag(&'static str),
     Which,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.

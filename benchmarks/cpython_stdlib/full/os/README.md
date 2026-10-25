@@ -19,3 +19,9 @@ done
 ```
 
 A user namespace mapping only the caller's UID/GID can cause `ChownFileTests.test_chown_gid` and `test_chown_without_permission` to get `EINVAL` for unmapped IDs. The recorded OS run used the normal devbox user's IDs; neither test was skipped.
+
+## Descriptor execution
+
+[Linux results](descriptors-linux.json) list the results by upstream ID. Nine `test_os` bodies and one `test_posix` body run as complete native methods at both `-O0` and `-O3`. The compiled fixture checks the original assertions, registers descriptors for reverse-order cleanup, and closes them in a `finally` block. Only `os.close` registrations are accepted. For three additional OS methods and two POSIX methods, CPython drives a compiled Imre entry point in the same process, so upstream `fcntl` and host file objects can observe the actual OS descriptors. These IDs are disjoint. The older `native_os.py` getcwd/fspath results are separate.
+
+Run `native_descriptors.py` and `host_descriptors.py` here with the pinned reference interpreter. Both accept `--imre`, `--runtime`, `--clang`, `--opt-level 0|3`, `--result`, and an optional `--cpython-source`. Each run uses temporary fixtures. Host-driven calls expose only explicitly routed operations. An absent bridge operation fails the test.

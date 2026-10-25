@@ -264,6 +264,15 @@ pub(super) fn errno_error(error: io::Error) -> Error {
 }
 
 fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+    errno_with_path(error, |message| {
+        if let Some(path) = path {
+            message.push_str(": ");
+            super::exceptions::push_string_repr(path, message);
+        }
+    })
+}
+
+pub(super) fn errno_with_path(error: io::Error, append: impl FnOnce(&mut String)) -> Error {
     let Some(errno) = error.raw_os_error() else {
         return os_error(error);
     };
@@ -275,10 +284,7 @@ fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     // SAFETY: the successful call initialized a terminated string.
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
     let mut message = format!("[Errno {errno}] {description}");
-    if let Some(path) = path {
-        message.push_str(": ");
-        super::exceptions::push_string_repr(path, &mut message);
-    }
+    append(&mut message);
     Error::from_errno(os_error_kind(error.kind()), errno, &description, message)
 }
 
