@@ -1208,16 +1208,23 @@ fn annotation_at(
     source: &str,
     owner: Option<usize>,
 ) -> Result<Type, String> {
-    annotation_with_aliases(expression, graph, module, classes, types, source, owner, 0)
+    annotation_with_aliases(
+        expression,
+        graph,
+        (module, source),
+        classes,
+        types,
+        owner,
+        0,
+    )
 }
 
 fn annotation_with_aliases(
     expression: &ast::Expr,
     graph: &SourceGraph,
-    module: ModuleId,
+    (module, source): (ModuleId, &str),
     classes: &Classes,
     types: &Types,
-    source: &str,
     owner: Option<usize>,
     alias_depth: usize,
 ) -> Result<Type, String> {
@@ -1233,10 +1240,9 @@ fn annotation_with_aliases(
         return annotation_with_aliases(
             &module.aliases[index].value,
             graph,
-            origin,
+            (origin, &module.source),
             classes,
             types,
-            &module.source,
             owner,
             alias_depth + 1,
         );
@@ -1249,10 +1255,9 @@ fn annotation_with_aliases(
         return annotation_with_aliases(
             parsed.expr(),
             graph,
-            module,
+            (module, contents),
             classes,
             types,
-            contents,
             owner,
             alias_depth,
         )
@@ -1306,10 +1311,9 @@ fn annotation_with_aliases(
         annotation_with_aliases(
             expression,
             graph,
-            module,
+            (module, source),
             classes,
             types,
-            source,
             owner,
             alias_depth,
         )

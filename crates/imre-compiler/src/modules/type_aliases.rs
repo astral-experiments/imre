@@ -8,6 +8,69 @@ pub(super) fn type_statement(stmt: &ast::Stmt) -> bool {
         || matches!(stmt, ast::Stmt::Assign(assign) if matches!(assign.targets.as_slice(), [ast::Expr::Name(_)]))
 }
 
+/// Refuse dynamic subscriptions and unbound names: module-level aliases
+/// really evaluate in Python and may raise before the next statement.
+pub(super) fn static_type(modules: &[SourceModule], module: ModuleId, value: &ast::Expr) -> bool {
+    match value {
+        ast::Expr::Name(n) if !modules[module].bindings.contains_key(n.id.as_str()) => {
+            matches!(
+                n.id.as_str(),
+                "str"
+                    | "bytes"
+                    | "bool"
+                    | "int"
+                    | "float"
+                    | "list"
+                    | "dict"
+                    | "set"
+                    | "tuple"
+                    | "type"
+            )
+        }
+        ast::Expr::Name(_) | ast::Expr::Attribute(_) => matches!(
+            resolve_binding(modules, module, value),
+            Some(
+                Binding::TypeAlias(..)
+                    | Binding::Intrinsic(
+                        Intrinsic::BinaryIO
+                            | Intrinsic::TextIO
+                            | Intrinsic::Iterable
+                            | Intrinsic::Iterator
+                            | Intrinsic::Sequence
+                            | Intrinsic::Declaration(
+                                "collections.abc.Mapping" | "collections.abc.Collection"
+                            )
+                            | Intrinsic::Literal
+                    )
+            )
+        ),
+        ast::Expr::Tuple(t) => t.elts.iter().all(|v| static_type(modules, module, v)),
+        ast::Expr::NoneLiteral(_) | ast::Expr::EllipsisLiteral(_) | ast::Expr::StringLiteral(_) => {
+            true
+        }
+        ast::Expr::Subscript(s) => {
+            let builtin = s.value.as_name_expr().is_some_and(|n| {
+                matches!(n.id.as_str(), "tuple" | "list" | "set" | "dict" | "type")
+                    && !modules[module].bindings.contains_key(n.id.as_str())
+            });
+            let sealed = matches!(
+                resolve_binding(modules, module, &s.value),
+                Some(Binding::Intrinsic(
+                    Intrinsic::Iterable
+                        | Intrinsic::Iterator
+                        | Intrinsic::Sequence
+                        | Intrinsic::Declaration(
+                            "collections.abc.Mapping" | "collections.abc.Collection"
+                        )
+                        | Intrinsic::Literal
+                ))
+            );
+            (builtin || sealed) && static_type(modules, module, &s.slice)
+        }
+        _ => false,
+    }
+}
+
 impl Loader<'_> {
     pub(super) fn add_alias(
         &mut self,
@@ -22,63 +85,6 @@ impl Loader<'_> {
             constructor,
         });
         Binding::TypeAlias(module, index)
-    }
-
-    /// Refuse dynamic subscriptions and unbound names: module-level aliases
-    /// really evaluate in Python and may raise before the next statement.
-    fn static_type(&self, module: ModuleId, value: &ast::Expr) -> bool {
-        match value {
-            ast::Expr::Name(n) if self.modules[module].bindings.get(n.id.as_str()).is_none() => {
-                matches!(
-                    n.id.as_str(),
-                    "str"
-                        | "bytes"
-                        | "bool"
-                        | "int"
-                        | "float"
-                        | "list"
-                        | "dict"
-                        | "set"
-                        | "tuple"
-                        | "type"
-                )
-            }
-            ast::Expr::Name(_) | ast::Expr::Attribute(_) => matches!(
-                resolve_binding(&self.modules, module, value),
-                Some(
-                    Binding::TypeAlias(..)
-                        | Binding::Intrinsic(
-                            Intrinsic::BinaryIO
-                                | Intrinsic::TextIO
-                                | Intrinsic::Iterable
-                                | Intrinsic::Iterator
-                                | Intrinsic::Sequence
-                                | Intrinsic::Literal
-                        )
-                )
-            ),
-            ast::Expr::Tuple(t) => t.elts.iter().all(|v| self.static_type(module, v)),
-            ast::Expr::NoneLiteral(_)
-            | ast::Expr::EllipsisLiteral(_)
-            | ast::Expr::StringLiteral(_) => true,
-            ast::Expr::Subscript(s) => {
-                let builtin = s.value.as_name_expr().is_some_and(|n| {
-                    matches!(n.id.as_str(), "tuple" | "list" | "set" | "dict" | "type")
-                        && !self.modules[module].bindings.contains_key(n.id.as_str())
-                });
-                let sealed = matches!(
-                    resolve_binding(&self.modules, module, &s.value),
-                    Some(Binding::Intrinsic(
-                        Intrinsic::Iterable
-                            | Intrinsic::Iterator
-                            | Intrinsic::Sequence
-                            | Intrinsic::Literal
-                    ))
-                );
-                (builtin || sealed) && self.static_type(module, &s.slice)
-            }
-            _ => false,
-        }
     }
 
     pub(super) fn alias_declaration(
@@ -103,13 +109,15 @@ impl Loader<'_> {
                 if !call.arguments.keywords.is_empty()
                     || label.value.to_str() != name.id.as_str()
                     || !matches!(value, ast::Expr::Name(_))
-                    || !self.static_type(module, value)
+                    || !static_type(&self.modules, module, value)
                 {
                     return Ok(false);
                 }
                 (value, true)
             }
-            value @ ast::Expr::Subscript(_) if self.static_type(module, value) => (value, false),
+            value @ ast::Expr::Subscript(_) if static_type(&self.modules, module, value) => {
+                (value, false)
+            }
             _ => return Ok(false),
         };
         let binding = self.add_alias(module, value, constructor);
