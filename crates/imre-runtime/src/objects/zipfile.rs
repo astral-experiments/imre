@@ -1,6 +1,7 @@
 //! Read-only ZIP archives, their ordered central-directory metadata, and
 //! independent member handles. Closing drops the archive's source owner only.
 
+use crate::StrOwner;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fmt::Write;
@@ -16,8 +17,8 @@ pub(in crate::objects) use member::Member;
 use source::Source;
 
 pub(super) struct Info {
-    filename: Rc<Str>,
-    original: Rc<Str>,
+    filename: StrOwner,
+    original: StrOwner,
     method: u16,
     flags: u16,
     crc: u32,
@@ -118,13 +119,13 @@ impl Object {
 
 pub(super) struct Archive {
     source: Option<Source>,
-    filename: Option<Rc<Str>>,
+    filename: Option<StrOwner>,
     filelist: Rc<Object>,
-    by_name: HashMap<Rc<Str>, Rc<Object>>,
+    by_name: HashMap<StrOwner, Rc<Object>>,
 }
 
 impl Archive {
-    fn open(source: Source, filename: Option<Rc<Str>>) -> Result<Self> {
+    fn open(source: Source, filename: Option<StrOwner>) -> Result<Self> {
         let entries = source.directory()?;
         let mut list = Words::new(5);
         let mut by_name = HashMap::new();
@@ -172,7 +173,7 @@ impl Archive {
                 let info = unsafe { object(info as *const Object) }.zip_info();
                 names
                     .values
-                    .push(Rc::into_raw(info.filename.clone()) as usize);
+                    .push(StrOwner::into_raw(info.filename.clone()) as usize);
             }
             Ok(())
         })?;
@@ -210,7 +211,7 @@ impl Archive {
         }
     }
 
-    fn test(&self) -> Result<Option<Rc<Str>>> {
+    fn test(&self) -> Result<Option<StrOwner>> {
         self.for_infos(|list| {
             for &word in list {
                 // SAFETY: the filelist owns every entry throughout iteration.
@@ -260,7 +261,7 @@ unsafe fn with_archive<T>(archive: *const Object, f: impl FnOnce(&Archive) -> T)
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_zip_open(path: *const Str) -> *const Object {
     // SAFETY: the path is a live string owner for the entire open operation.
-    let path: Rc<Str> = unsafe { acquire_rc(path as usize) };
+    let path: StrOwner = unsafe { crate::StrOwner::acquire_word(path as usize) };
     opened(
         files::open_file(&path, 0)
             .and_then(|(file, _)| Archive::open(Source::Owned(Rc::new(file)), Some(path))),
@@ -328,7 +329,9 @@ pub unsafe extern "C" fn imre_zip_filename(archive: *const Object) -> *const Str
     // SAFETY: the caller supplies an archive that stays live for the metadata query.
     unsafe {
         with_archive(archive, |a| {
-            a.filename.clone().map_or(std::ptr::null(), Rc::into_raw)
+            a.filename
+                .clone()
+                .map_or(std::ptr::null(), StrOwner::into_raw)
         })
     }
 }
@@ -376,7 +379,7 @@ pub unsafe extern "C" fn imre_zip_test(archive: *const Object) -> *const Str {
     // SAFETY: the caller roots the exact archive and key for this operation.
     let result = unsafe { with_archive(archive, Archive::test) };
     finish(
-        result.map(|n| n.map_or(std::ptr::null(), Rc::into_raw)),
+        result.map(|n| n.map_or(std::ptr::null(), StrOwner::into_raw)),
         std::ptr::null(),
     )
 }
@@ -405,7 +408,7 @@ pub unsafe extern "C" fn imre_zip_close(archive: *const Object) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_zip_info_name(info: *const Object) -> *const Str {
     // SAFETY: the caller roots the metadata throughout string acquisition.
-    Rc::into_raw(unsafe { object(info) }.zip_info().filename.clone())
+    StrOwner::into_raw(unsafe { object(info) }.zip_info().filename.clone())
 }
 
 macro_rules! info_integer {
