@@ -18,7 +18,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use serde::Deserializer;
-use serde::de::{Error as _, MapAccess, Visitor};
+use serde::de::{Error as _, MapAccess, SeqAccess, Visitor};
 use serde_json::value::RawValue;
 use smallvec::SmallVec;
 
@@ -184,18 +184,14 @@ impl View {
         ))))
     }
 
-    fn resolved(&self, index: usize) -> (&Self, usize) {
+    fn try_resolved(&self, index: usize) -> Result<(&Self, usize), Error> {
         match &self.nodes[index] {
             Node::Deferred(array) => {
-                let view = array.view();
-                (view, view.index)
+                let view = array.try_view()?;
+                Ok((view, view.index))
             }
-            _ => (self, index),
+            _ => Ok((self, index)),
         }
-    }
-
-    fn expanded(&self) -> &Self {
-        self.resolved(self.index).0
     }
 
     /// Snapshot the current elements when an array projected to a native list
@@ -279,10 +275,10 @@ impl View {
             return self.add(&root);
         }
         if let Node::Deferred(array) = &self.nodes[self.index] {
-            return array.view().add(other);
+            return array.try_view()?.add(other);
         }
         if let Node::Deferred(array) = &other.nodes[other.index] {
-            return self.add(array.view());
+            return self.add(array.try_view()?);
         }
         let left = &self.nodes[self.index];
         let right = &other.nodes[other.index];
@@ -384,7 +380,8 @@ impl View {
                 matches!(node, Node::String(text) if Some(text.as_ref()) == literal),
             )),
             (5 | 6, Node::Deferred(array)) => {
-                array.view().project(array.view().index, mode, literal)
+                let view = array.try_view()?;
+                view.project(view.index, mode, literal)
             }
             (5 | 6, Node::Array(children)) => Ok(if index == self.index {
                 self.array(children)
@@ -439,9 +436,68 @@ impl Source<'_> {
     }
 }
 
-fn allocation_error(refused: &Cell<bool>) -> serde_json::Error {
+fn allocation_error<E: serde::de::Error>(refused: &Cell<bool>) -> E {
     refused.set(true);
-    serde_json::Error::custom("JSON storage allocation failed")
+    E::custom("JSON storage allocation failed")
+}
+
+fn push<T, E: serde::de::Error>(
+    items: &mut Vec<T>,
+    item: T,
+    refused: &Cell<bool>,
+) -> Result<(), E> {
+    items
+        .try_reserve(1)
+        .map_err(|_| allocation_error::<E>(refused))?;
+    items.push(item);
+    Ok(())
+}
+
+/// A deferred span has already passed JSON and Unicode validation. Its encoded
+/// byte length bounds the decoded string, including UTF-16 surrogate pairs.
+fn string(raw: &RawValue, source: Source<'_>) -> Result<Str, serde_json::Error> {
+    let token = raw.get();
+    let text = &token[1..token.len() - 1];
+    if !text.as_bytes().contains(&b'\\') {
+        return Str::try_new(text).map_err(|_| allocation_error(source.refused));
+    }
+    if source.shared.is_none() {
+        return serde_json::from_str::<String>(token).map(Str::from);
+    }
+    let mut out = String::new();
+    out.try_reserve_exact(text.len())
+        .map_err(|_| allocation_error::<serde_json::Error>(source.refused))?;
+    let mut rest = text;
+    while let Some((plain, escaped)) = rest.split_once('\\') {
+        out.push_str(plain);
+        let (ch, used) = match escaped.as_bytes()[0] {
+            b'"' => ('"', 1),
+            b'\\' => ('\\', 1),
+            b'/' => ('/', 1),
+            b'b' => ('\x08', 1),
+            b'f' => ('\x0c', 1),
+            b'n' => ('\n', 1),
+            b'r' => ('\r', 1),
+            b't' => ('\t', 1),
+            b'u' => {
+                let first = u16::from_str_radix(&escaped[1..5], 16).unwrap();
+                if (0xd800..=0xdbff).contains(&first) {
+                    let second = u16::from_str_radix(&escaped[7..11], 16).unwrap();
+                    (
+                        char::decode_utf16([first, second]).next().unwrap().unwrap(),
+                        11,
+                    )
+                } else {
+                    (char::from_u32(u32::from(first)).unwrap(), 5)
+                }
+            }
+            _ => unreachable!("validated JSON escape"),
+        };
+        out.push(ch);
+        rest = &escaped[used..];
+    }
+    out.push_str(rest);
+    Ok(Str::from(out))
 }
 
 fn push_node(
@@ -449,7 +505,8 @@ fn push_node(
     raw: &RawValue,
     source: Source<'_>,
 ) -> Result<usize, serde_json::Error> {
-    let raw = raw.get();
+    let token = raw;
+    let raw = token.get();
     let node = match raw.as_bytes()[0] {
         b'{' => Node::Object(source.keys.fields(
             serde_json::Deserializer::from_str(raw).deserialize_map(Fields(nodes, source))?,
@@ -458,16 +515,17 @@ fn push_node(
             Some(array) => Node::Deferred(array),
             None => push_array(nodes, raw, source)?,
         },
-        b'"' => Node::String(StrOwner::new(Str::from(serde_json::from_str::<String>(
-            raw,
-        )?))),
+        b'"' => Node::String(
+            StrOwner::try_new(string(token, source)?)
+                .map_err(|_| allocation_error::<serde_json::Error>(source.refused))?,
+        ),
         b't' => Node::Bool(true),
         b'f' => Node::Bool(false),
         b'n' => Node::Null,
         _ => number(source.token(raw)),
     };
     let index = nodes.len();
-    nodes.push(node);
+    push(nodes, node, source.refused)?;
     Ok(index)
 }
 
@@ -498,13 +556,23 @@ fn push_array(
     raw: &str,
     source: Source<'_>,
 ) -> Result<Node, serde_json::Error> {
-    let items: Vec<&RawValue> = serde_json::from_str(raw)?;
-    Ok(Node::Array(
-        items
-            .into_iter()
-            .map(|item| push_node(nodes, item, source))
-            .collect::<Result<_, _>>()?,
-    ))
+    serde_json::Deserializer::from_str(raw).deserialize_seq(Array(nodes, source))
+}
+
+struct Array<'a, 'b>(&'a mut Vec<Node>, Source<'b>);
+impl<'de> Visitor<'de> for Array<'_, '_> {
+    type Value = Node;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a JSON array")
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Node, A::Error> {
+        let mut indices = Vec::new();
+        while let Some(raw) = seq.next_element::<&RawValue>()? {
+            let index = push_node(self.0, raw, self.1).map_err(A::Error::custom)?;
+            push(&mut indices, index, self.1.refused)?;
+        }
+        Ok(Node::Array(indices))
+    }
 }
 
 struct Fields<'a, 'b>(&'a mut Vec<Node>, Source<'b>);
@@ -515,10 +583,11 @@ impl<'de> Visitor<'de> for Fields<'_, '_> {
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let mut fields = Vec::new();
-        while let Some(key) = map.next_key_seed(Key)? {
+        while let Some(key) = map.next_key::<&RawValue>()? {
             let raw = map.next_value::<&RawValue>()?;
+            let key = string(key, self.1).map_err(A::Error::custom)?;
             let index = push_node(self.0, raw, self.1).map_err(A::Error::custom)?;
-            fields.push((Str::new(key.as_ref()), index));
+            push(&mut fields, (key, index), self.1.refused)?;
         }
         Ok(fields)
     }
@@ -782,11 +851,8 @@ pub unsafe extern "C" fn imre_json_add(a: *const Object, b: *const Object) -> *c
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_json_equal(left: *const Object, right: *const Object) -> u32 {
     // SAFETY: both views admit simultaneous immutable borrows, including on alias.
-    unsafe {
-        with_view(left, |a| {
-            with_view(right, |b| u32::from(a.equal_operand(b)))
-        })
-    }
+    let result = unsafe { with_view(left, |a| with_view(right, |b| a.equal_operand(b))) };
+    finish(result.map(u32::from), 0)
 }
 
 /// # Safety
@@ -933,7 +999,7 @@ pub unsafe extern "C" fn imre_json_iter(value: *const Object) -> *const Object {
     // SAFETY: iteration only borrows the immutable document to construct a rooted sequence.
     let result = unsafe {
         with_view(value, |view| {
-            let view = view.expanded();
+            let view = view.try_resolved(view.index)?.0;
             let mut items = Words::new(5);
             match &view.nodes[view.index] {
                 Node::Array(children) => return Ok(view.array(children)),
@@ -964,8 +1030,8 @@ pub unsafe extern "C" fn imre_json_len(value: *const Object) -> usize {
     // SAFETY: no document borrow escapes the scalar result.
     let result = unsafe {
         with_view(value, |view| {
-            let view = view.expanded();
             let len = match &view.nodes[view.index] {
+                Node::Deferred(array) => array.len(),
                 Node::Array(children) => view.nodes.root_items().map_or_else(
                     || children.len(),
                     |items| items.0.with(|storage| storage.sequence().values.len()),
@@ -992,7 +1058,7 @@ pub unsafe extern "C" fn imre_json_index(value: *const Object, key: usize) -> *c
     // SAFETY: child handles are acquired before their parent borrow ends.
     let result = unsafe {
         with_view(value, |view| {
-            let view = view.expanded();
+            let view = view.try_resolved(view.index)?.0;
             let key = Int::borrow(key);
             let at = || {
                 crate::decode_index(&key).map_err(|_| {

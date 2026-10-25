@@ -17,6 +17,7 @@ mod bytes;
 mod cache_paths;
 mod calendar;
 mod chainmap;
+mod codecs;
 mod contexts;
 mod contextvars;
 mod copying;
@@ -32,6 +33,8 @@ mod format_cursors;
 mod hashlib;
 mod inspect;
 mod itertools;
+mod join_buffer;
+mod joined_lines;
 mod json;
 mod linecache;
 mod logging;
@@ -39,6 +42,7 @@ mod mappings;
 mod module_specs;
 mod namespaces;
 mod os;
+mod patchset;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
@@ -104,6 +108,7 @@ enum Storage {
     Socket(socket::Socket),
     StrDescriptor(u32),
     Sequence(Words),
+    JoinBuffer(allocator_api2::boxed::Box<join_buffer::JoinBuffer>),
     Deque(Box<deque::Deque>),
     DequeIterator(deque::DequeIterator),
     Dictionary(mappings::TableOwner<mappings::Mapping>),
@@ -130,6 +135,7 @@ enum Storage {
     ModuleNamespace(Rc<errno::Registry>),
     ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
+    CodecInfo(codecs::Codec),
     Exception(exceptions::Exception),
     ObjectValue(OwnedWord),
     File(Box<files::FileState>),
@@ -153,6 +159,9 @@ enum Storage {
     PathInfo(Box<paths::Info>),
     PurePath(Box<paths::PurePath>),
     PathIterator(Box<paths::PathIterator>),
+    PatchSet(patchset::PatchSet),
+    PatchedFile(patchset::PatchedFile),
+    Hunk(patchset::Hunk),
     RegexPattern(Box<regexes::Pattern>),
     Logger(StrOwner),
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
@@ -324,6 +333,22 @@ pub unsafe extern "C" fn imre_seq_get_index(value: *const Object, at: usize) -> 
         })
     };
     finish(owned, 0)
+}
+
+/// Transfers a private list slot to its single forward iterator. Unvisited
+/// elements are still owned by the normal list destructor on every loop exit.
+///
+/// # Safety
+/// `value` is a rooted, ordinary typed list. No alias may observe a consumed
+/// slot and `at` must be a fresh in-bounds native index for this iterator.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_take_index_proven(value: *const Object, at: usize) -> usize {
+    // SAFETY: the list owns each stored word; zero is the empty destructor state.
+    unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| std::mem::take(&mut storage.sequence_mut().values[at]))
+    }
 }
 
 /// Borrows one concrete sequence word after its current bounds were proved.
@@ -570,10 +595,15 @@ pub unsafe extern "C" fn imre_seq_len(value: *const Object) -> usize {
     // SAFETY: only the copied length leaves storage.
     let length = unsafe {
         object(value).0.with(|storage| {
-            storage
-                .sequence_storage()
-                .rows()
-                .map_or_else(|| storage.sequence().values.len(), structs::Rows::len)
+            let words = storage.sequence_storage();
+            words.rows().map_or_else(
+                || {
+                    words
+                        .plan()
+                        .map_or_else(|| words.values.len(), deferred_diff::Deferred::len)
+                },
+                structs::Rows::len,
+            )
         })
     };
     debug_assert!(length <= MAX_LIST_LEN);
@@ -1375,6 +1405,13 @@ pub unsafe extern "C" fn imre_str_splitlines_options(
 unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(StrOwner::from_raw(value)) };
+    if !KEEP {
+        match deferred_diff::Deferred::split_lines(&value) {
+            Ok(Some(lines)) => return lines,
+            Ok(None) => {}
+            Err(error) => return finish(Err(error), std::ptr::null()),
+        }
+    }
     finish(
         split_lines(&value, |mut range| {
             // The shared scanner has already found the boundary. Its first

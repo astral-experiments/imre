@@ -321,9 +321,8 @@ impl Words {
     /// Deferred words live in their plan even when their resolved list is
     /// small. Its inline bit must never address the plan pointer as an element.
     pub(super) fn resolved_header(&self) -> u32 {
-        self.plan().map_or(self.header, |plan| {
-            Self::header_for(plan.ordered().values.len(), false)
-        })
+        self.plan()
+            .map_or(self.header, |plan| Self::header_for(plan.len(), false))
     }
 
     /// An empty inline buffer normally has header 1. Publishing length zero
@@ -476,6 +475,7 @@ pub extern "C" fn imre_seq_layout_with_orig_argv() -> SequenceLayout {
 }
 
 fn sequence_layout() -> SequenceLayout {
+    crate::initialize_io();
     let mut sample = Words::new(0);
     sample.values.push(0);
     // One non-owning word fits inline and needs no destructor.
