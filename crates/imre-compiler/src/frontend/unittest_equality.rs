@@ -18,8 +18,11 @@ impl Checker<'_> {
             return Ok(None);
         }
         if let Some(signature) = self.classes.methods[class].get(name) {
-            let owner = &self.classes.declarations.definitions[signature.method.unwrap().class];
-            let module = &self.graph.modules[owner.definition.module];
+            let method = signature.method.unwrap();
+            let declarations = &self.classes.declarations;
+            let origin = declarations.definitions[method.class].method_origins[method.index];
+            let owner = &declarations.definitions[declarations.ids[&origin]];
+            let module = &self.graph.modules[origin.module];
             if owner.name != "TestCase" || !module.bundled || module.name != "unittest" {
                 return Ok(None);
             }
