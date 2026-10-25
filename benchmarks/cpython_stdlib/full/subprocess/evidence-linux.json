@@ -8,12 +8,12 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 168,
-      "failed": 8,
+      "blocked": 148,
+      "failed": 6,
       "host-driven-native-operation": 89,
       "host-operation": 6,
       "mixed": 9,
-      "native-body-host-fixture": 32,
+      "native-body-host-fixture": 54,
       "reference-skip": 41
     },
     "records": [
@@ -1561,11 +1561,11 @@
         },
         "evidence": {
           "opt_level": 0,
-          "imre_revision": "f4e461af62b885ebf1b62614334a1a2329bb251d",
-          "tested_tree": "699ee364f8dc47709f29c2c3c2f28583b397567e",
-          "source": "raw-pipe-readiness-linux.json",
-          "operation": "Imre launches the original CPython data child, reads exactly four bytes on its raw stdout pipe, closes and reaps. Host select returns that stream with one byte still in the kernel pipe.",
-          "fixture": "CPython runs the original test, assertions and addCleanup. Held-open raw and buffered writers distinguish readable data from EOF.",
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "pipe-readiness-integrated-linux.json",
+          "operation": "Imre launches the original CPython data child, reads four bytes, closes its raw pipe and reaps once. CPython select returns that stream with one byte left. Native select accepts its integer fd but rejects the stream operand used by the original.",
+          "fixture": "CPython runs the original test, assertions and addCleanup. The independent SCM_RIGHTS fixture observes the same open file description. Held-open controls distinguish a queued byte from EOF.",
           "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
         "classification": "mixed"
@@ -1731,24 +1731,23 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "none",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "the control pipes occupy descriptors that the upstream fixture closed",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:11:21: Imre: name is not a local value; globals and first-class functions are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "streams": 1,
-            "wait": 1
-          }
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "native parent saved and closed fds 0/1, used both for its CLOEXEC launch socket, reaped the original Python child and restored both descriptors with dup2",
+          "fixture": "original CPython module, class and instance hooks; the native original method has no explicit assertion",
+          "method_sha256": "dfa55970d928cd33e72794fee1686c8aaab73744976177c1410e6e5439aeedf0"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_specific_shell",
@@ -2353,19 +2352,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.CalledProcessError",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_call_config launched pinned CPython 3.14.5: sys.exit(47); native parent reaped status 47",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "9ff46ab62ba1550ee55186ec52d2e0df16b383c1ee120a3a4f795d96ea5e0b95"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_call_zero",
@@ -2415,19 +2418,26 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "send bytes down child stdin and capture child stdout",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fb7f7b872c9d9fc0298bff4cb225bb363b352c563a08f97413cc67cb56c7618a",
+          "native_parent_selector_syscalls": {
+            "poll": 3
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_input_none",
@@ -2435,19 +2445,26 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None and capture bytes",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fbe801de12692afe94d5d599035f77eb448991e4b2868c1adc367c4d8b40dba3",
+          "native_parent_selector_syscalls": {
+            "poll": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_input_none_encoding_errors",
@@ -2455,19 +2472,26 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF and capture UTF-8 output with the ignore policy",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fed196b6886d694ef9fd08f2f1c1a6cb68ec316b115a3bc757f07ee304e6b010",
+          "native_parent_selector_syscalls": {
+            "poll": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_input_none_text",
@@ -2475,19 +2499,26 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None and capture text",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "c2b9ece3a178ef1933e99aa41aeb6d368b031486105dea97fe2f6a62c468b72f",
+          "native_parent_selector_syscalls": {
+            "poll": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_input_none_universal_newlines",
@@ -2495,19 +2526,26 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None with universal newlines",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "cca2898c23f4326d58516bceeaaaf85bdbdf1f56104f88d2a5a75f64f8f7c6c3",
+          "native_parent_selector_syscalls": {
+            "poll": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_nonzero",
@@ -2515,19 +2553,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.CalledProcessError",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_run_config launched pinned CPython 3.14.5: sys.exit(5); native parent reaped status 5",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "471340b9db4c094ede2eb0b7f7cd8091993a42700fcfd8b4bc540c9099bab219"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_stderr",
@@ -2535,19 +2577,24 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:12:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "merge child stderr into native captured stdout",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "796f6daa4817b4ed47a479d115b03b9d842f70d84409a1ddcb2ad7a81f0a44bd",
+          "native_parent_selector_syscalls": {}
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_stdin_arg",
@@ -2615,19 +2662,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_run_config launched pinned CPython 3.14.5: time.sleep(3600); native parent reaped status -9 after its poll deadline and SIGKILL",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "dab34ef13e89a41ed1950fe3263dbeacf0c8ccf3cd18aed38d657ea3dd4cd0c3"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_class_getitems",
@@ -2685,19 +2736,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "worker 1: BrokenPipeError: [Errno 32] Broken pipe",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "native communicate retried both interrupted reads on the same fd, reached EOF and reaped each original child",
+          "fixture": "original CPython module, class and instance hooks; both native SIGUSR1 deliveries invoked the original host handler before communicate returned",
           "native_body_diagnostic": "ProcessTestCase.test_communicate_eintr needs its upstream method decorator"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_communicate_epipe",
@@ -3627,22 +3682,21 @@
         "reference": "pass",
         "outcome": "pass",
         "roles": {
-          "body": "cpython",
-          "assertions": "cpython",
+          "body": "imre",
+          "assertions": "imre",
           "operation": "imre",
-          "fixture": "cpython"
+          "fixture": "mixed"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:11:14: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen:ValueError": 2
-          },
-          "operation": "Popen:ValueError",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 0
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "the native Popen rejected both original NUL arguments before forking",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "2c624dbefb8e0170b1b93696e7a5f891da573a3c795e902924d32f1ac99d6a9f"
         },
-        "classification": "host-driven-native-operation"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_invalid_env",
@@ -5083,19 +5137,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.CalledProcessError",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_call_config launched pinned CPython 3.14.5: sys.exit(47); native parent reaped status 47",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "9ff46ab62ba1550ee55186ec52d2e0df16b383c1ee120a3a4f795d96ea5e0b95"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_call_zero",
@@ -5146,19 +5204,26 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "send bytes down child stdin and capture child stdout",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fb7f7b872c9d9fc0298bff4cb225bb363b352c563a08f97413cc67cb56c7618a",
+          "native_parent_selector_syscalls": {
+            "pselect6": 3
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none",
@@ -5166,19 +5231,26 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None and capture bytes",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fbe801de12692afe94d5d599035f77eb448991e4b2868c1adc367c4d8b40dba3",
+          "native_parent_selector_syscalls": {
+            "pselect6": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_encoding_errors",
@@ -5186,19 +5258,26 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF and capture UTF-8 output with the ignore policy",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fed196b6886d694ef9fd08f2f1c1a6cb68ec316b115a3bc757f07ee304e6b010",
+          "native_parent_selector_syscalls": {
+            "pselect6": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_text",
@@ -5206,19 +5285,26 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None and capture text",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "c2b9ece3a178ef1933e99aa41aeb6d368b031486105dea97fe2f6a62c468b72f",
+          "native_parent_selector_syscalls": {
+            "pselect6": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_universal_newlines",
@@ -5226,19 +5312,26 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None with universal newlines",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "cca2898c23f4326d58516bceeaaaf85bdbdf1f56104f88d2a5a75f64f8f7c6c3",
+          "native_parent_selector_syscalls": {
+            "pselect6": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_nonzero",
@@ -5246,19 +5339,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.CalledProcessError",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_run_config launched pinned CPython 3.14.5: sys.exit(5); native parent reaped status 5",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "471340b9db4c094ede2eb0b7f7cd8091993a42700fcfd8b4bc540c9099bab219"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stderr",
@@ -5266,19 +5363,24 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:12:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "merge child stderr into native captured stdout",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "796f6daa4817b4ed47a479d115b03b9d842f70d84409a1ddcb2ad7a81f0a44bd",
+          "native_parent_selector_syscalls": {}
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdin_arg",
@@ -5346,19 +5448,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_run_config launched pinned CPython 3.14.5: time.sleep(3600); native parent reaped status -9 after its pselect6 deadline and SIGKILL",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "dab34ef13e89a41ed1950fe3263dbeacf0c8ccf3cd18aed38d657ea3dd4cd0c3"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_class_getitems",
@@ -5414,19 +5520,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "worker 1: BrokenPipeError: [Errno 32] Broken pipe",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "native communicate retried both interrupted reads on the same fd, reached EOF and reaped each original child",
+          "fixture": "original CPython module, class and instance hooks; both native SIGUSR1 deliveries invoked the original host handler before communicate returned",
           "native_body_diagnostic": "ProcessTestCase.test_communicate_eintr needs its upstream method decorator"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_epipe",
@@ -6330,22 +6440,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:11:14: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen:ValueError": 2
-          }
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "the native Popen rejected both original NUL arguments before forking",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "2c624dbefb8e0170b1b93696e7a5f891da573a3c795e902924d32f1ac99d6a9f"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_env",
@@ -7765,19 +7876,21 @@
         "reference": "pass",
         "outcome": "pass",
         "roles": {
-          "body": "cpython",
-          "assertions": "cpython",
+          "body": "imre",
+          "assertions": "imre",
           "operation": "imre",
-          "fixture": "cpython"
+          "fixture": "mixed"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:29: Imre: expected list[str], got tuple[str]; annotations are enforced contracts",
-          "operation": "subprocess.run launched and waited for the child in Imre",
-          "fixture": "native_subprocess.py reconstructed host case with the original method and host assertions",
-          "opt_level": 0
+          "opt_level": 0,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_run_config launched original fixture ZERO_RETURN_CMD: ['/usr/bin/true']; native parent reaped status 0",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "7d8d2df88a085e9dc1652b9571d65ab350ace556d77b646dbe5ae2c2e55a4936"
         },
-        "classification": "host-driven-native-operation"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.RunFuncTestCase.test_encoding_warning",
@@ -8560,12 +8673,12 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 168,
-      "failed": 8,
+      "blocked": 148,
+      "failed": 6,
       "host-driven-native-operation": 89,
       "host-operation": 6,
       "mixed": 9,
-      "native-body-host-fixture": 32,
+      "native-body-host-fixture": 54,
       "reference-skip": 41
     },
     "records": [
@@ -10113,11 +10226,11 @@
         },
         "evidence": {
           "opt_level": 3,
-          "imre_revision": "f4e461af62b885ebf1b62614334a1a2329bb251d",
-          "tested_tree": "699ee364f8dc47709f29c2c3c2f28583b397567e",
-          "source": "raw-pipe-readiness-linux.json",
-          "operation": "Imre launches the original CPython data child, reads exactly four bytes on its raw stdout pipe, closes and reaps. Host select returns that stream with one byte still in the kernel pipe.",
-          "fixture": "CPython runs the original test, assertions and addCleanup. Held-open raw and buffered writers distinguish readable data from EOF.",
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "pipe-readiness-integrated-linux.json",
+          "operation": "Imre launches the original CPython data child, reads four bytes, closes its raw pipe and reaps once. CPython select returns that stream with one byte left. Native select accepts its integer fd but rejects the stream operand used by the original.",
+          "fixture": "CPython runs the original test, assertions and addCleanup. The independent SCM_RIGHTS fixture observes the same open file description. Held-open controls distinguish a queued byte from EOF.",
           "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
         "classification": "mixed"
@@ -10283,24 +10396,23 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "none",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "the control pipes occupy descriptors that the upstream fixture closed",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:11:21: Imre: name is not a local value; globals and first-class functions are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "streams": 1,
-            "wait": 1
-          }
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "native parent saved and closed fds 0/1, used both for its CLOEXEC launch socket, reaped the original Python child and restored both descriptors with dup2",
+          "fixture": "original CPython module, class and instance hooks; the native original method has no explicit assertion",
+          "method_sha256": "dfa55970d928cd33e72794fee1686c8aaab73744976177c1410e6e5439aeedf0"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_specific_shell",
@@ -10905,19 +11017,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.CalledProcessError",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_call_config launched pinned CPython 3.14.5: sys.exit(47); native parent reaped status 47",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "9ff46ab62ba1550ee55186ec52d2e0df16b383c1ee120a3a4f795d96ea5e0b95"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_call_zero",
@@ -10967,19 +11083,26 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "send bytes down child stdin and capture child stdout",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fb7f7b872c9d9fc0298bff4cb225bb363b352c563a08f97413cc67cb56c7618a",
+          "native_parent_selector_syscalls": {
+            "poll": 3
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_input_none",
@@ -10987,19 +11110,26 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None and capture bytes",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fbe801de12692afe94d5d599035f77eb448991e4b2868c1adc367c4d8b40dba3",
+          "native_parent_selector_syscalls": {
+            "poll": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_input_none_encoding_errors",
@@ -11007,19 +11137,26 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF and capture UTF-8 output with the ignore policy",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fed196b6886d694ef9fd08f2f1c1a6cb68ec316b115a3bc757f07ee304e6b010",
+          "native_parent_selector_syscalls": {
+            "poll": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_input_none_text",
@@ -11027,19 +11164,26 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None and capture text",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "c2b9ece3a178ef1933e99aa41aeb6d368b031486105dea97fe2f6a62c468b72f",
+          "native_parent_selector_syscalls": {
+            "poll": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_input_none_universal_newlines",
@@ -11047,19 +11191,26 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None with universal newlines",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "cca2898c23f4326d58516bceeaaaf85bdbdf1f56104f88d2a5a75f64f8f7c6c3",
+          "native_parent_selector_syscalls": {
+            "poll": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_nonzero",
@@ -11067,19 +11218,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.CalledProcessError",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_run_config launched pinned CPython 3.14.5: sys.exit(5); native parent reaped status 5",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "471340b9db4c094ede2eb0b7f7cd8091993a42700fcfd8b4bc540c9099bab219"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_stderr",
@@ -11087,19 +11242,24 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:12:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "merge child stderr into native captured stdout",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "796f6daa4817b4ed47a479d115b03b9d842f70d84409a1ddcb2ad7a81f0a44bd",
+          "native_parent_selector_syscalls": {}
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_check_output_stdin_arg",
@@ -11167,19 +11327,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_run_config launched pinned CPython 3.14.5: time.sleep(3600); native parent reaped status -9 after its poll deadline and SIGKILL",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "dab34ef13e89a41ed1950fe3263dbeacf0c8ccf3cd18aed38d657ea3dd4cd0c3"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_class_getitems",
@@ -11237,19 +11401,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "worker 1: BrokenPipeError: [Errno 32] Broken pipe",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "native communicate retried both interrupted reads on the same fd, reached EOF and reaped each original child",
+          "fixture": "original CPython module, class and instance hooks; both native SIGUSR1 deliveries invoked the original host handler before communicate returned",
           "native_body_diagnostic": "ProcessTestCase.test_communicate_eintr needs its upstream method decorator"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_communicate_epipe",
@@ -12179,22 +12347,21 @@
         "reference": "pass",
         "outcome": "pass",
         "roles": {
-          "body": "cpython",
-          "assertions": "cpython",
+          "body": "imre",
+          "assertions": "imre",
           "operation": "imre",
-          "fixture": "cpython"
+          "fixture": "mixed"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:11:14: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen:ValueError": 2
-          },
-          "operation": "Popen:ValueError",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 3
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "the native Popen rejected both original NUL arguments before forking",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "2c624dbefb8e0170b1b93696e7a5f891da573a3c795e902924d32f1ac99d6a9f"
         },
-        "classification": "host-driven-native-operation"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_invalid_env",
@@ -13635,19 +13802,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.CalledProcessError",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_call_config launched pinned CPython 3.14.5: sys.exit(47); native parent reaped status 47",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "9ff46ab62ba1550ee55186ec52d2e0df16b383c1ee120a3a4f795d96ea5e0b95"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_call_zero",
@@ -13698,19 +13869,26 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "send bytes down child stdin and capture child stdout",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fb7f7b872c9d9fc0298bff4cb225bb363b352c563a08f97413cc67cb56c7618a",
+          "native_parent_selector_syscalls": {
+            "pselect6": 3
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none",
@@ -13718,19 +13896,26 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:13:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None and capture bytes",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fbe801de12692afe94d5d599035f77eb448991e4b2868c1adc367c4d8b40dba3",
+          "native_parent_selector_syscalls": {
+            "pselect6": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_encoding_errors",
@@ -13738,19 +13923,26 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF and capture UTF-8 output with the ignore policy",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "fed196b6886d694ef9fd08f2f1c1a6cb68ec316b115a3bc757f07ee304e6b010",
+          "native_parent_selector_syscalls": {
+            "pselect6": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_text",
@@ -13758,19 +13950,26 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None and capture text",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "c2b9ece3a178ef1933e99aa41aeb6d368b031486105dea97fe2f6a62c468b72f",
+          "native_parent_selector_syscalls": {
+            "pselect6": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_universal_newlines",
@@ -13778,19 +13977,26 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:9:18: Imre: check_output requires an argv list and encoding='utf-8'"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "supply EOF for explicit None with universal newlines",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "cca2898c23f4326d58516bceeaaaf85bdbdf1f56104f88d2a5a75f64f8f7c6c3",
+          "native_parent_selector_syscalls": {
+            "pselect6": 2
+          }
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_nonzero",
@@ -13798,19 +14004,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.CalledProcessError",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_run_config launched pinned CPython 3.14.5: sys.exit(5); native parent reaped status 5",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "471340b9db4c094ede2eb0b7f7cd8091993a42700fcfd8b4bc540c9099bab219"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stderr",
@@ -13818,19 +14028,24 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:12:17: Imre: check_output requires a literal UTF-8 encoding"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "merge child stderr into native captured stdout",
+          "fixture": "original CPython module, class and instance hooks; native typed membership assertions and controlled inherited stdin",
+          "method_sha256": "796f6daa4817b4ed47a479d115b03b9d842f70d84409a1ddcb2ad7a81f0a44bd",
+          "native_parent_selector_syscalls": {}
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdin_arg",
@@ -13898,19 +14113,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:14: Imre: unknown class method"
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_run_config launched pinned CPython 3.14.5: time.sleep(3600); native parent reaped status -9 after its pselect6 deadline and SIGKILL",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "dab34ef13e89a41ed1950fe3263dbeacf0c8ccf3cd18aed38d657ea3dd4cd0c3"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_class_getitems",
@@ -13966,19 +14185,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "worker 1: BrokenPipeError: [Errno 32] Broken pipe",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "native communicate retried both interrupted reads on the same fd, reached EOF and reaped each original child",
+          "fixture": "original CPython module, class and instance hooks; both native SIGUSR1 deliveries invoked the original host handler before communicate returned",
           "native_body_diagnostic": "ProcessTestCase.test_communicate_eintr needs its upstream method decorator"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_epipe",
@@ -14882,22 +15105,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:11:14: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen:ValueError": 2
-          }
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "the native Popen rejected both original NUL arguments before forking",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "2c624dbefb8e0170b1b93696e7a5f891da573a3c795e902924d32f1ac99d6a9f"
         },
-        "classification": "blocked"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_env",
@@ -16317,19 +16541,21 @@
         "reference": "pass",
         "outcome": "pass",
         "roles": {
-          "body": "cpython",
-          "assertions": "cpython",
+          "body": "imre",
+          "assertions": "imre",
           "operation": "imre",
-          "fixture": "cpython"
+          "fixture": "mixed"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:10:29: Imre: expected list[str], got tuple[str]; annotations are enforced contracts",
-          "operation": "subprocess.run launched and waited for the child in Imre",
-          "fixture": "native_subprocess.py reconstructed host case with the original method and host assertions",
-          "opt_level": 3
+          "opt_level": 3,
+          "imre_revision": "4851037788ee9b71813db9d507bf84ff444ce61a",
+          "tested_tree": "d5ada98d3fab09be28ec2af344338dd4c3c9e9f2",
+          "source": "selected-operations-linux.json",
+          "operation": "imre_run_config launched original fixture ZERO_RETURN_CMD: ['/usr/bin/true']; native parent reaped status 0",
+          "fixture": "original CPython module, class and instance hooks; native case instance and unchanged assertions",
+          "method_sha256": "7d8d2df88a085e9dc1652b9571d65ab350ace556d77b646dbe5ae2c2e55a4936"
         },
-        "classification": "host-driven-native-operation"
+        "classification": "native-body-host-fixture"
       },
       {
         "id": "test.test_subprocess.RunFuncTestCase.test_encoding_warning",

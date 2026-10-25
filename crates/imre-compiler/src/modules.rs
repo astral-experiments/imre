@@ -205,6 +205,7 @@ pub(crate) enum Intrinsic {
     CacheInfo,
     LruCache,
     SingleDispatch,
+    UpdateWrapper,
     CachedProperty,
     NewType,
     Partial,
@@ -626,6 +627,7 @@ impl IntrinsicModule {
             }
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Functools, "singledispatch") => Intrinsic::SingleDispatch,
+            (Self::Functools, "update_wrapper") => Intrinsic::UpdateWrapper,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
                     normcase: name == "fnmatch",
@@ -966,6 +968,10 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    pub(crate) fn checked_diagnostic_count(&self, module: ModuleId) -> usize {
+        self.checked_diagnostics.borrow()[module].len()
+    }
+
     pub(crate) fn is_unittest_main(&self, id: DefinitionId) -> bool {
         let owner = &self.modules[id.module];
         owner.bundled

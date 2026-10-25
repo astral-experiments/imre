@@ -172,7 +172,7 @@ pub unsafe extern "C" fn imre_string_io(initial: usize, newline: usize) -> *cons
             memory.write(initial)?;
             memory.pos = 0;
         }
-        Ok(Rc::into_raw(
+        Ok(crate::ObjectOwner::into_raw(
             FileState {
                 fd: None,
                 raw: false,
@@ -419,7 +419,7 @@ pub unsafe extern "C" fn imre_string_io_readlines(
             })
         })
     };
-    finish(result.map(Rc::into_raw), std::ptr::null())
+    finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }
 
 /// # Safety

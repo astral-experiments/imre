@@ -131,6 +131,26 @@ struct Storage {
 #[derive(Default)]
 pub(crate) struct Types(RefCell<Storage>);
 
+#[derive(Default)]
+pub(crate) struct ShapePrefix(Vec<Shape>);
+
+impl Types {
+    pub(crate) fn shape_count(&self) -> usize {
+        self.0.borrow().shapes.len()
+    }
+
+    pub(crate) fn save_prefix(&self, previous: &mut ShapePrefix) {
+        let storage = self.0.borrow();
+        if previous.0 != storage.shapes {
+            previous.0.clone_from(&storage.shapes);
+        }
+    }
+
+    pub(crate) fn matches_prefix(&self, previous: &ShapePrefix) -> bool {
+        previous.0.starts_with(&self.0.borrow().shapes)
+    }
+}
+
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
 impl Types {
     /// Checks an identity without using the unchecked shape accessors below.

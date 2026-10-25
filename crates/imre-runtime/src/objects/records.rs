@@ -10,6 +10,7 @@ use super::{Object, fail, words::WordKind};
 pub(super) mod strings;
 pub(super) mod tuples;
 pub(super) mod weak;
+mod wrappers;
 
 // Keep the first queue block available even when destruction cannot allocate.
 type ReleaseQueue = RefCell<smallvec::SmallVec<[Release; 4]>>;
@@ -17,7 +18,7 @@ type ReleaseQueue = RefCell<smallvec::SmallVec<[Release; 4]>>;
 enum Release {
     Fields(*const usize, usize),
     Record(*const usize),
-    Object(Rc<Object>),
+    Object(crate::ObjectOwner),
     Sequence(WordKind, Vec<usize>),
     Table(Box<dyn super::mappings::ReleaseEntries>, usize),
 }
@@ -38,9 +39,9 @@ pub struct RecordDescriptor {
     pub semantics: *const RecordSemantics,
 }
 
-/// Generated behavior is shared by a class, never carried by individual fields.
-/// `kind` is zero for a class and one for a tuple; flags select generated equality
-/// and representation. All strings are immutable UTF-8 byte slices.
+/// Kinds are zero for a class, one for a tuple, and two for a Python function
+/// that owns a wrapper link. Flags select generated equality and representation.
+/// All strings are immutable UTF-8 byte slices.
 #[repr(C)]
 pub struct RecordSemantics {
     pub kind: u32,
@@ -179,7 +180,7 @@ pub unsafe extern "C" fn imre_callable_cache_parameter(
             }
         }
     };
-    Rc::into_raw(value.object())
+    crate::ObjectOwner::into_raw(value.object())
 }
 
 /// Checks the declared identity of a record, including across codegen units.
@@ -500,7 +501,7 @@ pub unsafe extern "C" fn imre_record_release(payload: *const usize) {
 }
 
 /// A container can start an acyclic release traversal without a record root.
-pub(super) fn release_object_word(object: Rc<Object>) {
+pub(super) fn release_object_word(object: crate::ObjectOwner) {
     release(Release::Object(object));
 }
 
@@ -523,7 +524,7 @@ fn release(owner: Release) {
             return;
         }
         if let Release::Object(object) = &owner
-            && Rc::strong_count(object) > 1
+            && crate::ObjectOwner::strong_count(object) > 1
         {
             return;
         }
@@ -578,6 +579,11 @@ unsafe fn release_record_owner(payload: *const usize, pending: &ReleaseQueue) {
     }
     header.references.set(count - 1);
     if count != 1 {
+        if count == 2 && wrappers::is_function(header.descriptor()) {
+            // SAFETY: the remaining owner roots this marked function. Every
+            // traversed edge independently owns its target on this thread.
+            unsafe { wrappers::release_unowned_cycle(payload) };
+        }
         return;
     }
     header.drop_weak_anchor();
@@ -701,10 +707,12 @@ mod tests {
             .stack_size(256 * 1024)
             .spawn(|| {
                 let mut root = crate::objects::Words::new(5).into_object();
-                let leaf = Rc::downgrade(&root);
+                let leaf = crate::ObjectOwner::downgrade(&root);
                 for _ in 0..20_000 {
                     let mut parent = crate::objects::Words::new(5);
-                    parent.values.push(Rc::into_raw(root) as usize);
+                    parent
+                        .values
+                        .push(crate::ObjectOwner::into_raw(root) as usize);
                     root = parent.into_object();
                 }
                 drop(root);
@@ -797,8 +805,8 @@ mod tests {
         unsafe {
             let list = Rc::<List>::from_raw(imre_list_new());
             let weak_list = Rc::downgrade(&list);
-            let object = Rc::from_raw(imre_seq_new(2));
-            let weak_object = Rc::downgrade(&object);
+            let object = crate::ObjectOwner::from_raw(imre_seq_new(2));
+            let weak_object = crate::ObjectOwner::downgrade(&object);
             let child = imre_record_new(&child_descriptor);
             replace(child, 0, StrOwner::as_ptr(&text) as usize, 3);
             let record = imre_record_new(&descriptor);
@@ -807,7 +815,7 @@ mod tests {
             replace(record, 2, Rc::as_ptr(&integer) as usize, 2);
             replace(record, 3, StrOwner::as_ptr(&text) as usize, 3);
             replace(record, 4, Rc::as_ptr(&list) as usize, 4);
-            replace(record, 5, Rc::as_ptr(&object) as usize, 5);
+            replace(record, 5, crate::ObjectOwner::as_ptr(&object) as usize, 5);
             replace(record, 6, child as usize, 6);
             // Nullable owning words remain absent; uninitialized regular owning
             // slots on a second record also require safe final cleanup.
@@ -874,13 +882,13 @@ mod tests {
             semantics: std::ptr::null(),
         };
         let leaf = crate::objects::Words::new(2).into_object();
-        let weak = Rc::downgrade(&leaf);
+        let weak = crate::ObjectOwner::downgrade(&leaf);
         // SAFETY: the descriptor outlives the record and populated fields retain a live object.
         unsafe {
             let row = imre_record_try_new(&layout);
             assert!(!row.is_null());
             for field in (0..kinds.len()).step_by(2) {
-                replace(row, field, Rc::as_ptr(&leaf) as usize, 5);
+                replace(row, field, crate::ObjectOwner::as_ptr(&leaf) as usize, 5);
             }
             drop(leaf);
             imre_record_release(row);

@@ -6,11 +6,10 @@ mod source;
 use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use super::exceptions::Result;
 use super::{
-    Error, Int, Kind, Object, Str, Words, acquire_rc, finish, mappings, records,
+    Error, Int, Kind, Object, Str, Words, finish, mappings, records,
     words::{OwnedWord, WordKind},
 };
 use num_traits::ToPrimitive;
@@ -19,7 +18,7 @@ thread_local! {
     // Like other Python containers, the closed native interpreter owns this on
     // its execution thread. Source loader callbacks/threads are not admitted.
     // SAFETY: imre_dict_new transfers one owned str-keyed, tuple-valued dictionary.
-    static CACHE: Rc<Object> = unsafe { Rc::from_raw(mappings::imre_dict_new(3,6)) };
+    static CACHE: crate::ObjectOwner = unsafe { crate::ObjectOwner::from_raw(mappings::imre_dict_new(3,6)) };
     static SAFE_PATH: Cell<bool> = const { Cell::new(false) };
     static SEARCH: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
 }
@@ -46,13 +45,13 @@ pub extern "C" fn imre_linecache_init() {
 /// Shares the ordinary mutable dictionary; its value layout is fixed by the frontend.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_linecache_cache() -> *const Object {
-    CACHE.with(|cache| Rc::into_raw(cache.clone()))
+    CACHE.with(|cache| crate::ObjectOwner::into_raw(cache.clone()))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_linecache_clear() {
     // SAFETY: the thread-local root is the same typed dictionary returned by cache().
-    CACHE.with(|cache| unsafe { mappings::imre_dict_clear(Rc::as_ptr(cache)) });
+    CACHE.with(|cache| unsafe { mappings::imre_dict_clear(crate::ObjectOwner::as_ptr(cache)) });
 }
 
 fn stamp(meta: &fs::Metadata) -> Option<(u64, f64)> {
@@ -140,18 +139,18 @@ fn stat(
     }
 }
 
-fn empty() -> Rc<Object> {
+fn empty() -> crate::ObjectOwner {
     Words::new(3).into_object()
 }
 
 // Removing via the mapping API preserves aliases and releases the old tuple only
 // after the dictionary mutation has finished.
-fn remove(cache: &Rc<Object>, key: &Str) {
+fn remove(cache: &crate::ObjectOwner, key: &Str) {
     let mut old = 0;
     // SAFETY: cache roots a string-key, tuple-value dictionary and key lives for the call.
     unsafe {
         if mappings::imre_dict_try_pop(
-            Rc::as_ptr(cache),
+            crate::ObjectOwner::as_ptr(cache),
             std::ptr::from_ref(key) as usize,
             &mut old,
         ) != 0
@@ -162,14 +161,14 @@ fn remove(cache: &Rc<Object>, key: &Str) {
 }
 
 fn load(
-    cache: &Rc<Object>,
+    cache: &crate::ObjectOwner,
     name: &StrOwner,
     globals: Option<&Object>,
     root: &str,
     newline: &StrOwner,
     env: bool,
     layout: *const records::RecordDescriptor,
-) -> Result<Rc<Object>> {
+) -> Result<crate::ObjectOwner> {
     let Some(SourceFile {
         path,
         original,
@@ -222,7 +221,7 @@ fn load(
         for (i, (kind, value)) in [
             (2, Int::new(size.into()).into_raw()),
             (7, mtime.to_bits() as usize),
-            (5, Rc::into_raw(lines.clone()) as usize),
+            (5, crate::ObjectOwner::into_raw(lines.clone()) as usize),
             (3, StrOwner::into_raw(fullname) as usize),
         ]
         .into_iter()
@@ -232,7 +231,7 @@ fn load(
                 .initialize_record_field(record.add(i));
         }
         mappings::dict_set(
-            Rc::as_ptr(cache),
+            crate::ObjectOwner::as_ptr(cache),
             StrOwner::as_ptr(name) as usize,
             owner.word,
         )?;
@@ -264,7 +263,7 @@ pub unsafe extern "C" fn imre_linecache_lines(
             layout,
         )
     };
-    finish(result.map(Rc::into_raw), std::ptr::null())
+    finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }
 
 /// Read the real public cache, including mutations to its entries and source lists.
@@ -281,14 +280,16 @@ pub(super) unsafe fn cached_lines(
     env: bool,
     update: bool,
     layout: *const records::RecordDescriptor,
-) -> Result<Rc<Object>> {
+) -> Result<crate::ObjectOwner> {
     // SAFETY: the typed mapping roots the entry and source list during the lookup.
     CACHE.with(|cache| unsafe {
         if !update
-            && let Some(entry) =
-                mappings::lookup(Rc::as_ptr(cache), std::ptr::from_ref(name) as usize)
+            && let Some(entry) = mappings::lookup(
+                crate::ObjectOwner::as_ptr(cache),
+                std::ptr::from_ref(name) as usize,
+            )
         {
-            return Ok(acquire_rc::<Object>(entry_field(&entry, 2, 5)));
+            return Ok(crate::ObjectOwner::acquire_word(entry_field(&entry, 2, 5)));
         }
         remove(cache, name);
         match load(
@@ -301,7 +302,7 @@ pub(super) unsafe fn cached_lines(
             layout,
         ) {
             Err(e) if !update && e.is_kind(Kind::MemoryError) => {
-                mappings::imre_dict_clear(Rc::as_ptr(cache));
+                mappings::imre_dict_clear(crate::ObjectOwner::as_ptr(cache));
                 Ok(empty())
             }
             result => result,
@@ -314,11 +315,14 @@ fn entry_field(entry: &OwnedWord, i: usize, kind: u32) -> usize {
     unsafe { WordKind::new(kind).read_record_field((entry.word as *const usize).add(i)) }
 }
 
-fn check(cache: &Rc<Object>, key: &Str) {
+fn check(cache: &crate::ObjectOwner, key: &Str) {
     // SAFETY: the dictionary roots typed entries and the key lives for the lookup.
-    let Some(entry) =
-        (unsafe { mappings::lookup(Rc::as_ptr(cache), std::ptr::from_ref(key) as usize) })
-    else {
+    let Some(entry) = (unsafe {
+        mappings::lookup(
+            crate::ObjectOwner::as_ptr(cache),
+            std::ptr::from_ref(key) as usize,
+        )
+    }) else {
         return;
     };
     // SAFETY: this acquired entry roots its integer and fullname string.

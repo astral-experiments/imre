@@ -9,12 +9,12 @@ use crate::objects::words::Words;
 use crate::objects::{records, values};
 
 pub(super) struct Errors {
-    entries: Rc<Object>,
+    entries: crate::ObjectOwner,
     args: OnceCell<OwnedWord>,
 }
 
 impl Error {
-    pub(in crate::objects) fn tree_errors(entries: Rc<Object>) -> Self {
+    pub(in crate::objects) fn tree_errors(entries: crate::ObjectOwner) -> Self {
         Self {
             kind: Kind::ShutilError,
             payload: Some(Payload::Tree(Rc::new(Errors {
@@ -39,7 +39,9 @@ impl Errors {
                 if tuple.is_null() {
                     return Err(Error::allocation());
                 }
-                tuple.write(Rc::into_raw(Rc::clone(&self.entries)) as usize);
+                tuple.write(
+                    crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(&self.entries)) as usize,
+                );
                 let owned = OwnedWord::from_owned(tuple as usize, WordKind::new(6));
                 assert!(self.args.set(owned).is_ok());
             }
@@ -53,7 +55,7 @@ impl Errors {
         unsafe {
             values::write_repr(
                 &mut repr,
-                Rc::as_ptr(&self.entries) as usize,
+                crate::ObjectOwner::as_ptr(&self.entries) as usize,
                 WordKind::new(5),
             )
         };
@@ -127,17 +129,17 @@ mod tests {
             semantics: std::ptr::null(),
         };
         let list = Words::new(6).into_object();
-        let error = Error::tree_errors(Rc::clone(&list)).into_object();
+        let error = Error::tree_errors(crate::ObjectOwner::clone(&list)).into_object();
         // SAFETY: the layout outlives the exception and both returned tuple owners.
         unsafe {
-            let first = imre_shutil_tree_error_args(Rc::as_ptr(&error), &layout);
-            let second = imre_shutil_tree_error_args(Rc::as_ptr(&error), &layout);
+            let first = imre_shutil_tree_error_args(crate::ObjectOwner::as_ptr(&error), &layout);
+            let second = imre_shutil_tree_error_args(crate::ObjectOwner::as_ptr(&error), &layout);
             assert_eq!(first, second);
             drop(error);
-            assert_eq!(*first, Rc::as_ptr(&list) as usize);
+            assert_eq!(*first, crate::ObjectOwner::as_ptr(&list) as usize);
             drop(OwnedWord::from_owned(first as usize, WordKind::new(6)));
             drop(OwnedWord::from_owned(second as usize, WordKind::new(6)));
         }
-        assert_eq!(Rc::strong_count(&list), 1);
+        assert_eq!(crate::ObjectOwner::strong_count(&list), 1);
     }
 }

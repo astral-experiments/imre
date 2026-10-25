@@ -2,10 +2,9 @@
 
 use crate::StrOwner;
 use std::borrow::Cow;
-use std::rc::Rc;
 
 use crate::objects::{
-    Object, acquire_rc,
+    Object,
     bytes::{decode_error, decode_owned_error},
 };
 use crate::{Bytes, Error, Kind, finish};
@@ -35,14 +34,14 @@ impl Encoding {
     }
 }
 
-fn decode(bytes: &Rc<Bytes>) -> Result<Cow<'_, str>, Error> {
+fn decode(bytes: &crate::BytesOwner) -> Result<Cow<'_, str>, Error> {
     let (encoding, mut pos) = Encoding::detect(bytes);
     let (width, little, codec) = match encoding {
         Encoding::Utf8 => {
             let data = &bytes[pos..];
             return std::str::from_utf8(data).map(Cow::Borrowed).map_err(|err| {
                 if pos == 0 {
-                    decode_owned_error(Rc::clone(bytes), err)
+                    decode_owned_error(crate::BytesOwner::clone(bytes), err)
                 } else {
                     decode_error(data, err)
                 }
@@ -123,7 +122,7 @@ fn decode(bytes: &Rc<Bytes>) -> Result<Cow<'_, str>, Error> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_json_loads_bytes(bytes: *const Bytes) -> *const Object {
     // SAFETY: the caller supplies live immutable bytes until the parse completes.
-    let bytes = unsafe { acquire_rc::<Bytes>(bytes as usize) };
+    let bytes = unsafe { crate::acquire_bytes(bytes as usize) };
     let result = decode(&bytes).and_then(|text| {
         super::readonly::loads(&text, || {
             crate::Str::try_new(text.as_ref()).ok().map(StrOwner::new)
@@ -139,32 +138,33 @@ mod tests {
 
     #[test]
     fn invalid_utf8_retains_the_original_bytes() {
-        let bytes = Rc::new(vec![0xff]);
+        let bytes = crate::BytesOwner::new(vec![0xff]);
         let error = decode(&bytes).unwrap_err();
-        assert_eq!(Rc::strong_count(&bytes), 2);
+        assert_eq!(crate::BytesOwner::strong_count(&bytes), 2);
         drop(error);
-        assert_eq!(Rc::strong_count(&bytes), 1);
+        assert_eq!(crate::BytesOwner::strong_count(&bytes), 1);
     }
 
     #[test]
     fn wide_decode_error_retains_the_original_bytes() {
-        let bytes = Rc::new(vec![0xff, 0xfe, b'"', 0, 3]);
-        let original = Rc::downgrade(&bytes);
+        let bytes = crate::BytesOwner::new(vec![0xff, 0xfe, b'"', 0, 3]);
+        let observer = bytes.clone();
         // SAFETY: bytes roots its exact runtime handle throughout the decode.
-        assert!(unsafe { imre_json_loads_bytes(Rc::as_ptr(&bytes)) }.is_null());
+        assert!(unsafe { imre_json_loads_bytes(crate::BytesOwner::as_ptr(&bytes)) }.is_null());
         drop(bytes);
         // SAFETY: take and repr each transfer one owner, and the exception stays rooted.
         let (error, repr) = unsafe {
-            let error = Rc::from_raw(imre_error_take());
-            let repr = crate::StrOwner::from_raw(imre_exception_repr(Rc::as_ptr(&error)));
+            let error = crate::ObjectOwner::from_raw(imre_error_take());
+            let repr =
+                crate::StrOwner::from_raw(imre_exception_repr(crate::ObjectOwner::as_ptr(&error)));
             (error, repr)
         };
         assert_eq!(
             repr.as_str(),
             r#"UnicodeDecodeError('utf-16-le', b'\xff\xfe"\x00\x03', 4, 5, 'truncated data')"#
         );
-        assert!(original.upgrade().is_some());
+        assert_eq!(crate::BytesOwner::strong_count(&observer), 2);
         drop(error);
-        assert!(original.upgrade().is_none());
+        assert_eq!(crate::BytesOwner::strong_count(&observer), 1);
     }
 }

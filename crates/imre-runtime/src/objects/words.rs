@@ -112,11 +112,11 @@ impl WordKind {
                 }
                 3 | 11 => StrOwner::increment_strong_count(word as *const Str),
                 4 => Rc::increment_strong_count(word as *const List),
-                5 => Rc::increment_strong_count(word as *const Object),
+                5 => crate::ObjectOwner::increment_strong_count(word as *const Object),
                 6 | 12 | 13 | 14 => records::imre_record_retain(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
-                8 => Rc::increment_strong_count(word as *const Bytes),
+                8 => crate::retain_bytes(word as *const Bytes),
                 9 => unions::imre_union_retain(word),
                 _ => unreachable!(),
             }
@@ -137,11 +137,13 @@ impl WordKind {
                 2 => drop(Int(word)),
                 3 | 11 => StrOwner::decrement_strong_count(word as *const Str),
                 4 => crate::imre_list_release(word as *const List),
-                5 => records::release_object_word(Rc::from_raw(word as *const Object)),
+                5 => records::release_object_word(crate::ObjectOwner::from_raw(
+                    word as *const Object,
+                )),
                 6 | 12 | 13 | 14 => records::imre_record_release(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
-                8 => Rc::decrement_strong_count(word as *const Bytes),
+                8 => crate::release_bytes(word as *const Bytes),
                 9 => unions::imre_union_release(word),
                 _ => unreachable!(),
             }
@@ -357,15 +359,18 @@ impl Words {
         Ok(())
     }
 
-    pub(super) fn into_object(mut self) -> Rc<Object> {
+    pub(super) fn into_object(self) -> crate::ObjectOwner {
+        crate::ObjectOwner::new(Object(super::StorageCell::new(self.into_storage())))
+    }
+
+    /// Finish the header and optional packing without allocating the surrounding owner.
+    pub(super) fn into_storage(mut self) -> super::Storage {
         // The original boxed list remains usable if optional packing cannot allocate.
         let _ = self.pack_structs();
         if self.kind != WordKind::DEFERRED {
             self.update_header();
         }
-        Rc::new(Object(super::StorageCell::new(super::Storage::Sequence(
-            self,
-        ))))
+        super::Storage::Sequence(self)
     }
 
     /// A saturated header defers to the full-width buffer length in the runtime.
@@ -535,57 +540,69 @@ mod tests {
         // SAFETY: every handle stays rooted, readonly views end before mutation,
         // and each new or popped owner is adopted exactly once.
         unsafe {
-            let child = Rc::from_raw(imre_seq_new(1));
-            let weak = Rc::downgrade(&child);
-            let word = Rc::as_ptr(&child) as usize;
-            let sequence = Rc::from_raw(imre_seq_new(5));
-            let alias = Rc::clone(&sequence);
+            let child = crate::ObjectOwner::from_raw(imre_seq_new(1));
+            let weak = crate::ObjectOwner::downgrade(&child);
+            let word = crate::ObjectOwner::as_ptr(&child) as usize;
+            let sequence = crate::ObjectOwner::from_raw(imre_seq_new(5));
+            let alias = crate::ObjectOwner::clone(&sequence);
             let layout = imre_seq_layout();
-            let cached = Rc::as_ptr(&sequence).byte_add(layout.header).cast::<u32>();
+            let cached = crate::ObjectOwner::as_ptr(&sequence)
+                .byte_add(layout.header)
+                .cast::<u32>();
             assert_eq!(cached.read(), 1);
             for _ in 0..3 {
-                imre_seq_append(Rc::as_ptr(&sequence), word, 5);
+                imre_seq_append(crate::ObjectOwner::as_ptr(&sequence), word, 5);
             }
             assert_eq!(cached.read(), 7);
-            assert_eq!(Rc::strong_count(&child), 4);
+            assert_eq!(crate::ObjectOwner::strong_count(&child), 4);
             assert!(
                 !sequence
                     .0
                     .with(|storage| storage.sequence().values.spilled())
             );
             {
-                let view = imre_seq_data_readonly(Rc::as_ptr(&sequence));
+                let view = imre_seq_data_readonly(crate::ObjectOwner::as_ptr(&sequence));
                 assert_eq!(
                     view,
-                    Rc::as_ptr(&sequence).byte_add(layout.inline_words).cast()
+                    crate::ObjectOwner::as_ptr(&sequence)
+                        .byte_add(layout.inline_words)
+                        .cast()
                 );
                 assert_eq!(std::slice::from_raw_parts(view, 3), &[word; 3]);
             }
 
-            imre_seq_append(Rc::as_ptr(&alias), word, 5);
+            imre_seq_append(crate::ObjectOwner::as_ptr(&alias), word, 5);
             assert_eq!(cached.read(), 8);
-            assert_eq!(Rc::strong_count(&child), 5);
+            assert_eq!(crate::ObjectOwner::strong_count(&child), 5);
             assert!(
                 sequence
                     .0
                     .with(|storage| storage.sequence().values.spilled())
             );
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&sequence))).as_small(), Some(4));
+            assert_eq!(
+                Int(imre_seq_len(crate::ObjectOwner::as_ptr(&sequence))).as_small(),
+                Some(4)
+            );
             {
-                let view = imre_seq_data_readonly(Rc::as_ptr(&alias));
+                let view = imre_seq_data_readonly(crate::ObjectOwner::as_ptr(&alias));
                 assert_eq!(std::slice::from_raw_parts(view, 4), &[word; 4]);
             }
 
-            let popped = Rc::from_raw(imre_seq_pop(Rc::as_ptr(&alias)) as *const Object);
+            let popped = crate::ObjectOwner::from_raw(imre_seq_pop(crate::ObjectOwner::as_ptr(
+                &alias,
+            )) as *const Object);
             assert_eq!(cached.read(), 6); // Popping preserves spilled storage.
-            assert!(Rc::ptr_eq(&child, &popped));
-            assert_eq!(Rc::strong_count(&child), 5);
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&sequence))).as_small(), Some(3));
+            assert!(crate::ObjectOwner::ptr_eq(&child, &popped));
+            assert_eq!(crate::ObjectOwner::strong_count(&child), 5);
+            assert_eq!(
+                Int(imre_seq_len(crate::ObjectOwner::as_ptr(&sequence))).as_small(),
+                Some(3)
+            );
             drop(child);
             drop(sequence);
-            assert_eq!(Rc::strong_count(&popped), 4);
+            assert_eq!(crate::ObjectOwner::strong_count(&popped), 4);
             drop(alias);
-            assert_eq!(Rc::strong_count(&popped), 1);
+            assert_eq!(crate::ObjectOwner::strong_count(&popped), 1);
             drop(popped);
             assert!(weak.upgrade().is_none());
         }
@@ -604,13 +621,21 @@ mod tests {
         // SAFETY: all handles remain rooted through their last access. The
         // buffer pointer is read before either the list or a copy is changed.
         unsafe {
-            imre_seq_append(Rc::as_ptr(&input), StrOwner::as_ptr(&held) as usize, 3);
-            let diff = Rc::from_raw(imre_ndiff_deferred(Rc::as_ptr(&input), Rc::as_ptr(&input)));
-            let copy = Rc::from_raw(imre_str_list_copy(Rc::as_ptr(&diff)));
+            imre_seq_append(
+                crate::ObjectOwner::as_ptr(&input),
+                StrOwner::as_ptr(&held) as usize,
+                3,
+            );
+            let diff = crate::ObjectOwner::from_raw(imre_ndiff_deferred(
+                crate::ObjectOwner::as_ptr(&input),
+                crate::ObjectOwner::as_ptr(&input),
+            ));
+            let copy =
+                crate::ObjectOwner::from_raw(imre_str_list_copy(crate::ObjectOwner::as_ptr(&diff)));
             drop(held);
             drop(input);
             let layout = imre_seq_layout();
-            let handle = Rc::as_ptr(&diff);
+            let handle = crate::ObjectOwner::as_ptr(&diff);
             assert_eq!(
                 handle.byte_add(layout.header).cast::<u32>().read(),
                 u32::MAX
