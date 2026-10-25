@@ -74,3 +74,33 @@ try:
     subprocess.Popen(["/bin/true"], cwd="/dev/null")
 except OSError as error:
     describe(error)
+
+# The two POSIX launch interfaces differ in whether the executable is
+# converted to str. Force fork/exec with cwd, a PATH search, and a low fd.
+program = Path("/no-imre-program")
+try:
+    subprocess.Popen([program], cwd="/")
+except FileNotFoundError as error:
+    describe(error)
+    name = error.filename
+    if isinstance(name, Path):
+        assert name is program
+    else:
+        raise AssertionError("cwd launch lost the executable owner")
+try:
+    subprocess.Popen(Path("no-imre-program"))
+except FileNotFoundError as error:
+    describe(error)
+try:
+    subprocess.Popen([program], stderr=subprocess.STDOUT)
+except FileNotFoundError as error:
+    describe(error)
+# This launch can use the direct interface even without a closefrom file action.
+try:
+    subprocess.Popen([program], close_fds=False)
+except FileNotFoundError as error:
+    describe(error)
+try:
+    subprocess.Popen([program], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+except FileNotFoundError as error:
+    describe(error)

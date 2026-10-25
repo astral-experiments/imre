@@ -33,6 +33,59 @@ pub(super) fn decode(error: io::Error) -> (Option<Site>, io::Error) {
     }
 }
 
+/// The direct POSIX spawn interface reports its converted filesystem path.
+/// The fork/exec interface retains the caller's original executable object.
+/// This is observable even though both execute the same native program.
+fn converts_executable(has_directory: bool, cwd: bool, streams: u32) -> bool {
+    if !has_directory || cwd {
+        return false;
+    }
+    let stdout = streams & 15;
+    let stderr = (streams >> 4) & 15;
+    if matches!(stdout, 3 | 4) || matches!(stderr, 3 | 4) || (stderr == 5 && stdout == 0) {
+        // Explicit stdio descriptors 1 and 2 require fork/exec.
+        return false;
+    }
+    static CAPABILITIES: std::sync::OnceLock<(bool, bool)> = std::sync::OnceLock::new();
+    let &(spawn, closefrom) = CAPABILITIES.get_or_init(|| {
+        let spawn = match std::env::var_os("_PYTHON_SUBPROCESS_USE_POSIX_SPAWN").as_deref() {
+            Some(value) if value == "0" => false,
+            Some(value) if value == "1" => true,
+            _ => spawn_reports_exec_errors(),
+        };
+        // SAFETY: query an optional libc symbol without calling it. Older glibc
+        // and Darwin lack this file action even when posix_spawn itself works.
+        let closefrom = unsafe {
+            !libc::dlsym(
+                libc::RTLD_DEFAULT,
+                c"posix_spawn_file_actions_addclosefrom_np".as_ptr(),
+            )
+            .is_null()
+        };
+        (spawn, closefrom)
+    });
+    spawn && (closefrom || streams & (1 << 17) != 0)
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn spawn_reports_exec_errors() -> bool {
+    // SAFETY: glibc returns a permanent NUL-terminated version string.
+    let version = unsafe { std::ffi::CStr::from_ptr(libc::gnu_get_libc_version()) };
+    let mut parts = version.to_str().unwrap_or_default().split('.');
+    let mut next = || {
+        parts
+            .next()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0)
+    };
+    (next(), next()) >= (2, 24)
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn spawn_reports_exec_errors() -> bool {
+    cfg!(any(target_os = "macos", target_os = "solaris"))
+}
+
 /// # Safety
 /// The compiler roots the command and the exact cwd/executable owners in config.
 pub(super) unsafe fn spawn(
@@ -42,6 +95,7 @@ pub(super) unsafe fn spawn(
 ) -> Result<Child> {
     // SAFETY: validation and copying complete before the command may fork.
     let (launch, cwd) = unsafe { prepare_command(cmd, config)? };
+    let has_directory = launch.search.is_none();
     launch.spawn_tagged(cwd.as_ref(), streams).map_err(|err| {
         let (site, err) = decode(err);
         // SAFETY: failure does not release the original command or its arguments.
@@ -53,7 +107,7 @@ pub(super) unsafe fn spawn(
                 Site::Executable if !config.executable.is_null() => filename(
                     config.executable as usize,
                     WordKind::new(config.executable_kind),
-                    false,
+                    !converts_executable(has_directory, cwd.is_some(), streams),
                 ),
                 Site::Executable if config.shell => {
                     Filename::Str(Rc::new(Str::from(if cfg!(target_os = "android") {
@@ -75,7 +129,11 @@ pub(super) unsafe fn spawn(
                         }
                         _ => (cmd.word, cmd.kind),
                     };
-                    filename(word, kind, false)
+                    filename(
+                        word,
+                        kind,
+                        !converts_executable(has_directory, cwd.is_some(), streams),
+                    )
                 }
             }
         });
@@ -83,7 +141,7 @@ pub(super) unsafe fn spawn(
     })
 }
 
-/// cwd retains its original object; the executable passes through os.fspath.
+/// Only the direct spawn interface converts an executable with os.fspath.
 unsafe fn filename(word: usize, kind: WordKind, keep_path: bool) -> Filename {
     let (word, kind) = if kind.raw() == 9 {
         crate::objects::unions::member(word)
