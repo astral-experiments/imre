@@ -124,6 +124,7 @@ pub(crate) enum Intrinsic {
     ContextManager,
     FunctionCache,
     CachedProperty,
+    Reduce,
     TomlDumps,
     TomliLoads,
     TomliLoad,
@@ -167,6 +168,8 @@ pub(crate) enum Intrinsic {
     UnsupportedOperation,
     GzipOpen,
     Sha256,
+    HashNew,
+    HashAvailable,
     ZipFile,
     ZipInfo,
     BytesIo,
@@ -207,6 +210,7 @@ pub(crate) enum Intrinsic {
     AssertNever,
     Cast,
     Path,
+    PurePath(crate::ir::PathFlavor),
     Which,
     TemporaryDirectory,
     SubprocessRun,
@@ -321,6 +325,7 @@ impl IntrinsicModule {
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
+            (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
             (Self::Tomli, "load") => Intrinsic::TomliLoad,
@@ -377,6 +382,8 @@ impl IntrinsicModule {
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
+            (Self::Hashlib, "new") => Intrinsic::HashNew,
+            (Self::Hashlib, "algorithms_available") => Intrinsic::HashAvailable,
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
@@ -412,6 +419,12 @@ impl IntrinsicModule {
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
             (Self::Pathlib, "Path" | "PosixPath") => Intrinsic::Path,
+            (Self::Pathlib, "PurePath" | "PurePosixPath") => {
+                Intrinsic::PurePath(crate::ir::PathFlavor::Posix)
+            }
+            (Self::Pathlib, "PureWindowsPath") => {
+                Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
+            }
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,

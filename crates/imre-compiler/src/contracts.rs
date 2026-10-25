@@ -120,6 +120,12 @@ impl Builtin {
                     | PathOperation::Scripts
                     | PathOperation::OsExists
                     | PathOperation::New
+                    | PathOperation::PureNew(_)
+                    | PathOperation::JoinObject
+                    | PathOperation::Drive
+                    | PathOperation::Root
+                    | PathOperation::Anchor
+                    | PathOperation::AsPosix
                     | PathOperation::Join
                     | PathOperation::Text
                     | PathOperation::Name
@@ -207,8 +213,16 @@ impl Builtin {
             ),
             Self::BytesGet
             | Self::Decode
+            | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
+            | Self::SetAdd
+            | Self::CounterUpdate
+            | Self::KeySet
+            | Self::KeyUnion
+            | Self::KeyIntersection
+            | Self::KeyDifference
+            | Self::RegexGroupDict
             | Self::DictGet
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
@@ -240,13 +254,13 @@ impl Builtin {
             | Self::Bool
             | Self::DictContains
             | Self::DictGetDefault
-            | Self::CounterUpdate
             | Self::EnumLookup(_)
             | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
             | Self::Sha256Hex
             | Self::Sha256New
+            | Self::HashAvailable
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
             | Self::Sha256Copy
@@ -272,7 +286,6 @@ impl Builtin {
             | Self::RStrip
             | Self::RegexCompile(_)
             | Self::RegexSearch
-            | Self::RegexGroupDict
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds
             | Self::SetContains
@@ -348,17 +361,12 @@ impl Builtin {
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
-            | Self::KeyUnion
-            | Self::KeySet
-            | Self::KeyIntersection
-            | Self::KeyDifference
             | Self::ExactRecord(_)
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::Repr
-            | Self::SetAdd
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
@@ -613,9 +621,15 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_concat"
                 | "imre_bytes_concat"
                 | "imre_bytes_repeat"
+                | "imre_counter_update"
+                | "imre_key_union"
+                | "imre_key_intersection"
+                | "imre_key_difference"
+                | "imre_regex_groupdict"
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
                 | "imre_bytes_decode"
+                | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"

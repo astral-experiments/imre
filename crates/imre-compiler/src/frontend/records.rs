@@ -809,7 +809,18 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
-        calls::reject_unpacking(call, self.source)?;
+        if call
+            .arguments
+            .keywords
+            .iter()
+            .any(|keyword| keyword.arg.is_none())
+        {
+            return Err(error(
+                self.source,
+                call,
+                "keyword argument unpacking is unsupported",
+            ));
+        }
         if attribute.attr.starts_with("__")
             && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
         {
@@ -846,6 +857,7 @@ impl Checker<'_> {
             ));
         }
         if kind == MethodKind::Property {
+            calls::reject_unpacking(call, self.source)?;
             let value = self.class_attribute(attribute, class, receiver, None)?;
             return self.invoke(call, value);
         }
@@ -855,16 +867,7 @@ impl Checker<'_> {
             (None, receiver)
         };
         let skip = usize::from(receiver.is_some());
-        let (ty, args) = if self.inference.is_some() {
-            self.infer_call(call, &signature, receiver, skip)?
-        } else {
-            (
-                signature.returns,
-                self.arguments(call, &signature.params[skip..], receiver)?,
-            )
-        };
-        self.calls.insert(signature.id);
-        let value = self.call_value(&signature, ty, args);
+        let value = self.source_call(call, &signature, receiver, skip)?;
         Ok(self.evaluated_receiver(discarded, value))
     }
 
