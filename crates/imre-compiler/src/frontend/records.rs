@@ -941,6 +941,13 @@ impl Checker<'_> {
                 "special methods cannot be called directly",
             ));
         }
+        if attribute.attr.as_str() == "assertRaises"
+            && !self.classes.methods[class].contains_key("assertRaises")
+            && let Some(receiver) = &receiver
+            && let Some(context) = self.unittest_assert_raises(call, class, receiver)?
+        {
+            return Ok(context);
+        }
         let signature = self.classes.methods[class]
             .get(attribute.attr.as_str())
             .ok_or_else(|| error(self.source, call, "unknown class method"))?

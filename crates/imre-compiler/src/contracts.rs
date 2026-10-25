@@ -340,6 +340,7 @@ impl Builtin {
             | Self::StringListNonempty
             | Self::Str
             | Self::NominalIdentity
+            | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
             | Self::ForwardRefField(_)
             | Self::NewForwardRef

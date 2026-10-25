@@ -1,6 +1,7 @@
 """Run complete pinned unittest methods against native Imre at both optimization levels."""
 import argparse
 from collections import Counter
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import subprocess
@@ -19,6 +20,7 @@ ASSERTIONS = {
     "testAssertLess": "assertLess", "testAssertLessEqual": "assertLessEqual",
     "testAssertGreater": "assertGreater", "testAssertGreaterEqual": "assertGreaterEqual",
     "testNotEqual": "assertNotEqual", "test_baseAssertEqual": "_baseAssertEqual",
+    "testAssertRaises": "assertRaises",
 }
 
 
@@ -26,14 +28,9 @@ def check_assertion(binary, operation, level):
     def run(case, original):
         calls = []
         def bind(target):
-            def call(*operands, msg=None):
+            def invoke(operands, msg):
                 if type(target.longMessage) is not bool or msg is not None and type(msg) is not str:
                     raise TypeError("unexpected assertion fixture")
-                unary = operation in {"assertTrue", "assertFalse"}
-                if len(operands) != (1 if unary else 2) or not all(
-                    type(value) is (bool if unary else int) for value in operands
-                ):
-                    raise TypeError("unexpected native assertion operands")
                 invocation = [binary, operation, "long" if target.longMessage else "short",
                               "absent" if msg is None else "message", msg or "", *map(str, operands)]
                 result = subprocess.run(invocation, capture_output=True, text=True, timeout=30)
@@ -44,6 +41,23 @@ def check_assertion(binary, operation, level):
                     raise AssertionError(result.stdout[len("failure\n"):-1])
                 if result.stdout != "success\n":
                     raise RuntimeError(f"invalid assertion response {result.stdout!r}")
+            @contextmanager
+            def scope(expected, *, msg=None):
+                if expected is not TypeError:
+                    raise TypeError("native context driver expects TypeError")
+                # The unchanged host callback must return normally. Only this
+                # outcome is represented by the native driver's empty protected block.
+                yield
+                invoke((), msg)
+            if operation == "assertRaises":
+                return scope
+            def call(*operands, msg=None):
+                unary = operation in {"assertTrue", "assertFalse"}
+                if len(operands) != (1 if unary else 2) or not all(
+                    type(value) is (bool if unary else int) for value in operands
+                ):
+                    raise TypeError("unexpected native assertion operands")
+                invoke(operands, msg)
             return call
         for target in (case.testableTrue, case.testableFalse):
             setattr(target, operation, bind(target))
@@ -52,7 +66,7 @@ def check_assertion(binary, operation, level):
             raise AssertionError(f"incomplete native calls: {calls}")
         return {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
                 "evidence": {"operation": f"unittest.TestCase.{operation}", "native_calls": len(calls), "opt_level": level,
-                             "assertions": "upstream assertMessages checks each native failure message",
+                             "assertions": "upstream unittest helper checks each native failure message",
                              "fixture": "upstream TestLongMessage setup and lifecycle on CPython"}}
     return run
 
@@ -63,6 +77,14 @@ def run(args, level, root):
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
+    control = root / "context"
+    control.mkdir()
+    program = HERE / "context_protocol.py"
+    native = lang.build(program.read_bytes(), control)
+    oracle = subprocess.run([sys.executable, "-B", program], capture_output=True, timeout=30, check=True)
+    observed = subprocess.run([native], capture_output=True, timeout=30, check=True)
+    if (observed.stdout, observed.stderr) != (oracle.stdout, oracle.stderr):
+        raise AssertionError(f"context control differs from CPython: {observed!r} != {oracle!r}")
     driver = root / "assertions"
     driver.mkdir()
     executions, blocked = {}, {}
@@ -73,15 +95,18 @@ def run(args, level, root):
         blocked.update({(name, 1): compile_blocker(exc) for name in host})
     else:
         executions.update({name: check_assertion(binary, op, level) for name, op in host.items()})
-    path = HERE / "upstream/Lib/test/test_unittest/test_result.py"
-    for method, operation in (("test_stop", "unittest.TestResult.stop"),
-                              ("test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun")):
-        case_id = PREFIX + "test_result.Test_TestResult." + method
+    for module, owner, method, operation in (
+        ("test_result", "Test_TestResult", "test_stop", "unittest.TestResult.stop"),
+        ("test_result", "Test_TestResult", "test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun"),
+        ("test_case", "Test_TestCase", "testAssertRaisesNoExceptionType", "unittest.TestCase.assertRaises"),
+    ):
+        path = HERE / f"upstream/Lib/test/test_unittest/{module}.py"
+        case_id = PREFIX + f"{module}.{owner}.{method}"
         directory = root / method
         directory.mkdir()
         fixture = testcase_fixture("bool" if method == "test_stop" else None)
         try:
-            executions[case_id] = native_method(lang, directory, path, "Test_TestResult", case_id, fixture,
+            executions[case_id] = native_method(lang, directory, path, owner, case_id, fixture,
                                                 operation=("imre", operation))
         except NativeCompileError as exc:
             blocked[case_id, 1] = compile_blocker(exc)

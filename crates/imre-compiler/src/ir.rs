@@ -492,6 +492,8 @@ pub(crate) enum Builtin {
     EnumLookup(usize),
     EnumString,
     NominalIdentity,
+    /// Match an exception against the category list retained by an assertion context.
+    ExceptionMatchesAny,
     LiteralStringView,
     StringListContains,
     StringContains,

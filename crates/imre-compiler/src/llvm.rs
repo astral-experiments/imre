@@ -3665,9 +3665,14 @@ impl Emitter<'_, '_> {
             | Builtin::DirectoryContextView => {
                 unreachable!("representation-preserving views transfer the operand owner directly")
             }
-            Builtin::StringContains => {
+            Builtin::StringContains | Builtin::ExceptionMatchesAny => {
+                let name = if matches!(builtin, Builtin::ExceptionMatchesAny) {
+                    "imre_exception_matches_any"
+                } else {
+                    "imre_str_contains"
+                };
                 let found = self.instruction(format!(
-                    "call i32 @imre_str_contains(ptr {}, ptr {})",
+                    "call i32 @{name}(ptr {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
                 Value {
@@ -6435,6 +6440,7 @@ declare i32 @imre_record_has_type(ptr, ptr) nounwind memory(read)
 declare ptr @imre_named_exception_new(ptr, ptr)
 declare ptr @imre_exception_new(i32, ptr)
 declare i32 @imre_exception_matches(ptr, i32)
+declare i32 @imre_exception_matches_any(ptr, ptr)
 declare i64 @imre_string_iterable_len(i64)
 declare ptr @imre_string_iterable_list(i64)
 declare void @imre_union_retain(i64)
