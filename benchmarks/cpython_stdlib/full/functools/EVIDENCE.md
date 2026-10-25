@@ -171,3 +171,18 @@ Each build reproduced both pinned CPython references byte for byte. Counts apply
 | [581e518](https://github.com/astral-sh/imre/actions/runs/40193838962/job/121170327420) [free-threading, 4](observations/581e518/evidence-free-threading-linux.json) | 0 | 0 | 0 | 4 |
 
 On `270129b`, the unchanged registration method compiles its formatting and stops at `self.assertIs` on upstream line 2297. `test_simple_overloads` runs its native body and assertions under host fixtures. On `581e518`, the four native bodies are the C and Python variants of `test_argument_checking` and `test_with_bound_and_unbound_methods`. Both LRU reentrancy methods remain mixed on that source. Neither build starts a free-threaded native worker.
+
+## Local full-suite reruns
+
+Each source ran with the original CPython 3.14.5 fixtures. The reports list every occurrence at O0 and O3. Counts match between levels.
+
+| Source and suite | Native bodies with host fixtures | Host-driven native operations | Mixed | Blocked |
+| --- | ---: | ---: | ---: | ---: |
+| [b54496f](https://github.com/astral-sh/imre/commit/b54496f44e7e38498b6202afa518b2cd57e27dfe) [primary, 325](observations/b54496f/evidence-linux.json) | 4 | 13 | 15 | 293 |
+| [b54496f](https://github.com/astral-sh/imre/commit/b54496f44e7e38498b6202afa518b2cd57e27dfe) [free-threading, 4](observations/b54496f/evidence-free-threading-linux.json) | 0 | 0 | 0 | 4 |
+| [bc9c98c](https://github.com/astral-sh/imre/commit/bc9c98c23318e56493bfb6ca8e08e33847787c05) [primary, 325](observations/bc9c98c/evidence-linux.json) | 5 | 15 | 13 | 292 |
+| [bc9c98c](https://github.com/astral-sh/imre/commit/bc9c98c23318e56493bfb6ca8e08e33847787c05) [free-threading, 4](observations/bc9c98c/evidence-free-threading-linux.json) | 0 | 0 | 0 | 4 |
+| [ecf60bc](https://github.com/astral-sh/imre/commit/ecf60bcde79ee43463177a53fbe9ddf0b865fe81) [primary, 325](observations/ecf60bc/evidence-linux.json) | 6 | 15 | 13 | 291 |
+| [ecf60bc](https://github.com/astral-sh/imre/commit/ecf60bcde79ee43463177a53fbe9ddf0b865fe81) [free-threading, 4](observations/ecf60bc/evidence-free-threading-linux.json) | 0 | 0 | 0 | 4 |
+
+On `b54496f`, keyword-rest parsing and deferred annotation names coexist after the canonical I/O repairs. On `bc9c98c`, `TestSingleDispatch.test_wrapping_attributes` stops at `sys.flags.optimize`. On `ecf60bc`, the unchanged body and both assertions run in Imre under the original host fixtures using the actual optimization level, wrapper name, and nullable docstring. The four companion cases on each source stop before native worker execution.
