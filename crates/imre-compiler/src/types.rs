@@ -476,6 +476,7 @@ impl Types {
             | Type::DirectoryContext(_)
             | Type::Semaphore
             | Type::Popen(..)
+            | Type::ActivePopen
             | Type::AsyncProcess(_)
             | Type::LogFormatter
             | Type::LogRecord
@@ -770,6 +771,7 @@ impl Types {
                 | Type::CsvReader
                 | Type::ZipFile
                 | Type::Popen(..)
+                | Type::ActivePopen
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
                 | Type::GeneratorContext

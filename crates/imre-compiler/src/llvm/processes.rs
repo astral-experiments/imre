@@ -363,6 +363,10 @@ impl Emitter<'_, '_> {
             }
             ProcessOperation::PopenArgs => self.call("imre_popen_args", returns, &[&args[0].value]),
             ProcessOperation::PopenPid => self.call("imre_popen_pid", returns, &[&args[0].value]),
+            ProcessOperation::PopenActive => self.call("imre_popen_active", returns, &[]),
+            ProcessOperation::PopenIdentity => {
+                self.call("imre_popen_identity", returns, &[&args[0].value])
+            }
             ProcessOperation::PopenStatus { poll } => {
                 let control = self.instruction(format!(
                     "call ptr @imre_popen_control(ptr {})",

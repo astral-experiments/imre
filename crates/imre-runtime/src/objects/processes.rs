@@ -26,7 +26,7 @@ mod asynchronous;
 mod launch_error;
 mod popen;
 pub(super) use asynchronous::AsyncProcess;
-pub(super) use popen::Popen;
+pub(super) use popen::{Popen, retain_live_owner};
 
 #[cfg(target_os = "linux")]
 unsafe extern "C" {
@@ -435,7 +435,6 @@ impl Launch {
         env: Option<StringPairs>,
         executable: Option<CString>,
     ) -> Result<Self> {
-        popen::cleanup();
         let program = executable.as_ref().unwrap_or_else(|| &argv[0]);
         let search = if program.as_bytes().contains(&b'/') {
             None
@@ -1120,6 +1119,7 @@ unsafe fn spawn_list(
     env: *const Object,
     streams: u32,
 ) -> Result<Child> {
+    popen::cleanup();
     // SAFETY: the compiler passes a rooted exact list, never a tuple or a scalar.
     let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
@@ -1202,6 +1202,7 @@ unsafe fn prepare_process(
     cwd: *const Str,
     env: *const Object,
 ) -> Result<(Launch, Option<CString>)> {
+    popen::cleanup();
     // SAFETY: existing run and asynchronous ABIs accept an exact list.
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0, true);
     // SAFETY: the legacy arguments have their original word representations.

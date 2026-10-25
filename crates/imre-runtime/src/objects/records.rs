@@ -419,7 +419,7 @@ fn release(owner: Release) {
             match current {
                 // SAFETY: each entry transfers one live owner of this record.
                 Release::Record(record) => unsafe { release_record_owner(record) },
-                Release::Object(object) => drop(object),
+                Release::Object(object) => super::release_object_owner(object),
                 Release::Sequence(kind, mut values) => {
                     if let Some(word) = values.pop() {
                         // SAFETY: the sequence transferred this independently owned word.
