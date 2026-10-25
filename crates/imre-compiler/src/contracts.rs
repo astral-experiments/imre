@@ -229,14 +229,18 @@ impl Builtin {
                 | ProcessOperation::JoinGroup
                 | ProcessOperation::GeneratorNext
                 | ProcessOperation::GeneratorYield
-                | ProcessOperation::Acquire => Contract::new(true, Unknown),
-                ProcessOperation::Executable
+                | ProcessOperation::Acquire
                 | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
+                | ProcessOperation::PopenCleanup
                 | ProcessOperation::Call { .. }
+                | ProcessOperation::AsyncSpawn { .. } => Contract::new(true, Unknown),
+                ProcessOperation::Executable
                 | ProcessOperation::PopenPid
+                | ProcessOperation::PopenActive
+                | ProcessOperation::PopenIdentity
                 | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
                 | ProcessOperation::PopenStatus { .. }
@@ -244,7 +248,6 @@ impl Builtin {
                 | ProcessOperation::PopenCommunicate { .. }
                 | ProcessOperation::PopenWait
                 | ProcessOperation::PopenSignal
-                | ProcessOperation::AsyncSpawn { .. }
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }
                 | ProcessOperation::IndirectCoroutine { .. }

@@ -6,31 +6,23 @@ use crate::StorageCell;
 use crate::objects::files::{FileState, errno_error};
 use std::cell::RefCell;
 
+mod active;
 mod communicate;
 mod control;
 
+pub(super) use active::cleanup;
+pub(in crate::objects) use active::retain_live_owner;
 use control::ChildControl;
 use std::sync::Arc;
 
 type Pipes = [Option<Rc<Object>>; 3];
-
-thread_local! {
-    // Like subprocess._active: dropping the last handle neither kills a live
-    // child nor blocks. A subsequent launch collects its status and pipes.
-    static ACTIVE: RefCell<Vec<(Arc<ChildControl>, Pipes)>> = const { RefCell::new(Vec::new()) };
-}
-
-pub(super) fn cleanup() {
-    ACTIVE.with_borrow_mut(|children| {
-        children.retain_mut(|(child, _)| !matches!(child.poll(), Ok(Some(_))));
-    });
-}
 
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
     control: Arc<ChildControl>,
     pipes: Pipes,
     communication: communicate::Communication,
+    finalized: bool,
 }
 
 impl Popen {
@@ -58,17 +50,27 @@ impl Popen {
     }
 }
 
-impl Drop for Popen {
-    fn drop(&mut self) {
+impl Popen {
+    /// Python calls __del__ only once, including when _active keeps self alive.
+    fn finalize(&mut self) -> bool {
+        if self.finalized {
+            return false;
+        }
+        self.finalized = true;
         // The public warning is about an unobserved returncode. Even a child
         // which has already exited can still be waiting for its parent to reap it.
         if self.control.status().is_none() {
             crate::objects::warnings::unobserved_child(self.control.pid);
         }
-        if !matches!(self.control.poll(), Ok(Some(_))) {
-            ACTIVE.with_borrow_mut(|children| {
-                children.push((self.control.clone(), std::mem::take(&mut self.pipes)))
-            });
+        !matches!(self.control.poll(), Ok(Some(_)))
+    }
+}
+
+impl Drop for Popen {
+    fn drop(&mut self) {
+        if self.finalize() {
+            // Internal run/call temporaries need not have a language-level owner.
+            active::defer_internal(self.control.clone(), std::mem::take(&mut self.pipes));
         }
     }
 }
@@ -268,6 +270,8 @@ pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *cons
 /// # Safety
 /// The caller roots the argv, optional directory/environment and buffer size.
 unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
+    // CPython runs _cleanup before validating the new Popen's arguments.
+    cleanup();
     // SAFETY: settings describe the rooted command, path and integer representations.
     let args = unsafe { WordKind::new(config.arg_kind).acquire(config.args as usize) };
     let streams = config.streams | (u32::from(!config.close_fds) << 17);
@@ -373,6 +377,7 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             args,
             control: Arc::new(ChildControl::new(child)),
             communication: Default::default(),
+            finalized: false,
         }
     })
 }

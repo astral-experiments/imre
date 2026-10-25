@@ -1073,6 +1073,23 @@ impl Checker<'_> {
         receiver: Expr,
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
+        if receiver.ty == Type::ActivePopen {
+            let (op, ty) = match attr.attr.as_str() {
+                "pid" => (ProcessOperation::PopenPid, Type::Int),
+                "returncode" => (
+                    ProcessOperation::PopenStatus { poll: false },
+                    self.types.optional(Type::Int),
+                ),
+                _ => {
+                    return Err(error(
+                        self.source,
+                        attr,
+                        "this Popen has unknown stream and argument types",
+                    ));
+                }
+            };
+            return Ok(operation(op, ty, vec![receiver]));
+        }
         let Type::Popen(capture, stdin, cmd) = receiver.ty else {
             unreachable!()
         };
@@ -1119,7 +1136,11 @@ impl Checker<'_> {
             ),
             "communicate" => {
                 let Type::Popen(capture, ..) = args[0].ty else {
-                    unreachable!()
+                    return Err(error(
+                        self.source,
+                        call,
+                        "cannot infer capture modes for an active child",
+                    ));
                 };
                 let input = self
                     .types

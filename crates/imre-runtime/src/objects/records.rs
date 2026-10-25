@@ -497,7 +497,7 @@ fn release(owner: Release) {
                 Release::Fields(record, next) => unsafe {
                     release_standalone_fields(record, descriptor(record), next, &pending);
                 },
-                Release::Object(object) => drop(object),
+                Release::Object(object) => super::release_object_owner(object),
                 Release::Table(mut table, mut next) => {
                     if table.release_next(&mut next) {
                         pending.borrow_mut().push(Release::Table(table, next));
