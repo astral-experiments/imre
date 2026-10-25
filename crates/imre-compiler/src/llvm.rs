@@ -66,7 +66,7 @@ impl Type {
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExceptionField
+            | Self::ValueView
             | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
@@ -128,7 +128,7 @@ impl Type {
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExceptionField
+            | Self::ValueView
             | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
@@ -331,6 +331,7 @@ fn emit_program(
         uses_sys_argv,
         uses_orig_argv,
         uses_linecache,
+        uses_builtins_last: module.uses_builtins_last(),
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -517,6 +518,7 @@ struct Emitter<'a, 'module> {
     uses_sys_argv: bool,
     uses_orig_argv: bool,
     uses_linecache: bool,
+    uses_builtins_last: bool,
     has_extensions: bool,
 }
 
@@ -723,7 +725,7 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ValueView
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -1747,6 +1749,9 @@ impl Emitter<'_, '_> {
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
             }
+            if self.uses_builtins_last {
+                self.line("call void @imre_builtins_clear()");
+            }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
@@ -1781,6 +1786,9 @@ impl Emitter<'_, '_> {
             self.cleanup_globals();
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
+            }
+            if self.uses_builtins_last {
+                self.line("call void @imre_builtins_clear()");
             }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
@@ -3356,7 +3364,7 @@ impl Emitter<'_, '_> {
                 | Type::CsvReader
                 | Type::Exception
                 | Type::NamedException(_)
-                | Type::ExceptionField
+                | Type::ValueView
                 | Type::ImportException
                 | Type::TimeoutExpired
                 | Type::TextIO
@@ -4339,6 +4347,38 @@ impl Emitter<'_, '_> {
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
+            Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
+            Builtin::BuiltinsHasLast => {
+                let bit = self.instruction("call i32 @imre_builtins_has_last()");
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::BuiltinsDeleteLast => {
+                self.void_call("imre_builtins_del_last", &[]);
+                none()
+            }
+            Builtin::BuiltinsSetLast | Builtin::SysDisplayHook => {
+                let value = &args[0].value;
+                let kind = if value.ty == Type::ValueView {
+                    u32::MAX
+                } else {
+                    representation_kind(value.ty, &self.module.types)
+                };
+                let word = self.word(value);
+                if matches!(builtin, Builtin::SysDisplayHook) {
+                    self.checked_line(format!(
+                        "call void @imre_sys_displayhook(i32 {kind}, i64 {word})"
+                    ));
+                } else {
+                    self.line(format!(
+                        "call void @imre_builtins_set_last(i32 {kind}, i64 {word})"
+                    ));
+                }
+                none()
+            }
             Builtin::IntegerPower => {
                 self.call("imre_int_pow", Type::Int, &[&args[0].value, &args[1].value])
             }
@@ -5012,7 +5052,7 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::None => self.call("imre_none_str", Type::Str, &[]),
-                Type::ExceptionField => {
+                Type::ValueView => {
                     self.call("imre_system_exit_code_text", Type::Str, &[&args[0].value])
                 }
                 Type::Exception
@@ -5710,7 +5750,7 @@ impl Emitter<'_, '_> {
                         self.instruction(format!("icmp eq i64 {}, 0", args[0].value.operand))
                     }
                     Type::None => "true".to_owned(),
-                    Type::ExceptionField => {
+                    Type::ValueView => {
                         let bit = self.instruction(format!(
                             "call i32 @imre_system_exit_code_equal(ptr {}, i32 0, i64 0)",
                             args[0].value.operand
@@ -5761,7 +5801,7 @@ impl Emitter<'_, '_> {
                     | Type::ByteOutput
                     | Type::Exception
                     | Type::NamedException(_)
-                    | Type::ExceptionField
+                    | Type::ValueView
                     | Type::ImportException
                     | Type::TimeoutExpired
                     | Type::Path
@@ -6010,7 +6050,7 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ValueView
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -6086,7 +6126,7 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExceptionField
+            | Type::ValueView
             | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
@@ -6676,7 +6716,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ByteOutput
         | Type::Exception
         | Type::NamedException(_)
-        | Type::ExceptionField
+        | Type::ValueView
         | Type::ImportException
         | Type::TimeoutExpired
         | Type::Path
@@ -7328,6 +7368,12 @@ declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
+declare ptr @imre_builtins_last()
+declare i32 @imre_builtins_has_last()
+declare void @imre_builtins_set_last(i32, i64)
+declare void @imre_builtins_del_last()
+declare void @imre_builtins_clear()
+declare void @imre_sys_displayhook(i32, i64)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()

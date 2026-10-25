@@ -44,8 +44,8 @@ pub(crate) enum Type {
     Exception,
     /// An exception object known to own the given fixed payload layout.
     NamedException(usize),
-    /// A retained value projected from a structured builtin exception.
-    ExceptionField,
+    /// A retained Python value with a concrete runtime type and independent ownership.
+    ValueView,
     /// A builtin ImportError (including its ModuleNotFoundError and marker subclasses).
     ImportException,
     /// A proved catch-only timeout with readonly float and nullable bytes fields.
@@ -191,7 +191,7 @@ impl std::fmt::Display for Type {
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception | Self::NamedException(_) => "Exception",
-            Self::ExceptionField => "exception field",
+            Self::ValueView => "retained value",
             Self::ImportException => "ImportError",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::StringIterable => "Iterable[str]",
@@ -309,6 +309,20 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
+    /// Only programs that can own a display value need to clear the namespace at shutdown.
+    pub(crate) fn uses_builtins_last(&self) -> bool {
+        let mut used = false;
+        for function in self.functions.iter().chain([&self.entry]) {
+            walk_expressions(&function.body, &mut |value| {
+                used |= matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::BuiltinsSetLast | Builtin::SysDisplayHook, _)
+                );
+            });
+        }
+        used
+    }
+
     /// Capture arguments, the original invocation, and source search paths only
     /// for modules that use them; a bare import needs no runtime state.
     pub(crate) fn startup_usage(&self) -> (bool, bool, bool) {
@@ -575,6 +589,11 @@ pub(crate) enum Builtin {
     Islice,
     Tee,
     Cycle,
+    SysDisplayHook,
+    BuiltinsLast,
+    BuiltinsHasLast,
+    BuiltinsSetLast,
+    BuiltinsDeleteLast,
     DirectoryContextView,
     Document(DocumentOp),
     /// Runs the static archive's module initializer in ordinary import order.
