@@ -259,6 +259,7 @@ impl Builtin {
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
             | Self::JsonLoads
+            | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver

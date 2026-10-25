@@ -25,7 +25,7 @@ python -B benchmarks/cpython_stdlib/full/json/native.py \
     --result /tmp/json-native.json
 ```
 
-The [native report](native-linux.json) records both `-O0` and `-O3`. The original unittest methods run on CPython; each JSON call runs in the compiled Imre driver. The host transports operands and reconstructs native values for the assertions. Both backend fixtures use the same executable. Each level ran 54 IDs (27 source methods; 256 native calls). Twenty-one additional binary stream controls check native `json.load` across encodings, doubled byte order marks and malformed code units; these do not increase the upstream test count.
+The [native report](native-linux.json) records both `-O0` and `-O3`. The [shared suite runner](../../SUITE_RUNNER.md) runs the original unittest fixtures, methods, and assertions on CPython; each JSON call runs in the compiled Imre driver. The host transports operands and reconstructs native values for the assertions. Both backend fixtures use the same executable. Each level ran 62 IDs (31 source methods; 356 native calls). Twenty-one binary stream controls and two additional checks of all five native `JSONDecodeError` fields do not increase the upstream test count.
 
 ## Compiled upstream methods
 

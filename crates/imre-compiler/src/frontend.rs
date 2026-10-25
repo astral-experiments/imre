@@ -5126,6 +5126,11 @@ impl<'a> Checker<'a> {
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
                         "code" => (Type::ExitCode, Builtin::SystemExitCode),
+                        "msg" => (Type::Str, Builtin::JsonErrorField(0)),
+                        "doc" => (Type::Str, Builtin::JsonErrorField(1)),
+                        "pos" => (Type::Int, Builtin::JsonErrorField(2)),
+                        "lineno" => (Type::Int, Builtin::JsonErrorField(3)),
+                        "colno" => (Type::Int, Builtin::JsonErrorField(4)),
                         "__cause__" => (
                             self.types.optional(Type::Exception),
                             Builtin::ExceptionCause,
