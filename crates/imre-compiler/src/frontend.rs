@@ -6229,6 +6229,7 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::StringIo)) => return self.string_io(call),
             Some(Binding::Intrinsic(Intrinsic::Batched)) => return self.batched_cursor(call),
+            Some(Binding::Intrinsic(Intrinsic::Compress)) => return self.compress_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::BytesIo)) => {
                 let args = self.arguments(
                     call,

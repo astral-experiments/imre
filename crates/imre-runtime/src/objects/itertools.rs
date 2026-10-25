@@ -84,6 +84,7 @@ pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *
 
 mod batched;
 mod chain;
+mod compress;
 mod sources;
 mod tee;
 use std::cell::{Cell, RefCell};
@@ -96,6 +97,7 @@ pub(super) enum Adapter {
     Tee(tee::Fork),
     Batched(batched::Batch),
     Chain(chain::Chain),
+    Compress(compress::Compress),
     Cycle(Cycle),
     PathWalk(paths::Walker),
 }
@@ -130,6 +132,7 @@ enum PullFrame {
     Batch(batched::Partial),
     ChainOuter,
     ChainInner,
+    CompressSelector(OwnedWord),
 }
 
 impl Drop for Adapter {
@@ -139,6 +142,12 @@ impl Drop for Adapter {
         let source = match self {
             Self::Tee(fork) => fork.take_source(),
             Self::Batched(batch) => batch.take_source(),
+            Self::Compress(filter) => {
+                if let Some(data) = filter.data.take() {
+                    records::release_object_word(data);
+                }
+                filter.selectors.take()
+            }
             Self::Chain(chain) => {
                 if let Some(outer) = chain.outer.get_mut().take() {
                     records::release_object_word(outer);
@@ -183,6 +192,7 @@ impl Adapter {
             Self::Tee(_) => "itertools._tee",
             Self::Batched(_) => "itertools.batched",
             Self::Chain(_) => "itertools.chain",
+            Self::Compress(_) => "itertools.compress",
             Self::Slice(_) => "itertools.islice",
             Self::Cycle(_) => "itertools.cycle",
             Self::PathWalk(_) => {
@@ -200,6 +210,7 @@ impl Adapter {
             Self::Cycle(cycle) => cycle.advance(item),
             Self::Batched(batch) => batch.advance(frame, item),
             Self::Chain(chain) => chain.advance(frame, item),
+            Self::Compress(filter) => filter.advance(frame, item),
             _ => unreachable!("only composed cursors request source items"),
         }
     }
@@ -228,6 +239,7 @@ impl Adapter {
                                         | Self::Cycle(_)
                                         | Self::Batched(_)
                                         | Self::Chain(_)
+                                        | Self::Compress(_)
                                 ) =>
                             {
                                 Some(Rc::clone(state))
@@ -274,9 +286,12 @@ impl Adapter {
                     )))
                 }
             }
-            Self::Tee(_) | Self::Slice(_) | Self::Cycle(_) | Self::Batched(_) | Self::Chain(_) => {
-                self.next_composed()
-            }
+            Self::Tee(_)
+            | Self::Slice(_)
+            | Self::Cycle(_)
+            | Self::Batched(_)
+            | Self::Chain(_)
+            | Self::Compress(_) => self.next_composed(),
             Self::PathWalk(walk) => walk.next(),
         }
     }

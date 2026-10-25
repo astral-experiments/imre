@@ -29,8 +29,8 @@ source and compiles each with an assertion adapter. The adapter checks equality
 and returns an assertion count from the executable. Both the method and every
 operation it invokes run in Imre; CPython does not supply iterator results.
 
-The [O0](native-O0.json) and [O3](native-O3.json) standalone controls pass twelve
-complete bodies: four repeat methods, five examples of chain/chain.from_iterable/count/cycle/islice,
+The [O0](native-O0.json) and [O3](native-O3.json) standalone controls pass thirteen
+complete bodies: four repeat methods, six examples of chain/chain.from_iterable/compress/count/cycle/islice,
 the twenty-million-item backward tee deletion regression, and two builtin
 filter/zip examples. Their native fixture records assertion counts.
 The [per-occurrence reports](COVERAGE.md) separately run the original unittest
@@ -81,3 +81,6 @@ shared inner cursor, delayed dictionary acquisition, and CSV parse errors:
 an inner reader can resume at its next row; an outer reader stops the chain
 and leaves that row for its other consumer. The separate native stack test
 advances and releases 16,384 nested chains while preserving an aliased leaf.
+
+[compress.py](compress.py) compares data and selector positions, propagation
+of selector errors, argument acquisition order, and truth of builtin values.

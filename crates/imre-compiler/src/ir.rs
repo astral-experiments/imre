@@ -530,6 +530,7 @@ pub(crate) enum Builtin {
         bounded: bool,
     },
     Islice,
+    Compress,
     Chain,
     ChainFrom(Type),
     Tee,

@@ -225,6 +225,62 @@ impl Checker<'_> {
         ))
     }
 
+    pub(super) fn compress_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let params = ["data", "selectors"].map(|name| Parameter {
+            name: name.to_owned(),
+            ty: Type::None,
+            kind: ParameterKind::PositionalOrKeyword,
+            default: None,
+            sign_only: false,
+        });
+        let mut items = [Type::Int; 2];
+        let args = self.arguments_with(call, &params, None, |checker, i, node| {
+            let source = checker.cursor_source_value(node)?;
+            items[i] = checker
+                .iterable_element(source.ty)
+                .or_else(|| {
+                    matches!(source.ty, Type::None | Type::Int | Type::Bool | Type::Float)
+                        .then_some(Type::Int)
+                })
+                .ok_or_else(|| {
+                    error(
+                        checker.source,
+                        node,
+                        "compress source requires one concrete element type",
+                    )
+                })?;
+            Ok(source)
+        })?;
+        let selector = self.types.payload(items[1]).unwrap_or(items[1]);
+        if !matches!(
+            selector,
+            Type::None
+                | Type::Bool
+                | Type::Int
+                | Type::Float
+                | Type::Str
+                | Type::StrLiteral(_)
+                | Type::Bytes
+                | Type::ListInt
+                | Type::List(_)
+                | Type::Tuple(_)
+                | Type::VarTuple(_)
+                | Type::Dict(_)
+                | Type::Set(_)
+                | Type::TextIO
+                | Type::CsvReader
+                | Type::Cursor(_)
+                | Type::Union(_)
+        ) {
+            return Err(error(
+                self.source,
+                call,
+                "compress selector needs a supported truth test",
+            ));
+        }
+        Ok(self.ordered_builtin(Builtin::Compress, self.types.cursor(items[0]), args))
+    }
+
     pub(super) fn tee_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let (source, n) = match call.arguments.args.as_ref() {

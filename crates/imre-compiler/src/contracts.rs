@@ -473,6 +473,7 @@ impl Builtin {
             | Self::Chain
             | Self::ChainFrom(_)
             | Self::Islice
+            | Self::Compress
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict

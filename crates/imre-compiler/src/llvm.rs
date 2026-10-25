@@ -5274,6 +5274,23 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::Compress => {
+                let data = &args[0].value;
+                let selectors = &args[1].value;
+                let (dm, sm) = (
+                    checked_iterable_mode(data.ty),
+                    checked_iterable_mode(selectors.ty),
+                );
+                let (d, s) = (self.word(data), self.word(selectors));
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_compress(i32 {dm}, i64 {d}, i32 {sm}, i64 {s})"
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::Tee => {
                 let source = &args[0].value;
                 let mode = iterable_mode(source.ty);
@@ -7452,6 +7469,7 @@ declare i64 @imre_tuple_len(ptr)
 declare i64 @imre_tuple_get(ptr, i64)
 declare ptr @imre_batched(i32, i64, i64, i32)
 declare ptr @imre_cycle(i32, i64)
+declare ptr @imre_compress(i32, i64, i32, i64)
 declare ptr @imre_chain(i64, ptr, i64)
 declare ptr @imre_chain_from(i32, i64, i32)
 declare i64 @imre_cursor_length_hint(ptr, i64)

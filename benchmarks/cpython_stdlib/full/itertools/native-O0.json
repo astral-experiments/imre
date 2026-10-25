@@ -28,6 +28,11 @@
       "assertions": 1,
       "status": "native"
     },
+    "test.test_itertools.TestExamples.test_compress": {
+      "method_sha256": "cd50edf3a21100df97da71341348d04303e216569416867359d40c50686ec9d4",
+      "assertions": 1,
+      "status": "native"
+    },
     "test.test_itertools.TestExamples.test_cycle": {
       "method_sha256": "47f20de83cb1aae6874a8dab7ac0b6f1099561df04b8c7af8fd33d03ba708dd9",
       "assertions": 1,

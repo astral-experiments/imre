@@ -18,6 +18,7 @@ CASES = {
     "TestBasicOps.test_repeat_with_negative_times": ("str", 4, ("repeat",)),
     "TestBasicOps.test_tee_del_backward": ("int", 0, ("repeat", "tee")),
     "TestExamples.test_count": ("list[int]", 1, ("count", "islice")),
+    "TestExamples.test_compress": ("list[str]", 1, ("compress",)),
     "TestExamples.test_cycle": ("list[str]", 1, ("cycle", "islice")),
     "TestExamples.test_islice": ("list[str]", 4, ("islice",)),
     "TestExamples.test_repeat": ("list[int]", 1, ("repeat",)),

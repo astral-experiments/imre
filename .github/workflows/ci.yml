@@ -293,7 +293,7 @@ jobs:
         run: |
           for opt in 0 3; do
             python3 benchmarks/cpython_stdlib/full/itertools/native.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" --result "$RUNNER_TEMP/itertools-O$opt.json"
-            for exercise in repeat sources tee batched chain; do
+            for exercise in repeat sources tee batched chain compress; do
               src="benchmarks/cpython_stdlib/full/itertools/$exercise.py"
               target/release/imre build "$src" --opt-level "$opt" -o "$RUNNER_TEMP/iterator"
               "$RUNNER_TEMP/iterator" "$RUNNER_TEMP/itertools-input" > "$RUNNER_TEMP/iterator.native"

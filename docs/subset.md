@@ -117,6 +117,11 @@ obtains its outer iterator at construction and its inner iterators on demand.
 An error reading the outer source or acquiring an inner iterator exhausts the
 chain; an error while reading an active inner source keeps that source active.
 
+`itertools.compress(data, selectors)` keeps two independent input cursors. Each
+pull reads data first, then tests its selector. An exhausted selector or a
+selector error therefore consumes one data item. Exact builtin selector values
+use their Python truth value; a class with a custom truth method is unsupported.
+
 `list(difflib.ndiff(before, after))` compares two string lists, including supported
 read-only `Sequence[str]` parameters. Line alignment, intraline Unicode hints,
 and popular-line handling follow CPython 3.12 with its default junk filters.
