@@ -380,12 +380,8 @@ impl Checker<'_> {
         ) {
             return self.path_call(receiver, name, call);
         }
-        if matches!(name, "iterdir" | "glob") {
-            return Err(error(
-                self.source,
-                call,
-                "Path iterators require an immediate loop, comprehension, or iterable consumer",
-            ));
+        if matches!(name, "iterdir" | "glob" | "rglob") {
+            return self.path_iterator(receiver, call, name);
         }
         let (kind, ty, arity) = match name {
             "absolute" => (PathOperation::Absolute, Type::Path, 0),
@@ -721,48 +717,58 @@ impl Checker<'_> {
         }
     }
 
-    /// Bounded glob syntax has no recursive traversal or dynamic matching protocol.
-    /// Matching itself stays native and preserves pathlib's treatment of dotfiles.
+    /// Construct the iterator at the call site. Globs bind and validate their pattern
+    /// now, but defer every directory scan until the consumer first requests a path.
     pub(super) fn path_iterator(
-        &self,
+        &mut self,
         receiver: Expr,
         call: &ast::ExprCall,
-        glob: bool,
+        name: &str,
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
-        self.reject_builtin_keywords(call)?;
-        let mut args = vec![receiver];
-        if glob {
-            let [ast::Expr::StringLiteral(pattern)] = call.arguments.args.as_ref() else {
-                return Err(error(
-                    self.source,
-                    call,
-                    "Path.glob requires one literal single-component pattern",
-                ));
-            };
-            check_string(pattern, self.source)?;
-            let value = pattern.value.to_str();
-            if value.is_empty() || value == "." || value.contains('/') || value.contains("**") {
-                return Err(error(
-                    self.source,
-                    pattern,
-                    "Path.glob supports nonempty single-component patterns without recursive '**'",
-                ));
+        if name == "iterdir" {
+            self.reject_builtin_keywords(call)?;
+            if !call.arguments.args.is_empty() {
+                return Err(error(self.source, call, "Path.iterdir takes no arguments"));
             }
-            args.push(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(value.into()),
-            });
-        } else if !call.arguments.args.is_empty() {
-            return Err(error(self.source, call, "Path.iterdir takes no arguments"));
+            return Ok(operation(
+                PathOperation::Iterdir,
+                self.types.cursor(Type::Path),
+                vec![receiver],
+            ));
         }
-        Ok(operation(
-            if glob {
-                PathOperation::Glob
-            } else {
-                PathOperation::Iterdir
+        let optional = self.types.optional(Type::Bool);
+        let default = self.coerce(
+            Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
             },
-            Type::Iterator,
+            optional,
+            call,
+        )?;
+        let params = [
+            parameter("pattern", Type::Str, None),
+            Parameter {
+                kind: ParameterKind::KeywordOnly,
+                ..parameter("case_sensitive", optional, Some(default))
+            },
+            Parameter {
+                kind: ParameterKind::KeywordOnly,
+                ..parameter("recurse_symlinks", Type::Bool, Some(boolean(false)))
+            },
+        ];
+        let args = self.arguments_with(call, &params, Some(receiver), |checker, i, value| {
+            if i == 0 {
+                checker.path_argument(value)
+            } else {
+                checker.expr_expected(value, params[i].ty)
+            }
+        })?;
+        Ok(self.ordered_path_operation(
+            PathOperation::Glob {
+                recursive: name == "rglob",
+            },
+            self.types.cursor(Type::Path),
             args,
         ))
     }

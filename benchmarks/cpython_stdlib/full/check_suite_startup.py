@@ -5,11 +5,14 @@ import json
 import keyword
 from pathlib import Path, PurePosixPath
 import subprocess
+import sys
 import tarfile
 import tempfile
 import tomllib
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from stage_tests import stage
 
 
 def suite_name(value):
@@ -30,11 +33,13 @@ def support_file(value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", type=Path, required=True)
-    parser.add_argument("--cpython-git", type=Path, required=True, help="checkout or bare Git repository with the pinned commit")
+    parser.add_argument("--cpython-git", type=Path, help="stage the full Lib/test from this Git repository instead of the vendored fixtures")
     parser.add_argument("--support-file", action="append", type=support_file, default=[],
                         help="also stage this pinned Lib/ source (repeatable)")
     parser.add_argument("suites", nargs="*", type=suite_name, help="defaults to primary wave-one suites")
     args = parser.parse_args()
+    if args.support_file and not args.cpython_git:
+        parser.error("--support-file needs a --cpython-git source")
     compiler = args.compiler.resolve(strict=True)
     with compiler.open("rb") as binary:
         compiler_digest = hashlib.file_digest(binary, "sha256").hexdigest()
@@ -43,19 +48,22 @@ def main():
     checks = []
     with tempfile.TemporaryDirectory(prefix="imre-cpython-suite-") as tmp:
         work = Path(tmp)
-        with tempfile.TemporaryFile() as archive:
-            subprocess.run(["git", "--literal-pathspecs", "-C", args.cpython_git, "archive", "--format=tar", pin, "--",
-                            "Lib/test", *["Lib/" + name for name in args.support_file]],
-                           stdout=archive, check=True)
-            archive.seek(0)
-            with tarfile.open(fileobj=archive) as tar:
-                tar.extractall(work, filter="data")
+        if args.cpython_git:
+            with tempfile.TemporaryFile() as archive:
+                subprocess.run(["git", "--literal-pathspecs", "-C", args.cpython_git, "archive", "--format=tar", pin, "--",
+                                "Lib/test", *["Lib/" + name for name in args.support_file]],
+                               stdout=archive, check=True)
+                archive.seek(0)
+                with tarfile.open(fileobj=archive) as tar:
+                    tar.extractall(work, filter="data")
+        else:
+            stage(work)
         root = work / "Lib"
         entry = root / "imre_suite.py"
         for suite in names:
             module = root.joinpath(*suite.split("."))
             if not (module.with_suffix(".py").is_file() or (module / "__init__.py").is_file()):
-                parser.error(f"no module {suite} in the pinned Lib/test")
+                parser.error(f"{suite} is not staged; --cpython-git includes the full pinned Lib/test")
             source = f"import {suite} as target\n"
             driver = ("import unittest\nsuite = unittest.defaultTestLoader.loadTestsFromModule(target)\n"
                       "unittest.TextTestRunner(verbosity=2).run(suite)\n")
@@ -69,7 +77,7 @@ def main():
                                    "exit": proc.returncode,
                                    "diagnostic": (proc.stdout + proc.stderr).replace(str(root) + "/", "Lib/").strip()})
     print(json.dumps({"cpython_commit": pin, "compiler_sha256": compiler_digest,
-                      "operation": "check", "tests_executed": 0,
+                      "operation": "check", "tests_executed": 0, "source": "git" if args.cpython_git else "vendored",
                       "support_files": args.support_file, "checks": checks}, indent=2))
     return int(any(row["exit"] != 0 for row in checks))
 
