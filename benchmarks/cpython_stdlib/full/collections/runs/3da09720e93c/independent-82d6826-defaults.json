@@ -1,0 +1,636 @@
+{
+  "historical_product": {
+    "base": "8969b80cc7425e226640800fac112c27b1be0e51",
+    "compiler_revision": "530ecc81681ad631708da130c2a71f22e81f06cf",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "head": "e8e92f706a39584c443a9a174b8e6741b4feec38",
+    "imre_sha256": "1a7f5911e298244dafc38c897ba9795b166b7593f1b91ab35760d6829f805e67",
+    "revision": "530ecc81681ad631708da130c2a71f22e81f06cf",
+    "runtime_sha256": "03985642a3f13c976ba949fbbc8c39a109d576c9e6da227ea98c2ebff150a58e",
+    "tree": "baea59b88dc9c368fc5a5d521e848955769b39b3"
+  },
+  "modes": {
+    "O0-reachable": {
+      "test.test_collections.TestCounter.test_ge": {
+        "evidence": {
+          "entry_sha256": "1a8f771cab9117a86ad4ccd1911a8d6c751a3ea7b36b073ecdaf9379fe14513b",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "0cfa2bfaef1c0edc0921109f1948fe46d21cd523c667925c9560f65d010590ab",
+          "operation": "Counter multiset containment with missing zero counts",
+          "reachable_only": true,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_ge",
+          "status": 0,
+          "stderr": "test_ge (__main__.TestCounter.test_ge) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_gt": {
+        "evidence": {
+          "entry_sha256": "82deb2de5772a37abb23bebaef88e8ad686641b7b5469cbd7c7b7342e56f205c",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "ec0001c6fd12796bd2f8eb57de80d99f37c6e0210a65188953f027d0e3895467",
+          "operation": "Counter strict multiset containment with missing zero counts",
+          "reachable_only": true,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_gt",
+          "status": 0,
+          "stderr": "test_gt (__main__.TestCounter.test_gt) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_le": {
+        "evidence": {
+          "entry_sha256": "c8801503deba70c11b0fe0f5a35f6270545016dfdc87345ef007a26487f13b90",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "7253520f6237ebe9f87f61085433bec9026023bba7dc39563417cda457446512",
+          "operation": "Counter multiset inclusion with missing zero counts",
+          "reachable_only": true,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_le",
+          "status": 0,
+          "stderr": "test_le (__main__.TestCounter.test_le) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_lt": {
+        "evidence": {
+          "entry_sha256": "acda75e0ff1a3360823ab79619299a0b69d93d8e3eeccda00da145a56e6a5496",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "746150baae9bea9d08b9d7a01f37df2339ab40ccd4fca1d16fef0e4045565e5a",
+          "operation": "Counter strict multiset inclusion with missing zero counts",
+          "reachable_only": true,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_lt",
+          "status": 0,
+          "stderr": "test_lt (__main__.TestCounter.test_lt) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_total": {
+        "evidence": {
+          "entry_sha256": "ca6b4f99b06a4a0c9b7dde7a7452d02696850e6b08decf2008d924adc0c49344",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "2df0ee692238ec6c283b680fc22ec954def93ab097c1c50daec0b41c4c77de2e",
+          "operation": "Counter construction and total()",
+          "reachable_only": true,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_total",
+          "status": 0,
+          "stderr": "test_total (__main__.TestCounter.test_total) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_deque.TestBasic.test_clear": {
+        "evidence": {
+          "entry_sha256": "d67dfba42bbaada79ea1bc9cdc9f5bc635e6fccd8d276c3fccf27d4356c01955",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "1b85276a6291dfd65920d2ff9edf5040fe9cd0caad03136af5a6cd0119db4375",
+          "operation": "Clear an existing native deque and measure its length",
+          "reachable_only": true,
+          "source_blob": "4e1a489205a6855e6a3f065d756ca8085d4b1043",
+          "staged_id": "__main__.TestBasic.test_clear",
+          "status": 0,
+          "stderr": "test_clear (__main__.TestBasic.test_clear) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_deque.TestBasic.test_maxlen_zero": {
+        "evidence": {
+          "entry_sha256": "49446e1213bacc06367019bb8d4c35b49e44a518dea2844378377d6db46a7213",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "0507ae1db4e0badd7c2ab3444f57c6eb8ab1c94eafedde4a1b8d48fe0128d6b5",
+          "operation": "Zero-length deque construction, extend and extendleft consume the original iterator",
+          "reachable_only": true,
+          "source_blob": "4e1a489205a6855e6a3f065d756ca8085d4b1043",
+          "staged_id": "__main__.TestBasic.test_maxlen_zero",
+          "status": 0,
+          "stderr": "test_maxlen_zero (__main__.TestBasic.test_maxlen_zero) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      }
+    },
+    "O0-whole": {
+      "test.test_collections.TestCounter.test_ge": {
+        "evidence": {
+          "entry_sha256": "1a8f771cab9117a86ad4ccd1911a8d6c751a3ea7b36b073ecdaf9379fe14513b",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "0cfa2bfaef1c0edc0921109f1948fe46d21cd523c667925c9560f65d010590ab",
+          "operation": "Counter multiset containment with missing zero counts",
+          "reachable_only": false,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_ge",
+          "status": 0,
+          "stderr": "test_ge (__main__.TestCounter.test_ge) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_gt": {
+        "evidence": {
+          "entry_sha256": "82deb2de5772a37abb23bebaef88e8ad686641b7b5469cbd7c7b7342e56f205c",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "ec0001c6fd12796bd2f8eb57de80d99f37c6e0210a65188953f027d0e3895467",
+          "operation": "Counter strict multiset containment with missing zero counts",
+          "reachable_only": false,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_gt",
+          "status": 0,
+          "stderr": "test_gt (__main__.TestCounter.test_gt) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_le": {
+        "evidence": {
+          "entry_sha256": "c8801503deba70c11b0fe0f5a35f6270545016dfdc87345ef007a26487f13b90",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "7253520f6237ebe9f87f61085433bec9026023bba7dc39563417cda457446512",
+          "operation": "Counter multiset inclusion with missing zero counts",
+          "reachable_only": false,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_le",
+          "status": 0,
+          "stderr": "test_le (__main__.TestCounter.test_le) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_lt": {
+        "evidence": {
+          "entry_sha256": "acda75e0ff1a3360823ab79619299a0b69d93d8e3eeccda00da145a56e6a5496",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "746150baae9bea9d08b9d7a01f37df2339ab40ccd4fca1d16fef0e4045565e5a",
+          "operation": "Counter strict multiset inclusion with missing zero counts",
+          "reachable_only": false,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_lt",
+          "status": 0,
+          "stderr": "test_lt (__main__.TestCounter.test_lt) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_total": {
+        "evidence": {
+          "entry_sha256": "ca6b4f99b06a4a0c9b7dde7a7452d02696850e6b08decf2008d924adc0c49344",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "2df0ee692238ec6c283b680fc22ec954def93ab097c1c50daec0b41c4c77de2e",
+          "operation": "Counter construction and total()",
+          "reachable_only": false,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_total",
+          "status": 0,
+          "stderr": "test_total (__main__.TestCounter.test_total) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_deque.TestBasic.test_clear": {
+        "evidence": {
+          "entry_sha256": "d67dfba42bbaada79ea1bc9cdc9f5bc635e6fccd8d276c3fccf27d4356c01955",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "1b85276a6291dfd65920d2ff9edf5040fe9cd0caad03136af5a6cd0119db4375",
+          "operation": "Clear an existing native deque and measure its length",
+          "reachable_only": false,
+          "source_blob": "4e1a489205a6855e6a3f065d756ca8085d4b1043",
+          "staged_id": "__main__.TestBasic.test_clear",
+          "status": 0,
+          "stderr": "test_clear (__main__.TestBasic.test_clear) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_deque.TestBasic.test_maxlen_zero": {
+        "evidence": {
+          "entry_sha256": "49446e1213bacc06367019bb8d4c35b49e44a518dea2844378377d6db46a7213",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "0507ae1db4e0badd7c2ab3444f57c6eb8ab1c94eafedde4a1b8d48fe0128d6b5",
+          "operation": "Zero-length deque construction, extend and extendleft consume the original iterator",
+          "reachable_only": false,
+          "source_blob": "4e1a489205a6855e6a3f065d756ca8085d4b1043",
+          "staged_id": "__main__.TestBasic.test_maxlen_zero",
+          "status": 0,
+          "stderr": "test_maxlen_zero (__main__.TestBasic.test_maxlen_zero) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      }
+    },
+    "O3-reachable": {
+      "test.test_collections.TestCounter.test_ge": {
+        "evidence": {
+          "entry_sha256": "1a8f771cab9117a86ad4ccd1911a8d6c751a3ea7b36b073ecdaf9379fe14513b",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "0cfa2bfaef1c0edc0921109f1948fe46d21cd523c667925c9560f65d010590ab",
+          "operation": "Counter multiset containment with missing zero counts",
+          "reachable_only": true,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_ge",
+          "status": 0,
+          "stderr": "test_ge (__main__.TestCounter.test_ge) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_gt": {
+        "evidence": {
+          "entry_sha256": "82deb2de5772a37abb23bebaef88e8ad686641b7b5469cbd7c7b7342e56f205c",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "ec0001c6fd12796bd2f8eb57de80d99f37c6e0210a65188953f027d0e3895467",
+          "operation": "Counter strict multiset containment with missing zero counts",
+          "reachable_only": true,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_gt",
+          "status": 0,
+          "stderr": "test_gt (__main__.TestCounter.test_gt) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_le": {
+        "evidence": {
+          "entry_sha256": "c8801503deba70c11b0fe0f5a35f6270545016dfdc87345ef007a26487f13b90",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "7253520f6237ebe9f87f61085433bec9026023bba7dc39563417cda457446512",
+          "operation": "Counter multiset inclusion with missing zero counts",
+          "reachable_only": true,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_le",
+          "status": 0,
+          "stderr": "test_le (__main__.TestCounter.test_le) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_lt": {
+        "evidence": {
+          "entry_sha256": "acda75e0ff1a3360823ab79619299a0b69d93d8e3eeccda00da145a56e6a5496",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "746150baae9bea9d08b9d7a01f37df2339ab40ccd4fca1d16fef0e4045565e5a",
+          "operation": "Counter strict multiset inclusion with missing zero counts",
+          "reachable_only": true,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_lt",
+          "status": 0,
+          "stderr": "test_lt (__main__.TestCounter.test_lt) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_total": {
+        "evidence": {
+          "entry_sha256": "ca6b4f99b06a4a0c9b7dde7a7452d02696850e6b08decf2008d924adc0c49344",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "2df0ee692238ec6c283b680fc22ec954def93ab097c1c50daec0b41c4c77de2e",
+          "operation": "Counter construction and total()",
+          "reachable_only": true,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_total",
+          "status": 0,
+          "stderr": "test_total (__main__.TestCounter.test_total) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_deque.TestBasic.test_clear": {
+        "evidence": {
+          "entry_sha256": "d67dfba42bbaada79ea1bc9cdc9f5bc635e6fccd8d276c3fccf27d4356c01955",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "1b85276a6291dfd65920d2ff9edf5040fe9cd0caad03136af5a6cd0119db4375",
+          "operation": "Clear an existing native deque and measure its length",
+          "reachable_only": true,
+          "source_blob": "4e1a489205a6855e6a3f065d756ca8085d4b1043",
+          "staged_id": "__main__.TestBasic.test_clear",
+          "status": 0,
+          "stderr": "test_clear (__main__.TestBasic.test_clear) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_deque.TestBasic.test_maxlen_zero": {
+        "evidence": {
+          "entry_sha256": "49446e1213bacc06367019bb8d4c35b49e44a518dea2844378377d6db46a7213",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "0507ae1db4e0badd7c2ab3444f57c6eb8ab1c94eafedde4a1b8d48fe0128d6b5",
+          "operation": "Zero-length deque construction, extend and extendleft consume the original iterator",
+          "reachable_only": true,
+          "source_blob": "4e1a489205a6855e6a3f065d756ca8085d4b1043",
+          "staged_id": "__main__.TestBasic.test_maxlen_zero",
+          "status": 0,
+          "stderr": "test_maxlen_zero (__main__.TestBasic.test_maxlen_zero) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      }
+    },
+    "O3-whole": {
+      "test.test_collections.TestCounter.test_ge": {
+        "evidence": {
+          "entry_sha256": "1a8f771cab9117a86ad4ccd1911a8d6c751a3ea7b36b073ecdaf9379fe14513b",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "0cfa2bfaef1c0edc0921109f1948fe46d21cd523c667925c9560f65d010590ab",
+          "operation": "Counter multiset containment with missing zero counts",
+          "reachable_only": false,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_ge",
+          "status": 0,
+          "stderr": "test_ge (__main__.TestCounter.test_ge) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_gt": {
+        "evidence": {
+          "entry_sha256": "82deb2de5772a37abb23bebaef88e8ad686641b7b5469cbd7c7b7342e56f205c",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "ec0001c6fd12796bd2f8eb57de80d99f37c6e0210a65188953f027d0e3895467",
+          "operation": "Counter strict multiset containment with missing zero counts",
+          "reachable_only": false,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_gt",
+          "status": 0,
+          "stderr": "test_gt (__main__.TestCounter.test_gt) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_le": {
+        "evidence": {
+          "entry_sha256": "c8801503deba70c11b0fe0f5a35f6270545016dfdc87345ef007a26487f13b90",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "7253520f6237ebe9f87f61085433bec9026023bba7dc39563417cda457446512",
+          "operation": "Counter multiset inclusion with missing zero counts",
+          "reachable_only": false,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_le",
+          "status": 0,
+          "stderr": "test_le (__main__.TestCounter.test_le) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_lt": {
+        "evidence": {
+          "entry_sha256": "acda75e0ff1a3360823ab79619299a0b69d93d8e3eeccda00da145a56e6a5496",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "746150baae9bea9d08b9d7a01f37df2339ab40ccd4fca1d16fef0e4045565e5a",
+          "operation": "Counter strict multiset inclusion with missing zero counts",
+          "reachable_only": false,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_lt",
+          "status": 0,
+          "stderr": "test_lt (__main__.TestCounter.test_lt) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_collections.TestCounter.test_total": {
+        "evidence": {
+          "entry_sha256": "ca6b4f99b06a4a0c9b7dde7a7452d02696850e6b08decf2008d924adc0c49344",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "2df0ee692238ec6c283b680fc22ec954def93ab097c1c50daec0b41c4c77de2e",
+          "operation": "Counter construction and total()",
+          "reachable_only": false,
+          "source_blob": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+          "staged_id": "__main__.TestCounter.test_total",
+          "status": 0,
+          "stderr": "test_total (__main__.TestCounter.test_total) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_deque.TestBasic.test_clear": {
+        "evidence": {
+          "entry_sha256": "d67dfba42bbaada79ea1bc9cdc9f5bc635e6fccd8d276c3fccf27d4356c01955",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "1b85276a6291dfd65920d2ff9edf5040fe9cd0caad03136af5a6cd0119db4375",
+          "operation": "Clear an existing native deque and measure its length",
+          "reachable_only": false,
+          "source_blob": "4e1a489205a6855e6a3f065d756ca8085d4b1043",
+          "staged_id": "__main__.TestBasic.test_clear",
+          "status": 0,
+          "stderr": "test_clear (__main__.TestBasic.test_clear) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      },
+      "test.test_deque.TestBasic.test_maxlen_zero": {
+        "evidence": {
+          "entry_sha256": "49446e1213bacc06367019bb8d4c35b49e44a518dea2844378377d6db46a7213",
+          "fixture": "default TestCase lifecycle in native unittest.main",
+          "method_sha256": "0507ae1db4e0badd7c2ab3444f57c6eb8ab1c94eafedde4a1b8d48fe0128d6b5",
+          "operation": "Zero-length deque construction, extend and extendleft consume the original iterator",
+          "reachable_only": false,
+          "source_blob": "4e1a489205a6855e6a3f065d756ca8085d4b1043",
+          "staged_id": "__main__.TestBasic.test_maxlen_zero",
+          "status": 0,
+          "stderr": "test_maxlen_zero (__main__.TestBasic.test_maxlen_zero) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n",
+          "stdout": ""
+        },
+        "outcome": "pass",
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "imre",
+          "operation": "imre"
+        }
+      }
+    }
+  },
+  "reference_controls": {
+    "test.test_collections.TestCounter.test_ge": "pass",
+    "test.test_collections.TestCounter.test_gt": "pass",
+    "test.test_collections.TestCounter.test_le": "pass",
+    "test.test_collections.TestCounter.test_lt": "pass",
+    "test.test_collections.TestCounter.test_total": "pass",
+    "test.test_deque.TestBasic.test_clear": "pass",
+    "test.test_deque.TestBasic.test_maxlen_zero": "pass"
+  },
+  "reference_denominator": 659,
+  "release": {
+    "artifacts": {
+      "imre": {
+        "path": "imre",
+        "sha256": "556ad40b63e99bc9986f04371fde3af54210841f307f591e5337e86ea17ef890"
+      },
+      "imre_runtime": {
+        "path": "libimre_runtime.a",
+        "sha256": "16f5962e8bc226a98fee8aee8c95362d4dc5b54baf448c9c834565360f4fed82"
+      }
+    },
+    "compiler_commit": "82d6826d1f94931480233a0211d27ac3ef549ebf",
+    "ohm_experimental_defaults": false,
+    "profile_opt_level": 3,
+    "source_tree": "5f6e172e35a248bc8d360b21fab1c6803695797d"
+  }
+}

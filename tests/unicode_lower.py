@@ -1,4 +1,4 @@
-"""Compare Unicode 16 str.lower over every native scalar, including final-sigma context."""
+"""Compare Unicode 16 upper and lower mappings, including final-sigma context."""
 import argparse
 from pathlib import Path
 import subprocess
@@ -9,7 +9,8 @@ import unicodedata
 
 DRIVER = """import sys
 from pathlib import Path
-print(Path(sys.argv[1]).read_bytes().decode("utf-8").lower())
+text = Path(sys.argv[1]).read_bytes().decode("utf-8")
+print(text.upper() if sys.argv[2] == "upper" else text.lower())
 """
 
 
@@ -36,12 +37,14 @@ def main():
             source = "\0".join(prefix + chr(c) + suffix for c in range(0x110000)
                                if not 0xD800 <= c <= 0xDFFF)
             path.write_bytes(source.encode())
-            expected = source.lower().encode() + b"\n"
-            for binary in binaries:
-                result = subprocess.run([binary, path], check=True, capture_output=True, timeout=300)
-                if result.stdout != expected or result.stderr:
-                    raise AssertionError(f"{binary.name} differs for context {prefix!r}, {suffix!r}")
-        print("5,560,320 scalar/context cases matched per optimization level")
+            methods = ("lower", "upper") if not prefix and not suffix else ("lower",)
+            for method in methods:
+                expected = getattr(source, method)().encode() + b"\n"
+                for binary in binaries:
+                    result = subprocess.run([binary, path, method], check=True, capture_output=True, timeout=300)
+                    if result.stdout != expected or result.stderr:
+                        raise AssertionError(f"{binary.name} {method} differs for context {prefix!r}, {suffix!r}")
+        print("5,560,320 lowercase and 1,112,064 uppercase scalar/context cases matched per level")
 
 
 if __name__ == "__main__":
