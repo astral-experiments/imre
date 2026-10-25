@@ -16,9 +16,9 @@ jobs:
       - name: Check out the exact prospective merge, without this validation workflow
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 037180a2841fb9d4961f4b5139a156117a6cef53
+          ref: b7bb90be1abffbdefff46db00d1520755c2b290d
           persist-credentials: false
-      - run: test "$(git rev-parse 'HEAD^{tree}')" = e9e41272d95c5d059d8638aec6dabd317f753fba
+      - run: test "$(git rev-parse 'HEAD^{tree}')" = ee150a852652ca183ffb2347249c6803cc963fef
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
@@ -121,3 +121,69 @@ jobs:
           for opt in 0 3; do
             python3 -B benchmarks/cpython_stdlib/native_paths.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" --result "$RUNNER_TEMP/pure-path-$opt.json"
           done
+      - name: Test later main changes on the same runner with the built dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          feature=f1cb878a7e6d20a480972c1393ce0f16b7d302b9
+          # This workflow has read-only repository access and never pushes.
+          # The merge has the exact published PR head as its second parent.
+          git -c protocol.version=2 fetch --no-tags --unshallow origin main "$feature"
+          latest() { git ls-remote origin refs/heads/main | cut -f1; }
+          base=
+          tested=$(git rev-parse 'HEAD^{tree}')
+          while true; do
+            new=$(latest)
+            if [[ "$base" == "$new" ]]; then break; fi
+            git fetch --no-tags origin "$new"
+            git -c advice.detachedHead=false checkout --detach "$new"
+            git -c user.name=CI -c user.email=ci@localhost merge --no-ff --no-commit "$feature"
+            tree=$(git write-tree)
+            test "$tree" = "$(git merge-tree --write-tree "$new" "$feature")"
+            cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+            python3 -B benchmarks/cpython_stdlib/full/doctest/audit.py --cpython-source .cpython-stdlib-reference
+            python3 -B benchmarks/cpython_stdlib/full/doctest/native.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/doctest-latest.json"
+            cmp benchmarks/cpython_stdlib/full/doctest/execution-linux.json "$RUNNER_TEMP/doctest-latest.json"
+            for opt in 0 3; do
+              program="$RUNNER_TEMP/argparse-$opt"
+              if [[ -e tests/fixtures/argparse/known_args.py ]]; then
+                target/debug/imre build tests/fixtures/argparse/known_args.py --no-cache --opt-level "$opt" --runtime "$PWD/target/debug/libimre_runtime.a" --clang /usr/bin/clang-18 -o "$program"
+                for scenario in flat child repeat; do
+                  case $scenario in flat) args=(one two --unknown -v three);; child) args=(commands --parent=x --before r --flag --after);; repeat) args=(repeat);; esac
+                  python3 -B tests/fixtures/argparse/known_args.py "${args[@]}" > "$RUNNER_TEMP/argparse-reference"
+                  "$program" "${args[@]}" > "$RUNNER_TEMP/argparse-native"
+                  cmp "$RUNNER_TEMP/argparse-reference" "$RUNNER_TEMP/argparse-native"
+                done
+              fi
+              for mode in normal reachable; do
+                extra=(); if [[ "$mode" == reachable ]]; then extra=(--reachable-only); fi
+                d="$RUNNER_TEMP/doctest-simple-namespace"
+                target/debug/imre build "$d/case.py" --no-cache --opt-level "$opt" --runtime "$PWD/target/debug/libimre_runtime.a" --clang /usr/bin/clang-18 -o "$d/main" "${extra[@]}"
+                "$d/main" > "$d/native" 2> "$d/native.err"
+                cmp "$d/reference" "$d/native"
+                grep -F 'Ran 1 test' "$d/native.err"; grep -Fx 'OK' "$d/native.err"
+              done
+            done
+            for fixture in git vendored; do
+              extra=(); if [[ "$fixture" == git ]]; then extra=(--cpython-git .cpython-stdlib-reference); fi
+              rc=0
+              python3 -B benchmarks/cpython_stdlib/full/check_suite_startup.py --compiler target/debug/imre "${extra[@]}" test.test_itertools test.test_json > "$RUNNER_TEMP/latest-$fixture.json" || rc=$?
+              test "$rc" -le 1
+            done
+            python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          a,b = [json.loads((root/f'latest-{source}.json').read_text()) for source in ('vendored','git')]
+          for report in (a,b):
+              for row in report['checks']:
+                  row['diagnostic']=re.sub(r'(?<= under )/[^;\n]*?/imre-cpython-suite-[^/\s]+/Lib(?=;)', '<staged>/Lib', row['diagnostic'])
+          assert len(a['checks']) == 8 and a['checks'] == b['checks'] and a['tests_executed'] == b['tests_executed'] == 0
+          print(json.dumps(a))
+          PY
+            cargo test --locked -j 2 -p imre-compiler -p imre-runtime --lib --features imre-compiler/verify-ir
+            git merge --abort
+            base=$new; tested=$tree
+            echo "Verified merge base=$base tree=$tested"
+          done
+          echo "DOCTEST_VERIFIED_BASE=$base DOCTEST_VERIFIED_TREE=$tested"
