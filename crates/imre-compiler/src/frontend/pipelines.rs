@@ -218,6 +218,7 @@ impl Checker<'_> {
                         | Intrinsic::Cycle
                         | Intrinsic::Batched
                         | Intrinsic::Accumulate
+                        | Intrinsic::Predicate(_)
                         | Intrinsic::Compress
                 ))
             )
@@ -1901,7 +1902,7 @@ impl Checker<'_> {
     /// Infer the parameter of a fixed unary function or noncapturing lambda from the
     /// pulled item. A caller may already have checked a dynamic callback to preserve
     /// its position among the constructor arguments.
-    fn item_callback(
+    pub(in crate::frontend) fn item_callback(
         &mut self,
         expression: &ast::Expr,
         item: Type,

@@ -123,6 +123,13 @@ impl Checker<'_> {
                 "accumulate requires a binary callable with the input and result types of its total",
             ));
         }
+        if matches!(source_ty, Type::None | Type::Bool | Type::Int | Type::Float)
+            || (static_function.is_none() && func != signature)
+        {
+            // These checked representations have a catchable TypeError: a bad
+            // source at construction, a bad function only on a subsequent pull.
+            self.graph.checked_overload(self.module, call.range());
+        }
         Ok(self.ordered_builtin(
             Builtin::Accumulate { static_function },
             self.types.cursor(item),

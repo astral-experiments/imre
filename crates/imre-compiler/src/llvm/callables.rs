@@ -12,6 +12,7 @@ pub(super) fn adapters(
     resource_types: &HashSet<Type>,
     output: &mut Output,
 ) {
+    predicate_bridges(module, sanitize, output);
     let mut targets = BTreeSet::new();
     let mut invoked = false;
     let mut enum_receiver = false;
@@ -133,6 +134,63 @@ pub(super) fn adapters(
         }
         writeln!(body, "  ret {returns} %result\n}}").unwrap();
         output.common().push('\n');
+    }
+}
+
+/// Convert the runtime's two words to the exact Python argument types. The
+/// helper itself performs normal callable dispatch, truth conversion and cleanup.
+fn predicate_bridges(module: &Module, sanitize: bool, output: &mut Output) {
+    let mut helpers = BTreeSet::new();
+    for function in module.functions.iter().chain([&module.entry]) {
+        crate::ir::walk_expressions(&function.body, &mut |expr| {
+            if let ExprKind::Builtin(
+                Builtin::Predicate(_, crate::ir::PredicateTest::Function(id)),
+                _,
+            ) = &expr.kind
+            {
+                helpers.insert(*id);
+            }
+        });
+    }
+    for id in helpers {
+        let helper = &module.functions[id];
+        let target = output.function_name(id);
+        let name = format!("{target}_predicate");
+        let attrs = if sanitize {
+            " alwaysinline sanitize_address"
+        } else {
+            " alwaysinline"
+        };
+        let body = output.function(
+            output.function_owner(id),
+            &name,
+            "i32",
+            "i64 %predicate, i64 %item",
+            attrs,
+        );
+        let mut args = Vec::new();
+        for (index, slot) in helper.params.iter().enumerate() {
+            let word = if index + 1 == helper.params.len() {
+                "%item"
+            } else {
+                "%predicate"
+            };
+            let ty = helper.locals[*slot].llvm();
+            let op = match ty {
+                "i64" => {
+                    args.push(format!("i64 {word}"));
+                    continue;
+                }
+                "ptr" => "inttoptr",
+                "double" => "bitcast",
+                "i1" | "i8" | "i32" => "trunc",
+                _ => unreachable!("concrete predicate argument"),
+            };
+            writeln!(body, "  %a{index} = {op} i64 {word} to {ty}").unwrap();
+            args.push(format!("{ty} %a{index}"));
+        }
+        writeln!(body, "  %truth = call i1 @{target}({})", args.join(", ")).unwrap();
+        body.push_str("  %result = zext i1 %truth to i32\n  ret i32 %result\n}\n");
     }
 }
 

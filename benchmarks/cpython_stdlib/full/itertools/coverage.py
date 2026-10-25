@@ -36,9 +36,12 @@ REVIEWED = {
     "TestExamples.test_compress": ("list[str]", ["compress"]),
     "TestExamples.test_count": ("list[int]", ["count", "islice"]),
     "TestExamples.test_cycle": ("list[str]", ["cycle", "islice"]),
+    "TestExamples.test_dropwhile": ("list[int]", ["dropwhile"]),
     "TestExamples.test_filter": ("list[int]", ["builtins.filter"]),
+    "TestExamples.test_filterfalse": ("list[int]", ["filterfalse"]),
     "TestExamples.test_islice": ("list[str]", ["islice"]),
     "TestExamples.test_repeat": ("list[int]", ["repeat"]),
+    "TestExamples.test_takewhile": ("list[int]", ["takewhile"]),
     "TestExamples.test_zip": ("list[tuple[str, str]]", ["builtins.zip"]),
 }
 EXAMPLE_TYPES = {

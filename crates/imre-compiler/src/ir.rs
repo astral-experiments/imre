@@ -522,6 +522,21 @@ pub(crate) enum ArgparseOutput {
     File,
 }
 
+/// CPython's predicate cursors differ in what happens after the first false result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub(crate) enum PredicateMode {
+    FilterFalse,
+    DropWhile,
+    TakeWhile,
+}
+
+#[derive(Clone)]
+pub(crate) enum PredicateTest {
+    Function(usize),
+    Invalid(String),
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     Repeat,
@@ -534,6 +549,7 @@ pub(crate) enum Builtin {
     Accumulate {
         static_function: Option<usize>,
     },
+    Predicate(PredicateMode, PredicateTest),
     Compress,
     Chain,
     ChainFrom(Type),

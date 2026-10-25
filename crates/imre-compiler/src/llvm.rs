@@ -5274,6 +5274,42 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::Predicate(mode, test) => {
+                let (function, source) = (&args[0].value, &args[1].value);
+                let source_mode = checked_iterable_mode(source.ty);
+                let function_kind = representation_kind(function.ty, &self.module.types);
+                let (target, error, length, transfer) = match test {
+                    crate::ir::PredicateTest::Function(id) => {
+                        let target = format!("{}_predicate", self.output.function_name(*id));
+                        let target = self.output.used(self.output.function_owner(*id), target);
+                        let helper = &self.module.functions[*id];
+                        let mut transfer = 0;
+                        for (index, slot) in helper.params.iter().enumerate() {
+                            if self.resource_types.contains(&helper.locals[*slot]) {
+                                transfer |= if index + 1 == helper.params.len() {
+                                    2
+                                } else {
+                                    1
+                                };
+                            }
+                        }
+                        (format!("@{target}"), "null".to_owned(), 0, transfer)
+                    }
+                    crate::ir::PredicateTest::Invalid(message) => {
+                        let bytes = self.byte_array(message.as_bytes().to_vec());
+                        ("null".to_owned(), format!("@{bytes}"), message.len(), 0)
+                    }
+                };
+                let f = self.word(function);
+                let s = self.word(source);
+                let mode = *mode as u32;
+                let operand = self.checked_pointer(format!("call ptr @imre_predicate_cursor(i32 {mode}, i32 {source_mode}, i64 {s}, i32 {function_kind}, i64 {f}, ptr {target}, ptr {error}, i64 {length}, i32 {transfer})"));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::Accumulate { static_function } => {
                 let (source, function, initial) = (&args[0].value, &args[1].value, &args[2].value);
                 let mode = checked_iterable_mode(source.ty);
@@ -7511,6 +7547,7 @@ declare ptr @imre_batched(i32, i64, i64, i32)
 declare ptr @imre_cycle(i32, i64)
 declare i64 @imre_cursor_next_required(ptr)
 declare ptr @imre_accumulate(i32, i64, i32, i64, i32, i64, i32, i32, i32)
+declare ptr @imre_predicate_cursor(i32, i32, i64, i32, i64, ptr, ptr, i64, i32)
 declare ptr @imre_compress(i32, i64, i32, i64)
 declare ptr @imre_chain(i64, ptr, i64)
 declare ptr @imre_chain_from(i32, i64, i32)

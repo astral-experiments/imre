@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation};
+use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation, PredicateMode};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -257,6 +257,7 @@ pub(crate) enum Intrinsic {
     Count,
     Islice,
     Accumulate,
+    Predicate(PredicateMode),
     Compress,
     Tee,
     Batched,
@@ -607,6 +608,9 @@ impl IntrinsicModule {
             (Self::Itertools, "islice") => Intrinsic::Islice,
             (Self::Itertools, "batched") => Intrinsic::Batched,
             (Self::Itertools, "accumulate") => Intrinsic::Accumulate,
+            (Self::Itertools, "filterfalse") => Intrinsic::Predicate(PredicateMode::FilterFalse),
+            (Self::Itertools, "dropwhile") => Intrinsic::Predicate(PredicateMode::DropWhile),
+            (Self::Itertools, "takewhile") => Intrinsic::Predicate(PredicateMode::TakeWhile),
             (Self::Itertools, "compress") => Intrinsic::Compress,
             (Self::Itertools, "cycle") => Intrinsic::Cycle,
             (Self::Itertools, "repeat") => Intrinsic::Repeat,
