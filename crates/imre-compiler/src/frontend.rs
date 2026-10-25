@@ -44,6 +44,7 @@ mod inspect;
 mod iterables;
 mod itertools;
 mod json;
+mod keyword_forwarding;
 mod linecache;
 mod literals;
 mod local_functions;
@@ -372,6 +373,7 @@ const RESERVED: &[&str] = &[
     "sorted",
     "divmod",
     "isinstance",
+    "issubclass",
     "input",
     "print",
     "range",
@@ -533,10 +535,16 @@ pub(crate) fn lower_with_owners(
                                 node_index: ast::AtomicNodeIndex::NONE,
                             })));
                     }
+                    let defaults = if cached.is_some() {
+                        // A cache can distinguish omitted keywords from explicitly supplied defaults.
+                        keyword_forwarding::Defaults::local(module_id)
+                    } else {
+                        keyword_forwarding::prepare(graph, module_id, &mut function)
+                    };
                     let signature = signature(
                         &function,
                         graph,
-                        module_id,
+                        defaults,
                         &classes.declarations,
                         &types,
                         None,
@@ -642,10 +650,11 @@ pub(crate) fn lower_with_owners(
                 })]
                 .into();
             }
+            let defaults = keyword_forwarding::prepare(graph, module_id, &mut method);
             let mut signature = signature(
                 &method,
                 graph,
-                module_id,
+                defaults,
                 &classes.declarations,
                 &types,
                 Some(context),
@@ -1073,12 +1082,13 @@ pub(crate) fn lower_with_owners(
 fn signature(
     function: &ast::StmtFunctionDef,
     graph: &SourceGraph,
-    module: ModuleId,
+    defaults: keyword_forwarding::Defaults,
     classes: &Classes,
     types: &Types,
     method: Option<records::MethodContext>,
     inference: &inference::Inference,
 ) -> Result<Signature, String> {
+    let module = defaults.module;
     let source = &graph.modules[module].source;
     let owner = method.map(|context| context.class);
     let receiver = method
@@ -1105,20 +1115,27 @@ fn signature(
     let mut params = Vec::new();
     let mut parameter_types = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
-        let module = owner
-            .and_then(|id| {
-                let record = &classes.definitions[id];
-                (record.generated_initializer && function.name.as_str() == "__init__")
-                    .then(|| {
-                        record
-                            .fields
-                            .iter()
-                            .find(|field| field.name == parameter.name().as_str())
-                    })
-                    .flatten()
-                    .map(|field| field.module)
+        let origin = defaults
+            .forwarded
+            .filter(|(first, _)| index >= *first)
+            .map(|(_, id)| id);
+        let module = origin
+            .or_else(|| {
+                owner.and_then(|id| {
+                    let record = &classes.definitions[id];
+                    (record.generated_initializer && function.name.as_str() == "__init__")
+                        .then(|| {
+                            record
+                                .fields
+                                .iter()
+                                .find(|field| field.name == parameter.name().as_str())
+                        })
+                        .flatten()
+                        .map(|field| field.module)
+                })
             })
             .unwrap_or(module);
+        let source = origin.map_or(source, |id| &graph.modules[id].source);
         let sequence = parameter.annotation().is_some_and(|value|
             matches!(value, ast::Expr::Subscript(subscript) if graph.resolve(module, &subscript.value) == Some(Binding::Intrinsic(Intrinsic::Sequence))));
         let empty_sequence = sequence
@@ -5207,6 +5224,21 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if values.iter().all(|v| matches!(v.ty, Type::ForwardRef(_))) {
+                    let ops = compare
+                        .ops
+                        .iter()
+                        .map(|op| match op {
+                            ast::CmpOp::Eq => Ok(Compare::Equal),
+                            ast::CmpOp::NotEq => Ok(Compare::NotEqual),
+                            _ => Err(error(self.source, expression, "ForwardRef has no ordering")),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    return Ok(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Compare(values, ops),
+                    });
+                }
                 let mut values = self.numeric_union_comparison(values);
                 if let ([left, right], [op]) = (values.as_slice(), compare.ops.as_ref())
                     && let Some(result) = inspect::equality(left, right, *op)
@@ -5612,6 +5644,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Type::ForwardRef(layout) = receiver.ty {
+                    return self.forward_ref_attribute(layout, receiver, attribute);
+                }
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return Ok(wrapped);
                 }
@@ -6248,6 +6283,7 @@ impl<'a> Checker<'a> {
             return self.counter(call, None, Some(ty));
         }
         match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => return self.forward_ref(call),
             Some(Binding::Intrinsic(Intrinsic::GetAnnotations)) => {
                 return self.get_annotations(call);
             }
@@ -6603,6 +6639,9 @@ impl<'a> Checker<'a> {
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance") {
             return self.isinstance(call);
         }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "issubclass") {
+            return self.issubclass(call);
+        }
         if let Some(kind) = self.exception_category(&call.func) {
             return self.simple_exception(call, kind);
         }
@@ -6793,6 +6832,11 @@ impl<'a> Checker<'a> {
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.named_format_call(Self::string_value(receiver), call);
+            }
+            if attribute.attr.as_str() == "translate"
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.translate_method(Self::string_value(receiver), call);
             }
             if receiver.ty == Type::Str {
                 match attribute.attr.as_str() {
@@ -7442,6 +7486,7 @@ impl<'a> Checker<'a> {
                     args[0].ty,
                     Type::Class(_)
                         | Type::CompletedProcess(..)
+                        | Type::ForwardRef(_)
                         | Type::ModuleSpec(_)
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)

@@ -313,6 +313,8 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 
 `str.expandtabs(tabsize=8)` counts Unicode code points, resets the column on CR or LF, and removes tabs for zero or negative widths. Converting the width happens before inspecting the text. Integers, booleans, and fixed classes with an integer-returning `__index__` are supported; values outside the platform C `int` range raise `OverflowError`. A string with no tabs retains its identity. A user `__index__` returning a boolean is rejected because Python's configurable deprecation warning is not supported.
 
+`str.translate(table)` looks up each Unicode ordinal in an exact plain dictionary. A missing ordinal keeps the character; `None` deletes it; an integer selects a code point, and a string can replace the character with any number of characters. An invalid value raises only when its key is hit. Tables use supported homogeneous or optional value layouts, and integer keys or provably distinct string, bytes or tuple keys. An inline ordinal table may mix strings, integers and `None`; the same value layout handles a closed string-or-integer result (such as `logging.getLevelName(name)`). User lookup callbacks, sequence tables, `str.maketrans`, and surrogate output are outside this subset.
+
 The bundled `string` module exports its nine ASCII character sets in CPython order (`ascii_letters`, `ascii_lowercase`, `ascii_uppercase`, `digits`, `hexdigits`, `octdigits`, `punctuation`, `printable`, `whitespace`). `string.capwords(s, sep=None)` accepts native strings, collapses Python whitespace by default, and preserves empty fields with an explicit separator. `Formatter`, `Template`, `string.templatelib`, and arbitrary module reflection are outside this subset.
 
 `str.split(sep=None, maxsplit=-1)` and `str.rsplit(sep=None, maxsplit=-1)` accept both positional and named arguments. With no separator, they group Python whitespace and omit empty fields; an explicit string separator preserves empty fields and must be nonempty. The split limit follows Python's left or right scanning rules. `str.strip([chars])`, `str.lstrip([chars])`, and `str.rstrip([chars])` accept an optional positional string or `None`: omitted/`None` removes Python whitespace, while a string names a set of Unicode scalar values to remove.
@@ -553,6 +555,14 @@ The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes
 
 ## Function arguments and defaults
 
+An ordinary wrapper can forward `**options` once to a statically known function
+that it calls by name. Supply all of that function's positional arguments;
+its remaining keyword-only parameters must have immutable scalar defaults.
+For example, `def report(value, **options): return format_row(value, **options)`
+accepts the same optional named arguments as `format_row`. Caller expressions
+still run in source order. Reading, changing, or returning the keyword
+dictionary requires general variadic support and is rejected.
+
 First-party functions, instance methods, and constructors accept positional and named arguments. Parameters before `/` are positional-only; parameters after a bare `*` are keyword-only. Other parameters accept either form. Imported aliases and re-exports retain the defining signature. Every call is bound during compilation, including checks for missing, duplicate, unexpected, or incorrectly typed arguments.
 
 ```python
@@ -605,6 +615,8 @@ A string template can substitute named `str` and `int` arguments, as in `url.for
 `textwrap.dedent(text)` removes the common prefix of spaces and tabs on nonblank lines. Each tab counts as a distinct character. Whitespace-only lines become empty as in Python 3.14. Interpolation happens before dedenting, so newlines in field values participate in the common-prefix calculation.
 
 `textwrap.indent(text, prefix, predicate=None)` preserves line endings, including CRLF and Unicode line separators. By default it prefixes lines that contain a non-whitespace character. An optional `Callable[[str], bool]` receives each complete line, including its terminator. Errors raised by the predicate stop iteration.
+
+`textwrap.TextWrapper`, `wrap`, `fill`, and `shorten` support string input, explicit wrapping options, and mutation of a wrapper between calls. Word splitting follows CPython's whitespace and hyphen rules, including its Unicode word characters. Boolean options also accept integers; when choosing how to split, CPython checks whether `break_on_hyphens` is the singleton `True`. A dynamically assembled keyword dictionary still needs the compiler's normal keyword-unpacking support.
 
 ## Immutable bytes
 
