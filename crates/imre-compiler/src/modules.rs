@@ -99,6 +99,7 @@ pub(crate) enum IntrinsicModule {
     Urllib,
     UrllibParse,
     Collections,
+    CollectionsNative,
     CollectionsAbc,
     Copy,
     Itertools,
@@ -272,6 +273,7 @@ pub(crate) enum Intrinsic {
     DefaultDict,
     NamedTuple,
     Counter,
+    CountElements,
     Deque,
     Repeat,
     LengthHint,
@@ -389,6 +391,7 @@ impl IntrinsicModule {
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
             "collections" => Some(Self::Collections),
+            "_collections" => Some(Self::CollectionsNative),
             "collections.abc" => Some(Self::CollectionsAbc),
             "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
@@ -655,8 +658,11 @@ impl IntrinsicModule {
             (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
-            (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
-            (Self::Collections, "deque") => Intrinsic::Deque,
+            (Self::Collections | Self::CollectionsNative, "_count_elements") => {
+                Intrinsic::CountElements
+            }
+            (Self::Collections | Self::CollectionsNative, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections | Self::CollectionsNative, "deque") => Intrinsic::Deque,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
@@ -971,6 +977,12 @@ impl SourceGraph {
     /// Target headers decide whether an errno from-import succeeds or raises ImportError.
     pub(crate) fn checked_builtin_import(&self, module: ModuleId, alias: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::BuiltinImport(alias));
+    }
+
+    /// A sealed module exports this exact member even when typeshed omits it.
+    pub(crate) fn checked_builtin_attribute(&self, module: ModuleId, name: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::BuiltinAttribute(name));
     }
 
     /// Record the exact list read proved by lowering a fixed-width tuple spread.
@@ -1765,7 +1777,10 @@ impl<'a> Loader<'a> {
                         }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
-                        if module == IntrinsicModule::Opcode {
+                        if matches!(
+                            module,
+                            IntrinsicModule::Opcode | IntrinsicModule::CollectionsNative
+                        ) {
                             self.checked_builtin_imports.push((id, alias.range()));
                         }
                         continue;
@@ -1832,10 +1847,17 @@ impl<'a> Loader<'a> {
                             })?;
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
+                        if module == IntrinsicModule::Collections
+                            && binding == Binding::Intrinsic(Intrinsic::CountElements)
+                        {
+                            self.checked_builtin_imports.push((id, alias.range()));
+                        }
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
-                    if module == IntrinsicModule::Opcode
-                        && let Some(name) = &import.module
+                    if matches!(
+                        module,
+                        IntrinsicModule::Opcode | IntrinsicModule::CollectionsNative
+                    ) && let Some(name) = &import.module
                     {
                         self.checked_builtin_imports.push((id, name.range()));
                     }
