@@ -170,7 +170,10 @@ impl Checker<'_> {
         if let Some(kind) = self.exception_category(expression) {
             return Ok(vec![InstanceType::Exception(kind)]);
         }
-        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::MappingAbc)) {
+        if matches!(
+            self.resolve(expression),
+            Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+        ) {
             let mut classes = vec![InstanceType::Dict];
             classes.extend(
                 self.classes
@@ -383,10 +386,7 @@ impl Checker<'_> {
     /// Tests for derived records or exception kinds can require runtime inspection.
     /// A stored builtin exception can be either a SystemExit or an Exception.
     fn instance_member_matches(&self, ty: Type, classes: &[InstanceType]) -> Option<bool> {
-        if matches!(
-            ty,
-            Type::ModuleMember | Type::ExceptionField | Type::StringIterable
-        ) {
+        if matches!(ty, Type::ObjectValue | Type::StringIterable) {
             return None;
         }
         let mut unknown = false;

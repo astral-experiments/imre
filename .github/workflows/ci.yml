@@ -167,7 +167,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup show
       - name: Install LLVM 18 and the CRC32C build tools
-        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 cmake
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 cmake valgrind
       - name: Verify and assemble the vendored CPython suite fixtures
         run: |
           python3 benchmarks/cpython_stdlib/full/test_stage_tests.py
@@ -432,7 +432,9 @@ jobs:
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites errno differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
       - name: Run original string core methods in native Imre
-        run: python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+        run: |
+          python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+          python3 benchmarks/cpython_stdlib/full/string/template_scaling.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Run pinned str.expandtabs methods and checked allocation controls
         run: PYTHONPATH=.cpython-stdlib-reference/Lib python3 tests/text_expandtabs_upstream.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Validate guarded list lengths on bounded heaps
