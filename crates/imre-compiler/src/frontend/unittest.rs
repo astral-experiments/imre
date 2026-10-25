@@ -347,13 +347,13 @@ impl Checker<'_> {
             match key {
                 "expected_exception" => {
                     if expected.is_some() {
-                        duplicate = Some(key);
+                        duplicate.get_or_insert(key);
                     }
                     expected = Some(self.unittest_expected(&keyword.value, &mut body, this)?);
                 }
                 "expected_regex" if regex => {
                     if pattern.is_some() {
-                        duplicate = Some(key);
+                        duplicate.get_or_insert(key);
                     }
                     pattern = Some(self.unittest_pattern(&keyword.value, &mut body, &mut clear)?);
                 }
@@ -664,7 +664,7 @@ impl Checker<'_> {
                     }
                 }
                 _ => match &mut callee {
-                    ast::Expr::Attribute(attr) => {
+                    ast::Expr::Attribute(attr) => 'method: {
                         let unbound = if attr
                             .value
                             .as_name_expr()
@@ -682,6 +682,16 @@ impl Checker<'_> {
                             let root =
                                 self.unittest_argument(&attr.value, &mut body, &mut locals, false)?;
                             let slot = locals.last().unwrap().1;
+                            // Sealed poll methods have no property lookup or user callback.
+                            if self.locals[slot] == Type::Poll
+                                && matches!(
+                                    attr.attr.as_str(),
+                                    "poll" | "register" | "modify" | "unregister"
+                                )
+                            {
+                                *attr.value = root;
+                                break 'method attr.attr.to_string();
+                            }
                             let Type::Class(owner) = self.locals[slot] else {
                                 return Err(error(
                                     self.source,

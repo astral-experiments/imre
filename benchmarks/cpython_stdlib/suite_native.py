@@ -467,19 +467,10 @@ def run_evidence(suite, executions, reference, level, *, preflight=None, excepti
 
 
 def testcase_fixture(equality=None):
-    """Use the native TestCase. Supply bool for a test whose equality operands are booleans."""
-    if equality is None:
-        return "import unittest\n\nclass NativeCase(unittest.TestCase):\n"
-    if equality != "bool":
+    """Use the native TestCase, including for the former bool-specific fixture."""
+    if equality not in (None, "bool"):
         raise ValueError(f"unsupported equality fixture: {equality}")
-    return """import unittest
-
-class NativeCase:
-    def assertEqual(self, first: bool, second: bool, msg: str | None = None) -> None:
-        if first != second:
-            case = unittest.TestCase()
-            raise AssertionError(case._formatMessage(msg, f"{first!r} != {second!r}"))
-"""
+    return "import unittest\n\nclass NativeCase(unittest.TestCase):\n"
 
 
 def native_method(toolchain, directory, path, owner, case_id, fixture=None, *, operation=None, assertions="imre"):

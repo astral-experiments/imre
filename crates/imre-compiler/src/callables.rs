@@ -73,6 +73,7 @@ mod tests {
         let first = Type::Callable(0);
         let second = Type::Callable(1);
         let module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
             class_metadata: Vec::new(),
