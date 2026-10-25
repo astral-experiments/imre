@@ -7526,9 +7526,10 @@ impl<'a> Checker<'a> {
                 "only statically bound direct calls are supported",
             ));
         };
-        // A standard stream passed positionally is displayed like any other
-        // value. Imre's text streams have a fixed UTF-8 encoding.
+        // Passing stderr as a positional value displays the open text stream.
         if matches!(name.id.as_str(), "print" | "repr" | "str")
+            && !self.names.contains_key(name.id.as_str())
+            && self.resolve(&call.func).is_none()
             && call.arguments.keywords.is_empty()
             && call
                 .arguments
@@ -7544,8 +7545,17 @@ impl<'a> Checker<'a> {
                 }
                 pieces.push(
                     if self.resolve(arg) == Some(Binding::Intrinsic(Intrinsic::Stderr)) {
-                        unpacking::string(
-                            "<_io.TextIOWrapper name='<stderr>' mode='w' encoding='utf-8'>",
+                        unpacking::concat(
+                            unpacking::concat(
+                                unpacking::string(
+                                    "<_io.TextIOWrapper name='<stderr>' mode='w' encoding='",
+                                ),
+                                Expr {
+                                    ty: Type::Str,
+                                    kind: ExprKind::Builtin(Builtin::SysStreamEncoding, vec![]),
+                                },
+                            ),
+                            unpacking::string("'>"),
                         )
                     } else {
                         self.expr_expected(arg, Type::Str)?
