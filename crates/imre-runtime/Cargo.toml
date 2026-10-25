@@ -10,6 +10,7 @@ license.workspace = true
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
+allocator-api2 = "=0.2.21"
 imre-regex = { path = "../imre-regex" }
 base64 = "=0.22.1"
 num-bigint.workspace = true

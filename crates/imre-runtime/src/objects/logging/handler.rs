@@ -20,7 +20,7 @@ thread_local! { static HANDLERS: RefCell<HashMap<Rc<str>, Entry>> = RefCell::def
 /// The caller roots a live record and the optional native string words.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_handler_rename(handler: *const usize, old: usize, new: usize) {
-    // SAFETY: nonzero optional strings are rooted Rc payload pointers.
+    // SAFETY: nonzero optional strings are rooted native string pointers.
     let (old, new) = unsafe { ((old as *const Str).as_ref(), (new as *const Str).as_ref()) };
     HANDLERS.with_borrow_mut(|names| {
         if let Some(old) = old {
@@ -74,6 +74,7 @@ pub unsafe extern "C" fn imre_log_handler_lookup(name: *const Str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::StrOwner;
     use crate::objects::records::{RecordDescriptor, imre_record_new, imre_record_release};
 
     #[test]
@@ -83,8 +84,8 @@ mod tests {
             kinds: std::ptr::null(),
             semantics: std::ptr::null(),
         };
-        let name = Rc::new(Str::from("replacement"));
-        let key = Rc::as_ptr(&name) as usize;
+        let name = StrOwner::new(Str::from("replacement"));
+        let key = StrOwner::as_ptr(&name) as usize;
         // SAFETY: the layout and name live through every use and both owners
         // of the second record are released separately.
         unsafe {
@@ -93,7 +94,7 @@ mod tests {
             imre_log_handler_rename(first, 0, key);
             imre_log_handler_rename(second, 0, key);
             imre_record_release(first);
-            let owned = imre_log_handler_lookup(Rc::as_ptr(&name));
+            let owned = imre_log_handler_lookup(StrOwner::as_ptr(&name));
             assert_eq!(owned, second as usize);
             imre_record_release(second);
             assert!(HANDLERS.with_borrow(|names| names.contains_key("replacement")));
