@@ -116,10 +116,13 @@ impl Session {
         let vendored = ty_vendored::file_system().clone();
         // CPython's POSIX which() accepts a byte search path independently of
         // the command's type. The cross-platform typeshed overloads omit it.
-        system.fs().write_file_all(
-            SystemPathBuf::from(root).join("shutil.pyi"),
-            "from os import PathLike\nfrom typing import TypeVar\n_S = TypeVar('_S', str, bytes)\ndef which(cmd: _S | PathLike[_S], mode: int = ..., path: str | bytes | PathLike[str] | None = ...) -> _S | None: ...\n",
-        ).map_err(|error| error.to_string())?;
+        system
+            .fs()
+            .write_file_all(
+                SystemPathBuf::from(root).join("shutil.pyi"),
+                include_str!("stubs/shutil.pyi"),
+            )
+            .map_err(|error| error.to_string())?;
         let mut settings = ProgramSettings::empty(&vendored);
         settings.python_version.version = ruff_python_ast::PythonVersion::PY314;
         let mut roots = vec![SystemPathBuf::from(root)];
