@@ -304,6 +304,7 @@ pub(crate) enum Intrinsic {
     Sha256,
     CodecInfoClass,
     CodecLookup,
+    CodecGetWriter,
     CodecBom(&'static [u8]),
     HashNew,
     SimpleNamespace,
@@ -805,6 +806,7 @@ impl IntrinsicModule {
 
                 _ => return None,
             }),
+            (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Hashlib, "new") => Intrinsic::HashNew,

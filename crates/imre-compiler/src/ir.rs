@@ -122,6 +122,8 @@ pub(crate) enum Type {
     CodecInfo,
     /// A POSIX IPv4 stream socket with shared descriptor ownership.
     Socket,
+    CodecWriterClass,
+    CodecWriter,
     Sha256,
     Poll,
     JsonDecoder,
@@ -354,6 +356,8 @@ impl std::fmt::Display for Type {
             Self::CodecInfo => "codecs.CodecInfo",
             Self::Poll => "select.poll",
             Self::Socket => "socket.socket",
+            Self::CodecWriterClass => "type[codecs.StreamWriter]",
+            Self::CodecWriter => "codecs.StreamWriter",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -1045,6 +1049,7 @@ pub(crate) enum Builtin {
     CodecEncode,
     CodecDecode,
     Socket(SocketOp),
+    CodecWriter(WriterOperation),
     Sha256Hex,
     Sha256New,
     HashNew,
@@ -1059,6 +1064,7 @@ pub(crate) enum Builtin {
     },
     Sha256Copy,
     BytesIo,
+    BytesIoValue,
     StringIo(StringIoOperation),
     ContextVar(ContextOperation),
     BinarySeek,
@@ -1690,6 +1696,21 @@ pub(crate) enum LogRecordOperation {
     Repr,
     Flag,
     SetFlag,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WriterOperation {
+    Class,
+    New,
+    Write,
+    Flush,
+    Close,
+    Reset,
+    Encoding,
+    SetEncoding,
+    Stream,
+    Errors,
+    SetErrors,
 }
 
 /// Operations on the native logging registry and its named loggers.

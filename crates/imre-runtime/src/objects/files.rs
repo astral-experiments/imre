@@ -165,6 +165,18 @@ impl FileState {
             .ok_or_else(|| Error::new(Kind::ValueError, "I/O operation on closed file."))
     }
 
+    /// A codec writer forwards missing attributes to the actual binary stream.
+    pub(super) fn binary_type_name(&self) -> &'static str {
+        match self.kind {
+            FileKind::Memory => "_io.BytesIO",
+            FileKind::BinaryRead => "_io.BufferedReader",
+            FileKind::BinaryWrite => "_io.BufferedWriter",
+            FileKind::GzipBinaryRead => "GzipFile",
+            FileKind::Member => "ZipExtFile",
+            FileKind::Text | FileKind::TextMemory => unreachable!("expected a binary stream"),
+        }
+    }
+
     pub(super) fn read(&mut self) -> Result<Str> {
         if self.kind == FileKind::TextMemory {
             return self.text_memory()?.read(None, false);
