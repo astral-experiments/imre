@@ -81,7 +81,7 @@ pub unsafe extern "C" fn imre_os_open(
 // All C ints fit in the immediate representation. Heap integers cannot fit.
 fn c_int(word: usize) -> Result<libc::c_int> {
     (word & 1 != 0)
-        .then(|| (word as i64) >> 1)
+        .then_some((word as i64) >> 1)
         .and_then(|n| libc::c_int::try_from(n).ok())
         .ok_or_else(|| {
             Error::new(
