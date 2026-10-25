@@ -39,11 +39,27 @@ class NativeCase:
     with tempfile.TemporaryDirectory() as tmp:
         executors = {}
         for method in ("test_big_queue_popleft", "test_big_queue_popright",
-                       "test_big_stack_left", "test_big_stack_right"):
+                       "test_big_stack_left", "test_big_stack_right", "test_setitem"):
             case_id = f"test.test_deque.TestBasic.{method}"
             directory = Path(tmp) / method
             directory.mkdir()
-            executors[case_id] = native_method(tools, directory, source, "TestBasic", case_id, fixture)
+            if method == "test_setitem":
+                prefix = """from collections import deque
+
+class NativeCase:
+    def assertEqual(self, first: list[int], second: list[int]) -> None:
+        if len(first) != len(second):
+            raise AssertionError("list lengths differ")
+        for index in range(len(first)):
+            if first[index] != second[index]:
+                raise AssertionError("list items differ")
+"""
+                operation = "Construct, index-assign, and iterate a native deque"
+            else:
+                prefix = fixture
+                operation = "Construct, append, and pop at opposite or matching deque ends"
+            executors[case_id] = native_method(tools, directory, source, "TestBasic", case_id, prefix,
+                                               operation=("imre", operation))
         evidence, failures, skips = run_in_fixtures(suite, executors)
     report = {"cpython_commit": manifest["commit"], "opt_level": args.opt_level,
               "operation": "native Imre deque", "tests": evidence,

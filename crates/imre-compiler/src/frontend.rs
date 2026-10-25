@@ -3338,7 +3338,7 @@ impl<'a> Checker<'a> {
                     let (key, element) = if let Some(mapping) = self.types.mapping(list.ty) {
                         mapping
                     } else {
-                        let element = self.types.element(list.ty).ok_or_else(|| {
+                        let element = self.types.indexed_element(list.ty).ok_or_else(|| {
                             error(
                                 self.source,
                                 target,
@@ -3354,7 +3354,11 @@ impl<'a> Checker<'a> {
                             "augmented items require int or float storage",
                         ));
                     }
-                    let index = self.expr_expected(&target.slice, key)?;
+                    let index = if matches!(list.ty, Type::Deque(_)) {
+                        self.integer_index(&target.slice)?
+                    } else {
+                        self.expr_expected(&target.slice, key)?
+                    };
                     let value = self.expr(&assign.value)?;
                     let value = Self::integer_addend(assign.op, value, element);
                     let (op, result) = self.binary_op(assign.op, element, value.ty, statement)?;
@@ -3452,6 +3456,14 @@ impl<'a> Checker<'a> {
                         ));
                     };
                     let receiver = self.expr(&target.value)?;
+                    if matches!(receiver.ty, Type::Deque(_)) {
+                        let index = self.integer_index(&target.slice)?;
+                        statements.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(Builtin::DequeDelete, vec![receiver, index]),
+                        }));
+                        continue;
+                    }
                     let (key, _) = self.types.mapping(receiver.ty).ok_or_else(|| {
                         error(
                             self.source,
@@ -4597,6 +4609,10 @@ impl<'a> Checker<'a> {
                             (key, Builtin::DictContains)
                         } else if receiver.ty == Type::Str {
                             (Type::Str, Builtin::StringContains)
+                        } else if let Some(element @ (Type::Int | Type::Str | Type::Bool)) =
+                            self.types.deque_element(receiver.ty)
+                        {
+                            (element, Builtin::DequeContains)
                         } else if let Some(element) = self
                             .types
                             .set_element(receiver.ty)
@@ -4859,6 +4875,13 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
+                if let Some(element) = self.types.deque_element(list.ty) {
+                    let index = self.integer_index(&subscript.slice)?;
+                    return Ok(Expr {
+                        ty: element,
+                        kind: ExprKind::Builtin(Builtin::DequeGet, vec![list, index]),
+                    });
+                }
                 let list = match list.ty {
                     documents::LIST => self.document_list(list),
                     Type::Document(_) => self.document_map(list),

@@ -866,6 +866,10 @@ constructor accepts an iterable and an optional nonnegative `maxlen`. It support
 append, pop, and extend at either end, clear, shallow copy, equality, length,
 truth testing, and forward or reverse iteration. A saved append or pop method
 keeps its receiver alive. An unannotated empty deque defaults to integer elements.
+Integer and boolean indices support reads, replacement, deletion and numeric
+augmented assignment, including negative positions. Replacement keeps an
+iterator valid; deletion invalidates it. Membership supports homogeneous
+integers, strings and booleans.
 
 `collections.Counter[K]` uses exact string or integer keys and arbitrary-precision integer counts. `Counter(iterable)` counts each key, and `Counter(mapping)` copies integer counts. A bare `Counter` annotation or unconstrained empty `Counter()` uses string keys. `Counter[int]()` and an annotated `Counter[int]` destination select integer keys. String-key counters also accept keyword counts. `update` adds its positional iterable or mapping and then the keyword counts, retaining negative and zero entries. A missing subscription returns zero without inserting. Membership, `get`, key iteration and `items()` inspect the stored entries. Deleting an absent key is a no-op. `total()` and `sum(c.values())` sum all counts. Equality between counters with the same key type treats absent keys as zero. Frozen dataclasses can hold independently created counters with `field(default_factory=Counter)`.
 

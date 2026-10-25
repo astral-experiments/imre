@@ -28,7 +28,7 @@ impl Checker<'_> {
             args.values.push(if index == 0 {
                 self.expr(expression)?
             } else {
-                self.cursor_index(expression)?
+                self.integer_index(expression)?
             });
         }
         let object =
@@ -60,7 +60,7 @@ impl Checker<'_> {
             ));
         }
         let default = if let Some(default) = default {
-            self.cursor_index(default)?
+            self.integer_index(default)?
         } else {
             pipelines::integer(0)
         };
@@ -70,7 +70,7 @@ impl Checker<'_> {
         })
     }
 
-    fn cursor_index(&mut self, node: &ast::Expr) -> Result<Expr, String> {
+    pub(super) fn integer_index(&mut self, node: &ast::Expr) -> Result<Expr, String> {
         let value = self.expr(node)?;
         if value.ty == Type::Bool {
             return Ok(Expr {

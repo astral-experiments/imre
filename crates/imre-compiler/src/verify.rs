@@ -179,7 +179,7 @@ impl Verifier<'_> {
     }
 
     fn item(&self, receiver: Type, index: Type) -> Result<Type, String> {
-        if let Some(element) = self.module.types.element(receiver) {
+        if let Some(element) = self.module.types.indexed_element(receiver) {
             same(index, Type::Int)?;
             Ok(element)
         } else if let Some((key, value)) = self.module.types.mapping(receiver) {

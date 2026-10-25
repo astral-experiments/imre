@@ -328,6 +328,7 @@ impl Builtin {
             | Self::StrEnumValue
             | Self::EnumString
             | Self::StringListContains
+            | Self::DequeContains
             | Self::StringContains
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
@@ -365,6 +366,9 @@ impl Builtin {
             | Self::ParseArgs { .. }
             | Self::DequeAppend { .. }
             | Self::DequePop { .. }
+            | Self::DequeGet
+            | Self::DequeSet
+            | Self::DequeDelete
             | Self::Pop
             | Self::Print
             | Self::SortRestore

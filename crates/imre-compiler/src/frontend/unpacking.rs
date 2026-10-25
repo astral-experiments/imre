@@ -201,7 +201,7 @@ impl Checker<'_> {
                     .mapping(receiver.ty)
                     .or_else(|| {
                         self.types
-                            .element(receiver.ty)
+                            .indexed_element(receiver.ty)
                             .map(|element| (Type::Int, element))
                     })
                     .ok_or_else(|| {
@@ -211,7 +211,11 @@ impl Checker<'_> {
                             "indexed assignment requires a mutable typed list or dictionary",
                         )
                     })?;
-                let index = self.expr_expected(&subscript.slice, key)?;
+                let index = if matches!(receiver.ty, Type::Deque(_)) {
+                    self.integer_index(&subscript.slice)?
+                } else {
+                    self.expr_expected(&subscript.slice, key)?
+                };
                 let value = self.coerce(value, element, target)?;
                 Ok(Statement::SetItem(receiver, index, value))
             }
