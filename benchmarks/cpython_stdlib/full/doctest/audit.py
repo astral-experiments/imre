@@ -69,7 +69,7 @@ def main():
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5):
         parser.error("use the test-enabled CPython 3.14.5 interpreter")
-    manifest = json.loads((HERE / "UPSTREAM.json").read_text())
+    manifest = json.loads((HERE / "AUDITED_SOURCES.json").read_text())
     verify_files(args.cpython_source, manifest["files"])
     verify_files(DOCSTRINGS, {"LICENSE": manifest["files"]["LICENSE"]})
     if (DOCSTRINGS / "json.decoder.txt").read_bytes() != json.decoder.__doc__.encode():

@@ -18,8 +18,10 @@ to their original module denominators.
 
 [audit.py](audit.py) calls both original hooks, records their actual
 constructors and executes each discovered doctest on CPython 3.14.5. It
-checks the pinned [source blobs and license](UPSTREAM.json), including the
+checks the pinned [source blobs and license](AUDITED_SOURCES.json), including the
 original modules and the native compiler's copy of each docstring.
+The module owners' fixture manifests stage the original tests. This audit
+also checks their installed copies and CPython's library and C sources.
 [reference.json](reference.json) records the exact source, expected output,
 flags, expected exception, indentation and line of each example.
 
