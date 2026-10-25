@@ -312,6 +312,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                 (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
                     super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
                 ),
+                (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
+                    object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)
+                }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
                     left.compare_entry(right, position)
                 }
@@ -429,6 +432,13 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         Storage::Dictionary(mapping) => {
                             format_entry(owner, mapping.repr_entry(output, position), &mut pending)
                         }
+                        Storage::SimpleNamespace(dict) => dict
+                            .0
+                            .with(|state| state.dictionary().namespace_repr_entry(output, position))
+                            .map(|(next, word, kind)| {
+                                pending.push(ReprTask::Object(owner, next));
+                                ReprTask::Word(word, kind)
+                            }),
                         Storage::Set(set) => {
                             format_entry(owner, set.repr_entry(output, position), &mut pending)
                         }

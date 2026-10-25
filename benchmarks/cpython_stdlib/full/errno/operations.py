@@ -1,6 +1,11 @@
 """Observe the target errno table, its aliases, and the shared mutable dictionary."""
 import errno
 from errno import EDOM as DOMAIN, ERANGE, errorcode as reverse, __name__ as module_name
+from types import ModuleType, SimpleNamespace
+
+
+def module_has_code(module: ModuleType, name: str) -> bool:
+    return SimpleNamespace(present=hasattr(module, name)).present
 
 def evaluate(value: int) -> int:
     print("evaluated")
@@ -9,6 +14,8 @@ def evaluate(value: int) -> int:
 
 def main() -> None:
     mod = errno
+    assert module_has_code(mod, "EDOM")
+    assert not module_has_code(mod, "NOT_AN_ERRNO_CODE")
     names = 0
     for name in mod.__dict__.keys():
         print(name)

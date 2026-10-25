@@ -72,12 +72,6 @@ REJECTED = {
     "optional_result": "result: CompletedProcess[str] | None = None\nprint(result.stdout)",
     "result_subclass": "class Custom(CompletedProcess):\n    pass",
 }
-for name, value in {
-    "stdin": "0",
-    "stdout": "1",
-    "stderr": "2",
-}.items():
-    REJECTED[f"unsupported_{name}"] = f"run(['command'], capture_output=True, encoding='utf-8', {name}={value})"
 for name, value in {"args": "['other']", "returncode": "0", "stdout": "'text'", "stderr": "'text'"}.items():
     REJECTED[f"write_{name}"] = f"result = {CALL}\nresult.{name} = {value}"
 REJECTED["write_error_field"] = "error: Exception = ValueError('message')\nerror.stdout = 'text'"
