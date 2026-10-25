@@ -39,6 +39,7 @@ mod tempdirs;
 mod text;
 mod unions;
 mod values;
+mod warnings;
 mod words;
 mod zipfile;
 

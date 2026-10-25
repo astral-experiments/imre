@@ -4017,6 +4017,13 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
+            Builtin::WarningFilter(category) => {
+                self.checked_line(format!(
+                    "call void @imre_warning_simplefilter(ptr {}, i32 {category})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             Builtin::TimeSleep => {
                 self.void_call("imre_time_sleep", &[&args[0].value]);
                 none()
@@ -6724,6 +6731,7 @@ declare void @imre_async_loop_signal(ptr, i64, ptr)
 declare void @imre_async_loop_close(ptr)
 declare i32 @imre_async_cancel(ptr)
 declare double @imre_wall_time()
+declare void @imre_warning_simplefilter(ptr, i32)
 declare void @imre_time_sleep(double)
 declare ptr @imre_str_percent_int(ptr,i64)
 declare ptr @imre_str_percent_text(ptr,ptr)
@@ -6755,11 +6763,12 @@ declare ptr @imre_popen_pipe(ptr, i32)
 declare i64 @imre_file_fileno(ptr)
 declare i64 @imre_popen_pid(ptr)
 declare ptr @imre_popen_args(ptr)
-declare i64 @imre_popen_status(ptr, i1 zeroext)
+declare ptr @imre_popen_control(ptr)
+declare i64 @imre_child_status(ptr, i1 zeroext)
 declare ptr @imre_popen_communicate(ptr, ptr, i1 zeroext, i32, i64, ptr)
-declare i64 @imre_popen_wait(ptr, i32, i64)
+declare i64 @imre_child_wait(ptr, i32, i64, ptr)
 declare void @imre_popen_exit(ptr)
-declare void @imre_popen_signal(ptr, i64)
+declare void @imre_child_signal(ptr, i64)
 declare ptr @imre_async_process_spawn(ptr, ptr, ptr, i32, i32)
 declare i64 @imre_async_process_status(ptr, i1 zeroext)
 declare ptr @imre_async_process_communicate(ptr, ptr)
