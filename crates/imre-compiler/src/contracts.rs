@@ -191,9 +191,7 @@ impl Builtin {
             Self::Logging(operation) => Contract::new(
                 matches!(
                     operation,
-                    crate::ir::LogOperation::Configure
-                        | crate::ir::LogOperation::ConfigureName
-                        | crate::ir::LogOperation::DictConfig
+                    crate::ir::LogOperation::DictConfig
                         | crate::ir::LogOperation::DictConfigTyped
                         | crate::ir::LogOperation::FileConfig
                         | crate::ir::LogOperation::CheckLevel
@@ -814,11 +812,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_formatter_time"
                 | "imre_formatter_message"
                 | "imre_logrecord_message"
-                | "imre_log_config"
                 | "imre_log_dict_config"
                 | "imre_log_typed_dict_config"
                 | "imre_log_file_config"
-                | "imre_log_config_named"
                 | "imre_log_check_level"
                 | "imre_log_lock_acquire"
                 | "imre_log_lock_acquire_int"

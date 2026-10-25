@@ -19,6 +19,7 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 sys.path[:0] = [str(HERE), str(STDLIB)]
+import native_basic_config
 import native_config
 import native_encoding
 import native_filters
@@ -156,6 +157,7 @@ def known_cases(toolchain, work, original):
     executions.update(native_handlers.handler_cases(toolchain, directory("handlers"), original))
     executions[native_encoding.CASE] = native_encoding.encoding_case(toolchain, directory("encoding"))
     executions[native_encoding.SETTING] = native_encoding.stream_setting_case(toolchain, directory("stream-setting"))
+    executions.update(native_basic_config.config_cases(toolchain, directory("root-config")))
     executions.update(native_filters.filter_cases(toolchain, directory("name-filter")))
     executions.update(native_hierarchy.hierarchy_cases(toolchain, directory("children")))
     executions.update(native_files.file_cases(toolchain, directory("file-handlers")))
