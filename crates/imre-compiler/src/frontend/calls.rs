@@ -82,7 +82,7 @@ pub(super) fn scalar_default(
 }
 
 /// A scalar default also supplies an exact type for an unannotated parameter.
-pub(super) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Expr, String> {
+pub(crate) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Expr, String> {
     let (ty, kind) = match expression {
         ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
             value: ast::Number::Int(value),

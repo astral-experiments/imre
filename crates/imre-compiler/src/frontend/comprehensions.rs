@@ -536,6 +536,9 @@ impl Checker<'_> {
         let mut captures = reads.names.into_iter().collect::<Vec<_>>();
         captures.sort();
         let id = self.helpers.reserve();
+        // Eager displays share the enclosing Python frame, even when lowered to a helper.
+        let omitted_locals = self.omitted_assert_locals.clone();
+        let omitted_free = self.omitted_assert_free.clone();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -545,6 +548,8 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_locals = omitted_locals;
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.class = self.class;
         helper.class_receiver = self
