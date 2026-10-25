@@ -7365,6 +7365,17 @@ impl<'a> Checker<'a> {
                 if attribute.attr.as_str() == "fromkeys" {
                     return self.dict_fromkeys(call, None, Some(receiver));
                 }
+                if attribute.attr.as_str() == "copy"
+                    && receiver.ty == self.types.dict(key_type, value_type)
+                {
+                    if !call.arguments.is_empty() {
+                        return Err(error(self.source, call, "dict.copy() takes no arguments"));
+                    }
+                    return Ok(Expr {
+                        ty: receiver.ty,
+                        kind: ExprKind::Builtin(Builtin::DictCopy, vec![receiver]),
+                    });
+                }
                 if attribute.attr.as_str() == "clear"
                     && call.arguments.args.is_empty()
                     && call.arguments.keywords.is_empty()
@@ -7388,7 +7399,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "supported dictionary methods are clear(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
+                        "supported dictionary methods are clear(), copy() on a plain dictionary, get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
                     ));
                 }
                 let key = self.expr_expected(&call.arguments.args[0], key_type)?;
