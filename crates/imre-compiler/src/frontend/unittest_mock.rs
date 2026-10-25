@@ -18,14 +18,54 @@ impl Checker<'_> {
                     | "_record"
                     | "_name"
                     | "_assert_called_with"
+                    | "_assert_any_call"
                     | "_assert_called_once_with"
             )
     }
 
     pub(super) fn native_mock(&self, class: usize) -> bool {
+        self.bundled_mock_class(class, "Mock")
+    }
+
+    fn bundled_mock_class(&self, class: usize, name: &str) -> bool {
         let record = &self.classes.declarations.definitions[class];
         let module = &self.graph.modules[record.definition.module];
-        module.bundled && module.name == "unittest.mock" && record.name == "Mock"
+        module.bundled && module.name == "unittest.mock" && record.name == name
+    }
+
+    /// A recorded call has Python's tuple representation, including ordered keywords.
+    pub(super) fn mock_call_repr(
+        &mut self,
+        value: &Expr,
+        at: &impl Ranged,
+    ) -> Result<Option<Expr>, String> {
+        let (ty, name) = match value.ty {
+            Type::Class(_) => (Some(value.ty), "_represent"),
+            Type::Optional(_) => (self.types.payload(value.ty), "_represent"),
+            Type::List(_) => (self.types.element(value.ty), "_represent_list"),
+            _ => return Ok(None),
+        };
+        let Some(Type::Class(class)) = ty else {
+            return Ok(None);
+        };
+        if !self.bundled_mock_class(class, "_Call") {
+            return Ok(None);
+        }
+        let method = self.classes.methods[class]
+            .get(name)
+            .ok_or_else(|| error(self.source, at, "missing native mock call formatter"))?;
+        self.calls.insert(method.id);
+        Ok(Some(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Call(
+                method.id,
+                ir::CallArgs::positional(vec![self.coerce(
+                    value.clone(),
+                    method.params[0].ty,
+                    at,
+                )?]),
+            ),
+        }))
     }
 
     pub(super) fn mock_state_member(name: &str) -> bool {
@@ -138,7 +178,9 @@ impl Checker<'_> {
         receiver: Expr,
         method: &str,
     ) -> Result<Expr, String> {
-        let target = &self.classes.methods[class][method];
+        let target = self.classes.methods[class]
+            .get(method)
+            .ok_or_else(|| error(self.source, call, "missing native mock call recorder"))?;
         let (function, returns, positional, keywords) = (
             target.id,
             target.returns,

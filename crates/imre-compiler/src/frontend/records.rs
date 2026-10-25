@@ -980,6 +980,9 @@ impl Checker<'_> {
             && let Some(object) = &receiver
         {
             match attribute.attr.as_str() {
+                "assert_any_call" => {
+                    return self.mock_arguments(call, class, object.clone(), "_assert_any_call");
+                }
                 "assert_called_with" => {
                     return self.mock_arguments(call, class, object.clone(), "_assert_called_with");
                 }

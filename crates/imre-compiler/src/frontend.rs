@@ -6862,6 +6862,12 @@ impl<'a> Checker<'a> {
                 text
             });
         }
+        if let [value] = args.as_slice()
+            && matches!(name.id.as_str(), "repr" | "str")
+            && let Some(rendered) = self.mock_call_repr(value, call)?
+        {
+            return Ok(rendered);
+        }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
             if name.id == "repr" || (name.id == "str" && self.types.element(args[0].ty).is_some()) {
                 if !dataclass_values::can_format(args[0].ty, self.types, self.classes) {

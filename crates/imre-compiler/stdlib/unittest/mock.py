@@ -32,6 +32,19 @@ class _Call:
             parts.append(key + "=" + self._kwargs[key].text)
         return name + "(" + ", ".join(parts) + ")"
 
+    @staticmethod
+    def _represent(value: _Call | None) -> str:
+        if value is None:
+            return "None"
+        return value._format("call")
+
+    @staticmethod
+    def _represent_list(values: list[_Call]) -> str:
+        parts: list[str] = []
+        for value in values:
+            parts.append(value._format("call"))
+        return "[" + ", ".join(parts) + "]"
+
     def _matches(self, other: _Call) -> bool:
         if len(self._args) != len(other._args) or len(self._kwargs) != len(other._kwargs):
             return False
@@ -76,6 +89,24 @@ class _Node:
         self._result = -1
         self._history = []
         self._ancestors = []
+
+    def _reset(self, nodes: list[_Node], reset_return: bool, reset_effect: bool) -> None:
+        self.called = False
+        self.call_count = 0
+        self.call_args = None
+        self.call_args_list = []
+        # Children retain this private list to report subsequent ancestor calls.
+        while len(self._history):
+            self._history.pop()
+        if reset_effect:
+            self.side_effect = None
+        if reset_return:
+            self._result = -1
+        for name in self._children:
+            nodes[self._children[name]]._reset(nodes, reset_return, reset_effect)
+        if self._result != -1:
+            # A retained return value resets its calls, but keeps its configuration.
+            nodes[self._result]._reset(nodes, False, False)
 
 
 class Mock:
@@ -149,6 +180,9 @@ class Mock:
             entries = ",\n ".join(self._node._history)
         return "\nCalls: [" + entries + "]."
 
+    def reset_mock(self, *, return_value: bool = False, side_effect: bool = False) -> None:
+        self._node._reset(self._nodes, return_value, side_effect)
+
     def assert_not_called(self) -> None:
         if self._node.call_count != 0:
             raise AssertionError(f"Expected '{self._name()}' to not have been called. Called {self._node.call_count} times." + self._calls_repr())
@@ -168,6 +202,13 @@ class Mock:
             return
         actual = "not called." if observed is None else observed._format(self._name())
         raise AssertionError("expected call not found.\nExpected: " + expected._format(self._name()) + "\n  Actual: " + actual)
+
+    def _assert_any_call(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
+        expected = _Call(args, kwargs)
+        for actual in self._node.call_args_list:
+            if expected._matches(actual):
+                return
+        raise AssertionError(expected._format(self._name()) + " call not found")
 
     def _assert_called_once_with(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
         if self._node.call_count != 1:
