@@ -45,6 +45,7 @@ impl Emitter<'_, '_> {
                     "call i32 @imre_path_is_relative_to(ptr {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
+                self.check_error();
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {answer}, 0")),
@@ -211,6 +212,24 @@ impl Emitter<'_, '_> {
                     operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
                     small_integer: false,
                 }
+            }
+            PathOperation::Walk => {
+                let row = self.module.types.cursor_element(returns).unwrap();
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(row)));
+                let top_down =
+                    self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let follow = self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_path_walk(ptr {}, i32 {top_down}, i32 {follow}, ptr @{layout})",
+                    args[0].value.operand,
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
             }
             PathOperation::Iterdir | PathOperation::Glob { .. } => {
                 let path = &args[0].value.operand;
