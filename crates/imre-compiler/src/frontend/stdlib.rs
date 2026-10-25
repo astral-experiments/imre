@@ -516,6 +516,11 @@ impl Checker<'_> {
                 specification.push_str(&literal.value);
             }
         }
+        if specification.is_empty()
+            && let Some(text) = self.unittest_failure_repr(&field.expression)?
+        {
+            return Ok(text);
+        }
         let mut value = self.expr(&field.expression)?;
         if field.conversion != ast::ConversionFlag::Repr {
             value = if matches!(value.ty, Type::Enum(_)) {

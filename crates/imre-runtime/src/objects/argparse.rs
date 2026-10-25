@@ -554,6 +554,68 @@ impl OptionSpec {
     }
 }
 
+impl Parser {
+    fn from_schema(schema: &str) -> Self {
+        let mut parser: Self = serde_json::from_str(schema)
+            .unwrap_or_else(|_| fail("SystemError", "invalid argparse schema"));
+        parser.normalize_numbers();
+        parser.set_child_programs();
+        parser
+    }
+}
+
+/// Format help or usage, returning the text or writing it to the requested stream.
+///
+/// # Safety
+/// The compiler roots the descriptor and description; output mode 3 also roots
+/// a native text stream in `file`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_argparse_text(
+    schema: *const Str,
+    description: *const Str,
+    usage: bool,
+    output: u32,
+    file: *const Object,
+) -> *const Str {
+    // SAFETY: both strings stay rooted while the formatter reads them.
+    let (schema, description) = unsafe { (&*schema, &*description) };
+    let parser = Parser::from_schema(schema);
+    let text: Str = if usage {
+        parser.usage(help::width())
+    } else {
+        parser.help(description)
+    }
+    .into();
+    match output {
+        0 => return Rc::into_raw(Rc::new(text)),
+        1 | 2 => {
+            // SAFETY: the native stream borrows the live string. A successful
+            // write returns an owned character count; zero indicates failure.
+            let count = unsafe { crate::sys::imre_sys_stream_write(output - 1, &text) };
+            if count != 0 {
+                drop(crate::Int(count));
+            }
+        }
+        3 => {
+            // SAFETY: file has the exact native text stream type.
+            unsafe { super::files::imre_text_write_discard(file, &text) };
+        }
+        _ => unreachable!(),
+    }
+    // _print_message ignores OSError from write(), but closed files raise
+    // ValueError and that exception must still reach the caller.
+    if let Some(error) = exceptions::take_pending() {
+        // SAFETY: the pending exception stays rooted for the kind check.
+        if unsafe {
+            exceptions::imre_exception_matches(Rc::as_ptr(&error), exceptions::Kind::OSError as u32)
+        } == 0
+        {
+            exceptions::replace_pending(Some(error));
+        }
+    }
+    std::ptr::null()
+}
+
 /// Parses an explicit string list or the current sys.argv[1..] into a namespace.
 ///
 /// # Safety
@@ -571,10 +633,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
 ) -> *mut usize {
     // SAFETY: these immutable inputs remain rooted during parsing and construction.
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
-    let mut parser: Parser = serde_json::from_str(schema)
-        .unwrap_or_else(|_| fail("SystemError", "invalid argparse schema"));
-    parser.normalize_numbers();
-    parser.set_child_programs();
+    let parser = Parser::from_schema(schema);
     // SAFETY: argv is a rooted list[str]; take independent string owners before
     // reading the argument values or constructing the output namespace.
     let owners = unsafe {

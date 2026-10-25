@@ -27,11 +27,14 @@ CASES = {
     "BlockingTests.test_blocking": 3,
     "TestInvalidFD.test_isatty": 1,
     "PosixTester.test_oscloexec": 1,
+    "PosixTester.test_pipe": 0,
+    "PosixTester.test_strerror": 1,
 }
 
 # All cleanup registrations in these methods use the same os.close callback.
 ADAPTER = """from typing import Callable
 import subject as os
+import subject as posix
 import os_helper
 
 class Case:
@@ -70,7 +73,7 @@ class Case:
 # The compiler can pass this first-party function as a cleanup callback.
 # Every descriptor operation, including the callback, calls the public os API.
 SUBJECT = """import os
-from os import O_RDONLY, O_CLOEXEC, open, dup, dup2, pipe, get_blocking, set_blocking, get_inheritable, set_inheritable, isatty
+from os import O_RDONLY, O_CLOEXEC, open, dup, dup2, pipe, get_blocking, set_blocking, get_inheritable, set_inheritable, isatty, strerror
 
 def close(fd: int) -> None:
     os.close(fd)
@@ -162,6 +165,8 @@ def compile_descriptor(case, tools, root, count):
     adapter = ADAPTER
     if method == "test_dup2":
         adapter = adapter.replace("actual: bool, expected: bool", "actual: int, expected: int")
+    if method == "test_strerror":
+        adapter = adapter.replace("def assertTrue(self, actual: bool)", "def assertTrue(self, actual: str)")
     entry = adapter.encode() + body + f"""
 case = Case()
 try:
@@ -194,6 +199,14 @@ def main():
     reports = {}
     with tempfile.TemporaryDirectory() as tmp, chdir(tmp):
         root = Path(tmp)
+        fields = root / "error-fields"
+        fields.mkdir()
+        probe = HERE / "errno_fields.py"
+        binary = tools.build(probe.read_bytes(), fields)
+        reference = subprocess.run([sys.executable, "-I", "-B", probe], cwd=fields, capture_output=True, check=True)
+        actual = subprocess.run([binary], cwd=fields, capture_output=True, check=True)
+        if (actual.stdout, actual.stderr) != (reference.stdout, reference.stderr):
+            raise AssertionError("native OS error projections or display differ from CPython")
         for module in modules.values():
             selections = {}
             for name, count in CASES.items():

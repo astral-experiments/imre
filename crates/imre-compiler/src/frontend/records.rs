@@ -948,6 +948,13 @@ impl Checker<'_> {
                 "special methods cannot be called directly",
             ));
         }
+        if matches!(attribute.attr.as_str(), "assertEqual" | "assertListEqual")
+            && let Some(receiver) = &receiver
+            && let Some(checked) =
+                self.unittest_equality(call, attribute.attr.as_str(), class, receiver)?
+        {
+            return Ok(checked);
+        }
         if attribute.attr.as_str() == "assertRaises"
             && !self.classes.methods[class].contains_key("assertRaises")
             && let Some(receiver) = &receiver
