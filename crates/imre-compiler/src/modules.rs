@@ -274,7 +274,7 @@ impl IntrinsicModule {
         }
     }
 
-    fn symbol(self, name: &str) -> Option<Binding> {
+    pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
         if self == Self::Os && name == "path" {
             return Some(Binding::IntrinsicModule(Self::PosixPath));
         }

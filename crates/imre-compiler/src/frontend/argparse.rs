@@ -409,6 +409,7 @@ fn namespace_class(
     layouts.push(fields.iter().map(|field| field.ty).collect());
     classes.definitions.push(Class {
         exception_aliases: Default::default(),
+        static_bindings: Default::default(),
         name: "Namespace".into(),
         definition,
         node: ast::StmtClassDef {
