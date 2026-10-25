@@ -471,6 +471,8 @@ pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
     Keyword(TextRange),
+    ExtraPositional(TextRange),
+    PositionalOnlyKeyword(TextRange),
     TupleListRead(TextRange),
     MissingArgument(TextRange),
 }
@@ -483,6 +485,8 @@ impl CheckedDiagnostic {
             Self::Keyword(range) => (range, 2),
             Self::TupleListRead(range) => (range, 3),
             Self::MissingArgument(range) => (range, 4),
+            Self::ExtraPositional(range) => (range, 5),
+            Self::PositionalOnlyKeyword(range) => (range, 6),
         };
         (range.start(), range.end(), kind)
     }
@@ -494,6 +498,12 @@ impl CheckedDiagnostic {
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
+            Self::ExtraPositional(site) => {
+                diagnostic == "too-many-positional-arguments" && site == range
+            }
+            Self::PositionalOnlyKeyword(site) => {
+                diagnostic == "positional-only-parameter-as-kwarg" && site == range
+            }
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
         }
