@@ -15,6 +15,51 @@ pub(super) fn displayable(ty: Type) -> bool {
     )
 }
 impl Checker<'_> {
+    /// Evaluate all arguments before printing. Each separator, value and newline
+    /// is a separate stdout write, so a later error preserves earlier output.
+    pub(super) fn print_scalar_arguments(&mut self, args: Vec<Expr>) -> Expr {
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        for arg in args {
+            let slot = self.hidden(arg.ty);
+            body.push(Statement::Assign(slot, arg));
+            clear.push(slot);
+        }
+        let write = |text| {
+            Statement::Expr(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::SysStreamWrite { stderr: false }, vec![text]),
+            })
+        };
+        for (index, &slot) in clear.iter().enumerate() {
+            if index != 0 {
+                body.push(write(unpacking::string(" ")));
+            }
+            let arg = self.local(slot);
+            let text = if matches!(arg.ty, Type::Str | Type::StrLiteral(_)) {
+                arg
+            } else {
+                Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Str, vec![arg]),
+                }
+            };
+            body.push(write(text));
+        }
+        body.push(write(unpacking::string("\n")));
+        Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                }),
+                clear,
+            },
+        }
+    }
+
     /// Read scalar fields of the immutable startup settings selected for a command.
     pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
         let Some((flags, _)) = &self.graph.command_startup else {

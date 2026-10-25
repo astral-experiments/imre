@@ -7502,6 +7502,23 @@ impl<'a> Checker<'a> {
             return Ok(length);
         }
         let (builtin, ty) = match name.id.as_str() {
+            "print"
+                if args.len() != 1
+                    && args.iter().all(|arg| {
+                        matches!(
+                            arg.ty,
+                            Type::Int
+                                | Type::Float
+                                | Type::Bool
+                                | Type::Str
+                                | Type::StrLiteral(_)
+                                | Type::Bytes
+                                | Type::None
+                        )
+                    }) =>
+            {
+                return Ok(self.print_scalar_arguments(args));
+            }
             "input" if args.is_empty() => (Builtin::Input, Type::Str),
             "chr" if args.len() == 1 && matches!(args[0].ty, Type::Int | Type::Bool) => {
                 let value = args.into_iter().next().unwrap();
