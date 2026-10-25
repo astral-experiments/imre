@@ -25,7 +25,7 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The replay of [`637f6fa`](https://github.com/astral-sh/imre/commit/637f6fae63586ccdf9b7e780e20f1a2c9f769bca)
+The replay of [`ca5d367`](https://github.com/astral-sh/imre/commit/ca5d367d42dbe99f4357f405e26f865e27ac533c)
 includes logger hierarchy and handler propagation, the level registry, ordinary
 and timed file handlers, records, formatters, filters and configuration.
 Both levels have the same counts:
@@ -42,7 +42,7 @@ No occurrence has a fully native fixture. Native assertions check root logger
 identity, immediate child membership, stopped handler propagation, level-name mapping independence, daily
 rollover with an explicit time, record representation, formatter precision,
 an empty name filter, both buffering formatters, and [FileHandler](files.md)
-delayed creation and emission after closing a file opened in write mode. The
+delayed creation and emission after closing a file opened in write mode. The real FileHandler subclass also routes through the live handler registry; its 25 additional differential observations are outside this denominator. The
 [CP1251 StreamHandler method](stream-delivery.md) compares the native writer’s
 bytes, including the newline, under its original host fixture. The stream replacement
 method checks the actual sys.stderr, the previous stream, and the unchanged-stream return. Two [root configuration methods](config.md) check the
