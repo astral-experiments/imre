@@ -47,11 +47,7 @@ impl Checker<'_> {
         let checked = if definition.is_some() || matches!(function, ast::Expr::Lambda(_)) {
             None
         } else if let Some(binding) = self.local_function_binding(function) {
-            Some(binding.target(self.source, function)?.callback(
-                self.types,
-                self.source,
-                function,
-            )?)
+            Some(self.local_callback(binding, function)?)
         } else {
             Some(self.expr(function)?)
         };

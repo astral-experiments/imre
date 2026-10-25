@@ -1757,11 +1757,7 @@ impl Checker<'_> {
         let checked = if definition.is_some() || matches!(callback, ast::Expr::Lambda(_)) {
             None
         } else if let Some(binding) = self.local_function_binding(callback) {
-            Some(binding.target(self.source, callback)?.callback(
-                self.types,
-                self.source,
-                callback,
-            )?)
+            Some(self.local_callback(binding, callback)?)
         } else {
             Some(self.expr(callback)?)
         };
@@ -1907,11 +1903,7 @@ impl Checker<'_> {
             return self.callable_value(signature, None, None, expression);
         }
         if let Some(binding) = self.local_function_binding(expression) {
-            return binding.target(self.source, expression)?.callback(
-                self.types,
-                self.source,
-                expression,
-            );
+            return self.local_callback(binding, expression);
         }
         self.expr(expression)
     }

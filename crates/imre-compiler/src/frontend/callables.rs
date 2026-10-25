@@ -227,9 +227,7 @@ impl Checker<'_> {
             },
         );
         let unbound = receiver.is_none();
-        let ty = if unbound
-            && let Some(&policy) = self.classes.cached.get(&signature.id)
-        {
+        let ty = if unbound && let Some(&policy) = self.classes.cached.get(&signature.id) {
             self.types.declared_cache(ty, signature.id, policy)
         } else {
             ty

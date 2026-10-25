@@ -206,6 +206,9 @@ impl Checker<'_> {
         }
         let list = self.local(list);
         let item = self.types.element(list.ty)?;
+        if self.local_cached_value(mapped.mapper).is_some() {
+            return None;
+        }
         let (signature, def) = if let Some(local) = self.local_function_binding(mapped.mapper) {
             let function = local.target(self.source, mapped.mapper).ok()?;
             (&function.signature, function.definition.as_ref())

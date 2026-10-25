@@ -5833,6 +5833,9 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::KeySet, vec![source]),
             });
         }
+        if let Some(cached) = self.local_cached_value(&call.func) {
+            return self.invoke(call, cached);
+        }
         if let Some(binding) = self.local_function_binding(&call.func) {
             if let Some(definition) = binding.generic.clone() {
                 return self.call_generic_awaitable(call, &definition);

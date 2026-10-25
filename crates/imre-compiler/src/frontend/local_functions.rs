@@ -2,6 +2,7 @@
 //! loaded at each direct call, after its explicit arguments, as Python would
 //! read the enclosing cell on entry. No callable with captures can escape.
 use ruff_python_ast::visitor::{Visitor, walk_expr};
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use super::*;
@@ -14,13 +15,19 @@ pub(super) struct Function {
 }
 
 #[derive(Clone)]
+struct Site {
+    range: TextRange,
+    value_read: bool,
+    later_writes: HashSet<String>,
+}
+
+#[derive(Clone)]
 pub(super) struct Binding {
-    site: TextRange,
+    sites: VecDeque<Site>,
     function: Option<Function>,
     pub(super) generic: Option<Rc<ast::StmtFunctionDef>>,
     instances: HashMap<Type, Function>,
     later_writes: HashSet<String>,
-    value_read: bool,
     pub(super) value_slot: Option<usize>,
 }
 
@@ -114,9 +121,31 @@ impl Checker<'_> {
         self.local_functions.get(value.as_name_expr()?.id.as_str())
     }
 
+    pub(super) fn local_cached_value(&self, expression: &ast::Expr) -> Option<Expr> {
+        let slot = self.local_function_binding(expression)?.value_slot?;
+        self.types
+            .cached_function(self.locals[slot])
+            .map(|_| self.local(slot))
+    }
+
+    pub(super) fn local_callback(
+        &self,
+        binding: &Binding,
+        value: &ast::Expr,
+    ) -> Result<Expr, String> {
+        if let Some(slot) = binding.value_slot {
+            Ok(self.local(slot))
+        } else {
+            binding
+                .target(self.source, value)?
+                .callback(self.types, self.source, value)
+        }
+    }
+
     /// Only an unconditional definition in the enclosing function's suite can
     /// introduce a fixed call target. Reserve its spelling throughout the suite.
     pub(super) fn collect_local_functions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
+        let mut sites: HashMap<String, VecDeque<Site>> = HashMap::new();
         for (index, statement) in stmts.iter().enumerate() {
             let Some(function) = statement.as_function_def_stmt() else {
                 continue;
@@ -134,23 +163,30 @@ impl Checker<'_> {
                     "local functions require a unique unshadowed name",
                 ));
             }
-            self.local_functions.insert(
-                name.to_owned(),
-                Binding {
-                    site: function.range,
-                    function: None,
-                    generic: None,
-                    value_read: reads_function_value(&stmts[index + 1..], name),
-                    value_slot: None,
-                    instances: HashMap::new(),
-                    later_writes: if function.is_async {
-                        narrowing::assigned_names(&stmts[index + 1..])
-                    } else {
-                        HashSet::new()
-                    },
+            sites.entry(name.to_owned()).or_default().push_back(Site {
+                range: function.range,
+                value_read: reads_function_value(&stmts[index + 1..], name),
+                later_writes: if function.is_async {
+                    narrowing::assigned_names(&stmts[index + 1..])
+                } else {
+                    HashSet::new()
                 },
-            );
+            });
         }
+        self.local_functions
+            .extend(sites.into_iter().map(|(name, sites)| {
+                (
+                    name,
+                    Binding {
+                        sites,
+                        function: None,
+                        generic: None,
+                        value_slot: None,
+                        instances: HashMap::new(),
+                        later_writes: HashSet::new(),
+                    },
+                )
+            }));
         Ok(())
     }
 
@@ -159,22 +195,27 @@ impl Checker<'_> {
         definition: &ast::StmtFunctionDef,
     ) -> Result<Option<Statement>, String> {
         let name = definition.name.as_str();
-        if !self
+        let Some(binding) = self
             .local_functions
-            .get(name)
-            .is_some_and(|binding| binding.site == definition.range && binding.function.is_none())
-        {
+            .get_mut(name)
+            .filter(|b| b.sites.front().is_some_and(|s| s.range == definition.range))
+        else {
             return Err(error(
                 self.source,
                 definition,
                 "local definitions must appear directly in the enclosing function's suite",
             ));
-        }
-        if (definition.returns.is_none() && !annotations::inert_body(definition))
-            || definition
-                .parameters
-                .iter_non_variadic_params()
-                .any(|p| p.annotation().is_none())
+        };
+        let site = binding.sites.pop_front().unwrap();
+        binding.function = None;
+        binding.generic = None;
+        binding.instances.clear();
+        binding.value_slot = None;
+        binding.later_writes = site.later_writes;
+        if definition
+            .parameters
+            .iter_non_variadic_params()
+            .any(|p| p.annotation().is_none())
         {
             return Err(error(
                 self.source,
@@ -186,8 +227,17 @@ impl Checker<'_> {
             self.local_functions.get_mut(name).unwrap().generic = Some(Rc::new(definition.clone()));
             return Ok(None);
         }
+        let policy = self.local_cache_policy(definition)?;
+        let mut raw;
+        let signature_def = if policy.is_some() {
+            raw = definition.clone();
+            raw.decorator_list.clear();
+            &raw
+        } else {
+            definition
+        };
         let signature = signature(
-            definition,
+            signature_def,
             self.graph,
             self.module,
             &self.classes.declarations,
@@ -196,19 +246,21 @@ impl Checker<'_> {
             &inference::Inference::default(),
         )?;
         let function = self.lift_local(definition, signature)?;
-        let object = if self.local_functions[name].value_read {
-            function
-                .callback(self.types, self.source, definition)
-                .ok()
-                .map(|value| {
-                    let slot = self.hidden(value.ty);
-                    self.assigned.insert(slot);
-                    self.calls.insert(function.signature.id);
-                    (slot, value)
-                })
+        let value = if let Some(policy) = policy {
+            let raw = function.callback(self.types, self.source, definition)?;
+            let origin = self.local_annotation_origin(&function);
+            Some(self.owned_cache(raw, policy, Some(origin), definition)?)
+        } else if site.value_read {
+            function.callback(self.types, self.source, definition).ok()
         } else {
             None
         };
+        let object = value.map(|value| {
+            let slot = self.hidden(value.ty);
+            self.assigned.insert(slot);
+            self.calls.insert(function.signature.id);
+            (slot, value)
+        });
         let binding = self.local_functions.get_mut(name).unwrap();
         binding.function = Some(function);
         binding.value_slot = object.as_ref().map(|(slot, _)| *slot);
@@ -309,6 +361,8 @@ impl Checker<'_> {
         );
         helper.inference = self.inference;
         helper.returns = signature.returns;
+        helper.inferred_returns =
+            (definition.returns.is_none() && !annotations::inert_body(definition)).then(Vec::new);
         helper.asynchronous = signature.asynchronous;
         let mut params = Vec::new();
         for (parameter, ty) in definition
@@ -341,6 +395,15 @@ impl Checker<'_> {
                 let inner = capture(outer, &mut helper);
                 helper.names.insert(read, inner);
             } else if let Some(binding) = self.local_functions.get(&read) {
+                if binding.function.is_some() && !binding.sites.is_empty() {
+                    return Err(error(
+                        self.source,
+                        definition,
+                        &format!(
+                            "captured local function '{read}' may be redefined before the call"
+                        ),
+                    ));
+                }
                 let mut binding = binding.clone();
                 if let Some(slot) = &mut binding.value_slot {
                     *slot = capture(*slot, &mut helper);
@@ -375,6 +438,20 @@ impl Checker<'_> {
             ));
         }
         let (mut body, falls) = helper.function_body(&definition.body)?;
+        if let Some(mut returns) = helper.inferred_returns.take() {
+            if falls || returns.is_empty() {
+                returns.push(Type::None);
+            }
+            let result = returns[0];
+            if !returns.iter().all(|&ty| ty == result) {
+                return Err(error(
+                    self.source,
+                    definition,
+                    "local functions with different return layouts require an annotated result",
+                ));
+            }
+            signature.returns = result;
+        }
         if falls && self.types.payload(signature.returns).is_some() {
             body.push(Statement::Return(helper.coerce(
                 Expr {

@@ -263,7 +263,8 @@ impl Checker<'_> {
         // object expression just because the selected format will raise.
         let binding = self.resolve(obj);
         let wrapped = if !matches!(binding, Some(Binding::Definition(_) | Binding::Module(_)))
-            && self.local_function_binding(obj).is_none()
+            && (self.local_function_binding(obj).is_none()
+                || self.local_cached_value(obj).is_some())
         {
             let target = self.expr(obj)?;
             let layout = self.types.cached_function(target.ty).ok_or_else(|| error(self.source, obj,
