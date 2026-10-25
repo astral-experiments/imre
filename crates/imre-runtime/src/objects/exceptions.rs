@@ -47,6 +47,7 @@ pub(crate) enum Kind {
     ShutilError = 64,
     SameFileError = 65,
     SpecialFileError = 66,
+    CsvError = 67,
     TypeError = 13,
     AttributeError = 14,
     MemoryError = 15,
@@ -98,6 +99,7 @@ impl Kind {
             64 => Self::ShutilError,
             65 => Self::SameFileError,
             66 => Self::SpecialFileError,
+            67 => Self::CsvError,
             13 => Self::TypeError,
             14 => Self::AttributeError,
             15 => Self::MemoryError,
@@ -167,6 +169,7 @@ impl Kind {
             Self::CalledProcessError => "CalledProcessError",
             Self::TimeoutExpired => "TimeoutExpired",
             Self::BadGzipFile => "BadGzipFile",
+            Self::CsvError => "_csv.Error",
             Self::ZlibError => "error",
             Self::TomlDecodeError => "TOMLDecodeError",
             Self::JsonDecodeError => "JSONDecodeError",
@@ -898,7 +901,7 @@ pub(super) fn active_exception() -> Option<Rc<Object>> {
     ACTIVE.with(|active| active.borrow().clone())
 }
 
-/// Uses Ruff's Python repr rules and its pinned Unicode printable categories.
+/// Quote and escape a string with CPython 3.14's Unicode 16 printability rules.
 pub(crate) fn string_repr(value: &str) -> Str {
     let mut result = String::new();
     push_string_repr(value, &mut result);
@@ -907,26 +910,70 @@ pub(crate) fn string_repr(value: &str) -> Str {
 
 pub(super) fn push_string_repr(value: &str, out: &mut String) {
     let escaped = UnicodeEscape::new_repr(value);
+    let extra = if value.is_ascii() {
+        0
+    } else {
+        value
+            .chars()
+            .filter(|&ch| crate::integer_text::newer_printable(ch))
+            .fold(0usize, |extra, ch| {
+                let width = if ch <= '\u{ffff}' { 6 } else { 10 };
+                extra.saturating_add(width - ch.len_utf8())
+            })
+    };
     if out.is_empty()
-        && let Some(size) = escaped.layout().len.and_then(|body| body.checked_add(2))
+        && let Some(size) = escaped
+            .layout()
+            .len
+            .and_then(|body| body.checked_add(2)?.checked_add(extra))
     {
         out.reserve_exact(size);
     }
-    write_escaped_string(&escaped, out).expect("writing to a String cannot fail");
+    write_escaped_string(&escaped, out, extra != 0).expect("writing to a String cannot fail");
 }
 
 pub(crate) fn write_string_repr(value: &str, out: &mut impl std::fmt::Write) -> std::fmt::Result {
-    write_escaped_string(&UnicodeEscape::new_repr(value), out)
+    write_escaped_string(&UnicodeEscape::new_repr(value), out, !value.is_ascii())
 }
 
 fn write_escaped_string(
     escaped: &UnicodeEscape<'_>,
     out: &mut impl std::fmt::Write,
+    correct_printability: bool,
 ) -> std::fmt::Result {
     let quote = escaped.layout().quote.as_char();
     out.write_char(quote)?;
-    escaped.write_body(out)?;
+    if correct_printability {
+        escaped.write_body(&mut Unicode16Repr(out))?;
+    } else {
+        escaped.write_body(out)?;
+    }
     out.write_char(quote)
+}
+
+/// Stream Ruff's escaped body, escaping characters first assigned after Unicode 16.
+struct Unicode16Repr<'a, W>(&'a mut W);
+
+impl<W: std::fmt::Write> std::fmt::Write for Unicode16Repr<'_, W> {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        let mut start = 0;
+        if !text.is_ascii() {
+            for (i, ch) in text
+                .char_indices()
+                .filter(|&(_, ch)| crate::integer_text::newer_printable(ch))
+            {
+                self.0.write_str(&text[start..i])?;
+                let code = u32::from(ch);
+                if code <= 0xffff {
+                    write!(self.0, "\\u{code:04x}")?;
+                } else {
+                    write!(self.0, "\\U{code:08x}")?;
+                }
+                start = i + ch.len_utf8();
+            }
+        }
+        self.0.write_str(&text[start..])
+    }
 }
 
 /// Acquires nullable exception input without retaining a storage reference.

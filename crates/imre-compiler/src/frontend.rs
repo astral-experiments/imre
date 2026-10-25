@@ -20,6 +20,7 @@ mod calls;
 mod comprehensions;
 mod contexts;
 mod counter;
+mod csv;
 mod dataclass_values;
 mod dispatch;
 mod documents;
@@ -2940,8 +2941,12 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("range iteration returned above")
         };
-        if matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
-            let input = self.prepare_file_lines(iterable);
+        if matches!(iterable.ty, Type::TextIO | Type::BinaryIO | Type::CsvReader) {
+            let input = if iterable.ty == Type::CsvReader {
+                self.prepare_csv_reader(iterable)
+            } else {
+                self.prepare_file_lines(iterable)
+            };
             return self.lower_prepared_iteration(
                 target,
                 input,
@@ -3459,7 +3464,11 @@ impl<'a> Checker<'a> {
                 } else if let ast::Expr::Name(_) = &*assign.target {
                     let left = self.expr(&assign.target)?;
                     let right = self.expr(&assign.value)?;
-                    let value = self.binary_expr(assign.op, left, right, statement)?;
+                    let value = if self.types.is_counter(left.ty) {
+                        self.counter_math(assign.op, left, right, true, statement)?
+                    } else {
+                        self.binary_expr(assign.op, left, right, statement)?
+                    };
                     if self.types.element(value.ty).is_some() {
                         return Err(error(
                             self.source,
@@ -3967,6 +3976,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::TimeoutExpired)) => Some(27),
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
+            Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(67),
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),
@@ -4701,6 +4711,9 @@ impl<'a> Checker<'a> {
                     self.expect(left.ty, right.ty, binary)?;
                     return self.concat_lists(left, right, binary);
                 }
+                if self.types.is_counter(left.ty) && self.types.is_counter(right.ty) {
+                    return self.counter_math(binary.op, left, right, false, expression);
+                }
                 return self.binary_expr(binary.op, left, right, expression);
             }
             ast::Expr::UnaryOp(unary) => {
@@ -4726,6 +4739,20 @@ impl<'a> Checker<'a> {
                         )
                     }
                     ast::UnaryOp::USub | ast::UnaryOp::UAdd => {
+                        if self.types.is_counter(value.ty) {
+                            let op = if unary.op == ast::UnaryOp::UAdd {
+                                ir::CounterOp::Positive
+                            } else {
+                                ir::CounterOp::Negative
+                            };
+                            return Ok(Expr {
+                                ty: value.ty,
+                                kind: ExprKind::Builtin(
+                                    Builtin::CounterMath { op, inplace: false },
+                                    vec![value],
+                                ),
+                            });
+                        }
                         if !matches!(value.ty, Type::Int | Type::Float) {
                             return Err(error(
                                 self.source,
@@ -5230,6 +5257,12 @@ impl<'a> Checker<'a> {
                 }
                 if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
                     return self.zip_attribute(receiver, attribute);
+                }
+                if receiver.ty == Type::CsvReader && attribute.attr.as_str() == "line_num" {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::CsvLineNumber, vec![receiver]),
+                    });
                 }
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
@@ -5759,6 +5792,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::CsvReader)) => return self.csv_reader(call),
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
                 self.reject_builtin_keywords(call)?;
