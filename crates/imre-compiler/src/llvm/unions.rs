@@ -7,7 +7,9 @@ fn tag(ty: Type) -> u8 {
         Type::Str => 0,
         Type::Bytes => 1,
         Type::List(_) => 2,
-        Type::Exception => 3,
+        // These owners share the always-true Object tag. No admitted union
+        // contains both an exception and a LogRecord.
+        Type::Exception | Type::LogRecord => 3,
         Type::Class(_) | Type::Tuple(_) => 4,
         Type::Enum(_) => 5,
         Type::Path => 6,

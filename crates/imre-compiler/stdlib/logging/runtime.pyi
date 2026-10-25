@@ -1,6 +1,14 @@
 from __imre_logging_classes__ import Handler
+from logging import Logger
+from typing import Protocol
 
 type _Level = int | str
+
+class _TextOutput(Protocol):
+    def write(self, value: str, /) -> int | None: ...
+    def flush(self) -> None: ...
+
+def _fallback(logger: Logger, level: int, msg: str, found: bool) -> None: ...
 
 class _Lock:
     def acquire(self, blocking: object = True, timeout: float = -1.0) -> bool: ...

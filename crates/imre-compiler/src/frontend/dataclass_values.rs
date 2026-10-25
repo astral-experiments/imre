@@ -44,6 +44,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::CodecInfo
         | Type::CodecWriterClass
         | Type::CodecWriter
+        | Type::TextOutput
         | Type::Sha256
         | Type::CsvReader
         | Type::RegexPattern
@@ -145,6 +146,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
             | Type::CodecInfo
             | Type::CodecWriterClass
             | Type::CodecWriter
+            | Type::TextOutput
             | Type::Sha256
             | Type::RegexPattern
             | Type::RegexMatch

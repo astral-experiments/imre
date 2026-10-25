@@ -1,8 +1,9 @@
 """Logging classes compiled into the native program."""
 
 import os.path
-from logging import Formatter, LogRecord, getLevelNamesMapping
-from imre._logging import _Level, _Lock, _lookup_handler, _rename_handler
+import sys
+from logging import Formatter, Logger, LogRecord, getLevelNamesMapping
+from imre._logging import _Level, _Lock, _TextOutput, _fallback, _lookup_handler, _rename_handler
 from pathlib import Path
 from typing import TextIO
 
@@ -98,6 +99,16 @@ class Handler:
     def emit(self, record: LogRecord | None) -> None:
         raise NotImplementedError("emit must be implemented by Handler subclasses")
 
+    def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
+        if record is None:
+            return None
+        for item in self.filters:
+            if not item.filter(record):
+                return False
+        with self.lock:
+            self.emit(record)
+        return record
+
     def flush(self) -> None:
         pass
 
@@ -108,6 +119,52 @@ class Handler:
 
 def getHandlerByName(name: str) -> Handler | None:
     return _lookup_handler(name)
+
+
+class StreamHandler(Handler):
+    stream: _TextOutput
+    terminator: str
+
+    def __init__(self, stream: _TextOutput | None = None) -> None:
+        super().__init__()
+        self.stream = sys.stderr if stream is None else stream
+        self.terminator = "\n"
+
+    def flush(self) -> None:
+        with self.lock:
+            self.stream.flush()
+
+    def emit(self, record: LogRecord | None) -> None:
+        if record is None:
+            raise AttributeError("'NoneType' object has no attribute 'getMessage'")
+        self.stream.write(self.format(record) + self.terminator)
+        self.flush()
+
+    def setStream(self, stream: _TextOutput) -> _TextOutput | None:
+        if stream is self.stream:
+            return None
+        with self.lock:
+            self.flush()
+            old = self.stream
+            self.stream = stream
+        return old
+
+
+def _deliver(logger: Logger, level: int, message: str, path: str, lineno: int) -> None:
+    current: Logger | None = logger
+    record: LogRecord | None = None
+    found = False
+    while current is not None:
+        for handler in current.handlers:
+            found = True
+            if level >= handler.level:
+                if record is None:
+                    record = LogRecord(logger.name, level, path, lineno, message, (), None)
+                handler.handle(record)
+        if not current.propagate:
+            break
+        current = current.parent
+    _fallback(logger, level, message, found)
 
 
 def _logfile_name(filename: str | Path) -> str:
@@ -202,7 +259,7 @@ class FileHandler:
 
 
 class NullHandler(Handler):
-    def handle(self, record: LogRecord | None):
+    def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
         pass
 
     def emit(self, record: LogRecord | None) -> None:

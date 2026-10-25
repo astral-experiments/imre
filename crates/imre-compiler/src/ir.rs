@@ -93,6 +93,7 @@ pub(crate) enum Type {
     CodecInfo,
     CodecWriterClass,
     CodecWriter,
+    TextOutput,
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -236,6 +237,7 @@ impl std::fmt::Display for Type {
             Self::CodecInfo => "codecs.CodecInfo",
             Self::CodecWriterClass => "type[codecs.StreamWriter]",
             Self::CodecWriter => "codecs.StreamWriter",
+            Self::TextOutput => "writable text stream",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -1326,6 +1328,11 @@ pub(crate) enum WriterOperation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
     Get,
+    Handlers,
+    AddHandler,
+    RemoveHandler,
+    WriteStream,
+    FlushStream,
     HandlerRename,
     LockNew,
     LockAcquire,

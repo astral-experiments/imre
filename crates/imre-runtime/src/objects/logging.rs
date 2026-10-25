@@ -1,5 +1,6 @@
 //! Process-local logging state for the native single-threaded runtime.
 mod config;
+mod delivery;
 mod handler;
 mod hierarchy;
 mod levels;
@@ -20,6 +21,7 @@ use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object}
 
 struct Entry {
     handle: Rc<Object>,
+    handlers: Rc<Object>,
     level: Int,
     creation_order: usize,
 }
@@ -31,6 +33,7 @@ impl Entry {
                 Str::from(name),
             ))))),
             level: Int::small(level).unwrap(),
+            handlers: super::Words::new(6).into_object(),
             creation_order,
         }
     }
