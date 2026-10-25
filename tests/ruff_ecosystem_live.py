@@ -117,6 +117,7 @@ def main():
     parser.add_argument("--compiler", type=Path, required=True)
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--opt-level", choices=["0", "3"], default="3")
     args = parser.parse_args()
     manifest = json.loads((EXAMPLE / "UPSTREAM.json").read_text())
     for name, digest in manifest["files"].items():
@@ -130,7 +131,7 @@ def main():
         subprocess.run(
             [args.compiler.resolve(), "build", package / "__main__.py", "--module-root", directory,
              "--reachable-only", "--entry-profile", EXAMPLE / "markdown-entry.json",
-             "--runtime", args.runtime.resolve(), "-o", binary],
+             "--opt-level", args.opt_level, "--runtime", args.runtime.resolve(), "-o", binary],
             check=True, timeout=300,
         )
         executables = [directory / name for name in ["baseline", "comparison"]]
