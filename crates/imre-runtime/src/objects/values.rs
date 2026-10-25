@@ -478,10 +478,6 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                             output.push('>');
                             None
                         }
-                        Storage::LogRecord(record) => {
-                            output.push_str(&record.repr());
-                            None
-                        }
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None

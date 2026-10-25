@@ -99,6 +99,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::NativeModule
         | Type::ModuleNamespace
         | Type::LogFormatter
+        | Type::LogRecord
         | Type::Logger
         | Type::TimedFileHandler
         | Type::ProcessSelectorClass

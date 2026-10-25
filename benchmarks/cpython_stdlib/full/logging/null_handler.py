@@ -94,23 +94,8 @@ print(emitter.calls)
 emitter.emit(first)
 print(emitter.calls)
 """
-    record_containers = imports + b"""
-record = LogRecord("sample", 20, "a.py", 7, "value", (), None)
-items: list[LogRecord | None] = []
-print(items)
-items.append(record)
-items.append(None)
-print(items)
-print(str(items))
-print(repr((items, record)))
-"""
-    return {
-        "null": base,
-        "recording": recording,
-        "locks": (HERE / "lock_values.py").read_bytes(),
-        "buffers": (HERE / "buffer_values.py").read_bytes(),
-        "record containers": record_containers,
-    }, method
+    return {"null": base, "recording": recording, "locks": (HERE / "lock_values.py").read_bytes(),
+            "buffers": (HERE / "buffer_values.py").read_bytes()}, method
 
 
 def output(command, cwd):

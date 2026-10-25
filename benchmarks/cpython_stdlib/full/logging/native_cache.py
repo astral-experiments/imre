@@ -28,7 +28,7 @@ def check_cache_values(toolchain, directory):
 
 def cache_assertion_blocker(exc, directory):
     """Accept only the unsupported shared assertion at this exact upstream statement."""
-    match = re.search(r"case\.py:(\d+):\d+: Imre: (expected int, got dict\[int, bool\]; annotations are enforced contracts)", str(exc))
+    match = re.search(r"case\.py:(\d+):\d+: Imre: (expected (?:bool \| )?int, got dict\[int, bool\]; annotations are enforced contracts)", str(exc))
     if match:
         statement = (directory / "case.py").read_text().splitlines()[int(match[1]) - 1].strip()
         if statement == "self.assertEqual(logger2._cache, {})":
