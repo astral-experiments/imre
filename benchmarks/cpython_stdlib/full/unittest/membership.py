@@ -50,12 +50,16 @@ def verify(case: Subject, log: list[str]) -> None:
 
 
 class Override(unittest.TestCase):
-    def assertIn(self, member: str, container: str, msg: str | None = None) -> None:
-        print("override " + member + container)
+    def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+        print("override " + repr(member) + " " + repr(container))
+
+    def assertNotIn(self, member: str, container: str, msg: str | None = None) -> None:
+        print("override not in " + member + container)
 
 
 def through_base(case: unittest.TestCase) -> None:
-    case.assertIn("a", "b")
+    case.assertIn(1, {1: "one"})
+    case.assertNotIn("a", "b")
 
 
 class CustomFail(unittest.TestCase):
@@ -67,6 +71,6 @@ class CustomFail(unittest.TestCase):
 
 
 verify(Subject(), [])
-Override().assertIn("a", "b")
+Override().assertIn(1, {1: "one"})
 through_base(Override())
 CustomFail().assertNotIn("x", "next")
