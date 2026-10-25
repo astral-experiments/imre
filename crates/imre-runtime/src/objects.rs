@@ -130,6 +130,7 @@ enum Storage {
     ZipInfo(Rc<zipfile::Info>),
     Popen(Box<processes::Popen>),
     AsyncProcess(Box<processes::AsyncProcess>),
+    AsyncCoroutine(Rc<asyncio::Task>),
     AsyncTask(Rc<asyncio::Task>),
     GeneratorContext(Rc<contexts::Manager>),
     DirectoryContext(tempdirs::DirectoryContext),

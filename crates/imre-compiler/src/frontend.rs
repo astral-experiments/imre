@@ -13,6 +13,7 @@ use crate::types::Types;
 
 mod annotations;
 mod argparse;
+mod assertion_syntax;
 mod assignments;
 mod asyncio;
 mod bytes;
@@ -790,6 +791,9 @@ pub(crate) fn lower_with_owners(
         graph,
         &types,
     )?;
+    if closed_calls::has_keyword_displays(graph) {
+        inference.discover_packed_arguments();
+    }
     for (module, function, _) in &mut definitions {
         assignments::alias_builtin_parameters(function, &graph.modules[*module].bindings);
         if closed_calls::prepare(function, graph, *module) {
@@ -4283,7 +4287,10 @@ impl<'a> Checker<'a> {
                     false,
                 ));
             }
-            ast::Stmt::Assert(_) if self.graph.python_optimization() > 0 => None,
+            ast::Stmt::Assert(assertion) if self.graph.python_optimization() > 0 => {
+                assertion_syntax::validate(self.source, assertion)?;
+                None
+            }
             ast::Stmt::Assert(assert) => {
                 let test = self.condition(&assert.test)?;
                 let successful = self.local_state();
@@ -4543,6 +4550,7 @@ impl<'a> Checker<'a> {
                     | Type::Float
                     | Type::Bytes
                     | Type::None
+                    | Type::ListInt
                     | Type::List(_)
                     | Type::Tuple(_)
                     | Type::Dict(_)
@@ -6031,17 +6039,67 @@ impl<'a> Checker<'a> {
                             || self.types.is_value_struct(item)
                             || matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
-                    if matches!(ty, Type::ListInt | Type::List(_)) && !comparable_list
-                        || matches!(
-                            ty,
-                            Type::ChainMap(_)
-                                | Type::StringKeys
-                                | Type::Optional(_)
-                                | Type::Union(_)
-                        )
-                        || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
-                        || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
-                    {
+                    let comparable = match ty {
+                        Type::List(_) => tuple_list,
+                        Type::Dict(_) => self.types.is_counter(ty),
+                        Type::Tuple(_) => self.types.hashable_key(ty),
+                        Type::ListInt
+                        | Type::ChainMap(_)
+                        | Type::StringKeys
+                        | Type::Optional(_)
+                        | Type::Union(_) => false,
+                        Type::ForwardRef(_)
+                        | Type::AnnotationValue(_)
+                        | Type::Int
+                        | Type::Float
+                        | Type::StrEnum(_)
+                        | Type::Enum(_)
+                        | Type::Str
+                        | Type::StrLiteral(_)
+                        | Type::BuiltinClass
+                        | Type::Path
+                        | Type::PurePath(_)
+                        | Type::Set(_)
+                        | Type::Deque(_)
+                        | Type::SimpleNamespace(_)
+                        | Type::Bytes
+                        | Type::Calendar(_)
+                        | Type::ClockTime
+                        | Type::Class(_)
+                        | Type::Bool
+                        | Type::None
+                        | Type::TimedFileHandler
+                        | Type::StrDescriptor(_)
+                        | Type::PlainObject
+                        | Type::PathInfo
+                        | Type::Poll
+                        | Type::Socket
+                        | Type::Sha256
+                        | Type::JsonDecoder
+                        | Type::ZipFile
+                        | Type::ZipInfo
+                        | Type::CsvReader
+                        | Type::Exception
+                        | Type::NamedException(_)
+                        | Type::ObjectValue
+                        | Type::ReadOnlyObjectMapping
+                        | Type::ImportException
+                        | Type::TimeoutExpired
+                        | Type::TextIO
+                        | Type::StringIO
+                        | Type::HandlerLock
+                        | Type::CompletedProcess(..)
+                        | Type::SourceModule
+                        | Type::BinaryIO => true,
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                expression,
+                                "unsupported comparison for these types",
+                            ));
+                        }
+                    };
+                    if !comparable {
                         return Err(error(
                             self.source,
                             expression,

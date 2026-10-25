@@ -95,6 +95,30 @@ impl Checker<'_> {
     }
 }
 
+/// A literal keyword display can carry a wider value into an annotated callee.
+pub(super) fn has_keyword_displays(graph: &SourceGraph) -> bool {
+    #[derive(Default)]
+    struct Displays(bool);
+    impl<'a> Visitor<'a> for Displays {
+        fn visit_keyword(&mut self, kw: &'a ast::Keyword) {
+            if kw.arg.is_none() && kw.value.is_dict_expr() {
+                self.0 = true;
+            } else if !self.0 {
+                walk_keyword(self, kw);
+            }
+        }
+    }
+    graph.modules.iter().any(|module| {
+        module.source.contains("**") && {
+            let mut found = Displays::default();
+            module.parsed.syntax().body.iter().any(|stmt| {
+                found.visit_stmt(stmt);
+                found.0
+            })
+        }
+    })
+}
+
 const KEYWORD_PACK: &str = "@keyword-tuple:";
 
 fn packed_name(n: &mut ast::ExprName) {

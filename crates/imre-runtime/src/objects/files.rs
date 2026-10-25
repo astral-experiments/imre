@@ -1040,6 +1040,7 @@ mod tests {
         std::fs::write(&path, member(b"replacement")).unwrap();
 
         state.flush().ok().unwrap();
+        assert_eq!(state.read_into(&mut []).ok().unwrap(), 0);
         assert!(
             state
                 .read_size(&Int::from_usize(0))
@@ -1048,9 +1049,12 @@ mod tests {
                 .is_empty()
         );
         assert!(matches!(state.stream, Some(Stream::UnreadGzip { .. })));
+        let mut prefix = [0; 3];
+        assert_eq!(state.read_into(&mut prefix).ok().unwrap(), 3);
+        assert_eq!(&prefix, b"ori");
         assert_eq!(
             state.read_size(&Int::from_usize(8)).ok().unwrap(),
-            b"original"
+            b"ginal"
         );
     }
 
