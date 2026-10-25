@@ -20,6 +20,7 @@ STDLIB = HERE.parents[1]
 SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import native_config
+import native_formatters
 import native_levels
 import native_logging
 import native_records
@@ -147,6 +148,9 @@ def known_cases(toolchain, work, original):
             operation=("imre", "Native handler construction, calendar rollover and close"))(case, method)
     executions[daily] = native_daily
     executions.update(native_config.config_cases(toolchain, directory("config"), original))
+    formatter = toolchain.build((HERE / "formatter_driver.py").read_bytes(), directory("formatters"))
+    executions.update(native_formatters.host_formatter_cases(toolchain, formatter, original))
+    executions[native_formatters.PRECISION] = native_formatters.precision_case(toolchain, directory("precision"))
     record_binary = toolchain.build((HERE / "record_driver.py").read_bytes(), directory("records"))
     def optional(case, method):
         with native_records.native_flags(record_binary) as (driver, calls), patch.object(original, "logging", driver):
