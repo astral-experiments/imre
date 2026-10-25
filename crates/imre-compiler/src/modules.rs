@@ -386,7 +386,7 @@ impl IntrinsicModule {
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
-            (Self::Pathlib, "Path") => Intrinsic::Path,
+            (Self::Pathlib, "Path" | "PosixPath") => Intrinsic::Path,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,

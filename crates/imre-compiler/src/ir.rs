@@ -772,6 +772,9 @@ pub(crate) enum PathOperation {
     OsExists,
     New,
     Join,
+    Match {
+        full: bool,
+    },
     WithName,
     Text,
     Name,

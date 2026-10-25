@@ -90,6 +90,7 @@ impl Builtin {
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
                     | PathOperation::WithName
+                    | PathOperation::Match { .. }
                     | PathOperation::Resolve
                     | PathOperation::WriteText
                     | PathOperation::WriteBytes
