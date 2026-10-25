@@ -57,6 +57,7 @@ pub(crate) enum Type {
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
     TextIO,
     StringIO,
+    HandlerLock,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
@@ -211,6 +212,7 @@ impl std::fmt::Display for Type {
             Self::StringIterable => "Iterable[str]",
             Self::TextIO => "typing.TextIO",
             Self::StringIO => "io.StringIO",
+            Self::HandlerLock => "_thread.RLock",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
             Self::PathInfo => "pathlib.types.PathInfo",
@@ -1394,6 +1396,16 @@ pub(crate) enum WriterOperation {
 pub(crate) enum LogOperation {
     Get,
     HandlerRename,
+    LockNew,
+    LockAcquire,
+    LockAcquireInt,
+    LockRelease,
+    LockCount,
+    LockOwned,
+    LockLocked,
+    LockEnter,
+    LockExit,
+    LockReset,
     HandlerLookup,
     AddLevel,
     LevelName,
