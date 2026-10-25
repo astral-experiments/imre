@@ -88,3 +88,8 @@ class Case(unittest.TestCase):
 
 Case().exercise()
 failure_class(SpecialCase())
+
+unbound = UnboundLocalError("unassigned")
+with unittest.TestCase().assertRaises(NameError) as name_error:
+    raise unbound
+print(name_error.exception is unbound)

@@ -66,6 +66,8 @@ pub(crate) enum Kind {
     StopIteration = 35,
     BadZipFile = 36,
     NotImplementedError = 37,
+    NameError = 39,
+    UnboundLocalError = 40,
 }
 
 impl Kind {
@@ -113,6 +115,8 @@ impl Kind {
             35 => Self::StopIteration,
             36 => Self::BadZipFile,
             37 => Self::NotImplementedError,
+            39 => Self::NameError,
+            40 => Self::UnboundLocalError,
             _ => return None,
         })
     }
@@ -157,12 +161,15 @@ impl Kind {
             Self::StopIteration => "StopIteration",
             Self::BadZipFile => "BadZipFile",
             Self::NotImplementedError => "NotImplementedError",
+            Self::NameError => "NameError",
+            Self::UnboundLocalError => "UnboundLocalError",
         }
     }
 
     fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
+            Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::Exception => !matches!(
                 self,
                 Self::BaseException | Self::SystemExit | Self::CancelledError

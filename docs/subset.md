@@ -508,6 +508,12 @@ Numeric fields additionally accept literal `f`, `%`, `.Nf`, and `.N%` specificat
 
 Integer and boolean fields support decimal `d` and the `+`, `-`, and space sign options with or without `d`. For example, `f"{change:+}"` produces `+0`, `+3`, or `-3`. Decimal formatting preserves arbitrary integer precision and formats booleans as zero or one.
 
+Integer and boolean fields also accept `x` or `X` with a literal width up to
+1000, including zero padding (for example, `f"{code:04x}"`). `chr(int)` returns
+a one-character native string for Unicode scalar values. Out-of-range integers
+raise `ValueError`; isolated surrogate code points cannot be represented by a
+native string.
+
 Dynamic specifications, width, alignment, other numeric presentation types, `!a`, and debug `=` fields are rejected, including `f"{quantity=!s}"`. Records support a statically resolved `__str__` method. Custom `__format__` and `__repr__` methods are unsupported.
 
 Raw prefixes apply only to their own literal text. Expressions inside a raw f-string still follow their ordinary string rules, and adjacent parts keep their individual prefixes. Surrogate escapes in non-raw literal text or field expressions are rejected consistently with ordinary strings; tabs and form feeds inside literal text remain data.
@@ -940,6 +946,8 @@ Language errors propagate through explicit checked call results and can be caugh
 Exceptions contain an immutable category, message, optional explicit cause, and context-suppression flag. Process status errors additionally retain the original argument list, return code, and captured strings, and format their message from the current argument list. A cause can be attached only while raising a freshly constructed exception, and cause attributes cannot be written, so cause chains remain acyclic. Deep uniquely owned cause chains are released iteratively. There are no traceback, frame, or implicit context references. Exited function frames release their owners during propagation; implicit file closure can therefore happen before CPython releases locals retained by a traceback. A source-defined exception can inherit from one known exception class. A subclass with a docstring or `pass` uses the inherited constructor and matches its ancestor handlers. A failing `asyncio.TaskGroup` can raise an exception group. Full traceback objects, implicit exception context, attaching causes to existing instances and `except*` remain unsupported.
 
 ## Exceptions and cleanup
+
+An explicitly typed local assigned in a `try` body may be read after a handled exception. When a simple assignment did not complete on that path and no earlier value exists, the read raises `UnboundLocalError` (a `NameError`). A successfully assigned `None` remains an ordinary value.
 
 User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent

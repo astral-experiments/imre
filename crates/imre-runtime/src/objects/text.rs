@@ -7,6 +7,49 @@ use std::rc::Rc;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
 
+/// # Safety
+/// The integer is rooted. Success transfers an immutable one-character string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
+    // SAFETY: the caller retains the integer through this conversion.
+    let value = unsafe { Int::borrow(value) }.as_small();
+    let result = match value {
+        Some(0xd800..=0xdfff) => Err(Error::new(
+            Kind::ValueError,
+            "surrogates are outside the native string domain",
+        )),
+        Some(code @ 0..=0x10ffff) => {
+            let c = char::from_u32(code as u32).expect("Unicode scalar");
+            Ok(Rc::into_raw(owned_string(c.encode_utf8(&mut [0; 4]))))
+        }
+        _ => Err(Error::new(
+            Kind::ValueError,
+            "chr() arg not in range(0x110000)",
+        )),
+    };
+    finish(result, std::ptr::null())
+}
+
+/// # Safety
+/// The caller roots the integer and supplies a bounded literal width. BigInt's
+/// formatter pads signed magnitudes, including zeroes after a negative sign.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_hex_format(value: usize, width: u32, flags: u32) -> *const Str {
+    // SAFETY: the native integer owner stays live until formatting completes.
+    let value = unsafe { Int::borrow(value) };
+    let big = value.big();
+    let n = big.as_ref();
+    let width = width as usize;
+    let output = match flags {
+        0 => format!("{n:width$x}"),
+        1 => format!("{n:0width$x}"),
+        2 => format!("{n:width$X}"),
+        3 => format!("{n:0width$X}"),
+        _ => unreachable!("invalid hexadecimal format flags"),
+    };
+    Rc::into_raw(Rc::new(Str::from(output)))
+}
+
 /// Returns Python's substring membership for two exact strings.
 ///
 /// # Safety
