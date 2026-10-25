@@ -651,7 +651,8 @@ impl Checker<'_> {
         } else {
             let binding = self.graph.resolve(self.module, expression);
             if let Some(Binding::Definition(definition)) = binding
-                && self.classes.declarations.ids.contains_key(&definition)
+                && (self.classes.declarations.ids.contains_key(&definition)
+                    || self.types.namedtuple(definition).is_some())
             {
                 // Static dispatch and constant folding can erase the class name from the IR.
                 self.class_reads.borrow_mut().insert(definition);
