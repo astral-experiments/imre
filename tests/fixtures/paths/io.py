@@ -45,8 +45,8 @@ for name in ["tree", "missing", "input.txt/child", "file-link", "directory-link"
     print(candidate.is_file())
     print(candidate.is_dir())
     print(
-        candidate.exists(follow_symlinks=False),
-        candidate.is_file(follow_symlinks=False),
-        candidate.is_dir(follow_symlinks=False),
+        f"{candidate.exists(follow_symlinks=False)} "
+        f"{candidate.is_file(follow_symlinks=False)} "
+        f"{candidate.is_dir(follow_symlinks=False)}"
     )
 print(Path("file-link").read_text(encoding="utf-8"))

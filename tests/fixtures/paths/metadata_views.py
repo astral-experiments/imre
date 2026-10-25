@@ -64,12 +64,12 @@ def main(root: str) -> None:
             saved = entry.info
             entry.unlink()
             copyfile(str(base / 'dangling.json'), str(entry), follow_symlinks=False)
-            print(saved.exists(), saved.exists(follow_symlinks=False))
-            print(saved.is_file(), saved.is_symlink())
-            print(entry.exists(), entry.is_file(), entry.is_symlink())
+            print(f'{saved.exists()} {saved.exists(follow_symlinks=False)}')
+            print(f'{saved.is_file()} {saved.is_symlink()}')
+            print(f'{entry.exists()} {entry.is_file()} {entry.is_symlink()}')
             entry.unlink()
             entry.mkdir()
-            print(saved.exists(), saved.is_file(), saved.is_dir(), entry.is_dir())
+            print(f'{saved.exists()} {saved.is_file()} {saved.is_dir()} {entry.is_dir()}')
             entry.rmdir()
 
 
