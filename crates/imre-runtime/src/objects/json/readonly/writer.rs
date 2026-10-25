@@ -195,6 +195,7 @@ mod tests {
             &mut nodes,
             raw,
             Source {
+                refused: &std::cell::Cell::new(false),
                 text: json,
                 original: None,
                 shared: None,
