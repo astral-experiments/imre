@@ -11,6 +11,7 @@ mod args;
 mod asyncio;
 mod builtins;
 mod bytes;
+mod codecs;
 mod contexts;
 mod csv;
 mod deferred_diff;
@@ -65,6 +66,7 @@ enum Storage {
     ByteOutput(bytes::ByteOutput),
     Sha256(Box<sha2::Sha256>),
     CsvReader(Box<csv::Reader>),
+    CodecInfo(codecs::Codec),
     Exception(exceptions::Exception),
     ValueView(OwnedWord),
     File(Box<files::FileState>),

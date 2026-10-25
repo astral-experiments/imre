@@ -41,6 +41,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::Logger
         | Type::TimedFileHandler
         | Type::ClockTime
+        | Type::CodecInfo
         | Type::Sha256
         | Type::CsvReader
         | Type::RegexPattern
@@ -137,6 +138,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
             | Type::ClockTime
             | Type::LogFormatter
             | Type::LogRecord
+            | Type::CodecInfo
             | Type::Sha256
             | Type::RegexPattern
             | Type::RegexMatch

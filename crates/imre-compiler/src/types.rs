@@ -124,6 +124,7 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::CodecInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -457,6 +458,7 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::CodecInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
