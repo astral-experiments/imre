@@ -9,6 +9,7 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "warning_hierarchy": (Path(__file__).parent / "fixtures/exceptions/warning_hierarchy.py").read_text(),
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
     "classvar_exception_constructor": """
