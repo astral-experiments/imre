@@ -182,12 +182,27 @@ impl Checker<'_> {
                 "local functions require annotated parameters and return types",
             ));
         }
-        if self.generic_awaitable_wrapper(definition) {
+        let wraps = match definition.decorator_list.as_slice() {
+            [decorator] => decorator.expression.as_call_expr().filter(|call| {
+                self.resolve(&call.func)
+                    == Some(crate::modules::Binding::Intrinsic(Intrinsic::Wraps))
+            }),
+            _ => None,
+        };
+        if wraps.is_none() && self.generic_awaitable_wrapper(definition) {
             self.local_functions.get_mut(name).unwrap().generic = Some(Rc::new(definition.clone()));
             return Ok(None);
         }
+        let mut undecorated;
+        let raw = if wraps.is_some() {
+            undecorated = definition.clone();
+            undecorated.decorator_list.clear();
+            &undecorated
+        } else {
+            definition
+        };
         let signature = signature(
-            definition,
+            raw,
             self.graph,
             self.module,
             &self.classes.declarations,
@@ -195,20 +210,22 @@ impl Checker<'_> {
             None,
             &inference::Inference::default(),
         )?;
-        let function = self.lift_local(definition, signature)?;
-        let object = if self.local_functions[name].value_read {
-            function
-                .callback(self.types, self.source, definition)
-                .ok()
-                .map(|value| {
-                    let slot = self.hidden(value.ty);
-                    self.assigned.insert(slot);
-                    self.calls.insert(function.signature.id);
-                    (slot, value)
-                })
+        let function = self.lift_local(raw, signature)?;
+        let value = if let Some(config) = wraps {
+            let (scope, wrapped) = self.wraps_config(config)?;
+            let wrapper = function.callback(self.types, self.source, definition)?;
+            Some(scope.finish(self.attach_wrapped(wrapper, wrapped, config)?))
+        } else if self.local_functions[name].value_read {
+            function.callback(self.types, self.source, definition).ok()
         } else {
             None
         };
+        let object = value.map(|value| {
+            let slot = self.hidden(value.ty);
+            self.assigned.insert(slot);
+            self.calls.insert(function.signature.id);
+            (slot, value)
+        });
         let binding = self.local_functions.get_mut(name).unwrap();
         binding.function = Some(function);
         binding.value_slot = object.as_ref().map(|(slot, _)| *slot);

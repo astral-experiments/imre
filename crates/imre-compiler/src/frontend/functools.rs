@@ -13,55 +13,104 @@ fn type_error(message: &str) -> Statement {
 }
 
 impl Checker<'_> {
-    /// With both attribute lists empty, update_wrapper still attaches the
-    /// original callable and returns the wrapper itself.
-    pub(super) fn update_wrapper(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let names = ["wrapper", "wrapped", "assigned", "updated"];
+    /// Check each argument in source order and hold it across the later calls.
+    fn wrapper_arguments<const N: usize>(
+        &mut self,
+        call: &ast::ExprCall,
+        names: [&str; N],
+    ) -> Result<(calls::ArgumentScope, [Expr; N]), String> {
         let mut supplied = call.arguments.args.iter().enumerate().collect::<Vec<_>>();
         for keyword in &call.arguments.keywords {
             let index = names
                 .iter()
                 .position(|name| keyword.arg.as_deref() == Some(*name))
-                .ok_or_else(|| error(self.source, keyword, "unsupported update_wrapper keyword"))?;
+                .ok_or_else(|| error(self.source, keyword, "unsupported wrapper keyword"))?;
             supplied.push((index, &keyword.value));
         }
-        let mut fields: [Option<Expr>; 4] = [None, None, None, None];
+        let mut fields: [Option<Expr>; N] = std::array::from_fn(|_| None);
         let mut scope = calls::ArgumentScope::default();
         for (index, node) in supplied {
             let slot = fields
                 .get_mut(index)
                 .filter(|slot| slot.is_none())
-                .ok_or_else(|| {
-                    error(self.source, node, "invalid update_wrapper argument binding")
-                })?;
+                .ok_or_else(|| error(self.source, node, "invalid wrapper argument binding"))?;
             let value = self.expr(node)?;
-            if index >= 2 && value.ty != self.types.tuple(Vec::new()) {
+            if index >= N - 2 && value.ty != self.types.tuple(Vec::new()) {
                 return Err(error(
                     self.source,
                     node,
-                    "native update_wrapper requires empty assigned and updated tuples",
+                    "native wrapper updates require empty assigned and updated tuples",
                 ));
             }
             *slot = Some(scope.hold(self, value));
         }
-        let [Some(wrapper), Some(wrapped), Some(_), Some(_)] = fields else {
+        if fields.iter().any(Option::is_none) {
             return Err(error(
                 self.source,
                 call,
-                "native update_wrapper requires explicit assigned and updated tuples",
+                "native wrapper updates require explicit assigned and updated tuples",
             ));
-        };
+        }
+        Ok((scope, fields.map(Option::unwrap)))
+    }
+
+    pub(super) fn attach_wrapped(
+        &self,
+        wrapper: Expr,
+        wrapped: Expr,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
         if !matches!(wrapper.ty, Type::Callable(_)) || wrapper.ty != wrapped.ty {
             return Err(error(
                 self.source,
-                call,
+                node,
                 "native wrapper links require two functions with the same callable signature",
             ));
         }
-        Ok(scope.finish(Expr {
+        Ok(Expr {
             ty: wrapper.ty,
             kind: ExprKind::Builtin(Builtin::FunctionWrappedSet, vec![wrapper, wrapped]),
-        }))
+        })
+    }
+
+    pub(super) fn update_wrapper(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let (scope, [wrapper, wrapped, _, _]) =
+            self.wrapper_arguments(call, ["wrapper", "wrapped", "assigned", "updated"])?;
+        Ok(scope.finish(self.attach_wrapped(wrapper, wrapped, call)?))
+    }
+
+    pub(super) fn wraps_config(
+        &mut self,
+        config: &ast::ExprCall,
+    ) -> Result<(calls::ArgumentScope, Expr), String> {
+        let (scope, [wrapped, _, _]) =
+            self.wrapper_arguments(config, ["wrapped", "assigned", "updated"])?;
+        Ok((scope, wrapped))
+    }
+
+    /// An immediate decorator application can consume the partial without exposing it.
+    pub(super) fn apply_wraps(
+        &mut self,
+        config: &ast::ExprCall,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let (scope, wrapped) = self.wraps_config(config)?;
+        let node = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([node], []) => node,
+            ([], [key]) if key.arg.as_deref() == Some("wrapper") => &key.value,
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "an immediate wraps decorator needs a single wrapper",
+                ));
+            }
+        };
+        let wrapper = self.expr(node)?;
+        Ok(scope.finish(self.attach_wrapped(wrapper, wrapped, call)?))
     }
 
     /// Evaluate the callable, iterable and optional seed before acquiring the iterator.
