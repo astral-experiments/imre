@@ -463,14 +463,21 @@ impl Checker<'_> {
         if cursor.ty == Type::StringIO {
             return Ok(self.open_string_io(cursor));
         }
-        if cursor.ty != Type::CsvReader && self.types.cursor_element(cursor.ty).is_none() {
-            return Err(error(
-                self.source,
-                call,
-                "iter requires a supported iterator",
-            ));
+        if cursor.ty == Type::CsvReader || self.types.cursor_element(cursor.ty).is_some() {
+            return Ok(cursor);
         }
-        Ok(cursor)
+        let item = self
+            .iterable_element(cursor.ty)
+            .filter(|_| cursor.ty != Type::TextIO)
+            .or_else(|| {
+                matches!(cursor.ty, Type::Int | Type::Bool | Type::Float | Type::None)
+                    .then_some(Type::Int)
+            })
+            .ok_or_else(|| error(self.source, call, "iter requires a supported iterator"))?;
+        Ok(Expr {
+            ty: self.types.cursor(item),
+            kind: ExprKind::Builtin(Builtin::AcquireCursor, vec![cursor]),
+        })
     }
 
     pub(super) fn next_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {

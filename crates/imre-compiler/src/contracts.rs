@@ -466,6 +466,7 @@ impl Builtin {
             | Self::TomlKeys
             | Self::CursorNextRequired => Contract::new(true, Unknown),
             Self::Repeat
+            | Self::AcquireCursor
             | Self::CursorLengthHint
             | Self::Progression { .. }
             | Self::Tee

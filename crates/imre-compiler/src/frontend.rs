@@ -1226,9 +1226,12 @@ fn signature(
         })
         .map(|value| {
             if let ast::Expr::Subscript(subscript) = value
-                && graph.resolve(module, &subscript.value)
+                && (graph.resolve(module, &subscript.value)
                     == Some(Binding::Intrinsic(Intrinsic::Sequence))
+                    || (method.is_some() && records::iterator_result(function, graph, module)))
             {
+                // Delegating generator methods return their existing backing list
+                // to the suspended consumer. Stored Iterator fields use a cursor.
                 annotation_in_class(&subscript.slice, graph, module, classes, types, owner)
                     .map(|element| types.list(element))
             } else {
@@ -1565,17 +1568,17 @@ fn annotation_with_aliases(
             })
         }
         ast::Expr::Subscript(value) => match &*value.value {
-            item if matches!(
-                graph.resolve(module, item),
-                Some(Binding::Intrinsic(
-                    Intrinsic::Iterable | Intrinsic::Iterator
-                ))
-            ) =>
+            item if graph.resolve(module, item)
+                == Some(Binding::Intrinsic(Intrinsic::Iterator)) =>
+            {
+                Ok(types.cursor(nested(&value.slice)?))
+            }
+            item if graph.resolve(module, item)
+                == Some(Binding::Intrinsic(Intrinsic::Iterable)) =>
             {
                 let element = nested(&value.slice)?;
                 if owner.is_some_and(|id| classes.definitions[id].dataclass.is_some())
                     && element == Type::Str
-                    && graph.resolve(module, item) == Some(Binding::Intrinsic(Intrinsic::Iterable))
                 {
                     Ok(Type::StringIterable)
                 } else {
