@@ -33,6 +33,15 @@ class Redirect(logging.FileHandler):
         return record.getMessage()
 
 
+class BrokenRotation(RotatingFileHandler):
+    def rotate(self, source: str, dest: str) -> None:
+        raise ValueError("rotation")
+
+    def handleError(self, record: logging.LogRecord) -> None:
+        print(record is seen_records[0])
+        print(isinstance(sys.exception(), ValueError))
+
+
 filename = sys.argv[1]
 entry = logging.makeLogRecord({"msg": "π"})
 seen_records.append(entry)
@@ -97,3 +106,11 @@ redirect.close()
 if original is not None:
     original.close()
 print(redirect_path.read_text(encoding="utf-8"))
+
+rotating = BrokenRotation(filename, maxBytes=1, backupCount=1)
+print(rotating.handle(entry) is entry)
+try:
+    rotating.doRollover()
+except ValueError as error:
+    print(str(error))
+rotating.close()
