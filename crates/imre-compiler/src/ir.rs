@@ -4,6 +4,8 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
     Document(DocumentShape),
+    /// Read-only nodes from the sealed unified-diff parser.
+    Patch(PatchKind),
     Int,
     Float,
     Bool,
@@ -221,6 +223,7 @@ pub(crate) enum SocketOp {
     Listen,
     Accept,
     Connect,
+    Shutdown,
     SockName,
     Recv,
     Send,
@@ -327,6 +330,9 @@ impl std::fmt::Display for Type {
             Self::ContextToken(_) => "contextvars.Token",
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
+            Self::Patch(PatchKind::Set) => "unidiff.PatchSet",
+            Self::Patch(PatchKind::File) => "unidiff.PatchedFile",
+            Self::Patch(PatchKind::Hunk) => "unidiff.Hunk",
             Self::RegexPattern => "re.Pattern[str]",
             Self::NativeModule => "builtin module",
             Self::ModuleNamespace => "module namespace",
@@ -812,6 +818,7 @@ pub(crate) enum Builtin {
     /// Match an exception against the category list retained by an assertion context.
     ExceptionMatchesAny,
     LiteralStringView,
+    IntListContains,
     StringListContains,
     StructListContains,
     StringContains,
@@ -1068,6 +1075,8 @@ pub(crate) enum Builtin {
     IsBuiltinSubclass,
     Split,
     SplitLines,
+    /// Only the first line and a joined remainder can be observed.
+    JoinedSplitLines,
     DecodeSplitLines,
     Ndiff,
     /// Copy an exact list of immutable strings into a distinct mutable list.
@@ -1159,6 +1168,7 @@ pub(crate) enum Builtin {
     PosixPath(PosixPathOperation),
     Errno(ErrnoOperation),
     Fnmatch(FnmatchOperation),
+    Patch(PatchOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -1198,6 +1208,7 @@ pub(crate) enum Builtin {
     ModuleParentPrefix,
     ModuleCacheFromOrigin,
     CachePath(CachePathOperation),
+    OrderedDict,
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,
@@ -1237,6 +1248,7 @@ pub(crate) enum Builtin {
     ChainMapContains,
     /// The stored type may be promoted to an optional result on a hit.
     ChainMapGet(Type),
+    CounterElements,
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,
@@ -1426,6 +1438,26 @@ impl StrDescriptor {
             Self::IsAlnum => "isalnum",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PatchKind {
+    Set,
+    File,
+    Hunk,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum PatchOperation {
+    Parse,
+    Len,
+    Files,
+    ModifiedFiles,
+    ModifiedCount,
+    Hunks,
+    Path,
+    SourceStart,
+    HunkText,
 }
 
 /// Closed string operations preserve exact argument and storage types.
@@ -1770,6 +1802,7 @@ pub(crate) enum ProcessOperation {
     PopenStatus {
         poll: bool,
     },
+    PopenSetStatus,
     PopenWait,
     PopenCommunicate {
         text: bool,
