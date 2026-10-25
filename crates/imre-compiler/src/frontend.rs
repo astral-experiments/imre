@@ -378,6 +378,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "UnicodeEncodeError" => return Some(38),
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
+        "RecursionError" => return Some(43),
         _ => {}
     }
     if name == "ImportError" {

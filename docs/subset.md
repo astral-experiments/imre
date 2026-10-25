@@ -208,7 +208,10 @@ Select a value into a concrete scalar or
 with literal-key `.get()`, scalar or empty-list defaults, and nested iteration.
 Original array roots keep their mutable list identity. Malformed JSON raises
 `json.JSONDecodeError`, with the original decoded `doc`, short `msg`, character
-offset `pos`, and one-based `lineno` and `colno`. Nesting is limited to 128 containers. Strings use
+offset `pos`, and one-based `lineno` and `colno`. The standard decoder uses a heap stack for
+deep input and raises `RecursionError` above 50,000 open containers. CPython's accelerator
+and pure decoder reach different limits depending on the platform and recursion context.
+The explicit typed schema decoder and the encoder retain their 128-container limit. Strings use
 Unicode scalar values. Integers retain their exact precision. The standard
 reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
