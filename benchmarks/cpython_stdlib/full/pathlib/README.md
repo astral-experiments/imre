@@ -69,6 +69,15 @@ revision `13b6945`. Four link observations use `ad70f73`, and ten stat/lstat
 observations use `6c448e3`. Each other row retains its original revision and roles.
 The 978 baseline probe results and diagnostics matched between optimization levels.
 
+The [stat-branch sweep](body-probes-stat-linux.json) ran all 978 reference
+passes again on `2e4c78d` at both levels. Each produced 119 native candidates,
+820 compile blockers and 39 original wrapper blockers. All fixtures completed
+without an unexpected failure or skip. The eight new candidates were the
+four caching checks on both concrete classes; all already had separately
+audited native receipts. A candidate does not change an execution role.
+Use the complete-method commands below with that compiler and commit to
+reproduce this second snapshot.
+
 For both Path and PosixPath, the original existence, directory and file cache
 methods check a missing name, create a file or directory and query the same view
 again. The complete bodies, filesystem mutations and 24 boolean assertions per
