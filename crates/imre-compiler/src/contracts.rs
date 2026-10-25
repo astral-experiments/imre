@@ -470,6 +470,8 @@ impl Builtin {
             | Self::Tee
             | Self::Batched
             | Self::TupleIndex
+            | Self::Chain
+            | Self::ChainFrom(_)
             | Self::Islice
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter

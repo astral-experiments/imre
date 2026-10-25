@@ -48,6 +48,11 @@
       "assertions": 1,
       "status": "native"
     },
+    "test.test_itertools.TestExamples.test_chain_from_iterable": {
+      "method_sha256": "9c390b12d540589c18085a5c49c7614c021c9141ce32d86c9a75dc831100aaf2",
+      "assertions": 1,
+      "status": "native"
+    },
     "test.test_itertools.TestExamples.test_filter": {
       "method_sha256": "251daf5a1de9f85c255f7e91c63b527fcd18b3fc9c257ca51e262ec501d39fd0",
       "assertions": 1,

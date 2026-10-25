@@ -5246,6 +5246,26 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::Chain | Builtin::ChainFrom(_) => {
+                let source = &args[0].value;
+                let word = self.word(source);
+                let call = if let Builtin::ChainFrom(inner) = builtin {
+                    let outer = iterable_mode(source.ty);
+                    let inner = checked_iterable_mode(*inner);
+                    format!("call ptr @imre_chain_from(i32 {outer}, i64 {word}, i32 {inner})")
+                } else {
+                    let fields = self.module.types.fields(source.ty).unwrap();
+                    let length = fields.len();
+                    let modes = self
+                        .byte_array(fields.into_iter().map(|ty| checked_iterable_mode(ty) as u8).collect());
+                    format!("call ptr @imre_chain(i64 {word}, ptr @{modes}, i64 {length})")
+                };
+                Value {
+                    ty: returns,
+                    operand: self.instruction(call),
+                    small_integer: false,
+                }
+            }
             Builtin::Tee => {
                 let source = &args[0].value;
                 let mode = iterable_mode(source.ty);
@@ -7424,6 +7444,8 @@ declare i64 @imre_tuple_len(ptr)
 declare i64 @imre_tuple_get(ptr, i64)
 declare ptr @imre_batched(i32, i64, i64, i32)
 declare ptr @imre_cycle(i32, i64)
+declare ptr @imre_chain(i64, ptr, i64)
+declare ptr @imre_chain_from(i32, i64, i32)
 declare i64 @imre_cursor_length_hint(ptr, i64)
 declare ptr @imre_repeat(i32, i64, i64)
 declare ptr @imre_str_iter(ptr)

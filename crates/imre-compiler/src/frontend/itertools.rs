@@ -105,6 +105,73 @@ impl Checker<'_> {
         Ok((source, element))
     }
 
+    pub(super) fn is_chain_from_iterable(&self, call: &ast::ExprCall) -> bool {
+        matches!(&*call.func, ast::Expr::Attribute(attr)
+            if attr.attr.as_str() == "from_iterable"
+                && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::Chain)))
+    }
+
+    pub(super) fn chain_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let (op, input, element) = if self.is_chain_from_iterable(call) {
+            let [outer] = call.arguments.args.as_ref() else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "chain.from_iterable takes one iterable",
+                ));
+            };
+            let (outer, inner) = self.cursor_source(outer)?;
+            (
+                Builtin::ChainFrom(inner),
+                outer,
+                self.chain_element(inner, call)?,
+            )
+        } else {
+            let mut values = Vec::new();
+            let mut element = None;
+            for arg in &call.arguments.args {
+                let value = self.cursor_source_value(arg)?;
+                if let Some(ty) = self.chain_element(value.ty, arg)? {
+                    if let Some(previous) = element {
+                        self.expect(previous, ty, arg)?;
+                    }
+                    element = Some(ty);
+                }
+                values.push(value);
+            }
+            let ty = self.types.tuple(values.iter().map(|e| e.ty).collect());
+            (
+                Builtin::Chain,
+                Expr {
+                    ty,
+                    kind: ExprKind::Tuple(values),
+                },
+                element,
+            )
+        };
+        Ok(Expr {
+            ty: self.types.cursor(element.unwrap_or(Type::Int)),
+            kind: ExprKind::Builtin(op, vec![input]),
+        })
+    }
+
+    fn chain_element(&self, ty: Type, node: &impl Ranged) -> Result<Option<Type>, String> {
+        // Iterating an exact scalar raises only when chain reaches that input.
+        if matches!(ty, Type::None | Type::Int | Type::Bool | Type::Float)
+            || matches!(ty, Type::Tuple(_) if self.types.fields(ty).unwrap().is_empty())
+        {
+            return Ok(None);
+        }
+        self.iterable_element(ty).map(Some).ok_or_else(|| {
+            error(
+                self.source,
+                node,
+                "chain input requires one concrete element type",
+            )
+        })
+    }
+
     pub(super) fn count_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let params = [("start", 0), ("step", 1)].map(|(name, value)| Parameter {
             name: name.to_owned(),

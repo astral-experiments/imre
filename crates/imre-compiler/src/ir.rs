@@ -530,6 +530,8 @@ pub(crate) enum Builtin {
         bounded: bool,
     },
     Islice,
+    Chain,
+    ChainFrom(Type),
     Tee,
     Batched,
     TupleIndex,

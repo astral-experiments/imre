@@ -5928,6 +5928,9 @@ impl<'a> Checker<'a> {
         if let Some(suite) = self.doctest_suite(call)? {
             return Ok(suite);
         }
+        if self.is_chain_from_iterable(call) {
+            return self.chain_cursor(call);
+        }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
@@ -6252,6 +6255,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::DeepCopy)) => return self.deep_copy(call),
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
+            Some(Binding::Intrinsic(Intrinsic::Chain)) => return self.chain_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Islice | Intrinsic::Cycle)) => {
                 return self.source_adapter(call);

@@ -83,6 +83,7 @@ pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *
 }
 
 mod batched;
+mod chain;
 mod sources;
 mod tee;
 use std::cell::{Cell, RefCell};
@@ -94,6 +95,7 @@ pub(super) enum Adapter {
     Slice(Slice),
     Tee(tee::Fork),
     Batched(batched::Batch),
+    Chain(chain::Chain),
     Cycle(Cycle),
     PathWalk(paths::Walker),
 }
@@ -184,6 +186,7 @@ impl Adapter {
             Self::Sequence(_) => "iterator",
             Self::Tee(_) => "itertools._tee",
             Self::Batched(_) => "itertools.batched",
+            Self::Chain(_) => "itertools.chain",
             Self::Slice(_) => "itertools.islice",
             Self::Cycle(_) => "itertools.cycle",
             Self::PathWalk(_) => {
@@ -273,6 +276,7 @@ impl Adapter {
                     )))
                 }
             }
+            Self::Chain(chain) => chain.next(),
             Self::Tee(_) | Self::Slice(_) | Self::Cycle(_) | Self::Batched(_) => {
                 self.next_composed()
             }

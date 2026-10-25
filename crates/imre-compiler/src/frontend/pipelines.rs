@@ -207,7 +207,7 @@ impl Checker<'_> {
         if self.is_builtin_iter(call) && call.arguments.args.len() != 1 {
             return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
         }
-        if matches!(
+        if self.is_chain_from_iterable(call) || matches!(
             self.resolve(&call.func),
             Some(Binding::Intrinsic(
                 Intrinsic::Repeat

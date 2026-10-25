@@ -22,6 +22,7 @@ CASES = {
     "TestExamples.test_islice": ("list[str]", 4, ("islice",)),
     "TestExamples.test_repeat": ("list[int]", 1, ("repeat",)),
     "TestExamples.test_chain": ("str", 1, ("chain",)),
+    "TestExamples.test_chain_from_iterable": ("str", 1, ("chain",)),
     "TestExamples.test_filter": ("list[int]", 1, ()),
     "TestExamples.test_zip": ("list[tuple[str, str]]", 1, ()),
 }

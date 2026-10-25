@@ -29,8 +29,8 @@ source and compiles each with an assertion adapter. The adapter checks equality
 and returns an assertion count from the executable. Both the method and every
 operation it invokes run in Imre; CPython does not supply iterator results.
 
-The [O0](native-O0.json) and [O3](native-O3.json) standalone controls pass eleven
-complete bodies: four repeat methods, four examples of chain/count/cycle/islice,
+The [O0](native-O0.json) and [O3](native-O3.json) standalone controls pass twelve
+complete bodies: four repeat methods, five examples of chain/chain.from_iterable/count/cycle/islice,
 the twenty-million-item backward tee deletion regression, and two builtin
 filter/zip examples. Their native fixture records assertion counts.
 The [per-occurrence reports](COVERAGE.md) separately run the original unittest
@@ -74,3 +74,6 @@ On Linux, [batched_allocation.py](batched_allocation.py) fails the
 first native tuple allocation and compares it with a test-enabled pinned
 CPython using `_testcapi.set_nomemory`. Both keep the source at its first item
 and allow a later pull on the same batch cursor. Neither control adds a test ID.
+
+[chain.py](chain.py) exercises a live outer list, delayed acquisition of a
+dictionary, errors on active and outer iterators, and a shared inner cursor.

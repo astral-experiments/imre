@@ -111,7 +111,11 @@ current fixed-tuple return layout requires a literal fork count from 0 to 256.
 element type. A loop, comprehension, or immediate consumer can use the chain.
 It evaluates source expressions left to right, then acquires each iterator on
 reaching its source. A second `Path.glob` sees directory changes made while
-consuming the first glob.
+consuming the first glob. A chain over concrete containers, ranges, or supported
+cursors can be stored and consumed through aliases. `chain.from_iterable(outer)`
+obtains its outer iterator at construction and its inner iterators on demand.
+An error reading the outer source or acquiring an inner iterator exhausts the
+chain; an error while reading an active inner source keeps that source active.
 
 `list(difflib.ndiff(before, after))` compares two string lists, including supported
 read-only `Sequence[str]` parameters. Line alignment, intraline Unicode hints,
