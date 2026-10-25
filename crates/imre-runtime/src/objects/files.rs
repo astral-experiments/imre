@@ -2,7 +2,7 @@
 //! final ownership cleanup only closes resources and never changes error state.
 
 use std::fs::OpenOptions;
-use std::io::{self, SeekFrom};
+use std::io::{self, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
@@ -470,7 +470,7 @@ pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
     }
-    let file = match mode {
+    let mut file = match mode {
         0 | 4 => OpenOptions::new().read(true).open(path),
         1 => OpenOptions::new()
             .write(true)
@@ -488,6 +488,14 @@ pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs
             io::Error::from_raw_os_error(libc::EISDIR),
             Some(path),
         ));
+    }
+    // FileIO starts append streams at EOF before the first write. Pipes may
+    // still be opened for append even though they have no file position.
+    if mode == 2
+        && let Err(error) = file.seek(SeekFrom::End(0))
+        && error.raw_os_error() != Some(libc::ESPIPE)
+    {
+        return Err(errno_error(error));
     }
     Ok((file, metadata))
 }
@@ -1196,6 +1204,42 @@ mod tests {
         }
         drop(ignored_failure);
         assert_eq!(imre_error_pending(), 0);
+    }
+
+    #[test]
+    fn append_open_positions_existing_files_and_accepts_pipes() {
+        use std::ffi::CString;
+        use std::io::Read;
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let directory = Directory::new();
+        let path = directory.0.join("existing");
+        std::fs::write(&path, b"before").unwrap();
+        let Ok((mut writer, _)) = open_file(path.to_str().unwrap(), 2) else {
+            panic!("could not open the existing file for append");
+        };
+        assert_eq!(writer.stream_position().unwrap(), 6);
+        writer.seek(SeekFrom::Start(0)).unwrap();
+        writer.write_all(b"!").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"before!");
+
+        let fifo = directory.0.join("fifo");
+        let name = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        // SAFETY: the terminated path remains live through mkfifo.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let mut reader = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&fifo)
+            .unwrap();
+        let Ok((mut writer, _)) = open_file(fifo.to_str().unwrap(), 2) else {
+            panic!("could not open the pipe for append");
+        };
+        writer.write_all(b"x").unwrap();
+        let mut byte = [0];
+        reader.read_exact(&mut byte).unwrap();
+        assert_eq!(&byte, b"x");
     }
 
     #[test]
