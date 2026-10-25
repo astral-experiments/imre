@@ -85,6 +85,20 @@ impl Checker<'_> {
         assignment: &ast::StmtAssign,
     ) -> Result<Vec<Statement>, String> {
         if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
+            && attribute.attr.as_str() == "default_factory"
+            && (matches!(&*assignment.value, ast::Expr::NoneLiteral(_))
+                || self.unshadowed_builtin(&assignment.value, "list"))
+        {
+            let receiver = self.expr(&attribute.value)?;
+            if self.types.is_default_list_dict(receiver.ty) {
+                let enabled = !matches!(&*assignment.value, ast::Expr::NoneLiteral(_));
+                return Ok(vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::DefaultFactorySet { enabled }, vec![receiver]),
+                })]);
+            }
+        }
+        if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
             && attribute.attr.as_str() == "converter"
             && let Some(Binding::Intrinsic(Intrinsic::ClockConverter(utc))) =
                 self.resolve(&assignment.value)
@@ -244,6 +258,16 @@ impl Checker<'_> {
                 Ok(Statement::SetItem(receiver, index, value))
             }
             ast::Expr::Attribute(attribute) => {
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::PopenSelector)) {
+                    let value = self.coerce(value, Type::ProcessSelectorClass, target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::SetSelector),
+                            vec![value],
+                        ),
+                    }));
+                }
                 if let Some(prefix) = self.cache_config(target) {
                     let value = self.coerce(value, self.types.optional(Type::Str), target)?;
                     return Ok(Statement::Expr(cache_paths::op(
@@ -290,6 +314,19 @@ impl Checker<'_> {
                     self.mutable_instance_data(receiver.ty, attribute.attr.as_str())
                 {
                     return self.store_instance_data(class, attribute, receiver, value);
+                }
+                if self.types.has_reflected_functions()
+                    && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))
+                    && let Some(index) = typing::attribute_index(attribute.attr.as_str())
+                {
+                    let value = self.coerce(value, Type::Str, target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::Typing(ir::TypingOperation::SetAttr(index)),
+                            vec![value, receiver],
+                        ),
+                    }));
                 }
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;

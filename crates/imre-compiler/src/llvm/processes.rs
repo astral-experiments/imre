@@ -61,6 +61,23 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            ProcessOperation::SelectorClass(mode) => {
+                let which = mode.map_or(2, u32::from);
+                let operand =
+                    self.instruction(format!("call ptr @imre_popen_selector_class(i32 {which})"));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::SetSelector => {
+                self.line(format!(
+                    "call void @imre_popen_set_selector(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             ProcessOperation::NewLoop | ProcessOperation::EnsureTask => {
                 let call = if matches!(operation, ProcessOperation::NewLoop) {
                     "call ptr @imre_async_loop_new()".to_owned()

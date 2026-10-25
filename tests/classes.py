@@ -122,7 +122,7 @@ REJECTED = {
     "constructor_return": CELL.replace("self.value = value", "self.value = value\n        return"),
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
     "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),
-    "magic_method": CELL + '    def __repr__(self) -> str:\n        return "Cell"\n',
+    "magic_method": CELL + '    def __bytes__(self) -> bytes:\n        return b"Cell"\n',
     "str_extra_parameter": CELL + '    def __str__(self, detail: bool = False) -> str:\n        return "Cell"\n',
     "str_static_method": CELL + '    @staticmethod\n    def __str__() -> str:\n        return "Cell"\n',
     "str_wrong_result": CELL + '    def __str__(self) -> int:\n        return self.value\n',

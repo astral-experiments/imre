@@ -112,13 +112,13 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
     }
     // SAFETY: both pointers are rooted record payloads.
     let (left_layout, right_layout) = unsafe { (descriptor(left), descriptor(right)) };
-    // SAFETY: nonnull semantic descriptors are immutable compiler-emitted data.
+    // SAFETY: semantic descriptors stay rooted through the comparison.
     let Some(semantics) = (unsafe { left_layout.semantics.as_ref() }) else {
         return Comparison::Done(false);
     };
-    if !std::ptr::eq(left_layout, right_layout) && !left_layout.same_class(right_layout) {
-        // Named tuples compare structurally with other tuple layouts. Both
-        // descriptors must agree on how to read every word before traversing.
+    let distinct = !std::ptr::eq(left_layout, right_layout);
+    if distinct && !left_layout.same_class(right_layout) {
+        // Tuples can compare across layouts; records can share a nominal class.
         // SAFETY: the immutable descriptors cover each initialized field.
         let compatible = unsafe {
             semantics.kind == TUPLE
@@ -127,8 +127,6 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
                     .as_ref()
                     .is_some_and(|other| other.kind == TUPLE)
                 && left_layout.length == right_layout.length
-                && (0..left_layout.length)
-                    .all(|i| *left_layout.kinds.add(i) == *right_layout.kinds.add(i))
         };
         if !compatible {
             return Comparison::Done(false);
@@ -145,6 +143,11 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
                 continue;
             }
             let kind = WordKind::new(*left_layout.kinds.add(index));
+            // Check the kind exactly once per visited field, including across
+            // resumptions after comparing a nested tuple.
+            if distinct && kind.raw() != *right_layout.kinds.add(index) {
+                return Comparison::Done(false);
+            }
             let left_word = kind.read_record_field(left.add(index));
             let right_word = kind.read_record_field(right.add(index));
             if left_layout.is_value_struct() && kind.raw() == 7 {
@@ -305,6 +308,7 @@ unsafe fn scalar_equal(left: usize, right: usize, kind: WordKind) -> bool {
             }
             7 if raw & NULLABLE != 0 => *(left as *const f64) == *(right as *const f64),
             7 => f64::from_bits(left as u64) == f64::from_bits(right as u64),
+            14 => left == right,
             8 => *(left as *const Bytes) == *(right as *const Bytes),
             _ => unreachable!("WordKind validates concrete representations"),
         }
@@ -405,7 +409,7 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
 pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
     let mut output = String::new();
     // SAFETY: the caller supplies the exact checked representation and root.
-    unsafe { write_repr(&mut output, word, WordKind::new(kind)) };
+    unsafe { write_checked_repr(&mut output, word, WordKind::new(kind)) };
     if super::exceptions::imre_error_pending() != 0 {
         return std::ptr::null();
     }
@@ -486,6 +490,14 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                                 super::inspect::descriptor_name(*index)
                             )
                             .unwrap();
+                            None
+                        }
+                        Storage::ProcessSelectorClass(select) => {
+                            output.push_str(if *select {
+                                "<class 'selectors.SelectSelector'>"
+                            } else {
+                                "<class 'selectors.PollSelector'>"
+                            });
                             None
                         }
                         Storage::IteratorAdapter(adapter) => {
@@ -709,6 +721,7 @@ unsafe fn write_scalar(
         match raw & !NULLABLE {
             0 => output.push_str("None"),
             10 => super::string_enums::write_repr(output, word),
+            14 => super::typing::write_repr(output, word),
             12 => super::annotations::write_repr(output, word),
             13 => {
                 let (member, value) = super::annotations::member(word);
@@ -725,14 +738,9 @@ unsafe fn write_scalar(
                     write!(output, "{value}").unwrap();
                 } else {
                     let value = value.big();
-                    if check_digits {
-                        static LIMIT: std::sync::LazyLock<num_bigint::BigUint> =
-                            std::sync::LazyLock::new(|| num_bigint::BigUint::from(10u8).pow(4300));
-                        if value.magnitude() >= &*LIMIT {
-                            super::exceptions::Error::new(super::exceptions::Kind::ValueError,
-                                "Exceeds the limit (4300 digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit").raise();
-                            return false;
-                        }
+                    if check_digits && let Err(error) = crate::integer_text::check_decimal(&value) {
+                        error.raise();
+                        return false;
                     }
                     write!(output, "{value}").unwrap();
                 }

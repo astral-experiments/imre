@@ -47,16 +47,16 @@ pub unsafe extern "C" fn imre_splitlines_joined_tail(
     let mut offsets = LineOffsets::new(value);
     let mut result = Words::new(3);
     if offsets.next(value).is_some() && offsets.start < value.len() {
-        let Some(chunk) = joined_tail(value, separator, offsets) else {
+        let Some(chunk) =
+            joined_tail(value, separator, offsets).and_then(|text| StrOwner::try_new(text).ok())
+        else {
             // SAFETY: this is the original splitlines operation on the same rooted input.
             return unsafe { imre_str_splitlines(value) };
         };
         result
             .values
             .push(StrOwner::into_raw(text::owned_string("")) as usize);
-        result
-            .values
-            .push(StrOwner::into_raw(StrOwner::new(chunk)) as usize);
+        result.values.push(StrOwner::into_raw(chunk) as usize);
     }
     Rc::into_raw(result.into_object())
 }

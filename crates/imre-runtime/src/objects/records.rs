@@ -8,6 +8,7 @@ use std::rc::Rc;
 use super::{Object, fail, words::WordKind};
 
 pub(super) mod strings;
+pub(super) mod tuples;
 pub(super) mod weak;
 
 // Keep the first queue block available even when destruction cannot allocate.
@@ -113,7 +114,8 @@ pub struct RecordField {
 #[repr(C)]
 struct Header {
     references: Cell<usize>,
-    /// The descriptor, a shared block tagged with bit zero, or a weak anchor tagged with bit one.
+    /// Descriptor (untagged), shared block (bit 0), weak anchor (bit 1),
+    /// or owned tuple layout (bit 2). An anchor retains the original tagged layout.
     descriptor: Cell<*const RecordDescriptor>,
 }
 
@@ -216,6 +218,12 @@ pub unsafe extern "C" fn imre_tuple_probe(
 }
 
 impl Header {
+    fn tuple_layout(&self) -> Option<*const tuples::TupleLayout> {
+        let layout = self.layout_pointer();
+        (layout.addr() & tuples::LAYOUT_TAG != 0)
+            .then(|| layout.map_addr(|addr| addr & !tuples::LAYOUT_TAG).cast())
+    }
+
     fn block(&self) -> Option<*const Block> {
         let layout = self.layout_pointer();
         if layout.addr() & 1 == 0 {
@@ -230,7 +238,7 @@ impl Header {
         // SAFETY: a tagged header owns its Rc until its last record owner drops.
         let layout = self.layout_pointer();
         let descriptor = if layout.addr() & 1 == 0 {
-            layout
+            layout.map_addr(|addr| addr & !tuples::LAYOUT_TAG)
         } else {
             // SAFETY: the untagged block is rooted for this record's lifetime.
             unsafe { (*layout.map_addr(|addr| addr - 1).cast::<Block>()).descriptor }
@@ -462,7 +470,19 @@ unsafe fn cached_result(
     } else {
         // SAFETY: a fresh record uses the cache's static descriptor; it does not
         // expose or mutate any existing tuple's observable field values.
-        unsafe { allocate(header.descriptor()) }
+        unsafe {
+            let next = allocate(header.descriptor());
+            if let Some(layout) = header.tuple_layout()
+                && !next.is_null()
+            {
+                Rc::increment_strong_count(layout);
+                // The new record shares its immutable layout, not the cache's identity.
+                (*next.cast::<Header>().sub(1))
+                    .descriptor
+                    .set(header.layout_pointer());
+            }
+            next
+        }
     }
 }
 
@@ -606,7 +626,14 @@ unsafe fn release_standalone_fields(
     unsafe {
         let size = size_of::<Header>() + descriptor.allocated_words() * size_of::<usize>();
         let layout = Layout::from_size_align_unchecked(size, align_of::<Header>());
-        dealloc(payload.cast::<Header>().sub(1).cast_mut().cast(), layout);
+        let header = payload.cast::<Header>().sub(1);
+        // A suspended field-release frame still needs its tuple descriptor.
+        // Transfer its owner only after the last field has been visited.
+        let tuple_layout = (*header).tuple_layout();
+        dealloc(header.cast_mut().cast(), layout);
+        if let Some(tuple_layout) = tuple_layout {
+            Rc::decrement_strong_count(tuple_layout);
+        }
     }
 }
 

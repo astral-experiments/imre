@@ -237,6 +237,13 @@ jobs:
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
         run: python3 tests/posix_readiness.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --host-original
+      - name: Run original CPython TCP methods and socket option controls
+        env:
+          PYTHONPATH: .cpython-stdlib-reference/Lib
+        run: |
+          dir=benchmarks/cpython_stdlib/full/socket
+          python3 "$dir/run.py" --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18 --output "$RUNNER_TEMP/socket-evidence.json"
+          cmp "$dir/evidence-linux.json" "$RUNNER_TEMP/socket-evidence.json"
       - name: Check native string line boundaries and Unicode predicates against CPython
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
@@ -259,6 +266,11 @@ jobs:
       - name: Compare static inspect lookups with the pinned CPython suite
         run: |
           python3 benchmarks/cpython_stdlib/full/inspect/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-inspect.json"
+      - name: Check typing overloads against the original CPython typing and warnings fixtures
+        run: |
+          python3 benchmarks/cpython_stdlib/full/typing/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-typing-overloads.json"
+          cmp benchmarks/cpython_stdlib/full/typing/native-linux.json "$RUNNER_TEMP/cpython-typing-overloads.json"
+          cmp benchmarks/cpython_stdlib/full/typing/warnings-client-linux.json "$RUNNER_TEMP/typing-warnings-client.json"
       - name: Verify the complete OS, POSIX and genericpath evidence
         run: |
           for level in 0 3; do
@@ -445,6 +457,10 @@ jobs:
               diff -u "$RUNNER_TEMP/iterator.reference" "$RUNNER_TEMP/iterator.native"
             done
           done
+      - name: Compare runtime tuple spreads and check the unchanged itertools entry points
+        run: |
+          python3 benchmarks/cpython_stdlib/full/itertools/tuple_spread_audit.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/itertools-tuple-spreads.json"
+          python3 benchmarks/cpython_stdlib/full/itertools/whole_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/itertools-whole-files.json"
       - name: Run vendored CPython Counter methods in native Imre
         run: python3 benchmarks/cpython_stdlib/native_counter.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-counter.json"
       - name: Compare native doctest suites with the pinned interpreter
