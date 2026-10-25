@@ -35,22 +35,6 @@ unsafe fn combine(a: usize, b: usize, op: u32) -> Int {
     }
 }
 
-/// Reserve only when a new key will be stored, before transferring any owners.
-unsafe fn store(target: *const Object, key: usize, count: &Int) -> Result<(), Error> {
-    // SAFETY: key and value are rooted and match the target's representation.
-    unsafe {
-        object(target).0.with_mut(|s| {
-            let tables = &mut s.dictionary_mut().tables;
-            if tables.lookup(key).is_none() {
-                tables.try_reserve(1)?;
-            }
-            Ok::<(), Error>(())
-        })?;
-        imre_dict_set(target, key, count.0);
-    }
-    Ok(())
-}
-
 /// Read both inputs in insertion order, emitting only positive result counts.
 unsafe fn fresh(left: &Mapping, right: &Mapping, op: u32) -> Result<*const Object, Error> {
     // SAFETY: the constructor transfers its fresh strong reference.
@@ -61,7 +45,7 @@ unsafe fn fresh(left: &Mapping, right: &Mapping, op: u32) -> Result<*const Objec
         unsafe {
             let count = combine(a, b, op);
             if crate::imre_int_compare(count.0, zero) > 0 {
-                store(Rc::as_ptr(&result), key, &count)?;
+                dict_set(Rc::as_ptr(&result), key, count.0)?;
             }
         }
         Ok::<(), Error>(())
@@ -118,7 +102,7 @@ unsafe fn inplace(
                 continue;
             }
             let count = combine(a, b, op);
-            store(left, key.word, &count)?;
+            dict_set(left, key.word, count.0)?;
         }
         // Deletion may compact the table. Register a cursor so it tracks the
         // next surviving entry across each compaction, including external cursors.

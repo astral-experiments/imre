@@ -42,7 +42,7 @@ impl Checker<'_> {
             return literals::view(value, ty);
         }
         if self.types.payload(value.ty).unwrap_or(value.ty) == Type::Exception
-            && ty == Type::TimeoutExpired
+            && matches!(ty, Type::TimeoutExpired | Type::NamedException(_))
         {
             let value = if value.ty == Type::Exception {
                 value
@@ -214,7 +214,7 @@ impl Checker<'_> {
     /// other category checks are exact for every admitted concrete layout.
     /// A stored builtin exception can be either a SystemExit or an Exception.
     fn instance_member_matches(ty: Type, classes: &[InstanceType]) -> Option<bool> {
-        if ty == Type::ExitCode {
+        if ty == Type::ExitCode || ty == Type::StringIterable {
             return None;
         }
         let mut unknown = false;
@@ -228,7 +228,7 @@ impl Checker<'_> {
                 continue;
             }
             if let InstanceType::Exception(kind) = class
-                && ty == Type::Exception
+                && matches!(ty, Type::Exception | Type::NamedException(_))
                 && kind != 0
             {
                 unknown = true;

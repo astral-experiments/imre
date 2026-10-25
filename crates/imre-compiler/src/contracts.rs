@@ -57,6 +57,17 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            Self::Str
+                if args
+                    .first()
+                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
+            {
+                Contract::new(true, Unknown)
+            }
+            Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
+            Self::ExceptionArgument(_) | Self::NamedException { .. } => {
+                Contract::new(false, PreservesLists)
+            }
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
@@ -109,6 +120,12 @@ impl Builtin {
                     | PathOperation::Scripts
                     | PathOperation::OsExists
                     | PathOperation::New
+                    | PathOperation::PureNew(_)
+                    | PathOperation::JoinObject
+                    | PathOperation::Drive
+                    | PathOperation::Root
+                    | PathOperation::Anchor
+                    | PathOperation::AsPosix
                     | PathOperation::Join
                     | PathOperation::Text
                     | PathOperation::Name
@@ -121,6 +138,21 @@ impl Builtin {
                     | PathOperation::IsDir
                     | PathOperation::Glob => false,
                 },
+                PreservesLists,
+            ),
+            Self::Timed(operation) => Contract::new(
+                matches!(
+                    operation,
+                    crate::ir::TimedOperation::New
+                        | crate::ir::TimedOperation::Clock
+                        | crate::ir::TimedOperation::Close
+                        | crate::ir::TimedOperation::Flush
+                        | crate::ir::TimedOperation::ComputeInt
+                        | crate::ir::TimedOperation::ComputeFloat
+                        | crate::ir::TimedOperation::FilesToDelete
+                        | crate::ir::TimedOperation::ShouldRollover
+                        | crate::ir::TimedOperation::DoRollover
+                ),
                 PreservesLists,
             ),
             Self::Logging(operation) => Contract::new(
@@ -196,8 +228,16 @@ impl Builtin {
             ),
             Self::BytesGet
             | Self::Decode
+            | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
+            | Self::SetAdd
+            | Self::CounterUpdate
+            | Self::KeySet
+            | Self::KeyUnion
+            | Self::KeyIntersection
+            | Self::KeyDifference
+            | Self::RegexGroupDict
             | Self::DictGet
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
@@ -220,6 +260,7 @@ impl Builtin {
             | Self::Slice
             | Self::StringFormat
             | Self::RegexSub(_)
+            | Self::StringIterationList
             | Self::StringJoin
             | Self::StringReplace
             | Self::StringGet
@@ -229,18 +270,19 @@ impl Builtin {
             | Self::Bool
             | Self::DictContains
             | Self::DictGetDefault
-            | Self::CounterUpdate
             | Self::EnumLookup(_)
             | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
             | Self::Sha256Hex
             | Self::Sha256New
+            | Self::HashAvailable
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
             | Self::Sha256Copy
+            | Self::ActiveException
+            | Self::ExceptionRecord
             | Self::ExceptionCause
-            | Self::ExceptionMessage
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
             | Self::GlobalGet(_)
@@ -261,7 +303,6 @@ impl Builtin {
             | Self::RStrip
             | Self::RegexCompile(_)
             | Self::RegexSearch
-            | Self::RegexGroupDict
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds
             | Self::SetContains
@@ -321,6 +362,7 @@ impl Builtin {
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
+            | Self::OsName
             | Self::SysArgv
             | Self::TextClose
             | Self::TextEnter
@@ -329,6 +371,7 @@ impl Builtin {
             | Self::TextRead
             | Self::TextWrite
             | Self::TomlKeys => Contract::new(true, Unknown),
+            Self::Repeat | Self::CursorLengthHint => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
             | Self::CounterNew
@@ -337,17 +380,12 @@ impl Builtin {
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
-            | Self::KeyUnion
-            | Self::KeySet
-            | Self::KeyIntersection
-            | Self::KeyDifference
             | Self::ExactRecord(_)
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::Repr
-            | Self::SetAdd
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
@@ -562,6 +600,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "imre_json_index"
+                | "imre_exception_message"
+                | "imre_exception_repr"
                 | "imre_json_iter"
                 | "imre_json_len"
                 | "imre_json_get_receiver"
@@ -582,12 +622,22 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_subprocess_error_field"
                 | "imre_print_int"
                 | "imre_print_float"
+                | "imre_log_file_new"
+                | "imre_log_clock_new"
+                | "imre_log_file_close"
+                | "imre_log_file_flush"
+                | "imre_log_file_compute_int"
+                | "imre_log_file_compute_float"
+                | "imre_log_file_deletions"
+                | "imre_log_file_should_roll"
+                | "imre_log_file_roll"
                 | "imre_log_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"
+                | "imre_string_iterable_list"
                 | "imre_str_join"
                 | "imre_str_replace"
                 | "imre_print_str"
@@ -601,9 +651,15 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_concat"
                 | "imre_bytes_concat"
                 | "imre_bytes_repeat"
+                | "imre_counter_update"
+                | "imre_key_union"
+                | "imre_key_intersection"
+                | "imre_key_difference"
+                | "imre_regex_groupdict"
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
                 | "imre_bytes_decode"
+                | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"
@@ -676,6 +732,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
                 | "imre_dict_delete"
+                | "imre_cursor_length_hint"
                 | "imre_mapping_iter_next"
                 | "imre_exception_raise"
                 | "imre_exception_reraise"
