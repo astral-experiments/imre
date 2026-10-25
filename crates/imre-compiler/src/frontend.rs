@@ -7116,6 +7116,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(
                 symbol @ (Intrinsic::AddLevelName
                 | Intrinsic::GetLevelName
+                | Intrinsic::LoggingDisable
                 | Intrinsic::LevelNamesMapping),
             )) => return self.logging_levels(symbol, call),
             Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => {
