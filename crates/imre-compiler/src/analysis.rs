@@ -85,6 +85,7 @@ impl Session {
                 "tomli",
                 "from tomllib import load as load, loads as loads\n",
             ),
+            ("unittest/mock", include_str!("../stdlib/unittest/mock.pyi")),
             (
                 "unidiff",
                 "class PatchSet:\n    def __init__(self, patch: str) -> None: ...\n",
