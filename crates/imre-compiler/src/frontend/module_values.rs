@@ -402,6 +402,17 @@ impl Initialization {
                 }
                 ast::Stmt::FunctionDef(_) => {
                     available.insert(definition);
+                    if module.overloads.contains(&index) {
+                        let signature = &checker.functions[&definition];
+                        let original = checker.callable_value(signature, None, None, statement)?;
+                        body.push(Statement::Expr(Expr {
+                            ty: Type::OverloadStub,
+                            kind: ExprKind::Builtin(
+                                Builtin::Typing(ir::TypingOperation::Register),
+                                vec![original],
+                            ),
+                        }));
+                    }
                     continue;
                 }
                 ast::Stmt::ImportFrom(import)

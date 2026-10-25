@@ -202,6 +202,8 @@ def main():
                     operation = BIG_OPERATION
                 elif case_id == f"test.test_deque.TestBasic.{method}" and method in DEQUE_OPERATIONS:
                     operation = ("imre", DEQUE_OPERATIONS[method])
+                elif case_id == "test.test_deque.TestBasic.test_basics":
+                    operation = ("imre", "Reinitialize, grow, iterate and pop a native deque; reverse the list of right pops.")
                 elif case_id == "test.test_ordered_dict.CPythonOrderedDictTests.test_setitem":
                     from test.test_ordered_dict import c_coll
 

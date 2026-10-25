@@ -262,6 +262,7 @@ impl Builtin {
                 | ProcessOperation::GeneratorNext
                 | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire
+                | ProcessOperation::ShellOutput { .. }
                 | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
@@ -608,6 +609,7 @@ impl Builtin {
             | Self::DictAsBase
             | Self::DictClear
             | Self::ListClear
+            | Self::ListReverse
             | Self::DictIter(_)
             | Self::GlobalSet(_)
             | Self::ExactRecord(_)
@@ -627,6 +629,7 @@ impl Builtin {
             | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::TupleCacheNew
+            | Self::Typing(_)
             | Self::TupleCacheResult => Contract::new(true, Unknown),
         }
     }
@@ -870,6 +873,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             "int_floordiv"
                 | "imre_chr"
                 | "imre_annotation_ref"
+                | "imre_typing_call_stub"
                 | "imre_random_bits"
                 | "imre_random_choice_index"
                 | "imre_random_progression"

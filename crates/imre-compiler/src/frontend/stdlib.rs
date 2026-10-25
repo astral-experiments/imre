@@ -99,6 +99,93 @@ impl Checker<'_> {
         })
     }
 
+    /// Bind list.reverse on an instance or as a descriptor. The receiver and
+    /// every argument are evaluated before a rejected call raises TypeError.
+    pub(super) fn list_reverse(
+        &mut self,
+        receiver: Option<Expr>,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        let skip = usize::from(receiver.is_none());
+        let mut receiver = if let Some(receiver) = receiver {
+            Some(receiver)
+        } else {
+            args.args
+                .first()
+                .map(|arg| self.evaluated_argument(arg))
+                .transpose()?
+        };
+        if let Some(value) = receiver.take() {
+            receiver = Some(self.json_mutation_receiver(value, call)?);
+        }
+        let extra = args.args.len().saturating_sub(skip);
+        let message = match receiver.as_ref() {
+            None => {
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+                "unbound method list.reverse() needs an argument".to_owned()
+            }
+            Some(value) if self.types.element(value.ty).is_none() => {
+                let name = match value.ty {
+                    Type::None => "NoneType".to_owned(),
+                    Type::PlainObject => "object".to_owned(),
+                    Type::StrLiteral(_) => "str".to_owned(),
+                    Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes => {
+                        self.type_name(value.ty)
+                    }
+                    Type::Set(_) => "set".to_owned(),
+                    Type::Tuple(_) if self.types.namedtuple_definition(value.ty).is_none() => {
+                        "tuple".to_owned()
+                    }
+                    Type::Dict(_)
+                        if !self.types.is_counter(value.ty)
+                            && !self.types.is_default_list_dict(value.ty) =>
+                    {
+                        "dict".to_owned()
+                    }
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "list.reverse requires an exact native list or known descriptor receiver",
+                        ));
+                    }
+                };
+                format!(
+                    "descriptor 'reverse' for 'list' objects doesn't apply to a '{name}' object"
+                )
+            }
+            Some(_) if !args.keywords.is_empty() => {
+                "list.reverse() takes no keyword arguments".to_owned()
+            }
+            Some(_) if extra != 0 => format!("list.reverse() takes no arguments ({extra} given)"),
+            Some(_) => {
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::ListReverse, vec![receiver.unwrap()]),
+                });
+            }
+        };
+        self.graph.checked_overload(self.module, call.range());
+        self.graph
+            .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+        for arg in args.args.iter().skip(skip) {
+            self.graph.checked_excess_argument(self.module, arg.range());
+        }
+        let mut values: Vec<_> = receiver.into_iter().collect();
+        for arg in args
+            .args
+            .iter()
+            .skip(skip)
+            .chain(args.keywords.iter().map(|kw| &kw.value))
+        {
+            values.push(self.evaluated_argument(arg)?);
+        }
+        Ok(calls::type_error(Type::None, values, message))
+    }
+
     /// Keeps the receiver identity and argument order. A key can observe or mutate
     /// the temporarily empty list, so restoration must run on every completion.
     pub(super) fn list_sort(
