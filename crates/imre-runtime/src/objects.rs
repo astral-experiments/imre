@@ -1142,6 +1142,8 @@ pub unsafe extern "C" fn imre_str_splitlines_options(
     }
 }
 
+/// Reuse the collector and its ownership logic for either boundary policy.
+/// The caller roots `value` until the list owns every returned slice.
 unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
