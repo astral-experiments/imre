@@ -1,4 +1,5 @@
 //! Process-local logging state for the native single-threaded runtime.
+mod cache;
 mod config;
 mod handler;
 mod hierarchy;
@@ -15,12 +16,14 @@ use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::exceptions::Result;
+use super::mappings::IntKey;
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object};
 
 struct Entry {
     handle: Rc<Object>,
     level: Int,
     creation_order: usize,
+    enabled: cache::EnabledCache,
 }
 
 impl Entry {
@@ -31,11 +34,13 @@ impl Entry {
             ))))),
             level: Int::small(level).unwrap(),
             creation_order,
+            enabled: cache::EnabledCache::new(),
         }
     }
 }
 
 struct Registry {
+    disable: Int,
     entries: HashMap<String, Entry>,
     format: Option<Vec<Field>>,
     datefmt: Option<String>,
@@ -44,9 +49,23 @@ struct Registry {
 impl Registry {
     fn new() -> Self {
         Self {
+            disable: Int::small(0).unwrap(),
             entries: HashMap::from([("root".into(), Entry::new("root", 30, 0))]),
             format: None,
             datefmt: None,
+        }
+    }
+
+    fn set_level(&mut self, name: &str, value: &Int) {
+        self.entries.get_mut(name).unwrap().level = value.clone();
+        self.clear_enabled();
+    }
+
+    /// Previously returned caches stay live when a level or the manager limit changes.
+    fn clear_enabled(&self) {
+        // Manager._clear_cache invalidates every logger, even when the level is unchanged.
+        for entry in self.entries.values() {
+            entry.enabled.clear();
         }
     }
 
@@ -166,28 +185,40 @@ fn timestamp(format: Option<&str>) -> String {
 /// Renders either an emitted timestamp or the time captured earlier by a LogRecord.
 fn format_timestamp(format: Option<&str>, local: &libc::tm, now: std::time::Duration) -> String {
     let custom = format.filter(|value| !value.is_empty());
-    // A trailing sentinel distinguishes an empty expansion from a small buffer.
-    let pattern = format!("{}!", custom.unwrap_or("%Y-%m-%d %H:%M:%S"));
-    let Ok(fmt) = CString::new(pattern) else {
-        return String::new();
-    };
-    let mut buf = vec![0u8; fmt.as_bytes().len().max(64)];
-    loop {
-        // SAFETY: the calendar time and format are valid and the buffer is writable.
-        let len =
-            unsafe { libc::strftime(buf.as_mut_ptr().cast(), buf.len(), fmt.as_ptr(), local) };
-        if len > 0 {
-            let mut text = String::from_utf8_lossy(&buf[..len - 1]).into_owned();
-            if custom.is_none() {
-                text.push_str(&format!(",{:03}", now.subsec_millis()));
+    let mut text = String::new();
+    for (index, part) in custom
+        .unwrap_or("%Y-%m-%d %H:%M:%S")
+        .split('\0')
+        .enumerate()
+    {
+        if index != 0 {
+            text.push('\0');
+        }
+        if part.is_empty() {
+            continue;
+        }
+        // strftime takes a C string. Format each NUL-free segment at the same instant.
+        // The sentinel distinguishes an empty expansion from an undersized buffer.
+        let fmt = CString::new(format!("{part}!")).expect("the segment contains no NUL");
+        let mut buf = vec![0u8; fmt.as_bytes().len().max(64)];
+        loop {
+            // SAFETY: the calendar time and format are valid and the buffer is writable.
+            let len =
+                unsafe { libc::strftime(buf.as_mut_ptr().cast(), buf.len(), fmt.as_ptr(), local) };
+            if len > 0 {
+                text.push_str(&String::from_utf8_lossy(&buf[..len - 1]));
+                break;
             }
-            return text;
+            if buf.len() > fmt.as_bytes().len().saturating_mul(256).max(4096) {
+                return String::new();
+            }
+            buf.resize(buf.len() * 2, 0);
         }
-        if buf.len() > fmt.as_bytes().len().saturating_mul(256).max(4096) {
-            return String::new();
-        }
-        buf.resize(buf.len() * 2, 0);
     }
+    if custom.is_none() {
+        text.push_str(&format!(",{:03}", now.subsec_millis()));
+    }
+    text
 }
 
 unsafe fn name(handle: *const Object) -> Rc<Str> {
@@ -241,7 +272,8 @@ pub unsafe extern "C" fn imre_log_config(level: usize, fmt: usize, datefmt: usiz
         let datefmt = datefmt.map(ToString::to_string);
         if level != 0 {
             // SAFETY: obtain an independent owner of the supplied integer.
-            logs.entries.get_mut("root").unwrap().level = (*unsafe { Int::borrow(level) }).clone();
+            let level = unsafe { Int::borrow(level) };
+            logs.set_level("root", &level);
         }
         logs.format = Some(format);
         logs.datefmt = datefmt;
@@ -301,9 +333,7 @@ pub unsafe extern "C" fn imre_log_effective_level(logger: *const Object) -> usiz
 pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize) {
     // SAFETY: both arguments are rooted by the caller.
     let (name, value) = unsafe { (name(logger), Int::borrow(level)) };
-    LOGGERS.with_borrow_mut(|logs| {
-        logs.entries.get_mut(name.as_str()).unwrap().level = (*value).clone()
-    });
+    LOGGERS.with_borrow_mut(|logs| logs.set_level(&name, &value));
 }
 
 /// # Safety
@@ -312,13 +342,24 @@ pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize)
 pub unsafe extern "C" fn imre_log_enabled(logger: *const Object, level: usize) -> bool {
     // SAFETY: both arguments are rooted by the caller.
     let (name, value) = unsafe { (name(logger), Int::borrow(level)) };
-    LOGGERS.with_borrow(|logs| {
-        let threshold = logs.effective(&name);
-        match (value.as_small(), threshold.as_small()) {
-            (Some(level), Some(threshold)) => level > 0 && level >= threshold,
-            _ => value.big().sign() == num_bigint::Sign::Plus && value.big() >= threshold.big(),
+    let result = LOGGERS.with_borrow(|logs| {
+        let key = IntKey((*value).clone());
+        if let Some(enabled) = logs.entries[name.as_str()].enabled.get(&key) {
+            return Ok(enabled);
         }
-    })
+        let threshold = logs.effective(&name);
+        let enabled = match (
+            value.as_small(),
+            logs.disable.as_small(),
+            threshold.as_small(),
+        ) {
+            (Some(level), Some(disable), Some(threshold)) => level > disable && level >= threshold,
+            _ => value.big() > logs.disable.big() && value.big() >= threshold.big(),
+        };
+        logs.entries[name.as_str()].enabled.insert(key, enabled)?;
+        Ok(enabled)
+    });
+    finish(result, false)
 }
 
 /// # Safety
@@ -384,7 +425,7 @@ pub unsafe extern "C" fn imre_logger_write(logger: *const Object, level: u32, me
     let level = Int::small(i64::from(level)).unwrap().into_raw();
     // SAFETY: the caller roots both objects and every u32 level fits in an immediate.
     unsafe {
-        if imre_log_enabled(logger, level) {
+        if config::imre_log_is_enabled(logger, level) {
             imre_log_emit(logger, level, message);
         }
     }
