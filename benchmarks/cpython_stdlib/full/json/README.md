@@ -33,6 +33,8 @@ The four failed fixture occurrences cover key identity and excessive nesting. Th
 
 The [key identity rerun](key-identity-linux.json) distinguishes key owners returned by native `json.loads` from the strings reconstructed by the repr transport. Both original `test_keys_reuse` fixture IDs reach `json.decoder.JSONDecoder()` when the host reconstructs keys using their observed native identity. That constructor is still unbound. The ordinary repr transport still fails the first identity assertion. Neither attempt completes the method; sorted and the identity assertions run on the host. Run `key_identity.py` with the same options as `evidence.py` to reproduce both attempts at O0 and O3.
 
+The [deep decoder rerun](deep-decoder-linux.json) records both original `test_highly_nested_objects_decoding` fixture IDs. At O0 and O3 all six native loads per level raised `RecursionError` for the original 500,000-level documents. The method, decorators, recursion context and assertions ran on CPython; only the loads ran in Imre. The report retains Imre's exception text alongside CPython's C and pure reference messages. Separate controls traverse accepted deep values, compare equality and repr through 50,000 levels, and compare all five `JSONDecodeError` fields on malformed inputs. Run `deep_decode.py` with the same command-line options as `evidence.py`.
+
 ## Native calls with host assertions
 
 ```sh
