@@ -10,7 +10,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
-sys.path.insert(0, str(STDLIB))
+sys.path[:0] = [str(HERE), str(STDLIB)]
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import NativeCompileError, Toolchain, native_method, run_in_fixtures
 from native_cache import cache_assertion_blocker, check_cache_values, host_cache_case
