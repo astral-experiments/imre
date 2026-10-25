@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1])]
@@ -35,6 +35,9 @@ while command!="quit":
     elif command=="signal":
         p.send_signal(int(input()))
         print("sent")
+    elif command=="mockwait":
+        fixture_waitpid.mock_next(p.pid)
+        print(p.wait())
     elif command=="wait":
         print(p.wait())
     elif command=="status":
@@ -63,6 +66,7 @@ def build(tc, root):
     )
     (site / "fixture_waitpid.pyi").write_text(
         "def raw_wait(pid: int, flags: int, /) -> int: ...\n"
+        "def mock_next(pid: int, /) -> int: ...\n"
     )
     subprocess.run(
         [
@@ -112,7 +116,9 @@ def build(tc, root):
 
 
 class Parent:
-    def __init__(self, binary, logs, args):
+    def __init__(self, binary, logs, args, *, transfer_stopped_mock=False):
+        self.transfer_stopped_mock = transfer_stopped_mock
+        self.mock_requests = []
         self.logs = logs
         self.actor = subprocess.Popen(
             [
@@ -181,6 +187,15 @@ class Parent:
             raise AssertionError("send_signal failed")
 
     def wait(self):
+        if self.transfer_stopped_mock and isinstance(os.waitpid, Mock):
+            target = os.waitpid
+            self.actor.stdin.write(b"mockwait\n")
+            label, pid, flags = self.read().split()
+            assert label == b"mock-waitpid" and int(pid) == self.pid
+            observed = target(int(pid), int(flags))
+            target.assert_called_once_with(self.pid, int(flags))
+            self.mock_requests.append((int(flags), *observed))
+            return int(self.request(f"{observed[0]} {observed[1]}"))
         return int(self.request("wait"))
 
     def close(self):
@@ -201,7 +216,7 @@ class Parent:
         return lines
 
 
-def measure(tc, binary, root, case, original):
+def measure(tc, binary, root, case, original, *, transfer_stopped_mock=False):
     from test import test_subprocess as suite
 
     logs = root / case._testMethodName
@@ -222,7 +237,7 @@ def measure(tc, binary, root, case, original):
     def launch(args):
         if holder or args != suite.ZERO_RETURN_CMD:
             raise AssertionError(("unexpected command", args))
-        p = Parent(binary, logs, args)
+        p = Parent(binary, logs, args, transfer_stopped_mock=transfer_stopped_mock)
         holder.append(p)
         return p
 
@@ -260,8 +275,18 @@ def measure(tc, binary, root, case, original):
         return next(i for i, s in enumerate(actual) if re.search(pattern, s))
 
     completed = index(rf"WEXITSTATUS\(s\) == 0.*= {p.pid}$")
-    echild = index(r"= -1 ECHILD")
-    assert completed < echild
+    if p.mock_requests:
+        [(flags, mock_pid, mock_status)] = p.mock_requests
+        assert (
+            flags in (0, os.WNOHANG)
+            and mock_pid == p.pid
+            and os.WIFSTOPPED(mock_status)
+        )
+        assert os.WSTOPSIG(mock_status) == signal.SIGQUIT
+        assert not any("ECHILD" in line for line in actual[completed + 1 :])
+    else:
+        echild = index(r"= -1 ECHILD")
+        assert completed < echild
     kills = [s for s in lines if re.match(r"(kill|pidfd_send_signal)\(", s)]
     if kills or not any(
         pid == p.pid and status == 0 for _, pid, status in p.wait_requests
@@ -274,7 +299,9 @@ def measure(tc, binary, root, case, original):
             )
         )
     if case._testMethodName == "test_stopped":
-        if failure != "0 != -3":
+        if transfer_stopped_mock:
+            assert failure is None and len(p.mock_requests) == 1
+        elif failure != "0 != -3":
             raise AssertionError(("unexpected stopped-status failure", failure))
     return dict(
         outcome="failure" if failure else "pass",
@@ -285,7 +312,10 @@ def measure(tc, binary, root, case, original):
         ),
         external_wait_in_native_parent=True,
         original_support_wait_process=True,
-        public_wait_observed_ECHILD=True,
+        public_wait_observed_ECHILD=not p.mock_requests,
+        native_waitpid_mock=[
+            dict(options=flags, status=raw) for flags, _, raw in p.mock_requests
+        ],
         native_signals_sent=0,
         native_child_exit=0,
     )
@@ -296,6 +326,11 @@ def main():
     for n in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + n, required=True, type=Path)
     parser.add_argument("--opt-level", required=True, type=int, choices=(0, 3))
+    parser.add_argument(
+        "--transfer-stopped-mock",
+        action="store_true",
+        help="forward the actual native waitpid request to the original host mock",
+    )
     args = parser.parse_args()
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
     verify_files(HERE / "upstream", manifest["files"])
@@ -325,7 +360,14 @@ def main():
             raise AssertionError("missing positive control for native kill")
 
         def execute(case, original):
-            return measure(tc, binary, work, case, original)
+            return measure(
+                tc,
+                binary,
+                work,
+                case,
+                original,
+                transfer_stopped_mock=args.transfer_stopped_mock,
+            )
 
         rows, failed, skipped = run_in_fixtures(
             load_suite(manifest["module"]), dict.fromkeys(IDS, execute)
