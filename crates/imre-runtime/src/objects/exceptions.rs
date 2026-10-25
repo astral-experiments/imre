@@ -430,6 +430,7 @@ impl Error {
 
     /// UnicodeDecodeError preserves the undecoded bytes and the half-open error bounds.
     pub(super) fn unicode_decode(
+        encoding: &'static str,
         bytes: Rc<super::Bytes>,
         start: usize,
         end: usize,
@@ -440,7 +441,7 @@ impl Error {
         let object =
             unsafe { OwnedWord::from_owned(Rc::into_raw(bytes) as usize, WordKind::new(8)) };
         let args = [
-            Self::string_arg("utf-8"),
+            Self::string_arg(encoding),
             object,
             Self::int_arg(crate::Int::from_usize(start)),
             Self::int_arg(crate::Int::from_usize(end)),

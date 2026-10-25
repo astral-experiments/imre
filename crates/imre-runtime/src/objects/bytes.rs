@@ -507,6 +507,7 @@ fn decode_owned_error(value: Rc<Bytes>, error: std::str::Utf8Error) -> Error {
         format!("bytes in position {start}-{}", end - 1)
     };
     Error::unicode_decode(
+        "utf-8",
         value,
         start,
         end,
