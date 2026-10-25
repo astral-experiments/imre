@@ -265,15 +265,27 @@ impl Emitter<'_, '_> {
                 self.checked_line(instruction);
                 none()
             }
-            ProcessOperation::Popen { streams } => {
+            ProcessOperation::Popen { streams } | ProcessOperation::Call { streams, .. } => {
                 let cwd =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
                 let env =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
-                let operand = self.checked_instruction(format!(
-                    "call ptr @imre_popen_pipes(ptr {}, ptr {cwd}, ptr {env}, i32 {streams}, i64 {}, i1 {})",
+                let spawn = format!(
+                    "ptr {}, ptr {cwd}, ptr {env}, i32 {streams}, i64 {}, i1 {}",
                     args[0].value.operand, args[1].value.operand, args[9].value.operand
-                ));
+                );
+                if let ProcessOperation::Call { check, .. } = operation {
+                    let timeout = &args[10].value;
+                    let kind = if timeout.ty == Type::Int { 2 } else { 7 };
+                    let word = self.checked_instruction(format!(
+                        "call i64 @imre_subprocess_call({spawn}, i32 {kind}, i64 {}, i1 {})",
+                        timeout.operand,
+                        u8::from(check)
+                    ));
+                    return self.unpack_word(word, returns);
+                }
+                let operand =
+                    self.checked_instruction(format!("call ptr @imre_popen_pipes({spawn})"));
                 self.owned(Value {
                     ty: returns,
                     operand,

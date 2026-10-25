@@ -167,6 +167,7 @@ impl Checker<'_> {
                     Type::Exception | Type::TimeoutExpired | Type::NamedException(_) | Type::None
                 )
             })
+            || types == [Type::LogRecord; 2]
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
