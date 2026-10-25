@@ -175,6 +175,9 @@ impl Builtin {
                     operation,
                     crate::ir::LogOperation::Configure
                         | crate::ir::LogOperation::ConfigureName
+                        | crate::ir::LogOperation::DictConfig
+                        | crate::ir::LogOperation::DictConfigTyped
+                        | crate::ir::LogOperation::FileConfig
                         | crate::ir::LogOperation::CheckLevel
                 ),
                 PreservesLists,
@@ -704,6 +707,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_formatter_message"
                 | "imre_logrecord_message"
                 | "imre_log_config"
+                | "imre_log_dict_config"
+                | "imre_log_typed_dict_config"
+                | "imre_log_file_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
                 | "imre_stderr_line"
