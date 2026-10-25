@@ -56,8 +56,8 @@ fn required(name: &str, ty: Type) -> Parameter {
 }
 
 impl Checker<'_> {
-    /// Bind the private weak registry to the public fixed Handler record type.
-    pub(super) fn named_handler(
+    /// Bind the private operations used by the public handler implementation.
+    pub(super) fn handler_operation(
         &mut self,
         symbol: Intrinsic,
         call: &ast::ExprCall,
@@ -87,6 +87,7 @@ impl Checker<'_> {
                 self.types.optional(handler),
                 vec![required("name", Type::Str)],
             ),
+            Intrinsic::PrintActiveException => (Log::PrintActiveException, Type::None, vec![]),
             _ => unreachable!(),
         };
         let args = self.arguments(call, &params, None)?;
@@ -191,6 +192,21 @@ impl Checker<'_> {
                     None,
                 )?,
             ),
+            Intrinsic::LoggingDisable => {
+                let params = [parameter(
+                    "level",
+                    Type::Int,
+                    ParameterKind::PositionalOrKeyword,
+                    number(50),
+                )];
+                (
+                    Log::Disable,
+                    Type::None,
+                    self.arguments_with(call, &params, None, |checker, _, arg| {
+                        checker.checked_logging_level(arg)
+                    })?,
+                )
+            }
             Intrinsic::LevelNamesMapping => (
                 Log::NamesCopy,
                 self.types.dict(Type::Str, Type::Int),
@@ -283,12 +299,44 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args))
     }
 
+    /// Share _checkLevel between global suppression and logger thresholds.
+    fn checked_logging_level(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
+        let value = Self::string_value(self.expr(arg)?);
+        match value.ty {
+            Type::Int => Ok(value),
+            Type::Bool => Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            }),
+            Type::Str => Ok(operation(Log::CheckLevel, Type::Int, vec![value])),
+            ty if dataclass_values::can_format(ty, self.types, self.classes)
+                && !matches!(ty, Type::Class(_)) =>
+            {
+                let description = Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Repr, vec![value]),
+                };
+                Ok(operation(Log::InvalidLevel, Type::Int, vec![description]))
+            }
+            _ => Err(error(
+                self.source,
+                arg,
+                "unable to represent this invalid logging level",
+            )),
+        }
+    }
+
     pub(super) fn logger_attribute(
         &self,
         logger: Expr,
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         match attribute.attr.as_str() {
+            "_cache" => Ok(operation(
+                Log::EnabledCache,
+                self.types.dict(Type::Int, Type::Bool),
+                vec![logger],
+            )),
             "disabled" => Ok(operation(Log::Disabled, Type::Bool, vec![logger])),
             "propagate" => Ok(operation(Log::Propagate, Type::Bool, vec![logger])),
             "root" => Ok(operation(Log::Root, Type::Logger, vec![logger])),
@@ -330,14 +378,7 @@ impl Checker<'_> {
                 call,
                 &[required("level", Type::Int)],
                 Some(logger),
-                |checker, _, arg| {
-                    let value = Self::string_value(checker.expr(arg)?);
-                    if value.ty == Type::Str {
-                        Ok(operation(Log::CheckLevel, Type::Int, vec![value]))
-                    } else {
-                        checker.coerce(value, Type::Int, arg)
-                    }
-                },
+                |checker, _, arg| checker.checked_logging_level(arg),
             )?;
             return Ok(self.ordered_builtin(Builtin::Logging(Log::SetLevel), Type::None, args));
         }

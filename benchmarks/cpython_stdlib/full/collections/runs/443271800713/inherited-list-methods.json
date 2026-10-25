@@ -1,0 +1,54 @@
+{
+  "compiler_revision": "4432718007136e13c6608e0532d07c35b330677d",
+  "source": "Lib/test/list_tests.py:394",
+  "results": [
+    {
+      "id": "test.test_list.ListTest.test_reverse",
+      "method_sha256": "701e70b2751556c328ac34f3bb1a1d13fe686a3d1db437a9e17b079f499d07de",
+      "reference": "pass",
+      "opt_level": 0,
+      "fixture": "import unittest\n\nclass NativeCase(unittest.TestCase):\n    type2test = list\n",
+      "result": {
+        "result": "compile-blocked",
+        "location": "fixture:4:5",
+        "reason": "Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      }
+    },
+    {
+      "id": "test.test_list.ListTest.test_reverse",
+      "method_sha256": "701e70b2751556c328ac34f3bb1a1d13fe686a3d1db437a9e17b079f499d07de",
+      "reference": "pass",
+      "opt_level": 3,
+      "fixture": "import unittest\n\nclass NativeCase(unittest.TestCase):\n    type2test = list\n",
+      "result": {
+        "result": "compile-blocked",
+        "location": "fixture:4:5",
+        "reason": "Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      }
+    },
+    {
+      "id": "test.test_userlist.UserListTest.test_reverse",
+      "method_sha256": "701e70b2751556c328ac34f3bb1a1d13fe686a3d1db437a9e17b079f499d07de",
+      "reference": "pass",
+      "opt_level": 0,
+      "fixture": "from collections import UserList\nimport unittest\n\nclass NativeCase(unittest.TestCase):\n    type2test = UserList\n",
+      "result": {
+        "result": "compile-blocked",
+        "location": "fixture:1:1",
+        "reason": "Imre: unsupported sealed standard-library export collections.UserList"
+      }
+    },
+    {
+      "id": "test.test_userlist.UserListTest.test_reverse",
+      "method_sha256": "701e70b2751556c328ac34f3bb1a1d13fe686a3d1db437a9e17b079f499d07de",
+      "reference": "pass",
+      "opt_level": 3,
+      "fixture": "from collections import UserList\nimport unittest\n\nclass NativeCase(unittest.TestCase):\n    type2test = UserList\n",
+      "result": {
+        "result": "compile-blocked",
+        "location": "fixture:1:1",
+        "reason": "Imre: unsupported sealed standard-library export collections.UserList"
+      }
+    }
+  ]
+}

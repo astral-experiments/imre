@@ -4,7 +4,7 @@ mod callables;
 mod classes;
 mod contracts;
 mod effects;
-mod fixed_regex;
+use imre_regex as fixed_regex;
 mod frontend;
 mod guarded_text;
 mod ir;
@@ -19,6 +19,7 @@ mod record_copies;
 mod reductions;
 #[cfg(test)]
 mod slice_sum_validation;
+mod sorted_rows;
 mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
@@ -33,6 +34,8 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Copy)]
 pub struct CommandFlags {
     pub isolated: bool,
+    /// Python's language optimization level; independent of LLVM optimization.
+    pub optimize: i32,
     pub safe_path: bool,
     pub no_user_site: bool,
     pub dont_write_bytecode: bool,
@@ -164,7 +167,7 @@ fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
     let mut graph = options.load_graph(path, module_root, filesystem)?;
@@ -209,11 +212,13 @@ pub struct UnitCompilation {
 }
 
 /// Reuses ty's semantic queries across revisions of a first-party program in this process.
-/// Each call resolves imports and runs Imre's preflight, lowering and requested code generation
-/// against the current files. Changing the module root or resolved file set starts a new database.
+/// A change confined to literal `int` or `bool` defaults on explicitly typed top-level functions
+/// can also reuse completed caller bodies that did not consume those defaults. Each call resolves
+/// imports, checks the whole program and runs the requested code generation against current files.
 #[derive(Default)]
 pub struct IncrementalCompiler {
     cache: analysis::AnalysisCache,
+    callers: frontend::CallerCache,
 }
 
 impl IncrementalCompiler {
@@ -223,7 +228,7 @@ impl IncrementalCompiler {
             path,
             module_root,
             &CompileOptions::default(),
-            Some(&mut self.cache),
+            Some(self),
             Default::default(),
         )
     }
@@ -247,7 +252,7 @@ impl IncrementalCompiler {
         options: &CompileOptions,
         report: impl FnMut(Result<(), String>),
     ) -> Result<(), String> {
-        watch::check(&mut self.cache, path, module_root, options, report)
+        watch::check(self, path, module_root, options, report)
     }
 
     /// Watches the current revision and declarations in installed extension wheels.
@@ -276,7 +281,7 @@ impl IncrementalCompiler {
         module_root: Option<&Path>,
         options: &CompileOptions,
     ) -> Result<UnitCompilation, String> {
-        compile_file_units_with(path, module_root, options, Some(&mut self.cache))
+        compile_file_units_with(path, module_root, options, Some(self))
     }
 }
 
@@ -293,7 +298,7 @@ fn compile_file_units_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
     let mut graph = options.load_graph(path, module_root, Default::default())?;
     let (mut module, mut owners) = checked_lower_with(&mut graph, cache)?;
@@ -338,27 +343,34 @@ fn checked_lower(
 
 fn checked_lower_with(
     graph: &mut modules::SourceGraph,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
 ) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
-    let Some(cache) = cache else {
+    let Some(compiler) = cache else {
         return checked_lower(graph);
     };
-    cache.restore_hints(graph)?;
-    let lowered = frontend::lower_with_owners(graph);
-    cache.retain_hints(graph, lowered.is_ok());
-    let lowered = lowered?;
-    let (skipped, overloads) = graph.diagnostic_scopes();
-    cache.check_scopes(
-        &mut graph.session,
-        &graph.inputs,
-        skipped.as_deref(),
-        &overloads,
-    )?;
-    Ok(lowered)
+    compiler.cache.restore_hints(graph)?;
+    let lowered = frontend::lower_with_caller_cache(graph, compiler.callers.prepare(graph));
+    compiler.cache.retain_hints(graph, lowered.is_ok());
+    let checked = lowered.and_then(|lowered| {
+        let (skipped, overloads) = graph.diagnostic_scopes();
+        compiler.cache.check_scopes(
+            &mut graph.session,
+            &graph.inputs,
+            skipped.as_deref(),
+            &overloads,
+        )?;
+        Ok(lowered)
+    });
+    if checked.is_err() {
+        compiler.callers = frontend::CallerCache::default();
+    }
+    checked
 }
 
 fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "lowering")?;
+    sorted_rows::specialize(module);
+    verify_after(module, "sorted record rows")?;
     let reader_origins = record_copies::scalarize(module);
     verify_after(module, "record copy scalarization")?;
     tuples::scalarize(module);
@@ -458,6 +470,22 @@ fn check_encoding(source: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{CompileOptions, compile};
+
+    #[test]
+    fn unsupported_handle_comparisons_are_diagnosed_before_lowering() {
+        for source in [
+            "import tomli\nv = tomli.loads('x = 1')\nprint(v == v != v)\n",
+            "import logging\nv = logging.getLogger('x')\nprint(v != v)\n",
+            "import asyncio\nv = asyncio.Semaphore(1)\nprint(v != v)\n",
+            "from tempfile import TemporaryDirectory\nv = TemporaryDirectory()\nprint(v == v)\n",
+        ] {
+            let error = super::check(source).unwrap_err();
+            assert!(
+                error.contains("unsupported comparison for these types"),
+                "{error}"
+            );
+        }
+    }
 
     #[test]
     fn unsupported_operations_on_shared_tuple_types_have_bounded_diagnostics() {
@@ -849,21 +877,7 @@ def present_after_exhaustion(value: int | None) -> int:
     }
 
     #[test]
-    fn loop_breaks_do_not_preserve_replaced_or_deleted_locals() {
-        let replaced = r#"
-def invalid(values: list[int]) -> int:
-    result: int | None = 1
-    for value in values:
-        result = value
-        try:
-            break
-        finally:
-            result = None
-    else:
-        result = 1
-    return result + 1
-"#;
-        assert!(compile(replaced, &CompileOptions::default()).is_err());
+    fn loop_break_does_not_restore_a_deleted_exception_target() {
         let deleted = r#"
 def invalid(values: list[int]) -> str:
     caught = ValueError("old")
@@ -876,6 +890,10 @@ def invalid(values: list[int]) -> str:
         caught = ValueError("empty")
     return str(caught)
 "#;
-        assert!(compile(deleted, &CompileOptions::default()).is_err());
+        let error = compile(deleted, &CompileOptions::default()).unwrap_err();
+        assert!(
+            error.contains("local may be uninitialized on this path"),
+            "{error}"
+        );
     }
 }

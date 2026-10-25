@@ -1,0 +1,110 @@
+{
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_source": "78c34931d18dbdc310a86df30e48ba0270e0bdd6",
+  "compiler_tree": "cedf94b8903a68a5ec09e9a99d6c578dd4493b2b",
+  "compiler_sha256": "70165abb005f4a3dc5a28538b8b66015d53d103d54492d7eae8e0eb1817c1cc7",
+  "runtime_sha256": "7b733993695116ebcd6821bd0d6f9f51809bbc42b2c4d6be5674a6bfdd4dba6f",
+  "reference_sha256": "6ccd6421b8bfa2f22a2172ee034ef8cd83b332789045f3bdbac51dd1b2e8181d",
+  "full_reports": {
+    "ordinary": "e8f8a1f3f3e6dfa6cf7cc7efc35d7bf82ca6bed838f4456dd1918fe6cf7e868a",
+    "reachable": "964078a8cc94e14183c29f0cf5d6f22e0cdf5473afdde516dd63ca5f20625692"
+  },
+  "modes": {
+    "ordinary-O0": [
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:6:46: Imre: expected object, got str; annotations are enforced contracts",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "definition_sha256": "2f9090890a4bf55d696ffb21ebeb5f624901389b20a77000fb9f20706caad1fa"
+        }
+      },
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict_with_clear",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:6:46: Imre: expected object, got str; annotations are enforced contracts",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "definition_sha256": "3e7c35147d4193903c193f84010748963cb63f2248a09a88b88a3ca3aed765cb"
+        }
+      }
+    ],
+    "ordinary-O3": [
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:6:46: Imre: expected object, got str; annotations are enforced contracts",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "definition_sha256": "2f9090890a4bf55d696ffb21ebeb5f624901389b20a77000fb9f20706caad1fa"
+        }
+      },
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict_with_clear",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:6:46: Imre: expected object, got str; annotations are enforced contracts",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "definition_sha256": "3e7c35147d4193903c193f84010748963cb63f2248a09a88b88a3ca3aed765cb"
+        }
+      }
+    ],
+    "reachable-O0": [
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:6:46: Imre: expected object, got str; annotations are enforced contracts",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "definition_sha256": "2f9090890a4bf55d696ffb21ebeb5f624901389b20a77000fb9f20706caad1fa"
+        }
+      },
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict_with_clear",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:6:46: Imre: expected object, got str; annotations are enforced contracts",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "definition_sha256": "3e7c35147d4193903c193f84010748963cb63f2248a09a88b88a3ca3aed765cb"
+        }
+      }
+    ],
+    "reachable-O3": [
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:6:46: Imre: expected object, got str; annotations are enforced contracts",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "definition_sha256": "2f9090890a4bf55d696ffb21ebeb5f624901389b20a77000fb9f20706caad1fa"
+        }
+      },
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict_with_clear",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:6:46: Imre: expected object, got str; annotations are enforced contracts",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "definition_sha256": "3e7c35147d4193903c193f84010748963cb63f2248a09a88b88a3ca3aed765cb"
+        }
+      }
+    ]
+  }
+}

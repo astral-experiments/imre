@@ -1,0 +1,328 @@
+{
+  "O0": [
+    {
+      "id": "test.test_collections.TestChainMap.test_bool",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestChainMap",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_collections.TestChainMap.test_constructor",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestChainMap",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_collections.TestCounter.test_ge",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestCounter",
+      "before": "native-body-host-fixture",
+      "after": "fully-native"
+    },
+    {
+      "id": "test.test_collections.TestCounter.test_gt",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestCounter",
+      "before": "native-body-host-fixture",
+      "after": "fully-native"
+    },
+    {
+      "id": "test.test_collections.TestCounter.test_le",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestCounter",
+      "before": "native-body-host-fixture",
+      "after": "fully-native"
+    },
+    {
+      "id": "test.test_collections.TestCounter.test_lt",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestCounter",
+      "before": "native-body-host-fixture",
+      "after": "fully-native"
+    },
+    {
+      "id": "test.test_collections.TestCounter.test_total",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestCounter",
+      "before": "native-body-host-fixture",
+      "after": "fully-native"
+    },
+    {
+      "id": "collections.Counter.__add__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__add__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__and__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__and__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__iadd__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__iadd__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__iand__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__iand__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__ior__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__ior__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__isub__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__isub__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__or__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__or__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__sub__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__sub__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.most_common",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.most_common",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "test.test_defaultdict.TestDefaultDict.test_callable_arg",
+      "occurrence": 1,
+      "fixture_variant": "test.test_defaultdict.TestDefaultDict",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_big_queue_popleft",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_big_queue_popright",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_big_stack_left",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_big_stack_right",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_clear",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "fully-native"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_maxlen_zero",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "fully-native"
+    }
+  ],
+  "O3": [
+    {
+      "id": "test.test_collections.TestChainMap.test_bool",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestChainMap",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_collections.TestChainMap.test_constructor",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestChainMap",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_collections.TestCounter.test_ge",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestCounter",
+      "before": "native-body-host-fixture",
+      "after": "fully-native"
+    },
+    {
+      "id": "test.test_collections.TestCounter.test_gt",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestCounter",
+      "before": "native-body-host-fixture",
+      "after": "fully-native"
+    },
+    {
+      "id": "test.test_collections.TestCounter.test_le",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestCounter",
+      "before": "native-body-host-fixture",
+      "after": "fully-native"
+    },
+    {
+      "id": "test.test_collections.TestCounter.test_lt",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestCounter",
+      "before": "native-body-host-fixture",
+      "after": "fully-native"
+    },
+    {
+      "id": "test.test_collections.TestCounter.test_total",
+      "occurrence": 1,
+      "fixture_variant": "test.test_collections.TestCounter",
+      "before": "native-body-host-fixture",
+      "after": "fully-native"
+    },
+    {
+      "id": "collections.Counter.__add__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__add__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__and__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__and__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__iadd__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__iadd__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__iand__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__iand__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__ior__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__ior__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__isub__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__isub__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__or__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__or__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.__sub__",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.__sub__",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "collections.Counter.most_common",
+      "occurrence": 1,
+      "fixture_variant": "doctest.DocTestCase: collections.Counter.most_common",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "test.test_defaultdict.TestDefaultDict.test_callable_arg",
+      "occurrence": 1,
+      "fixture_variant": "test.test_defaultdict.TestDefaultDict",
+      "before": "blocked",
+      "after": "host-driven-native-operation"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_big_queue_popleft",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_big_queue_popright",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_big_stack_left",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_big_stack_right",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "native-body-host-fixture"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_clear",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "fully-native"
+    },
+    {
+      "id": "test.test_deque.TestBasic.test_maxlen_zero",
+      "occurrence": 1,
+      "fixture_variant": "test.test_deque.TestBasic",
+      "before": "blocked",
+      "after": "fully-native"
+    }
+  ]
+}

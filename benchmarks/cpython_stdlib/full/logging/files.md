@@ -16,3 +16,10 @@ The differential in `file_values.py` checks UTF-8 output, delayed opening,
 stream identity, both text and Path filenames, a changed terminator, and
 append-mode reopening. It adds no test IDs. Other encodings and custom
 path-like objects still need support from the native stream and path APIs.
+
+Formatting, write, and flush failures reach `handleError` with the original
+record and active exception. A delayed open failure or a `RecursionError`
+propagates to the caller. The default handler honors `logging.raiseExceptions`.
+Imre's diagnostic includes the exception and its explicit causes, the record's
+filename and line, and the message and arguments. Native frames have no
+traceback objects.

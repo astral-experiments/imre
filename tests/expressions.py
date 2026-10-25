@@ -36,7 +36,7 @@ REJECTED = {
     "slice_string_bound": 'value = "abc"["1":]\n',
     "slice_optional_bool": 'def bad(step: bool | None) -> str:\n    return "abc"[::step]\n',
     "slice_tuple": "values = (1, 2)[:]\n",
-    "tuple_index_out_of_bounds": "values = (1, 2)\nprint(values[2])\n",
+    "heterogeneous_tuple_index_out_of_bounds": 'values = (1, "two")\nprint(values[2])\n',
     "slice_existing_type_change": "original: list[int] = [1]\nvalues: list[int | None] = original[:]\n",
     "slice_dictionary": "values = {0: 1}[:]\n",
     "slice_assignment": "values = [1, 2]\nvalues[:] = [3]\n",

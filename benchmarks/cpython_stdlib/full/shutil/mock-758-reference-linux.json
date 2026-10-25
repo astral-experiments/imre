@@ -1,0 +1,329 @@
+{
+  "module": "test.test_shutil",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 223,
+  "reference": {
+    "test.test_shutil.PublicAPITests.test_module_all_attribute": "pass",
+    "test.test_shutil.TestArchives.test_make_archive": "pass",
+    "test.test_shutil.TestArchives.test_make_archive_cwd": "pass",
+    "test.test_shutil.TestArchives.test_make_archive_cwd_default": "pass",
+    "test.test_shutil.TestArchives.test_make_archive_cwd_supports_root_dir": "pass",
+    "test.test_shutil.TestArchives.test_make_archive_owner_group": "pass",
+    "test.test_shutil.TestArchives.test_make_tarfile": "pass",
+    "test.test_shutil.TestArchives.test_make_tarfile_in_curdir": "pass",
+    "test.test_shutil.TestArchives.test_make_tarfile_rootdir_nodir": "pass",
+    "test.test_shutil.TestArchives.test_make_tarfile_with_explicit_curdir": "pass",
+    "test.test_shutil.TestArchives.test_make_tarfile_without_rootdir": "pass",
+    "test.test_shutil.TestArchives.test_make_zipfile": "pass",
+    "test.test_shutil.TestArchives.test_make_zipfile_in_curdir": "pass",
+    "test.test_shutil.TestArchives.test_make_zipfile_rootdir_nodir": "pass",
+    "test.test_shutil.TestArchives.test_make_zipfile_with_explicit_curdir": "pass",
+    "test.test_shutil.TestArchives.test_make_zipfile_without_rootdir": "pass",
+    "test.test_shutil.TestArchives.test_register_archive_format": "pass",
+    "test.test_shutil.TestArchives.test_tarfile_root_owner": "pass",
+    "test.test_shutil.TestArchives.test_tarfile_vs_tar": "pass",
+    "test.test_shutil.TestArchives.test_unpack_archive_bztar": "pass",
+    "test.test_shutil.TestArchives.test_unpack_archive_gztar": "pass",
+    "test.test_shutil.TestArchives.test_unpack_archive_tar": "pass",
+    "test.test_shutil.TestArchives.test_unpack_archive_xztar": "pass",
+    "test.test_shutil.TestArchives.test_unpack_archive_zip": "pass",
+    "test.test_shutil.TestArchives.test_unpack_archive_zip_badpaths": "pass",
+    "test.test_shutil.TestArchives.test_unpack_archive_zstdtar": "pass",
+    "test.test_shutil.TestArchives.test_unpack_registry": "pass",
+    "test.test_shutil.TestArchives.test_unzip_zipfile": "pass",
+    "test.test_shutil.TestArchives.test_zipfile_vs_zip": "pass",
+    "test.test_shutil.TestCopy.test_copy": "pass",
+    "test.test_shutil.TestCopy.test_copy2": "pass",
+    "test.test_shutil.TestCopy.test_copy2_dir": "pass",
+    "test.test_shutil.TestCopy.test_copy2_symlinks": "pass",
+    "test.test_shutil.TestCopy.test_copy2_xattr": {
+      "skipped": "no non-broken extended attribute support"
+    },
+    "test.test_shutil.TestCopy.test_copy_dir": "pass",
+    "test.test_shutil.TestCopy.test_copy_return_value": "pass",
+    "test.test_shutil.TestCopy.test_copy_symlinks": "pass",
+    "test.test_shutil.TestCopy.test_copyfile_copy_dir": "pass",
+    "test.test_shutil.TestCopy.test_copyfile_named_pipe": "pass",
+    "test.test_shutil.TestCopy.test_copyfile_nonexistent_dir": "pass",
+    "test.test_shutil.TestCopy.test_copyfile_return_value": "pass",
+    "test.test_shutil.TestCopy.test_copyfile_same_file": "pass",
+    "test.test_shutil.TestCopy.test_copyfile_symlinks": "pass",
+    "test.test_shutil.TestCopy.test_copymode_follow_symlinks": "pass",
+    "test.test_shutil.TestCopy.test_copymode_symlink_to_symlink": {
+      "skipped": "requires os.lchmod"
+    },
+    "test.test_shutil.TestCopy.test_copymode_symlink_to_symlink_wo_lchmod": "pass",
+    "test.test_shutil.TestCopy.test_copystat_handles_harmless_chflags_errors": {
+      "skipped": "requires os.chflags, EOPNOTSUPP & ENOTSUP"
+    },
+    "test.test_shutil.TestCopy.test_copystat_symlinks": "pass",
+    "test.test_shutil.TestCopy.test_copyxattr": {
+      "skipped": "no non-broken extended attribute support"
+    },
+    "test.test_shutil.TestCopy.test_copyxattr_symlinks": {
+      "skipped": "no non-broken extended attribute support"
+    },
+    "test.test_shutil.TestCopy.test_dont_copy_file_onto_link_to_itself": "pass",
+    "test.test_shutil.TestCopy.test_dont_copy_file_onto_symlink_to_itself": "pass",
+    "test.test_shutil.TestCopyFile.test_w_dest_close_fails": "pass",
+    "test.test_shutil.TestCopyFile.test_w_dest_open_fails": "pass",
+    "test.test_shutil.TestCopyFile.test_w_source_close_fails": "pass",
+    "test.test_shutil.TestCopyFile.test_w_source_open_fails": "pass",
+    "test.test_shutil.TestCopyFileObj.test_content": "pass",
+    "test.test_shutil.TestCopyFileObj.test_file_not_closed": "pass",
+    "test.test_shutil.TestCopyFileObj.test_file_offset": "pass",
+    "test.test_shutil.TestCopyFileObj.test_win_impl": {
+      "skipped": "Windows only"
+    },
+    "test.test_shutil.TestCopyTree.test_copytree_arg_types_of_ignore": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_custom_copy_function": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_dangling_symlinks": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_dirs_exist_ok": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_named_pipe": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_retains_permissions": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_return_value": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_simple": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_special_func": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_subdirectory": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_symlink_dir": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_symlinks": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_winerror": "pass",
+    "test.test_shutil.TestCopyTree.test_copytree_with_exclude": "pass",
+    "test.test_shutil.TestGetTerminalSize.test_bad_environ": "pass",
+    "test.test_shutil.TestGetTerminalSize.test_does_not_crash": "pass",
+    "test.test_shutil.TestGetTerminalSize.test_fallback": "pass",
+    "test.test_shutil.TestGetTerminalSize.test_os_environ_first": "pass",
+    "test.test_shutil.TestGetTerminalSize.test_stty_match": {
+      "skipped": "not on tty"
+    },
+    "test.test_shutil.TestMisc.test_chown": "pass",
+    "test.test_shutil.TestMisc.test_disk_usage": "pass",
+    "test.test_shutil.TestMove.test_destinsrc_false_negative": "pass",
+    "test.test_shutil.TestMove.test_destinsrc_false_positive": "pass",
+    "test.test_shutil.TestMove.test_dont_move_dir_in_itself": "pass",
+    "test.test_shutil.TestMove.test_existing_file_inside_dest_dir": "pass",
+    "test.test_shutil.TestMove.test_move_as_rename_return_value": "pass",
+    "test.test_shutil.TestMove.test_move_dangling_symlink": "pass",
+    "test.test_shutil.TestMove.test_move_dir": "pass",
+    "test.test_shutil.TestMove.test_move_dir_altsep_to_dir": {
+      "skipped": "requires os.path.altsep"
+    },
+    "test.test_shutil.TestMove.test_move_dir_caseinsensitive": "pass",
+    "test.test_shutil.TestMove.test_move_dir_other_fs": "pass",
+    "test.test_shutil.TestMove.test_move_dir_permission_denied": {
+      "skipped": "requires CAP_DAC_OVERRIDE"
+    },
+    "test.test_shutil.TestMove.test_move_dir_sep_to_dir": "pass",
+    "test.test_shutil.TestMove.test_move_dir_special_function": "pass",
+    "test.test_shutil.TestMove.test_move_dir_symlink": "pass",
+    "test.test_shutil.TestMove.test_move_dir_to_dir": "pass",
+    "test.test_shutil.TestMove.test_move_dir_to_dir_other_fs": "pass",
+    "test.test_shutil.TestMove.test_move_file": "pass",
+    "test.test_shutil.TestMove.test_move_file_other_fs": "pass",
+    "test.test_shutil.TestMove.test_move_file_special_function": "pass",
+    "test.test_shutil.TestMove.test_move_file_symlink": "pass",
+    "test.test_shutil.TestMove.test_move_file_symlink_to_dir": "pass",
+    "test.test_shutil.TestMove.test_move_file_to_dir": "pass",
+    "test.test_shutil.TestMove.test_move_file_to_dir_other_fs": "pass",
+    "test.test_shutil.TestMove.test_move_file_to_dir_pathlike_dst": "pass",
+    "test.test_shutil.TestMove.test_move_file_to_dir_pathlike_src": "pass",
+    "test.test_shutil.TestMove.test_move_return_value": "pass",
+    "test.test_shutil.TestMove.test_move_symlink_to_dir_into_dir": "pass",
+    "test.test_shutil.TestMove.test_move_symlink_to_dir_into_symlink_to_dir": "pass",
+    "test.test_shutil.TestRmTree.test_both_onerror_and_onexc": "pass",
+    "test.test_shutil.TestRmTree.test_on_error": "pass",
+    "test.test_shutil.TestRmTree.test_on_exc": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_above_recursion_limit": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_deleted_race_condition": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_does_not_choke_on_failing_lstat": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_dont_delete_file": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_errors": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_errors_onerror": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_errors_onexc": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_fails_on_close": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onerror": {
+      "skipped": "only relevant on Windows"
+    },
+    "test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onexc": {
+      "skipped": "only relevant on Windows"
+    },
+    "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onerror": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onexc": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_on_junction": {
+      "skipped": "only relevant on Windows"
+    },
+    "test.test_shutil.TestRmTree.test_rmtree_on_named_pipe": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_on_symlink": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_uses_safe_fd_version_if_available": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_with_dir_fd": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_with_dir_fd_unsupported": {
+      "skipped": "dir_fd is supported"
+    },
+    "test.test_shutil.TestRmTree.test_rmtree_works_on_bytes": "pass",
+    "test.test_shutil.TestRmTree.test_rmtree_works_on_junctions": {
+      "skipped": "only relevant on Windows"
+    },
+    "test.test_shutil.TestRmTree.test_rmtree_works_on_symlinks": "pass",
+    "test.test_shutil.TestWhich.test_absolute_cmd": "pass",
+    "test.test_shutil.TestWhich.test_basic": "pass",
+    "test.test_shutil.TestWhich.test_cwd_non_win32": "pass",
+    "test.test_shutil.TestWhich.test_cwd_win32": {
+      "skipped": "test is for win32"
+    },
+    "test.test_shutil.TestWhich.test_cwd_win32_added_before_all_other_path": {
+      "skipped": "test is for win32"
+    },
+    "test.test_shutil.TestWhich.test_dir_order_with_pathext_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhich.test_dir_order_without_pathext_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhich.test_empty_path": "pass",
+    "test.test_shutil.TestWhich.test_empty_path_no_PATH": "pass",
+    "test.test_shutil.TestWhich.test_environ_path": "pass",
+    "test.test_shutil.TestWhich.test_environ_path_cwd": "pass",
+    "test.test_shutil.TestWhich.test_environ_path_empty": "pass",
+    "test.test_shutil.TestWhich.test_environ_path_missing": "pass",
+    "test.test_shutil.TestWhich.test_non_matching_mode": "pass",
+    "test.test_shutil.TestWhich.test_nonexistent_file": "pass",
+    "test.test_shutil.TestWhich.test_pathext": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhich.test_pathext_applied_on_files_in_path": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhich.test_pathext_checking": {
+      "skipped": "pathext check is Windows-only"
+    },
+    "test.test_shutil.TestWhich.test_pathext_extension_ends_with_dot": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhich.test_pathext_with_empty_str": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhich.test_pathext_with_multidot_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhich.test_pathext_with_null_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhich.test_relative_cmd": "pass",
+    "test.test_shutil.TestWhich.test_relative_path": "pass",
+    "test.test_shutil.TestWhich.test_same_dir_with_pathext_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhich.test_same_dir_without_pathext_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhich.test_win_path_needs_curdir": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhichBytes.test_absolute_cmd": "pass",
+    "test.test_shutil.TestWhichBytes.test_basic": "pass",
+    "test.test_shutil.TestWhichBytes.test_cwd_non_win32": "pass",
+    "test.test_shutil.TestWhichBytes.test_cwd_win32": {
+      "skipped": "test is for win32"
+    },
+    "test.test_shutil.TestWhichBytes.test_cwd_win32_added_before_all_other_path": {
+      "skipped": "test is for win32"
+    },
+    "test.test_shutil.TestWhichBytes.test_dir_order_with_pathext_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhichBytes.test_dir_order_without_pathext_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhichBytes.test_empty_path": "pass",
+    "test.test_shutil.TestWhichBytes.test_empty_path_no_PATH": "pass",
+    "test.test_shutil.TestWhichBytes.test_environ_path": "pass",
+    "test.test_shutil.TestWhichBytes.test_environ_path_cwd": "pass",
+    "test.test_shutil.TestWhichBytes.test_environ_path_empty": "pass",
+    "test.test_shutil.TestWhichBytes.test_environ_path_missing": "pass",
+    "test.test_shutil.TestWhichBytes.test_non_matching_mode": "pass",
+    "test.test_shutil.TestWhichBytes.test_nonexistent_file": "pass",
+    "test.test_shutil.TestWhichBytes.test_pathext": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhichBytes.test_pathext_applied_on_files_in_path": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhichBytes.test_pathext_checking": {
+      "skipped": "pathext check is Windows-only"
+    },
+    "test.test_shutil.TestWhichBytes.test_pathext_extension_ends_with_dot": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhichBytes.test_pathext_with_empty_str": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhichBytes.test_pathext_with_multidot_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhichBytes.test_pathext_with_null_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhichBytes.test_relative_cmd": "pass",
+    "test.test_shutil.TestWhichBytes.test_relative_path": "pass",
+    "test.test_shutil.TestWhichBytes.test_same_dir_with_pathext_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhichBytes.test_same_dir_without_pathext_extension": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestWhichBytes.test_win_path_needs_curdir": {
+      "skipped": "test specific to Windows"
+    },
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_big_chunk": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_blocksize_arg": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_cant_get_size": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_empty_file": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_first_call": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_second_call": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_filesystem_full": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_non_existent_src": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_dst": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_src": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_regular_copy": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_same_file": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_small_chunks": "pass",
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_unhandled_exception": "pass",
+    "test.test_shutil.TestZeroCopyMACOS.test_empty_file": {
+      "skipped": "macOS only"
+    },
+    "test.test_shutil.TestZeroCopyMACOS.test_exception_on_first_call": {
+      "skipped": "macOS only"
+    },
+    "test.test_shutil.TestZeroCopyMACOS.test_filesystem_full": {
+      "skipped": "macOS only"
+    },
+    "test.test_shutil.TestZeroCopyMACOS.test_non_existent_src": {
+      "skipped": "macOS only"
+    },
+    "test.test_shutil.TestZeroCopyMACOS.test_regular_copy": {
+      "skipped": "macOS only"
+    },
+    "test.test_shutil.TestZeroCopyMACOS.test_same_file": {
+      "skipped": "macOS only"
+    },
+    "test.test_shutil.TestZeroCopyMACOS.test_unhandled_exception": {
+      "skipped": "macOS only"
+    },
+    "test.test_shutil.TestZeroCopySendfile.test_big_chunk": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_blocksize_arg": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_cant_get_size": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_empty_file": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_exception_on_first_call": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_exception_on_second_call": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_filesystem_full": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_non_existent_src": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_non_regular_file_dst": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_non_regular_file_src": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_regular_copy": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_same_file": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_small_chunks": "pass",
+    "test.test_shutil.TestZeroCopySendfile.test_unhandled_exception": "pass"
+  }
+}

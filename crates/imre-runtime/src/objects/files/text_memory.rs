@@ -3,6 +3,7 @@
 
 use super::super::records::{RecordDescriptor, allocate_record};
 use super::*;
+use crate::StrOwner;
 use crate::objects::{bytes::native_size, c_int, exceptions::string_repr};
 use num_traits::ToPrimitive;
 
@@ -171,9 +172,10 @@ pub unsafe extern "C" fn imre_string_io(initial: usize, newline: usize) -> *cons
             memory.write(initial)?;
             memory.pos = 0;
         }
-        Ok(Rc::into_raw(
+        Ok(crate::ObjectOwner::into_raw(
             FileState {
                 fd: None,
+                raw: false,
                 name: None,
                 kind: FileKind::TextMemory,
                 stream: Some(Stream::TextMemory(memory)),
@@ -196,7 +198,10 @@ pub unsafe extern "C" fn imre_string_io_value(file: *const Object) -> *const Str
             .0
             .with_mut(|s| TextMemory::text(&s.file_mut().text_memory()?.data))
     };
-    finish(result.map(|s| Rc::into_raw(Rc::new(s))), std::ptr::null())
+    finish(
+        result.map(|s| StrOwner::into_raw(StrOwner::new(s))),
+        std::ptr::null(),
+    )
 }
 
 /// Read a bounded number of characters or a single line, validating the size before
@@ -225,7 +230,10 @@ pub unsafe extern "C" fn imre_string_io_read(
                 .with_mut(|s| s.file_mut().text_memory()?.read(limit, line))
         }
     })();
-    finish(result.map(|s| Rc::into_raw(Rc::new(s))), std::ptr::null())
+    finish(
+        result.map(|s| StrOwner::into_raw(StrOwner::new(s))),
+        std::ptr::null(),
+    )
 }
 
 /// Seek in characters, without allocating storage for an oversized position.
@@ -348,7 +356,7 @@ pub unsafe extern "C" fn imre_string_io_newlines(
             let mut spellings = [(1, "\r"), (2, "\n"), (4, "\r\n")]
                 .into_iter()
                 .filter(|(bit, _)| seen & bit != 0)
-                .map(|(_, s)| Rc::into_raw(Rc::new(Str::from(s))));
+                .map(|(_, s)| StrOwner::into_raw(StrOwner::new(Str::from(s))));
             if count == 1 {
                 return Ok(spellings.next().unwrap() as usize);
             }
@@ -400,7 +408,9 @@ pub unsafe extern "C" fn imre_string_io_readlines(
                         .values
                         .try_reserve(1)
                         .map_err(|_| Error::allocation())?;
-                    lines.values.push(Rc::into_raw(Rc::new(line)) as usize);
+                    lines
+                        .values
+                        .push(StrOwner::into_raw(StrOwner::new(line)) as usize);
                     if hint.is_some_and(|n| n > 0 && read > n as usize) {
                         break;
                     }
@@ -409,7 +419,7 @@ pub unsafe extern "C" fn imre_string_io_readlines(
             })
         })
     };
-    finish(result.map(Rc::into_raw), std::ptr::null())
+    finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }
 
 /// # Safety
