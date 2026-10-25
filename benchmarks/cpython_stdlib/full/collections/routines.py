@@ -21,7 +21,7 @@ sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import Toolchain, native_method, run_in_fixtures
 from native_counter import assertion_fixture
-from deque_methods import BIG_METHODS, BIG_OPERATION, big_fixture
+from deque_methods import METHODS as DEQUE_METHODS, method_fixture as deque_fixture
 
 
 COUNTER_OPERATIONS = {
@@ -162,9 +162,8 @@ def main():
                 if case_id == f"test.test_collections.TestCounter.{method}" and method in COUNTER_OPERATIONS:
                     fixture = assertion_fixture(method, "NativeCase")
                     operation = ("imre", COUNTER_OPERATIONS[method])
-                elif case_id == f"test.test_deque.TestBasic.{method}" and method in BIG_METHODS:
-                    fixture = big_fixture(sys.modules[name].BIG)
-                    operation = BIG_OPERATION
+                elif case_id == f"test.test_deque.TestBasic.{method}" and method in DEQUE_METHODS:
+                    fixture, operation = deque_fixture(method, sys.modules[name].BIG)
                 elif case_id in EMPTY:
                     if len(node.body) != 1 or not isinstance(node.body[0], ast.Pass):
                         raise ValueError(f"{case_id} is no longer an empty upstream test")

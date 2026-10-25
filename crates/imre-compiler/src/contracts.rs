@@ -431,6 +431,7 @@ impl Builtin {
             | Self::StrEnumValue
             | Self::EnumString
             | Self::StringListContains
+            | Self::DequeContains
             | Self::StringContains
             | Self::BytesContains
             | Self::UnionInject
@@ -478,6 +479,9 @@ impl Builtin {
             | Self::ArgparseText { .. }
             | Self::DequeAppend { .. }
             | Self::DequePop { .. }
+            | Self::DequeGet
+            | Self::DequeSet
+            | Self::DequeDelete
             | Self::Pop
             | Self::Print
             | Self::SortRestore
