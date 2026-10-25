@@ -12,6 +12,7 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path.insert(0, str(STDLIB))
+from suite_evidence import roles
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import Toolchain, native_method, run_in_fixtures
 
@@ -65,6 +66,58 @@ def native_flags(binary):
                 raise RuntimeError(f"native record driver exited {child.returncode}")
 
 
+
+def record_executions(toolchain, work, original):
+    """Build the focused LogRecord adapters used by both reports."""
+    child = work / "record-driver"
+    child.mkdir()
+    binary = toolchain.build((HERE / "record_driver.py").read_bytes(), child)
+    values = work / "record-values"
+    values.mkdir()
+    source_values = HERE / "record_values.py"
+    program = toolchain.build(source_values.read_bytes(), values)
+
+    def output(command):
+        done = subprocess.run(command, capture_output=True, timeout=30)
+        if done.returncode:
+            raise AssertionError((command, done.returncode, done.stdout, done.stderr))
+        return done.stdout, done.stderr
+
+    if output([program]) != output([sys.executable, source_values]):
+        raise AssertionError("record field ownership or formatting differs from CPython")
+
+    def optional(case, method):
+        with native_flags(binary) as (logging, operations), patch.object(original, "logging", logging):
+            method()
+        if not operations:
+            raise AssertionError("no native logging operation executed")
+        return {
+            "roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+            "evidence": {
+                "operation": "Native record creation, metadata reads and module flag changes",
+                "fixture": "Original CPython hooks and assertions; persistent native child",
+                "opt_level": toolchain.level,
+                "native_calls": len(operations),
+            },
+        }
+
+    prefix = "test.test_logging.LogRecordTest."
+    source = STDLIB / "upstream/Lib/test/test_logging.py"
+    record_method = work / "record-str-rep"
+    record_method.mkdir()
+    executions = {prefix + "test_optional": optional}
+    executions[prefix + "test_str_rep"] = native_method(
+        toolchain,
+        record_method,
+        source,
+        "LogRecordTest",
+        prefix + "test_str_rep",
+        REPR_FIXTURE,
+        operation=("imre", "Native record creation and representation"),
+    )
+    return executions
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("imre", "runtime", "clang"):
@@ -86,34 +139,8 @@ def main():
     assert denom == 272
     from test import test_logging
     toolchain = Toolchain(args.imre, args.runtime, args.clang, args.opt_level)
-    source = STDLIB / "upstream/Lib/test/test_logging.py"
-    prefix = "test.test_logging.LogRecordTest."
     with tempfile.TemporaryDirectory() as tmp:
-        work = Path(tmp)
-        child = work / "driver"
-        child.mkdir()
-        binary = toolchain.build((HERE / "record_driver.py").read_bytes(), child)
-        values = work / "values"
-        values.mkdir()
-        source_values = HERE / "record_values.py"
-        program = toolchain.build(source_values.read_bytes(), values)
-        def output(command):
-            done = subprocess.run(command, capture_output=True, timeout=30)
-            if done.returncode:
-                raise AssertionError((command, done.returncode, done.stdout, done.stderr))
-            return done.stdout, done.stderr
-        if output([program]) != output([sys.executable, source_values]):
-            raise AssertionError("record field ownership or formatting differs from CPython")
-        def optional(case, method):
-            with native_flags(binary) as (logging, operations), patch.object(test_logging, "logging", logging):
-                method()
-            if not operations:
-                raise AssertionError("no native logging operation executed")
-            return {"execution": "host-driven-native", "body": "CPython", "assertions": "CPython",
-                    "fixture_execution": "CPython module/class/instance hooks", "operations": operations}
-        executions = {prefix + "test_optional": optional}
-        executions[prefix + "test_str_rep"] = native_method(toolchain, work, source, "LogRecordTest",
-                                                          prefix + "test_str_rep", REPR_FIXTURE)
+        executions = record_executions(toolchain, Path(tmp), test_logging)
         evidence, failures, skips = run_in_fixtures(suite, executions)
         if failures or skips or set(evidence) != set(executions):
             raise AssertionError((failures, skips, set(evidence)))
