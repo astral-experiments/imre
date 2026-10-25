@@ -98,6 +98,8 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::Logger
         | Type::TimedFileHandler
         | Type::ClockTime
+        | Type::Poll
+        | Type::Socket
         | Type::Sha256
         | Type::JsonDecoder
         | Type::CsvReader
@@ -106,6 +108,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::ObjectValue
         | Type::TextIO
         | Type::StringIO
+        | Type::HandlerLock
         | Type::BinaryIO
         | Type::Iterator
         | Type::Callable(_) => false,
@@ -205,6 +208,8 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
             | Type::ClockTime
             | Type::LogFormatter
             | Type::LogRecord
+            | Type::Poll
+            | Type::Socket
             | Type::Sha256
             | Type::JsonDecoder
             | Type::RegexPattern

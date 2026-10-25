@@ -21,6 +21,8 @@ use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 mod binary;
 mod decoder;
 mod encode;
+#[cfg(test)]
+pub(super) use encode::imre_json_dumps;
 pub(super) mod readonly;
 mod syntax;
 mod toml;

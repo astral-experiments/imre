@@ -40,6 +40,10 @@ def main() -> None:
     print(tuples.setdefault((7, "k"), "first"))
     print(tuples.setdefault((7, "k"), "second"))
     print(tuples)
+    nested: dict[tuple[tuple[int, str], int], int] = {}
+    for n in [1, 1, 2]:
+        print(nested.setdefault(((n, "k"), 0), len(nested)))
+    print(nested)
     counts = Counter("aba")
     print(counts.setdefault("a", 5))
     print(Counter.setdefault(counts, "e", 5))
@@ -50,4 +54,22 @@ def main() -> None:
     print(groups["factory"])
 
 
+def nested_key(value: int) -> tuple[tuple[str, int], bytes]:
+    return (("key", value), b"suffix")
+
+
+def nested_tuple_keys() -> None:
+    table: dict[tuple[tuple[str, int], bytes], list[int]] = {}
+    stored = [1]
+    other = [2]
+    large = 10**48
+    print(table.setdefault(nested_key(large), stored) is stored)
+    print(table.setdefault(nested_key(large), other) is stored)
+    print(table.setdefault(nested_key(large + 1), other) is other)
+    print(len(table))
+    print(stored)
+    print(other)
+
+
 main()
+nested_tuple_keys()

@@ -24,7 +24,7 @@ use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, acquire_rc, fai
 pub(super) type StringPairs = Vec<(Rc<Str>, Rc<Str>)>;
 
 #[derive(Clone)]
-struct IntKey(Int);
+pub(super) struct IntKey(pub(super) Int);
 
 impl PartialEq for IntKey {
     fn eq(&self, other: &Self) -> bool {
@@ -62,7 +62,8 @@ impl PartialEq for ObjectKey {
         unsafe {
             self.0.0.with(|left| {
                 other.0.0.with(|right| match (left, right) {
-                    (Storage::Logger(_), _) | (_, Storage::Logger(_)) => false,
+                    (Storage::Logger(_) | Storage::Socket(_), _)
+                    | (_, Storage::Logger(_) | Storage::Socket(_)) => false,
                     (left, right) => left.path_equal(right),
                 })
             })
@@ -75,7 +76,7 @@ impl Hash for ObjectKey {
         // SAFETY: the key roots this object throughout the nonreentrant hash.
         unsafe {
             self.0.0.with(|key| match key {
-                Storage::Logger(_) => Rc::as_ptr(&self.0).hash(state),
+                Storage::Logger(_) | Storage::Socket(_) => Rc::as_ptr(&self.0).hash(state),
                 path => path.hash_path(state),
             })
         };
@@ -415,8 +416,8 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     unsafe fn setdefault(&mut self, word: usize, default: V) -> Result<(V, bool), Error> {
         // SAFETY: the caller roots an exact key of this table's representation.
         let key = unsafe { K::borrow(word) };
-        let hash = HASHER.hash_one(&*key);
-        if let Some(index) = self.position(hash, &*key) {
+        let hash = key.try_hash()?;
+        if let Some(index) = self.key_position(hash, &key)? {
             return Ok((self.entries[index].as_ref().unwrap().value, false));
         }
         self.insert_absent(hash, (*key).clone(), default)?;
@@ -2568,26 +2569,25 @@ unsafe fn key_filter(
                 _ => unreachable!("expected dictionary keys or set"),
             };
             let result = Rc::from_raw(imre_set_new(kind));
-            let mut inserted = Ok(());
             object(right).0.with(|right| {
-                let mut select = |key| {
+                let select = |key| {
                     let present = match right {
-                        Storage::Dictionary(dict) => dict.tables.lookup(key).is_some(),
-                        Storage::Set(set) => set.tables.lookup(key).is_some(),
+                        Storage::Dictionary(dict) => dict.tables.try_lookup(key)?.is_some(),
+                        Storage::Set(set) => set.tables.try_lookup(key)?.is_some(),
                         _ => unreachable!("expected dictionary keys or set"),
                     };
                     if present == keep_present {
-                        inserted = set_add(Rc::as_ptr(&result), key);
+                        set_add(Rc::as_ptr(&result), key)?;
                     }
-                    inserted.is_ok()
+                    Ok(())
                 };
                 match left {
-                    Storage::Dictionary(dict) => dict.tables.all(|key, _| select(key)),
-                    Storage::Set(set) => set.tables.all(|key, ()| select(key)),
+                    Storage::Dictionary(dict) => dict.tables.try_for_each(|key, _| select(key)),
+                    Storage::Set(set) => set.tables.try_for_each(|key, ()| select(key)),
                     _ => unreachable!(),
-                };
-            });
-            inserted.map(|()| Rc::into_raw(result))
+                }
+            })?;
+            Ok(Rc::into_raw(result))
         })
     };
     crate::finish(result, std::ptr::null())
