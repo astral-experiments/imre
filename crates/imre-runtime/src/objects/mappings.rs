@@ -61,7 +61,7 @@ impl Eq for PathKey {}
 impl Hash for PathKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // SAFETY: the key roots immutable path storage for this nonreentrant hash.
-        unsafe { self.0.0.with(|path| path.path().hash(state)) };
+        unsafe { self.0.0.with(|path| path.path_key().hash(state)) };
     }
 }
 
@@ -309,35 +309,36 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
             .copied()
     }
 
-    fn reserve(&mut self, additional: usize) {
+    fn reserve(&mut self, additional: usize) -> Result<(), Error> {
         let entries = &self.entries;
         self.index
             .try_reserve(additional, |&i| entries[i].as_ref().unwrap().hash)
-            .unwrap_or_else(|_| fail("MemoryError", "mapping allocation failed"));
+            .map_err(|_| Error::allocation())?;
         self.entries
             .try_reserve(additional)
-            .unwrap_or_else(|_| fail("MemoryError", "mapping allocation failed"));
+            .map_err(|_| Error::allocation())
     }
 
-    fn insert_absent(&mut self, hash: u64, key: K, value: V) {
+    fn insert_absent(&mut self, hash: u64, key: K, value: V) -> Result<(), Error> {
         self.compact();
-        self.reserve(1);
+        self.reserve(1)?;
         let position = self.entries.len();
         let entries = &self.entries;
         self.index
             .insert_unique(hash, position, |&i| entries[i].as_ref().unwrap().hash);
         self.entries.push(Some(Entry { hash, key, value }));
+        Ok(())
     }
 
     /// Preserves first-insertion position and returns owners displaced by an update.
-    fn insert(&mut self, key: K, value: V) -> Option<(K, V)> {
+    fn insert(&mut self, key: K, value: V) -> Result<Option<(K, V)>, Error> {
         let hash = HASHER.hash_one(&key);
         if let Some(position) = self.position(hash, &key) {
             let entry = self.entries[position].as_mut().unwrap();
-            return Some((key, std::mem::replace(&mut entry.value, value)));
+            return Ok(Some((key, std::mem::replace(&mut entry.value, value))));
         }
-        self.insert_absent(hash, key, value);
-        None
+        self.insert_absent(hash, key, value)?;
+        Ok(None)
     }
 
     /// Transfers the removed key and value so they can drop outside the mutation.
@@ -381,13 +382,14 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     }
 
     /// A key view already has the immutable hash needed by the result set.
-    fn copy_keys(&self, result: &mut Table<K, ()>) {
-        result.reserve(self.index.len().saturating_sub(result.index.len()));
+    fn copy_keys(&self, result: &mut Table<K, ()>) -> Result<(), Error> {
+        result.reserve(self.index.len().saturating_sub(result.index.len()))?;
         for entry in self.entries.iter().flatten() {
             if result.position(entry.hash, &entry.key).is_none() {
-                result.insert_absent(entry.hash, entry.key.clone(), ());
+                result.insert_absent(entry.hash, entry.key.clone(), ())?;
             }
         }
+        Ok(())
     }
 
     fn iterator_position(&mut self) -> Rc<Cell<usize>> {
@@ -429,20 +431,20 @@ impl<K: ScalarKey> Table<K, usize> {
         word: usize,
         kind: WordKind,
         missing: Missing,
-    ) -> Option<OwnedWord> {
+    ) -> Result<Option<OwnedWord>, Error> {
         // SAFETY: the incoming key remains rooted for this whole operation.
         let key = unsafe { K::borrow(word) };
         let hash = HASHER.hash_one(&*key);
         if let Some(position) = self.position(hash, &*key) {
             let value = self.entries[position].as_ref().unwrap().value;
             // SAFETY: the table roots the stored value of the declared kind.
-            return Some(unsafe { kind.acquire(value) });
+            return Ok(Some(unsafe { kind.acquire(value) }));
         }
         let element = match missing {
-            Missing::Raise => return None,
+            Missing::Raise => return Ok(None),
             Missing::Zero => {
                 // SAFETY: a Counter has exact integer values. Zero is immediate.
-                return Some(unsafe { kind.acquire(Int::small(0).unwrap().0) });
+                return Ok(Some(unsafe { kind.acquire(Int::small(0).unwrap().0) }));
             }
             Missing::List(element) => element,
         };
@@ -451,11 +453,12 @@ impl<K: ScalarKey> Table<K, usize> {
         } else {
             super::imre_seq_new(element.raw()) as usize
         };
-        // SAFETY: the factory transfers its fresh list to the table. The caller
-        // owns the acquired result independently of any subsequent replacement.
-        let result = unsafe { kind.acquire(list) };
-        self.insert_absent(hash, (*key).clone(), list);
-        Some(result)
+        // SAFETY: the factory transfers one fresh list owner. Keep it guarded
+        // until reservation succeeds and the table owns its word.
+        let list = unsafe { OwnedWord::from_owned(list, kind) };
+        self.insert_absent(hash, (*key).clone(), list.word)?;
+        // SAFETY: the table now roots the published value.
+        Ok(Some(unsafe { kind.acquire(list.into_word()) }))
     }
 }
 
@@ -512,7 +515,7 @@ impl<V: Copy> Tables<V> {
             Self::Tuple(_) => 6,
         }
     }
-    fn copy_keys(&self, result: &mut Tables<()>) {
+    fn copy_keys(&self, result: &mut Tables<()>) -> Result<(), Error> {
         match (self, result) {
             (Self::Int(table), Tables::Int(result)) => table.copy_keys(result),
             (Self::Enum(table), Tables::Enum(result)) => table.copy_keys(result),
@@ -537,22 +540,22 @@ impl<V: Copy> Tables<V> {
         // SAFETY: each dispatched table borrows its exact rooted key kind.
         table!(self, table => unsafe { table.lookup(word) }.map(|entry| entry.value))
     }
-    fn insert(&mut self, key: OwnedWord, value: V) -> Option<(OwnedWord, V)> {
+    fn insert(&mut self, key: OwnedWord, value: V) -> Result<Option<(OwnedWord, V)>, Error> {
         fn insert<K: ScalarKey, V: Copy>(
             table: &mut Table<K, V>,
             key: OwnedWord,
             value: V,
-        ) -> Option<(OwnedWord, V)> {
+        ) -> Result<Option<(OwnedWord, V)>, Error> {
             assert_eq!(key.kind.raw(), K::KIND);
             // SAFETY: the key temporary transfers one exact typed owner.
             let key = unsafe { K::from_owned(key.into_word()) };
-            table.insert(key, value).map(|(key, value)| {
+            Ok(table.insert(key, value)?.map(|(key, value)| {
                 // SAFETY: insert transfers the unused incoming key reference.
                 (
                     unsafe { OwnedWord::from_owned(key.into_word(), WordKind::new(K::KIND)) },
                     value,
                 )
-            })
+            }))
         }
         table!(self, table => insert(table, key, value))
     }
@@ -651,16 +654,37 @@ impl Mapping {
 
     /// Transfers two exact owners only for a new key. Duplicate inputs are
     /// dropped together, preserving existing entries during strict decoding.
-    pub(super) fn insert_unique(&mut self, key: OwnedWord, value: OwnedWord) -> bool {
+    pub(super) fn insert_unique(
+        &mut self,
+        key: OwnedWord,
+        value: OwnedWord,
+    ) -> Result<bool, Error> {
         assert_eq!(key.kind.raw(), self.tables.key_kind());
         assert_eq!(value.kind, self.value_kind);
         // SAFETY: the temporary key roots this table's exact immutable key kind.
         if unsafe { self.tables.lookup(key.word) }.is_some() {
-            return false;
+            return Ok(false);
         }
-        let displaced = self.tables.insert(key, value.into_word());
+        let displaced = self.insert(key, value)?;
         debug_assert!(displaced.is_none());
-        true
+        Ok(true)
+    }
+
+    /// Transfer the value and publish its cache slot only after the table owns it.
+    fn insert(
+        &mut self,
+        key: OwnedWord,
+        value: OwnedWord,
+    ) -> Result<Option<(OwnedWord, OwnedWord)>, Error> {
+        let key_word = key.word;
+        let old = self.tables.insert(key, value.word)?;
+        let word = value.into_word();
+        // SAFETY: the table or the displaced pair roots the key. The table owns
+        // the new value, and each displaced word transfers its stored owner.
+        unsafe {
+            self.update_ascii_int(key_word, word);
+            Ok(old.map(|(key, word)| (key, OwnedWord::from_owned(word, self.value_kind))))
+        }
     }
 
     /// Retains exact string entries in insertion order while preparing a process launch.
@@ -1080,7 +1104,7 @@ pub extern "C" fn imre_counter_new(key_kind: u32) -> *const Object {
 pub unsafe extern "C" fn imre_counter_update(target: *const Object, source: *const Object) {
     // SAFETY: the iterator acquires the source and each pair before mutating the target.
     // When the handles alias, replacing a count leaves the source's keys intact.
-    unsafe {
+    let updated = (|| unsafe {
         let iter = Rc::from_raw(imre_dict_iter(source, 1));
         while let Some((key, Some(count))) = iter
             .0
@@ -1089,9 +1113,11 @@ pub unsafe extern "C" fn imre_counter_update(target: *const Object, source: *con
         {
             let current = Int(imre_dict_get_default(target, key.word, 1));
             let total = Int(crate::imre_int_binary(current.0, count.word, 0));
-            imre_dict_set(target, key.word, total.0);
+            dict_set(target, key.word, total.0)?;
         }
-    }
+        Ok(())
+    })();
+    crate::finish(updated, ());
 }
 
 /// Sums exact integers after evaluating the dictionary and the start value.
@@ -1180,8 +1206,10 @@ pub unsafe extern "C" fn imre_dict_get(value: *const Object, key: usize) -> usiz
         table!(&mut mapping.tables, table => table.subscript(key, mapping.value_kind, mapping.missing))
     })
     };
-    if let Some(owned) = owned {
-        return owned.into_word();
+    match owned {
+        Ok(Some(owned)) => return owned.into_word(),
+        Err(error) => return error.returning(0),
+        Ok(None) => {}
     }
     // SAFETY: input roots remain live after storage access ends.
     unsafe { missing_key(value, key) }.returning(0)
@@ -1360,6 +1388,13 @@ pub unsafe extern "C" fn imre_dict_get_default(
 /// Acquisition precedes mutation, including replacement of the sole stored owner.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_dict_set(value: *const Object, key: usize, word: usize) {
+    // SAFETY: generated arguments obey the native insertion contract.
+    crate::finish(unsafe { dict_set(value, key, word) }, ());
+}
+
+/// # Safety
+/// The rooted container and words must have the exact declared kinds.
+pub(super) unsafe fn dict_set(value: *const Object, key: usize, word: usize) -> Result<(), Error> {
     // SAFETY: only copied descriptor metadata leaves storage.
     let (key_kind, value_kind) = unsafe {
         object(value).0.with(|s| {
@@ -1369,20 +1404,13 @@ pub unsafe extern "C" fn imre_dict_set(value: *const Object, key: usize, word: u
     };
     // SAFETY: both arguments are rooted before replacing any old owners.
     let (key, new) = unsafe { (key_kind.acquire(key), value_kind.acquire(word)) };
-    // SAFETY: insertion cannot reenter; displaced owners leave storage together.
+    // SAFETY: only the displaced owners leave the non-reentrant mutation.
     let old = unsafe {
-        object(value).0.with_mut(|s| {
-            let mapping = s.dictionary_mut();
-            // Both incoming owners remain rooted while the cache and table are
-            // updated together; insertion cannot reenter a dictionary lookup.
-            mapping.update_ascii_int(key.word, new.word);
-            mapping
-                .tables
-                .insert(key, new.into_word())
-                .map(|(key, word)| (key, OwnedWord::from_owned(word, value_kind)))
-        })
+        object(value)
+            .0
+            .with_mut(|s| s.dictionary_mut().insert(key, new))
     };
-    drop(old);
+    old.map(drop)
 }
 /// Removes one entry and keeps its returned owners out of the storage borrow.
 ///
@@ -1591,15 +1619,16 @@ pub unsafe extern "C" fn imre_key_union(
     for source in std::iter::once(left).chain((left != right).then_some(right)) {
         // SAFETY: the destination is private and distinct from both inputs. All
         // hash operations use sealed immutable keys and cannot call user code.
-        unsafe {
-            object(source).0.with(|storage| {
-                match storage {
-                    Storage::Dictionary(dict) => dict.tables.copy_keys(&mut result),
-                    Storage::Set(set) => set.tables.copy_keys(&mut result),
-                    _ => unreachable!("the checker proves both key sources"),
-                };
+        let copied = unsafe {
+            object(source).0.with(|storage| match storage {
+                Storage::Dictionary(dict) => dict.tables.copy_keys(&mut result),
+                Storage::Set(set) => set.tables.copy_keys(&mut result),
+                _ => unreachable!("the checker proves both key sources"),
             })
         };
+        if let Err(error) = copied {
+            return error.returning(std::ptr::null());
+        }
     }
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Set(Box::new(
         Set { tables: result },
@@ -1639,25 +1668,26 @@ unsafe fn key_filter(
 ) -> *const Object {
     // SAFETY: the operands are immutably borrowed. All inserts target the fresh
     // result, and exact scalar key hashing cannot reenter user code.
-    unsafe {
+    let result = unsafe {
         object(left).0.with(|left| {
             let kind = match left {
                 Storage::Dictionary(dict) => dict.tables.key_kind(),
                 Storage::Set(set) => set.tables.key_kind(),
                 _ => unreachable!("expected dictionary keys or set"),
             };
-            let result = imre_set_new(kind);
+            let result = Rc::from_raw(imre_set_new(kind));
+            let mut inserted = Ok(());
             object(right).0.with(|right| {
-                let select = |key| {
+                let mut select = |key| {
                     let present = match right {
                         Storage::Dictionary(dict) => dict.tables.lookup(key).is_some(),
                         Storage::Set(set) => set.tables.lookup(key).is_some(),
                         _ => unreachable!("expected dictionary keys or set"),
                     };
                     if present == keep_present {
-                        imre_set_add(result, key);
+                        inserted = set_add(Rc::as_ptr(&result), key);
                     }
-                    true
+                    inserted.is_ok()
                 };
                 match left {
                     Storage::Dictionary(dict) => dict.tables.all(|key, _| select(key)),
@@ -1665,9 +1695,10 @@ unsafe fn key_filter(
                     _ => unreachable!(),
                 };
             });
-            result
+            inserted.map(|()| Rc::into_raw(result))
         })
-    }
+    };
+    crate::finish(result, std::ptr::null())
 }
 
 /// # Safety
@@ -1692,6 +1723,13 @@ pub unsafe extern "C" fn imre_set_contains(value: *const Object, key: usize) -> 
 /// Root the set and exact key, including keys rooted only by this set.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_set_add(value: *const Object, key: usize) {
+    // SAFETY: generated arguments obey the native insertion contract.
+    crate::finish(unsafe { set_add(value, key) }, ());
+}
+
+/// # Safety
+/// The rooted container and words must have the exact declared kinds.
+pub(super) unsafe fn set_add(value: *const Object, key: usize) -> Result<(), Error> {
     // SAFETY: copied metadata leaves storage before acquiring the key.
     let kind = unsafe {
         object(value)
@@ -1706,7 +1744,7 @@ pub unsafe extern "C" fn imre_set_add(value: *const Object, key: usize) {
             .0
             .with_mut(|s| s.set_mut().tables.insert(key, ()))
     };
-    drop(old);
+    old.map(drop)
 }
 /// # Safety
 /// Root the set and exact key. Missing is a no-op; removed owners drop afterward.
@@ -1736,6 +1774,7 @@ pub unsafe extern "C" fn imre_mapping_iter_next(
     // SAFETY: the rooted iterator snapshots independent owners before returning.
     let next = unsafe {
         object(value).0.with_mut(|storage| match storage {
+            Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
@@ -1822,16 +1861,26 @@ mod tests {
     }
 
     #[test]
+    fn refused_table_reservation_preserves_entries_and_allows_retry() {
+        let mut table = Table::<usize, ()>::new();
+        assert!(table.insert(7, ()).is_ok());
+        assert!(table.reserve(usize::MAX).is_err());
+        assert_eq!(table.position(HASHER.hash_one(7_usize), &7), Some(0));
+        assert!(table.insert(8, ()).is_ok());
+        assert_eq!(table.index.len(), 2);
+    }
+
+    #[test]
     fn cached_hash_collisions_preserve_keys_across_growth_and_compaction() {
         // Force every key into one full-hash collision, including during transfer
         // between independently allocated tables. Keys still compare by value.
         let mut source = Table::<usize, ()>::new();
         let mut result = Table::<usize, ()>::new();
         for key in 1..90 {
-            source.insert_absent(42, key, ());
+            assert!(source.insert_absent(42, key, ()).is_ok());
         }
-        source.copy_keys(&mut result);
-        source.copy_keys(&mut result);
+        assert!(source.copy_keys(&mut result).is_ok());
+        assert!(source.copy_keys(&mut result).is_ok());
         assert_eq!(result.index.len(), 89);
         for key in 1..70 {
             let position = source.position(42, &key).unwrap();

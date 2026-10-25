@@ -24,6 +24,22 @@ print(repr((h.hexdigest(), h.digest(), h.digest_size)))
 """
 
 
+NAMES = r"""import hashlib
+from hashlib import algorithms_available
+print("sha256" in algorithms_available)
+algorithms_available.add("imre-control-unknown")
+print("imre-control-unknown" in hashlib.algorithms_available)
+for name in ["sha256", "Sha256", "SHA-256", "sha2-256", "2.16.840.1.101.3.4.2.1", "", "spam", "sha256\x00", "imre-control-unknown"]:
+    try:
+        state = hashlib.new(name=name, data=b"abc", usedforsecurity=False)
+        copied = state.copy()
+        state.update(b"d")
+        print(repr((state.name, copied.hexdigest(), state.hexdigest())))
+    except ValueError as error:
+        print(repr(str(error)))
+"""
+
+
 def run_case(suite, name, program, payload):
     case = suite.HashLibTestCase(name)
     original = suite.hashlib.sha256
@@ -83,7 +99,7 @@ def run_case(suite, name, program, payload):
 
 
 def run_native_methods(suite, work, build):
-    methods = {"test_sha256_gil": 2, "test_sha256_update_over_4gb": 1}
+    methods = {"test_sha256_gil": 2, "test_sha256_update_over_4gb": 1, "test_new_upper_to_lower": 1}
     source = Path(suite.__file__).read_bytes()
     cls = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef) and n.name == "HashLibTestCase")
     lines = source.splitlines(keepends=True)
@@ -138,6 +154,7 @@ def main():
     for name in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--cpython-source", type=Path)
+    parser.add_argument("--opt-level", choices=("0", "3"), default="3")
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5):
         parser.error("the original hashlib fixtures require CPython 3.14.5")
@@ -156,7 +173,7 @@ def main():
         def build(source):
             program = source.with_suffix("")
             subprocess.run([args.imre.resolve(), "build", source, "-o", program, "--no-cache",
-                            "--opt-level", "3", "--clang", args.clang.resolve(), "--runtime", args.runtime.resolve()],
+                            "--opt-level", args.opt_level, "--clang", args.clang.resolve(), "--runtime", args.runtime.resolve()],
                            cwd=work, check=True, timeout=120)
             return program
 
@@ -164,9 +181,17 @@ def main():
         source.write_text(DRIVER)
         program = build(source)
         cases = dict(run_case(test_hashlib, f"test_case_sha256_{n}", program, work / "data") for n in range(4))
+        controls = work / "names.py"
+        controls.write_text(NAMES)
+        binary = build(controls)
+        def run(command):
+            return subprocess.run(command, capture_output=True, timeout=30)
+        reference, actual = run([sys.executable, controls]), run([binary])
+        assert reference.returncode == 0 and not reference.stderr, reference
+        assert (actual.returncode, actual.stdout, actual.stderr) == (0, reference.stdout, b""), actual
         native = run_native_methods(test_hashlib, work, build)
         cases.update(native)
-    report = {"cpython_commit": commit, "whole_native_methods": sum(r["status"] == "pass" for r in native.values()),
+    report = {"cpython_commit": commit, "named_provider_controls": "matched CPython", "opt_level": args.opt_level, "whole_native_methods": sum(r["status"] == "pass" for r in native.values()),
               "tests": cases}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     for case, row in cases.items():

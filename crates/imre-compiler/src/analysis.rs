@@ -72,7 +72,7 @@ impl Session {
                 "hashlib",
                 // The bundled OpenSSL stub still names the input `string`. CPython
                 // 3.14 calls it `data`; the native constructor takes exact bytes.
-                "from _hashlib import HASH as _Hash\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\n",
+                "from _hashlib import HASH as _Hash\nalgorithms_available: set[str]\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\ndef new(name: str, data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\n",
             ),
             (
                 "tomli",
@@ -255,6 +255,19 @@ impl Session {
             expression.inferred_type(&model),
             Some(Ty::NominalInstance(_) | Ty::LiteralValue(_))
         )
+    }
+
+    /// A nominal instance here, instead of its declared optional union, records
+    /// a source-level narrowing. The backend must still guard mutable rereads.
+    pub(crate) fn narrowed_instance(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+        self.used_hints.set(true);
+        let program = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, program);
+        let Some(ty @ Ty::NominalInstance(_)) = expression.inferred_type(&model) else {
+            return false;
+        };
+        ty != KnownClass::NoneType.to_instance(&self.db, &ProgramEnvironment::from_file(program))
     }
 
     /// Get a scalar layout hint for an append operand in its own lexical scope.
