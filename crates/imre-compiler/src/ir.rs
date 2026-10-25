@@ -1118,6 +1118,8 @@ pub(crate) enum ProcessOperation {
     EnvironGet,
     GetCwd,
     Fd(FdOperation),
+    OsErrorField(u32),
+    Strerror,
     OpenFlag(&'static str),
     Which,
     CopyFile,

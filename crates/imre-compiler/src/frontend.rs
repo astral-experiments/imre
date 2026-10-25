@@ -5260,6 +5260,20 @@ impl<'a> Checker<'a> {
                         return Ok(value);
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
+                        name @ ("errno" | "strerror" | "filename" | "filename2") => {
+                            let (index, ty) = match name {
+                                "errno" => (0, Type::Int),
+                                "strerror" => (1, Type::Str),
+                                _ => (
+                                    if name == "filename" { 2 } else { 3 },
+                                    self.types.union(&[Type::Str, Type::Bytes]).unwrap(),
+                                ),
+                            };
+                            (
+                                self.types.optional(ty),
+                                Builtin::Process(ir::ProcessOperation::OsErrorField(index)),
+                            )
+                        }
                         field @ ("args" | "msg" | "name" | "path" | "name_from")
                             if receiver.ty == Type::ImportException =>
                         {
@@ -5703,6 +5717,19 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::Strerror)) => {
+                self.reject_builtin_keywords(call)?;
+                let [code] = call.arguments.args.as_ref() else {
+                    return Err(error(self.source, call, "os.strerror requires one integer"));
+                };
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(
+                        Builtin::Process(ir::ProcessOperation::Strerror),
+                        vec![self.expr_expected(code, Type::Int)?],
+                    ),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;

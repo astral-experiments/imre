@@ -2,8 +2,9 @@
 use super::Intrinsic;
 use crate::ir::FdOperation;
 
-pub(super) fn descriptor(name: &str) -> Option<Intrinsic> {
+pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
     Some(match name {
+        "strerror" => Intrinsic::Strerror,
         "close" => Intrinsic::Fd(FdOperation::Close),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "O_RDONLY" => Intrinsic::OpenFlag("rdonly"),

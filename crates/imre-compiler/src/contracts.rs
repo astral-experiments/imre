@@ -230,6 +230,8 @@ impl Builtin {
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
+                | ProcessOperation::OsErrorField(_)
+                | ProcessOperation::Strerror
                 | ProcessOperation::Which
                 | ProcessOperation::CopyFile
                 | ProcessOperation::CheckReturnCode
