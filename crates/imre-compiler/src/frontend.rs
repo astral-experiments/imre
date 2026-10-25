@@ -6613,6 +6613,11 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
+            if attribute.attr.as_str() == "update"
+                && let Some((key, value)) = self.types.mapping(receiver.ty)
+            {
+                return self.dict_update(call, receiver, key, value);
+            }
             if attribute.attr.as_str() == "sort" && self.types.element(receiver.ty).is_some() {
                 return self.list_sort(receiver, call);
             }
@@ -6735,6 +6740,12 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
+                if attribute.attr.as_str() == "copy" && call.arguments.args.is_empty() {
+                    return Ok(Expr {
+                        ty: receiver.ty,
+                        kind: ExprKind::Builtin(Builtin::DictCopy, vec![receiver]),
+                    });
+                }
                 if attribute.attr.as_str() == "clear"
                     && call.arguments.args.is_empty()
                     && call.arguments.keywords.is_empty()
@@ -6758,7 +6769,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "supported dictionary methods are clear(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
+                        "supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
                     ));
                 }
                 let key = self.expr_expected(&call.arguments.args[0], key_type)?;
