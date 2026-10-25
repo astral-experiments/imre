@@ -4358,17 +4358,6 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::StrIsUpper => {
-                let bit = self.instruction(format!(
-                    "call i32 @imre_str_is_upper(ptr {})",
-                    args[0].value.operand
-                ));
-                Value {
-                    ty: Type::Bool,
-                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
-                    small_integer: false,
-                }
-            }
             Builtin::Errno(op) => {
                 use crate::ir::ErrnoOperation as Op;
                 let call = match op {
@@ -4456,6 +4445,12 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
+            Builtin::DocCaptureStart => {
+                self.checked_line("call void @imre_doctest_capture_start()");
+                none()
+            }
+            Builtin::DocCaptureTake => self.call("imre_doctest_capture_take", returns, &[]),
+            Builtin::DocAscii => self.call("imre_doctest_ascii", returns, &[&args[0].value]),
             Builtin::SysStreamWrite { stderr } => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -7360,6 +7355,9 @@ declare ptr @imre_errno_member_text(ptr,i32)
 declare i32 @imre_errno_member_contains(ptr,ptr)
 declare i32 @imre_errno_member_equal(ptr,i32,i64)
 declare ptr @imre_os_name()
+declare void @imre_doctest_capture_start()
+declare ptr @imre_doctest_capture_take()
+declare ptr @imre_doctest_ascii(ptr)
 declare i64 @imre_sys_stream_write(i32, ptr)
 declare void @imre_sys_stream_flush(i32)
 declare ptr @imre_system_exit_new(i32, i64)

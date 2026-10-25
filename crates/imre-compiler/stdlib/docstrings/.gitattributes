@@ -1,0 +1,2 @@
+# Preserve CPython docstrings verbatim, including trailing blank lines.
+*.txt whitespace=-blank-at-eof
