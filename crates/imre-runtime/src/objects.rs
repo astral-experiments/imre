@@ -25,6 +25,7 @@ pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
 mod format_cursors;
+mod functools;
 mod hashlib;
 mod inspect;
 mod itertools;
@@ -86,6 +87,9 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    FunctoolsPlaceholder {
+        class: bool,
+    },
     StrDescriptor(u32),
     Sequence(Words),
     Deque(Box<deque::Deque>),

@@ -2416,6 +2416,17 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        self.expr_expected_or(expression, expected, None)
+    }
+
+    /// A partial can accept a sentinel in place of a parameter. Preserve its type
+    /// while checking ordinary operands in the declared parameter's context.
+    fn expr_expected_or(
+        &mut self,
+        expression: &ast::Expr,
+        expected: Type,
+        alternative: Option<Type>,
+    ) -> Result<Expr, String> {
         if self.present_subscripts.contains(&expression.range()) {
             let value = self.expr(expression)?;
             if self.types.payload(value.ty) == Some(expected) {
@@ -2745,6 +2756,9 @@ impl<'a> Checker<'a> {
             }
             _ => self.typed_expr(expression)?,
         };
+        if alternative == Some(value.ty) {
+            return Ok(value);
+        }
         self.coerce(value, expected, expression)
     }
 
@@ -5182,6 +5196,9 @@ impl<'a> Checker<'a> {
                     return Ok(self.linecache_mapping());
                 }
                 Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
+                Intrinsic::Placeholder => {
+                    return Ok(partials::singleton(ir::PlaceholderKind::Value));
+                }
                 Intrinsic::WrapperAttributes(fields) => {
                     return Ok(functools::wrapper_attributes(fields, self.types));
                 }
@@ -6008,6 +6025,30 @@ impl<'a> Checker<'a> {
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return Ok(wrapped);
                 }
+                if let Type::Placeholder(kind) = receiver.ty {
+                    let result = match (kind, attribute.attr.as_str()) {
+                        (ir::PlaceholderKind::Value, "__class__") => {
+                            partials::singleton(ir::PlaceholderKind::Class)
+                        }
+                        (ir::PlaceholderKind::Class, "__class__") => {
+                            annotations::builtin_type("type").unwrap()
+                        }
+                        (ir::PlaceholderKind::Class, "__name__" | "__qualname__") => {
+                            unpacking::string("_PlaceholderType")
+                        }
+                        (ir::PlaceholderKind::Class, "__module__") => {
+                            unpacking::string("functools")
+                        }
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                attribute,
+                                "unsupported Placeholder attribute",
+                            ));
+                        }
+                    };
+                    return Ok(partials::after(receiver, result));
+                }
                 if receiver.ty == Type::BuiltinClass {
                     match attribute.attr.as_str() {
                         "__name__" | "__qualname__" => return Ok(annotations::type_name(receiver)),
@@ -6589,6 +6630,9 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Partial)) {
+            return self.partial(call);
+        }
         if calls::starred(call) {
             if let Some(Binding::Intrinsic(Intrinsic::Credential(name))) = self.resolve(&call.func)
             {
@@ -6790,7 +6834,13 @@ impl<'a> Checker<'a> {
                 };
                 return self.typed_expr(value);
             }
-            Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::Placeholder)) => {
+                return self.placeholder_call(
+                    call,
+                    partials::singleton(ir::PlaceholderKind::Value),
+                    ir::PlaceholderKind::Value,
+                );
+            }
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
@@ -7787,6 +7837,24 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if let [value] = args.as_slice()
+            && let Type::Placeholder(kind) = value.ty
+        {
+            let result = match name.id.as_str() {
+                "type" if kind == ir::PlaceholderKind::Value => {
+                    Some(partials::singleton(ir::PlaceholderKind::Class))
+                }
+                "type" => annotations::builtin_type("type"),
+                "callable" => Some(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(kind == ir::PlaceholderKind::Class),
+                }),
+                _ => None,
+            };
+            if let Some(result) = result {
+                return Ok(partials::after(value.clone(), result));
+            }
+        }
         if name.id == "hash" {
             let [value] = args.as_slice() else {
                 return Err(error(self.source, call, "hash requires one argument"));
@@ -7999,7 +8067,10 @@ impl<'a> Checker<'a> {
             return Ok(rendered);
         }
         if args.len() == 1
-            && matches!(args[0].ty, Type::PlainObject | Type::StrDescriptor(_))
+            && matches!(
+                args[0].ty,
+                Type::PlainObject | Type::StrDescriptor(_) | Type::Placeholder(_)
+            )
             && matches!(name.id.as_str(), "repr" | "str" | "print")
         {
             let rendered = Expr {

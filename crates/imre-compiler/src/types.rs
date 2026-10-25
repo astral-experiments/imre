@@ -182,6 +182,7 @@ impl Types {
             | Type::TimedFileHandler
             | Type::ClockTime
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::PlainObject
             | Type::PathInfo
             | Type::Sha256
@@ -589,6 +590,7 @@ impl Types {
             | Type::TimedFileHandler
             | Type::ClockTime
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::PlainObject
             | Type::PathInfo
             | Type::Sha256
