@@ -51,7 +51,7 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-This baseline was executed with Imre compiler/runtime source `a97ca870c41b88ccfcbf1e2fa0db0dbe1c66370b`. The pinned suite has no companion module. The two shorter `native-O*.json`
+This baseline was executed with Imre compiler/runtime source `66f5ce1fee2659ef40018a9609c306376d3e3911`. The pinned suite has no companion module. The two shorter `native-O*.json`
 files retain their original records and are not additional test occurrences.
 
 The versioned gate loads the original suite and runs its selected methods
