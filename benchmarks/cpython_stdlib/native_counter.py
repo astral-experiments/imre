@@ -12,7 +12,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from upstream import verify_upstream
 # These are dynamic assertion counts, including three stored keys with counts 10, -2, 0.
-METHODS = {"test_total": 1, "test_invariant_for_the_in_operator": 6, "test_eq": 2}
+METHODS = {"test_total": 1, "test_invariant_for_the_in_operator": 6, "test_eq": 2,
+           "test_le": 2, "test_lt": 2, "test_ge": 2, "test_gt": 2}
 
 
 def assertion_fixture(method, class_name="Case"):
@@ -32,6 +33,9 @@ class {class_name}:
 
     def assertIn(self, key: str, counts: Counter[str]) -> None:
         self.assertTrue(key in counts)
+
+    def assertFalse(self, value: bool) -> None:
+        self.assertTrue(not value)
 
     def assertEqual(self, left: {ty}, right: {ty}) -> None:
         self.assertTrue(left == right)
