@@ -196,6 +196,8 @@ pub(crate) enum Intrinsic {
     SysPlatform,
     SysEncoding(&'static str),
     SysException,
+    SysGetRecursionLimit,
+    SysSetRecursionLimit,
     SysJitPredicate(&'static str),
     Stdin,
     OsName,
@@ -532,6 +534,8 @@ impl IntrinsicModule {
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
+            (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
+            (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
             (Self::SysJit, "is_enabled") => Intrinsic::SysJitPredicate("_jit.is_enabled"),
             (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
@@ -887,6 +891,12 @@ impl SourceGraph {
     pub(crate) fn checked_excess_argument(&self, module: ModuleId, argument: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::ExcessArgument(argument));
+    }
+
+    /// Lowering inspected this exact operand and emits the native type error itself.
+    pub(crate) fn checked_argument_type(&self, module: ModuleId, argument: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::ArgumentType(argument));
     }
 
     pub(crate) fn checked_keywords(

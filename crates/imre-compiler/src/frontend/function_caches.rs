@@ -327,6 +327,7 @@ impl Checker<'_> {
                 module: self.module,
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: self.graph.modules[self.module].error(
                     call,
                     "recursive indirect cache applications are unsupported",

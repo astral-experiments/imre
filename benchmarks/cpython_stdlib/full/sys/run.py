@@ -20,6 +20,7 @@ from occurrences import blocked_methods, reference_skips
 import argv_case
 import jit_case
 import locale_case
+import recursion_case
 
 MODULE = "test.test_sys"
 SYS = MODULE + ".SysModuleTest."
@@ -131,6 +132,7 @@ def select(toolchain, work, source, module):
         module, toolchain, work / "argv-controls", pinned_methods["SysModuleTest", "test_orig_argv"])
     executions[locale_case.CASE_ID] = locale_case.observer(
         module, toolchain, work / "nonascii-child", pinned_methods["SysModuleTest", "test_ioencoding_nonascii"])
+    executions.update(recursion_case.cases(module, toolchain, work, source))
     jit = jit_case.observer(module, toolchain, work, pinned_methods)
     for method in ("test_jit_is_available", "test_jit_is_enabled"):
         executions[f"{MODULE}.TestSysJIT.{method}"] = jit

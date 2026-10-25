@@ -1,4 +1,6 @@
 //! The process's two UTF-8 text output streams use the same buffering as print.
+mod recursion;
+
 use super::{
     Error, Int, Kind, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initialize_io,
 };

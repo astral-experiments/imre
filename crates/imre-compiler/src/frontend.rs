@@ -915,6 +915,7 @@ pub(crate) fn lower_with_owners(
                     function,
                     calls,
                     class_reads: reads,
+                    source_frame: false,
                     recursion_error: module.error(
                         definition,
                         "recursive calls are unsupported in this prototype",
@@ -1014,7 +1015,9 @@ pub(crate) fn lower_with_owners(
     }
     // Entry code and inactive module guards can create helpers too. Validate the
     // complete graph only after every source expression has been lowered.
+    let mut recursion_frames = vec![true; functions.len()];
     for helper in helpers.into_functions() {
+        recursion_frames.push(helper.source_frame);
         owners.push(helper.module);
         functions.push(helper.function);
         call_graph.push(helper.calls);
@@ -1047,6 +1050,23 @@ pub(crate) fn lower_with_owners(
             &callable_targets,
         )?;
     }
+    recursion_frames.push(true); // The program entry runs a Python module body.
+    // The call graph above is acyclic. If it cannot reach the default depth,
+    // only programs that can change the limit need to count their frames.
+    if recursion_frames.iter().filter(|&&frame| frame).count() <= 1000 {
+        let mut changes_limit = false;
+        for function in functions.iter().chain([&entry]) {
+            ir::walk_expressions(&function.body, &mut |value| {
+                changes_limit |= matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::SysSetRecursionLimit, _)
+                );
+            });
+        }
+        if !changes_limit {
+            recursion_frames.clear();
+        }
+    }
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
     for (id, sums) in zip_sums {
         zip_sums::fuse(&mut functions, id, &sums);
@@ -1058,6 +1078,7 @@ pub(crate) fn lower_with_owners(
             class_fields: classes.fields,
             json_records,
             globals: globals.into_types(),
+            recursion_frames,
             functions,
             entry,
         },

@@ -345,7 +345,8 @@ fn emit_program(
             emitter.next_value = 0;
             emitter.next_label = 0;
         }
-        let params = emitter.function(function, entry, &borrows[id])?;
+        let frame = module.recursion_frames.get(id).copied().unwrap_or(false);
+        let params = emitter.function(function, entry, frame, &borrows[id])?;
         bodies.push((params, std::mem::take(&mut emitter.code)));
     }
     emitter
@@ -1595,6 +1596,7 @@ impl Emitter<'_, '_> {
         &mut self,
         function: &Function,
         entry: bool,
+        frame: bool,
         borrows: &FunctionBorrows,
     ) -> Result<String, String> {
         self.entry_allocas.clear();
@@ -1727,6 +1729,9 @@ impl Emitter<'_, '_> {
         if entry && self.uses_sys_argv {
             self.line("call void @imre_args_init(i32 %argc, ptr %argv)");
         }
+        if frame {
+            self.checked_line("call void @imre_recursion_enter()");
+        }
         self.block(&function.body);
         if !self.terminated {
             self.jump(&self.return_exit.clone());
@@ -1736,6 +1741,9 @@ impl Emitter<'_, '_> {
             out.line(format!("call void @imre_object_release(ptr {frame})"));
         });
         self.cleanup(&cleanup_slots);
+        if frame {
+            self.line("call void @imre_recursion_leave()");
+        }
         if entry {
             if self.has_extensions {
                 self.line("call void @imre_extension_clear()");
@@ -1771,6 +1779,9 @@ impl Emitter<'_, '_> {
             ));
         });
         self.cleanup(&cleanup_slots);
+        if frame {
+            self.line("call void @imre_recursion_leave()");
+        }
         if entry {
             if self.has_extensions {
                 self.line("call void @imre_extension_clear()");
@@ -4350,6 +4361,13 @@ impl Emitter<'_, '_> {
             ),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::SysGetRecursionLimit => {
+                self.call("imre_sys_getrecursionlimit", Type::Int, &[])
+            }
+            Builtin::SysSetRecursionLimit => {
+                self.void_call("imre_sys_setrecursionlimit", &[&args[0].value]);
+                none()
+            }
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::DocCaptureStart => {
@@ -7307,6 +7325,10 @@ declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
+declare void @imre_recursion_enter()
+declare void @imre_recursion_leave()
+declare i64 @imre_sys_getrecursionlimit()
+declare void @imre_sys_setrecursionlimit(i64)
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_os_name()

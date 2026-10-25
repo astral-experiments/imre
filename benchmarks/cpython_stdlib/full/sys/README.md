@@ -31,6 +31,7 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 ```
 
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
+- `test_getrecursionlimit` and `test_setrecursionlimit`: the gate first tries each complete method with native unittest. If the callable form of `assertRaises` does not compile, the original CPython method and fixture drive one native process so both changes to the limit and its restoration are observable. Separate frame-depth controls compare nested calls, failed entry, unwinding, integer conversion, and restoration with stock CPython. The direct recursive recovery method still needs recursive source calls; it stays in the denominator.
 - `test_43581`: the complete method, both stream attributes, equality and assertion execute in the native binary.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations execute in the native driver. The original unittest assertions, codec lookup and transport run on CPython.
 - `test_jit_is_available` and `test_jit_is_enabled`: Imre answers the parent capability query and executes both original child assertions under `PYTHON_JIT=0` and `=1`. CPython runs the parent, fixtures and child-status assertions. The fixture builds the original child source directly; its automatic `-X faulthandler` option is outside this check.

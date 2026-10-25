@@ -261,6 +261,8 @@ pub(crate) struct Module {
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
     pub globals: Vec<Type>,
+    /// Source frames subject to the process recursion limit, including the entry.
+    pub recursion_frames: Vec<bool>,
     pub functions: Vec<Function>,
     pub entry: Function,
 }
@@ -811,6 +813,8 @@ pub(crate) enum Builtin {
     RStrip,
     SysArgv,
     SysOrigArgv,
+    SysGetRecursionLimit,
+    SysSetRecursionLimit,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
         namespace: usize,
