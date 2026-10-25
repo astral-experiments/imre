@@ -316,9 +316,9 @@ impl Checker<'_> {
             }
             let v = checker.expr(expr)?;
             match (i, v.ty) {
-                (0, Type::None) | (2 | 3, Type::None) | (4, Type::None | Type::Int | Type::Str) => {
-                    Ok(v)
-                }
+                (0, Type::None | Type::Path | Type::PurePath(_))
+                | (2 | 3, Type::None)
+                | (4, Type::None | Type::Int | Type::Str) => Ok(v),
                 (0, _) => checker.fspath_value(v, expr),
                 (4, _) if checker.types.payload(v.ty) == Some(Type::Int) => Ok(v),
                 (4, _) => Err(error(
