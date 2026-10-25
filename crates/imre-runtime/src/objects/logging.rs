@@ -1,4 +1,5 @@
 //! Process-local logging state for the native single-threaded runtime.
+mod config;
 mod hierarchy;
 mod levels;
 pub(super) mod timed;
