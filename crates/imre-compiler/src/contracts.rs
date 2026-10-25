@@ -129,9 +129,11 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::DictContains | Self::DictGetDefault | Self::DictTryGet(_) | Self::SetContains => {
-                Contract::new(true, PreservesLists)
-            }
+            Self::DictContains
+            | Self::ChainMapContains
+            | Self::DictGetDefault
+            | Self::DictTryGet(_)
+            | Self::SetContains => Contract::new(true, PreservesLists),
             Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
@@ -480,6 +482,9 @@ impl Builtin {
             | Self::DequeExtendSource
             | Self::NamespaceDelete
             | Self::DictDelete
+            | Self::ChainMapGetItem
+            | Self::ChainMapSetItem
+            | Self::ChainMapGet(_)
             | Self::DictPop
             | Self::DictSetDefault
             | Self::DictTryPop(_)

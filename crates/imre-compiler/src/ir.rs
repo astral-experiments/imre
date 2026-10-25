@@ -1041,6 +1041,11 @@ pub(crate) enum Builtin {
     ChainMapNew,
     ChainMapMaps,
     ChainMapSetMaps,
+    ChainMapGetItem,
+    ChainMapSetItem,
+    ChainMapContains,
+    /// The stored type may be promoted to an optional result on a hit.
+    ChainMapGet(Type),
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,

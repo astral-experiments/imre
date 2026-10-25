@@ -947,6 +947,13 @@ impl Types {
         Type::ChainMap(self.intern(Shape::Dict(key, value)))
     }
 
+    /// Look through the ChainMap's dictionary shape without treating its
+    /// owner as a dictionary in ordinary dictionary operations.
+    pub(crate) fn chainmap_entries(&self, ty: Type) -> Option<(Type, Type)> {
+        let Type::ChainMap(id) = ty else { return None };
+        self.mapping(Type::Dict(id))
+    }
+
     pub(crate) fn dict(&self, key: Type, value: Type) -> Type {
         Type::Dict(self.intern(Shape::Dict(key, value)))
     }

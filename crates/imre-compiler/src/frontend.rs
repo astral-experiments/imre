@@ -5544,6 +5544,8 @@ impl<'a> Checker<'a> {
                             }
                         } else if receiver.ty == Type::ReadOnlyObjectMapping {
                             (Type::Str, Builtin::DictContains)
+                        } else if let Some((key, _)) = self.types.chainmap_entries(receiver.ty) {
+                            (key, Builtin::ChainMapContains)
                         } else if receiver.ty == Type::Str {
                             (Type::Str, Builtin::StringContains)
                         } else if let Some(element) = self
@@ -5956,6 +5958,13 @@ impl<'a> Checker<'a> {
                     return Ok(Expr {
                         ty,
                         kind: ExprKind::Builtin(builtin, vec![list, index]),
+                    });
+                }
+                if let Some((key, value)) = self.types.chainmap_entries(list.ty) {
+                    let key = self.expr_expected(&subscript.slice, key)?;
+                    return Ok(Expr {
+                        ty: value,
+                        kind: ExprKind::Builtin(Builtin::ChainMapGetItem, vec![list, key]),
                     });
                 }
                 if let Some((key, value)) = self.types.mapping(list.ty) {
@@ -7394,6 +7403,11 @@ impl<'a> Checker<'a> {
             let receiver = Self::enum_text(receiver);
             if matches!(receiver.ty, Type::Document(_)) {
                 return self.document_method(call, attribute, receiver);
+            }
+            if let Some((key, value)) = self.types.chainmap_entries(receiver.ty)
+                && attribute.attr.as_str() == "get"
+            {
+                return self.chainmap_get(call, receiver, key, value);
             }
             if matches!(
                 receiver.ty,
