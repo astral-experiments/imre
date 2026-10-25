@@ -12,6 +12,7 @@ builtins = ["Read, assign and delete `builtins._`; escape supported representati
 collections = ["`Counter`, `deque`, `defaultdict` and selected `collections.abc.Mapping` operations.","benchmarks/cpython_stdlib/full/collections/README.md"]
 configparser = ["`ConfigParser` can be bound in unreachable code. Its constructor does not run natively.","crates/imre-compiler/src/modules/declarations.rs"]
 contextlib = ["`nullcontext` and selected single-yield `@contextmanager` functions.","tests/fixtures/processes/async_resource_arguments.py"]
+contextvars = ["Create and copy contexts, set and reset variable bindings, and isolate them in supported asyncio tasks.","benchmarks/cpython_stdlib/full/contextvars/README.md"]
 copy = ["Shallow and deep copies of supported containers and fixed-layout objects.","benchmarks/cpython_stdlib/full/copy/README.md"]
 csv = ["Read rows and apply supported CSV dialect options.","benchmarks/cpython_stdlib/full/csv/README.md"]
 dataclasses = ["Construct fixed-field dataclasses with defaults and factories.","tests/fixtures/dataclasses/record_factories.py"]

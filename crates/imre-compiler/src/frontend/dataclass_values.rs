@@ -57,6 +57,7 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
 /// subset. Excluding a field from generated repr keeps those records usable.
 pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     match ty {
+        Type::Context | Type::ContextMissing | Type::ContextVar(_) | Type::ContextToken(_) => true,
         Type::ModuleSpec(id) => {
             // A loader's custom __repr__ must run rather than being replaced by its storage.
             fn loader(ty: Type, types: &Types) -> bool {
@@ -167,6 +168,10 @@ fn check_format(
                 .iter()
                 .zip(&classes.fields[id])
                 .all(|(field, &ty)| !field.repr || check_format(ty, types, classes, seen, false));
+    }
+    // Context variables can hold the supported boxed scalar or tuple defaults.
+    if types.context_value(ty) == Some(Type::ObjectValue) {
+        return true;
     }
     if matches!(ty, Type::ModuleSpec(_)) {
         return repr_supported(ty, types);
