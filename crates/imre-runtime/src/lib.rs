@@ -34,6 +34,7 @@
 
 mod extensions;
 mod floats;
+mod integer_power;
 mod integer_text;
 mod objects;
 #[cfg(any(target_os = "linux", target_os = "macos"))]

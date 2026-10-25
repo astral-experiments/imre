@@ -27,6 +27,10 @@ COUNTER_OPERATIONS = {
     "test_total": "Counter construction and total()",
     "test_invariant_for_the_in_operator": "Counter construction, key iteration, subscription and membership",
     "test_eq": "Counter equality and inequality with missing zero counts",
+    "test_le": "Counter multiset inclusion with missing zero counts",
+    "test_lt": "Counter strict multiset inclusion with missing zero counts",
+    "test_ge": "Counter multiset containment with missing zero counts",
+    "test_gt": "Counter strict multiset containment with missing zero counts",
 }
 EMPTY = {f"test.test_deque.TestSequence.{method}" for method in
          ("test_getitem", "test_getslice", "test_subscript")}
