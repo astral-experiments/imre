@@ -13,6 +13,7 @@ mod asyncio;
 mod boxed_values;
 mod builtins;
 mod bytes;
+mod chainmap;
 mod contexts;
 mod copying;
 mod csv;
@@ -88,6 +89,7 @@ enum Storage {
     Deque(Box<deque::Deque>),
     DequeIterator(deque::DequeIterator),
     Dictionary(mappings::TableOwner<mappings::Mapping>),
+    ChainMap(Rc<Object>),
     FunctionCache(Box<mappings::FunctionCache>),
     Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),

@@ -60,6 +60,7 @@ impl Type {
             | Self::Callable(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
             | Self::StringKeys
@@ -129,6 +130,7 @@ impl Type {
             | Self::Callable(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
             | Self::StringKeys
@@ -734,6 +736,7 @@ impl Emitter<'_, '_> {
             | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
+            | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
             | Type::StringKeys
@@ -3416,6 +3419,7 @@ impl Emitter<'_, '_> {
                 )),
                 Type::ListInt
                 | Type::StringKeys
+                | Type::ChainMap(_)
                 | Type::CacheState(_)
                 | Type::Iterator
                 | Type::Cursor(_)
@@ -5676,6 +5680,15 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::ChainMapNew => self.call("imre_chainmap_new", returns, &[&args[0].value]),
+            Builtin::ChainMapMaps => self.call("imre_chainmap_maps", returns, &[&args[0].value]),
+            Builtin::ChainMapSetMaps => {
+                self.line(format!(
+                    "call void @imre_chainmap_set_maps(ptr {}, ptr {})",
+                    args[1].value.operand, args[0].value.operand
+                ));
+                none()
+            }
             Builtin::DequeNew => {
                 let element = self.module.types.deque_element(returns).unwrap();
                 let limit = self.word(&args[0].value);
@@ -6151,6 +6164,7 @@ impl Emitter<'_, '_> {
                     | Type::Class(_)
                     | Type::List(_)
                     | Type::Dict(_)
+                    | Type::ChainMap(_)
                     | Type::Set(_)
                     | Type::Deque(_)
                     | Type::StringKeys
@@ -6414,6 +6428,7 @@ impl Emitter<'_, '_> {
             | Type::Callable(_)
             | Type::List(_)
             | Type::Dict(_)
+            | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
             | Type::StringKeys
@@ -6497,6 +6512,7 @@ impl Emitter<'_, '_> {
             | Type::Callable(_)
             | Type::List(_)
             | Type::Dict(_)
+            | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
             | Type::StringKeys
@@ -7096,6 +7112,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(..) => 6,
         Type::List(_)
         | Type::Dict(_)
+        | Type::ChainMap(_)
         | Type::Set(_)
         | Type::Deque(_)
         | Type::StringKeys
@@ -7707,6 +7724,10 @@ declare i64 @imre_deque_len(ptr)
 declare i64 @imre_deque_maxlen(ptr)
 declare ptr @imre_deque_iter(ptr, i32)
 declare ptr @imre_counter_new(i32)
+declare ptr @imre_chainmap_new(ptr)
+declare ptr @imre_chainmap_maps(ptr)
+declare void @imre_chainmap_set_maps(ptr, ptr)
+declare i32 @imre_chainmap_truth(ptr)
 declare void @imre_counter_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
