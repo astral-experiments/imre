@@ -19,7 +19,7 @@ On Linux, 215 executions passed. `TestCEncodeBasestringAscii.test_overflow` has 
 
 ## Full native evidence
 
-The [v1 report](evidence-linux.json) covers the entire package at each optimization level. There is one package denominator, including its submodules, the two backend fixtures, and both CLI variants. It was exercised on Imre `7ae3a85460f356bd64c3e39991f9d4af7af6fd0a`. At each level, 12 complete native methods ran under 24 host fixture IDs; 40 additional fixture IDs called native operations from host methods. The remaining 152 occurrences are 98 blocked, four failed, 38 reference-only, 11 individually reviewed backend/private API exclusions, and the single upstream skip. The report includes partial calls, concrete diagnostics and source locations.
+The [v1 report](evidence-linux.json) covers the entire package at each optimization level. There is one package denominator, including its submodules, the two backend fixtures, and both CLI variants. It was exercised on Imre `6bafa669b5af591bfe855168f28505fdac4324dd`. At each level, 12 complete native methods ran under 24 host fixture IDs; 40 additional fixture IDs called native operations from host methods. The remaining 152 occurrences are 98 blocked, four failed, 38 reference-only, 11 individually reviewed backend/private API exclusions, and the single upstream skip. The report includes partial calls, concrete diagnostics and source locations.
 
 ```sh
 python -B benchmarks/cpython_stdlib/full/json/evidence.py \
