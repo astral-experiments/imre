@@ -5130,6 +5130,22 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
+        if let Some(Binding::Intrinsic(
+            intrinsic @ (Intrinsic::PopenSelector | Intrinsic::SelectorClass(_)),
+        )) = self.resolve(expression)
+        {
+            let mode = match intrinsic {
+                Intrinsic::SelectorClass(select) => Some(select),
+                _ => None,
+            };
+            return Ok(Expr {
+                ty: Type::ProcessSelectorClass,
+                kind: ExprKind::Builtin(
+                    Builtin::Process(ir::ProcessOperation::SelectorClass(mode)),
+                    Vec::new(),
+                ),
+            });
+        }
         if let Some(Binding::Intrinsic(Intrinsic::Declaration(symbol))) = self.resolve(expression) {
             return Err(error(
                 self.source,

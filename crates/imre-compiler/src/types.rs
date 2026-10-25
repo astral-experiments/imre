@@ -187,6 +187,7 @@ impl Types {
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject
@@ -598,6 +599,7 @@ impl Types {
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::StrDescriptor(_)
             | Type::PlainObject

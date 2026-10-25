@@ -97,6 +97,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::LogRecord
         | Type::Logger
         | Type::TimedFileHandler
+        | Type::ProcessSelectorClass
         | Type::ClockTime
         | Type::Sha256
         | Type::JsonDecoder
@@ -203,6 +204,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
         ty,
         Type::Logger
             | Type::TimedFileHandler
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::LogFormatter
             | Type::LogRecord
