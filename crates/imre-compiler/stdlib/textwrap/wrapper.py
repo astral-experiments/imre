@@ -29,58 +29,60 @@ def _punctuation(c: str) -> bool:
     return _word(c) or c in "!\"'&.,?"
 
 
-def _dash_end(text: str, i: int) -> int:
+def _dash_end(chars: list[str], i: int) -> int:
     # Two or more hyphens form their own chunk between punctuation and a word.
-    if i == 0 or i + 1 >= len(text) or text[i] != "-" or text[i + 1] != "-":
+    if i == 0 or i + 1 >= len(chars) or chars[i] != "-" or chars[i + 1] != "-":
         return i
-    if not _punctuation(text[i - 1]):
+    if not _punctuation(chars[i - 1]):
         return i
     j = i + 2
-    while j < len(text) and text[j] == "-":
+    while j < len(chars) and chars[j] == "-":
         j += 1
-    if j < len(text) and _word(text[j]):
+    if j < len(chars) and _word(chars[j]):
         return j
     return i
 
 
-def _hyphen(text: str, i: int) -> bool:
+def _hyphen(chars: list[str], i: int) -> bool:
     # A single hyphen can terminate a word only when the letters on both
     # sides match wordsep_re's two lookaround alternatives.
-    if text[i] != "-" or i < 2 or i + 2 >= len(text):
+    if chars[i] != "-" or i < 2 or i + 2 >= len(chars):
         return False
-    if not _letter(text[i - 1]) or not _letter(text[i + 1]):
+    if not _letter(chars[i - 1]) or not _letter(chars[i + 1]):
         return False
-    if not _letter(text[i - 2]) and not (i > 2 and text[i - 2] == "-" and _letter(text[i - 3])):
+    if not _letter(chars[i - 2]) and not (i > 2 and chars[i - 2] == "-" and _letter(chars[i - 3])):
         return False
-    return _letter(text[i + 2]) or (
-        text[i + 2] == "-" and i + 3 < len(text) and _letter(text[i + 3])
+    return _letter(chars[i + 2]) or (
+        chars[i + 2] == "-" and i + 3 < len(chars) and _letter(chars[i + 3])
     )
 
 
 def _chunk_text(text: str, break_hyphens: bool = True) -> list[str]:
     # Keep whitespace chunks: _wrap_chunks decides which to drop at line edges.
     parts: list[str] = []
+    # Native strings are UTF-8; indexing each position would rescan the prefix.
+    chars = [c for c in text]
     i = 0
-    while i < len(text):
+    while i < len(chars):
         start = i
-        if _space(text[i]):
+        if _space(chars[i]):
             i += 1
-            while i < len(text) and _space(text[i]):
+            while i < len(chars) and _space(chars[i]):
                 i += 1
         else:
-            end = _dash_end(text, i) if break_hyphens else i
+            end = _dash_end(chars, i) if break_hyphens else i
             if end > i:
                 i = end
             else:
                 i += 1
-                while i < len(text) and not _space(text[i]):
-                    if break_hyphens and _hyphen(text, i):
+                while i < len(chars) and not _space(chars[i]):
+                    if break_hyphens and _hyphen(chars, i):
                         i += 1
                         break
-                    if break_hyphens and _dash_end(text, i) > i:
+                    if break_hyphens and _dash_end(chars, i) > i:
                         break
                     i += 1
-        parts.append(text[start:i])
+        parts.append("".join(chars[start:i]))
     return parts
 
 

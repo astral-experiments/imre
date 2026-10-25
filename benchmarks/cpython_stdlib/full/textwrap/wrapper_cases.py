@@ -10,6 +10,49 @@ import unittest
 from unittest.mock import patch
 
 from suite_evidence import roles
+from suite_native import method_bytes
+
+
+def shorten_case(module, tools, directory, tests):
+    """Run the original no-fixture placeholder boundary on the native unittest entry."""
+    cls = module.ShortenTestCase
+    name = "test_width_too_small_for_placeholder"
+    for hook in ("setUp", "tearDown", "setUpClass", "tearDownClass"):
+        actual, inherited = getattr(cls, hook), getattr(unittest.TestCase, hook)
+        if getattr(actual, "__func__", actual) is not getattr(inherited, "__func__", inherited):
+            raise AssertionError(f"new upstream fixture hook: {hook}")
+    body = method_bytes(tests, cls.__name__, name)
+    entry = (
+        b"import unittest\nfrom textwrap import shorten\n\n"
+        b"class BaseTestCase(unittest.TestCase):\n    pass\n\n"
+        b"class ShortenTestCase(BaseTestCase):\n"
+        + body
+        + b"\nif __name__ == '__main__':\n    unittest.main()\n"
+    )
+    bad = entry.replace(
+        b"from textwrap import shorten",
+        b"def shorten(text: str, width: int, *, placeholder: str) -> str:\n    return text",
+    )
+    for source, label, status in ((entry, "ok", 0), (bad, "FAIL", 1)):
+        binary = tools.build(source, directory)
+        result = subprocess.run([binary, "-v"], text=True, capture_output=True, timeout=30)
+        lines = [line for line in result.stderr.splitlines() if " ... " in line]
+        if (result.returncode, result.stdout, lines) != (
+            status,
+            "",
+            [f"{name} (__main__.ShortenTestCase.{name}) ... {label}"],
+        ):
+            raise AssertionError((label, result.returncode, result.stdout, result.stderr))
+    return (f"{module.__name__}.{cls.__name__}.{name}", 1), {
+        "outcome": "pass",
+        "roles": roles(body="imre", assertions="imre", operation="imre", fixture="imre"),
+        "evidence": {
+            "operation": "textwrap.shorten",
+            "fixture": "Native unittest.main and unchanged default hooks",
+            "method_sha256": hashlib.sha256(body).hexdigest(),
+            "opt_level": tools.level,
+        },
+    }
 
 
 def wrapper_cases(module, tools, directory, denominator):
