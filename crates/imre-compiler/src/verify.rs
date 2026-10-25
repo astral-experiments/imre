@@ -157,6 +157,7 @@ impl Verifier<'_> {
         let fields = match receiver {
             Type::Class(class) => self.module.class_fields[class].clone(),
             Type::Tuple(_) => self.module.types.fields(receiver).unwrap(),
+            Type::ModuleSpec(id) => self.module.types.module_spec_fields(id),
             Type::CompletedProcess(capture, cmd) => {
                 return match field {
                     0 => same(value, self.module.types.completed_command(cmd)),
@@ -414,9 +415,13 @@ impl Verifier<'_> {
                 Ok(())
             }
             ExprKind::Tuple(values) => {
-                let fields = types
-                    .fields(value.ty)
-                    .ok_or("tuple expression has non-tuple type")?;
+                let fields = if let Type::ModuleSpec(id) = value.ty {
+                    types.module_spec_fields(id)
+                } else {
+                    types
+                        .fields(value.ty)
+                        .ok_or("tuple expression has non-tuple type")?
+                };
                 require(fields.len() == values.len(), "tuple field count mismatch")?;
                 for (value, field) in values.iter().zip(fields) {
                     same(value.ty, field)?;

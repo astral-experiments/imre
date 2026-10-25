@@ -163,6 +163,9 @@ impl Checker<'_> {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
         match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) => {
+                return Ok(vec![InstanceType::ModuleSpec]);
+            }
             Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => {
                 return Ok(vec![InstanceType::ForwardRef]);
             }

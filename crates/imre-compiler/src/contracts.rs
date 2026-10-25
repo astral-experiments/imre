@@ -59,20 +59,21 @@ impl Builtin {
         match self {
             Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
-                if args
-                    .first()
-                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
+                if args.first().is_some_and(|e| {
+                    matches!(
+                        e.ty,
+                        Type::Exception | Type::NamedException(_) | Type::ObjectValue
+                    )
+                }) =>
             {
                 Contract::new(true, Unknown)
-            }
-            Self::Str if args.first().is_some_and(|e| e.ty == Type::ObjectValue) => {
-                Contract::new(true, PreservesOwners)
             }
             Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
+            | Self::ExceptionArgs
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
@@ -80,19 +81,20 @@ impl Builtin {
             Self::BoxValue
             | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
-            | Self::ObjectRecordIdentity { .. } => Contract::new(false, PreservesOwners),
-            Self::ExceptionKeywordSuggestion | Self::ExceptionRecordFields => {
-                Contract::new(false, PreservesOwners)
-            }
-            Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
-            Self::ExceptionRepr
+            | Self::ObjectRecordIdentity { .. }
+            | Self::ExceptionTupleIdentity
+            | Self::ExceptionKeywordSuggestion
+            | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
+            // Formatting a projected task-group member may call its own __repr__.
+            Self::ExceptionFieldRepr
+            | Self::ExceptionRepr
             | Self::ExceptionMessage
             | Self::Logging(crate::ir::LogOperation::PrintActiveException) => {
                 Contract::new(true, Unknown)
             }
-            Self::ExceptionArgument(_) | Self::NamedException { .. } => {
-                Contract::new(false, PreservesLists)
-            }
+            Self::SystemExitFromTuple
+            | Self::ExceptionArgument(_)
+            | Self::NamedException { .. } => Contract::new(false, PreservesLists),
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
@@ -284,6 +286,7 @@ impl Builtin {
                 | ProcessOperation::CredentialId { .. }
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
+                | ProcessOperation::QuoteCommandArgument
                 | ProcessOperation::Which
                 | ProcessOperation::RmTree
                 | ProcessOperation::CopyTree(_)
@@ -330,6 +333,7 @@ impl Builtin {
             | Self::SetAdd
             | Self::SetDiscard
             | Self::CounterUpdate
+            | Self::DictUpdate
             | Self::KeySet
             | Self::KeyUnion
             | Self::KeyIntersection
@@ -338,6 +342,8 @@ impl Builtin {
             | Self::RegexFindIter
             | Self::Errno(_)
             | Self::DictGet
+            | Self::ModuleParentPrefix
+            | Self::ModuleCacheFromOrigin
             | Self::NamespaceWrap
             | Self::NamespaceDict
             | Self::NamespaceGet
@@ -468,11 +474,13 @@ impl Builtin {
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
             | Self::DequeNew
+            | Self::DequeReset
             | Self::DequeCopy
             | Self::DequeExtendSource
             | Self::NamespaceDelete
             | Self::DictDelete
             | Self::DictPop
+            | Self::DictSetDefault
             | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
@@ -878,6 +886,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_concat"
                 | "imre_bytes_repeat"
                 | "imre_counter_update"
+                | "imre_dict_update"
                 | "imre_key_union"
                 | "imre_key_intersection"
                 | "imre_key_difference"
@@ -986,6 +995,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_expandtabs"
                 | "imre_str_lower"
                 | "imre_str_capitalize"
+                | "imre_module_cache_from_origin"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"
@@ -993,6 +1003,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_get_index"
                 | "imre_seq_set_index"
                 | "imre_deque_new"
+                | "imre_deque_reset"
                 | "imre_deque_append"
                 | "imre_deque_copy"
                 | "imre_deque_extend_source"
