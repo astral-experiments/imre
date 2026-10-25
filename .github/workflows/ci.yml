@@ -179,6 +179,18 @@ jobs:
           jq -s . "$RUNNER_TEMP/sys-evidence-O0.json" "$RUNNER_TEMP/sys-evidence-O3.json" > "$RUNNER_TEMP/sys-evidence.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json "$RUNNER_TEMP/sys-evidence.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json benchmarks/cpython_stdlib/full/sys/evidence-linux.json
+          git rev-parse HEAD 'HEAD^{tree}' > "$RUNNER_TEMP/sys-source.txt"
+      - name: Retain the validated Linux sys reports and tested source
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sys-evidence-linux
+          path: |
+            ${{ runner.temp }}/sys-source.txt
+            ${{ runner.temp }}/sys-evidence.json
+            ${{ runner.temp }}/test-sys-O0.json
+            ${{ runner.temp }}/test-sys-O3.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Check pathlib file I/O and component methods under the original CPython fixtures
         run: |
           for level in 0 3; do
