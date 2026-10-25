@@ -497,7 +497,15 @@ impl Checker<'_> {
         }
         if matches!(
             name,
-            "mkdir" | "unlink" | "replace" | "resolve" | "with_name" | "with_stem" | "with_suffix"
+            "mkdir"
+                | "unlink"
+                | "replace"
+                | "resolve"
+                | "with_name"
+                | "with_stem"
+                | "with_suffix"
+                | "symlink_to"
+                | "hardlink_to"
         ) {
             return self.path_call(receiver, name, call);
         }
@@ -509,6 +517,7 @@ impl Checker<'_> {
             "as_posix" => (PathOperation::AsPosix, Type::Str, 0),
             "is_absolute" => (PathOperation::IsAbsolute, Type::Bool, 0),
             "read_bytes" => (PathOperation::ReadBytes, Type::Bytes, 0),
+            "readlink" => (PathOperation::Readlink, Type::Path, 0),
             "rmdir" => (PathOperation::Rmdir, Type::None, 0),
             _ => return Err(error(self.source, call, "unsupported native Path method")),
         };
@@ -663,6 +672,19 @@ impl Checker<'_> {
                 Type::Path,
                 vec![parameter("target", Type::Str, None)],
             ),
+            "symlink_to" => (
+                PathOperation::Link(ir::PathLink::Symlink),
+                Type::None,
+                vec![
+                    parameter("target", Type::Str, None),
+                    parameter("target_is_directory", Type::Bool, Some(boolean(false))),
+                ],
+            ),
+            "hardlink_to" => (
+                PathOperation::Link(ir::PathLink::Hardlink),
+                Type::None,
+                vec![parameter("target", Type::Str, None)],
+            ),
             "resolve" => (
                 PathOperation::Resolve,
                 Type::Path,
@@ -687,12 +709,45 @@ impl Checker<'_> {
         };
         let arguments =
             self.arguments_with(call, &params, Some(receiver), |checker, index, value| {
-                if name == "replace" {
+                if matches!(name, "symlink_to" | "hardlink_to") {
+                    checker.expr(value)
+                } else if name == "replace" {
                     checker.path_argument(value)
                 } else {
                     checker.expr_expected(value, params[index].ty)
                 }
             })?;
+        if let PathOperation::Link(link) = kind {
+            let mut scope = calls::ArgumentScope::default();
+            // The Python method receives every expression before os.link/os.symlink
+            // asks for a filename or the truth of target_is_directory.
+            let values: Vec<_> = arguments
+                .values
+                .into_iter()
+                .map(|v| scope.hold(self, v))
+                .collect();
+            let mut args: Vec<_> = arguments.order.iter().map(|&i| values[i].clone()).collect();
+            let symlink = matches!(link, ir::PathLink::Symlink);
+            let operation_name = if symlink { "symlink" } else { "link" };
+            let source = self.syscall_fspath(args[1].clone(), &call.func, operation_name, "src")?;
+            args[1] = scope.hold(self, source);
+            if symlink {
+                let flag = args.pop().unwrap();
+                if flag.ty != Type::Bool {
+                    scope.hold(
+                        self,
+                        operation(
+                            PathOperation::Link(ir::PathLink::CheckSymlink),
+                            Type::None,
+                            args.clone(),
+                        ),
+                    );
+                    let flag = self.truth_value(flag);
+                    scope.hold(self, flag);
+                }
+            }
+            return Ok(scope.finish(operation(kind, returns, args)));
+        }
         Ok(self.ordered_path_operation(kind, returns, arguments))
     }
 
@@ -862,7 +917,7 @@ impl Checker<'_> {
             body.push(Statement::Assign(slot, value));
             clear.push(slot);
         }
-        let args = arguments
+        let args: Vec<_> = arguments
             .order
             .iter()
             .map(|&index| self.local(clear[index]))

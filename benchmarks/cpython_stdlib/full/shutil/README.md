@@ -13,25 +13,25 @@ The runner verifies both the vendored and installed test blobs, discovers the fu
 
 ## Native execution
 
-The merged implementation covers [file contents and copy errors (#492)](https://github.com/astral-sh/imre/pull/492), [metadata and extended attributes (#504)](https://github.com/astral-sh/imre/pull/504), and [the missing-PATH defaults for text and bytes (#720)](https://github.com/astral-sh/imre/pull/720). [POSIX deletion (#522)](https://github.com/astral-sh/imre/pull/522) and [structured copy-error filenames (#795)](https://github.com/astral-sh/imre/pull/795) are also on main. This report adds recursive tree copying and callable copy and removal routines.
+The implementation covers [file contents and copy errors (#492)](https://github.com/astral-sh/imre/pull/492), [metadata and extended attributes (#504)](https://github.com/astral-sh/imre/pull/504), [the missing-PATH defaults for text and bytes (#720)](https://github.com/astral-sh/imre/pull/720), [POSIX deletion (#522)](https://github.com/astral-sh/imre/pull/522), [structured copy-error filenames (#795)](https://github.com/astral-sh/imre/pull/795), and [recursive tree copying (#829)](https://github.com/astral-sh/imre/pull/829). This report includes [moves and their cross-device fallbacks (#902)](https://github.com/astral-sh/imre/pull/902).
 
 [evidence-linux.json](evidence-linux.json) contains all 223 occurrences at each optimization level:
 
 | Execution | `-O0` | `-O3` |
 | --- | ---: | ---: |
 | Fully native, including fixtures | 0 | 0 |
-| Native method body, assertions and operations; host fixtures | 8 | 8 |
-| Host body and assertions driving native operations | 51 | 51 |
-| Mixed host and native operations | 14 | 14 |
+| Native method body, assertions and operations; host fixtures | 12 | 12 |
+| Host body and assertions driving native operations | 59 | 59 |
+| Mixed host and native operations | 28 | 28 |
 | Reference only | 0 | 0 |
-| Blocked | 100 | 100 |
+| Blocked | 74 | 74 |
 | Observed failures | 0 | 0 |
 | Original CPython skips | 50 | 50 |
 | **Total** | **223** | **223** |
 
-Of the 14 mixed methods, 8 call original Python deletion handlers, 4 include host callbacks or path-like conversions during tree copying, and 2 use the original default-search-path mocks. In those two methods, the native child has no `PATH`: it requests `os.confstr("CS_PATH")` and, after `ValueError`, `os.defpath`, then searches for the executable.
+Of the 28 mixed methods, 14 use the original rename mock, copy callback or path conversion during moves; 8 call original Python deletion handlers, 4 use host callbacks or path conversions during tree copying, and 2 use the original default-search-path mocks. In those last two methods, the native child has no `PATH`: it requests `os.confstr("CS_PATH")` and, after `ValueError`, `os.defpath`, then searches for the executable.
 
-Of the 100 blocked methods, 3 deletion methods and 1 tree-copy method need OS mocks. Each of the other 96 records the first complete-method diagnostic. The 50 skips retain their original CPython reasons.
+Of the 74 blocked methods, 3 deletion methods and 1 tree-copy method need OS mocks. Each of the other 70 records the first complete-method diagnostic. The 50 skips retain their original CPython reasons.
 
 ```sh
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/evidence.py \
@@ -53,14 +53,26 @@ The [complete TestCopyTree run](tree-linux.json) retains all 14 original methods
 
 ## Complete-method attempts
 
-[method-attempts-linux.json](method-attempts-linux.json) records the compiler and runtime hashes, original method and decorator hashes, and the first diagnostic for each blocked build. The [hosted run](https://github.com/astral-sh/imre/actions/runs/40177629056) tested tree `d6aa3eccebad9fc011341575e3745c7d063ca482` (main `71ffc22`, copytree `b88820e`). All 173 reference passes were attempted under their original CPython fixtures at both levels. Eight native bodies completed; 165 could not compile. After [native _opcode (#800)](https://github.com/astral-sh/imre/pull/800), 83 reach `import warnings` in the stock `test/support/__init__.py:21`; 40 reach the unsupported `unittest` import used by the original mocks and 10 stop at `errno`. The first diagnostic for each other method is in its record. The host-driven and mixed results retain their measured execution roles.
+The [copytree merge run](https://github.com/astral-sh/imre/actions/runs/40180794658) verified tree `61d5337dec05ab707494ca4150c05159ead3950b`, exactly the tree merged in [#829](https://github.com/astral-sh/imre/pull/829). Both missing-`PATH` methods ran with the environment variable absent in two native processes per optimization level. Their fixture, environment patches and assertions ran on CPython.
+
+## Moving files
+
+[move_ops.py](move_ops.py) selects every original `TestMove` occurrence, including its two Linux reference skips. It attempts unchanged methods and their original helper bodies when the compiler can represent the fixture. For other cases, it calls the native operation from the untouched CPython method. A test-only interposer sends actual rename operands to the original mock; native code receives its errno and performs the fallback. A Python copy callback keeps the result mixed.
+
+The [paired run](https://github.com/astral-sh/imre/actions/runs/40184043145) observed 4 complete native move bodies with original host fixtures, 8 host-driven native operations, 14 mixed, and 2 reference skips at each level. Both file-move bodies read and compare the actual bytes, and both return-value bodies compare the resulting path. The complete 223-occurrence report passed; a separate cross-device control in that run found that the type checker rejected non-callable copiers before filesystem access.
+
+[move_cross_device.py](move_cross_device.py) also compares file contents, directory trees, symlink targets, callbacks, and the source left after a failure on two real Linux mounts. It first proves the kernel returned `EXDEV` on each operand pair. These supplemental controls add no upstream IDs.
+
+## Reproducing complete-method attempts
+
+[method-attempts-linux.json](method-attempts-linux.json) records the compiler and runtime hashes, original method and decorator hashes, and the first diagnostic for each blocked build. The [hosted run](https://github.com/astral-sh/imre/actions/runs/40184043145) tested tree `aeb787b3d67616a86cfc3a4e7ff2524614381187` (main `fcbda28`, move `f8c78ab`). All 173 reference passes were attempted under their original CPython fixtures at both levels. Twelve native bodies completed; 161 could not compile. Of these, 83 reach `import warnings` in the stock `test/support/__init__.py:21`, 40 reach the unsupported `unittest` import used by the original mocks, and 10 stop at `errno`. Each remaining diagnostic is recorded per method.
 
 Reproduce the method attempts with the pinned interpreter and [vendored shared fixtures](../shared/UPSTREAM.json):
 
 ```sh
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/attempt_methods.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
-    --compiler-tree d6aa3eccebad9fc011341575e3745c7d063ca482 --result /tmp/method-attempts-linux.json
+    --compiler-tree aeb787b3d67616a86cfc3a4e7ff2524614381187 --result /tmp/method-attempts-linux.json
 ```
 
 Pass `--method-attempts /tmp/method-attempts-linux.json` to the evidence runner to use this result.

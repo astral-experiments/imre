@@ -370,7 +370,7 @@ impl Checker<'_> {
     /// Tests for derived records or exception kinds can require runtime inspection.
     /// A stored builtin exception can be either a SystemExit or an Exception.
     fn instance_member_matches(&self, ty: Type, classes: &[InstanceType]) -> Option<bool> {
-        if matches!(ty, Type::ValueView | Type::StringIterable) {
+        if matches!(ty, Type::ObjectValue | Type::StringIterable) {
             return None;
         }
         let mut unknown = false;
@@ -428,6 +428,19 @@ impl Checker<'_> {
                     result = Some(current);
                 }
                 result
+            }
+            ExprKind::Compare(values, ops) => {
+                let [left, right] = values.as_slice() else {
+                    return None;
+                };
+                let (ExprKind::Str(left), ExprKind::Str(right)) = (&left.kind, &right.kind) else {
+                    return None;
+                };
+                match ops.as_slice() {
+                    [Compare::Equal] => Some(left == right),
+                    [Compare::NotEqual] => Some(left != right),
+                    _ => None,
+                }
             }
             ExprKind::Not(value) => self.instance_condition(value).map(|value| !value),
             _ => None,

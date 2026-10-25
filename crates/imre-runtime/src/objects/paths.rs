@@ -424,7 +424,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
     let mut resolved = if path.starts_with('/') {
         Str::from("/")
     } else {
-        let directory = std::env::current_dir().map_err(files::os_error)?;
+        let directory = std::env::current_dir().map_err(files::errno_error)?;
         path_utf8(directory.into_os_string())?
     };
     let mut source = path.split('/');
@@ -460,9 +460,10 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         // Validate at the actual lookup, so an earlier strict filesystem error
         // still precedes a later component containing a NUL.
         check_nul(&next)?;
+        let component_error = |error| files::errno_with_filename(error, Some(&next));
         let metadata = match fs::symlink_metadata(next.as_str()) {
             Ok(metadata) => metadata,
-            Err(error) if strict => return Err(files::os_error(error)),
+            Err(error) if strict => return Err(component_error(error)),
             Err(_) => {
                 resolved = next;
                 continue;
@@ -470,7 +471,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         };
         if !metadata.file_type().is_symlink() {
             if strict && remaining != 0 && !metadata.is_dir() {
-                return Err(files::os_error(io::Error::from_raw_os_error(libc::ENOTDIR)));
+                return Err(component_error(io::Error::from_raw_os_error(libc::ENOTDIR)));
             }
             resolved = next;
             continue;
@@ -482,7 +483,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
             }
             Some(None) => {
                 if strict {
-                    return Err(files::os_error(io::Error::from_raw_os_error(libc::ELOOP)));
+                    return Err(component_error(io::Error::from_raw_os_error(libc::ELOOP)));
                 }
                 resolved = next;
                 continue;
@@ -491,7 +492,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         }
         let target = match fs::read_link(next.as_str()) {
             Ok(target) => path_utf8(target.into_os_string())?,
-            Err(error) if strict => return Err(files::os_error(error)),
+            Err(error) if strict => return Err(component_error(error)),
             Err(_) => {
                 resolved = next;
                 continue;
@@ -920,6 +921,33 @@ fn check_nul(path: &str) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+/// # Safety
+/// The caller roots an exact Path. Its spelling is retained if readlink fails;
+/// a successful call transfers a fresh Path containing the stored link target.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_readlink(path: *const Object) -> *const Object {
+    // SAFETY: the caller keeps the original Path rooted through conversion.
+    let result = unsafe { super::os::links::readlink(path) }.and_then(|target| {
+        let target = target.to_str().ok_or_else(|| {
+            Error::new(
+                Kind::UnicodeDecodeError,
+                "symlink target is not valid UTF-8",
+            )
+        })?;
+        Ok(new_path(normalize(target)))
+    });
+    finish(result, std::ptr::null())
+}
+
+/// # Safety
+/// The caller roots the destination Path and exact str or bytes target matching
+/// the tag. Both original spellings are retained by any resulting OS exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_link(path: *const Object, word: usize, tag: u32, kind: u32) {
+    // SAFETY: the caller roots both path operands and supplies their representation.
+    finish(unsafe { super::os::links::link(path, word, tag, kind) }, ());
 }
 
 /// Match pathlib's retry order: create the leaf first, make missing parents with

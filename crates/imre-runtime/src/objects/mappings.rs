@@ -823,6 +823,40 @@ impl Mapping {
         }
     }
 
+    /// Look up an integer through an object view without reading a string-key
+    /// table as a tagged integer. The result retains its exact value descriptor.
+    pub(super) fn integer_word(&self, key: &Int) -> Option<OwnedWord> {
+        let Tables::Int(table) = &self.tables else {
+            return None;
+        };
+        // SAFETY: the caller roots an exact integer; the table owns the value.
+        unsafe {
+            table
+                .lookup(key.0)
+                .map(|entry| self.value_kind.acquire(entry.value))
+        }
+    }
+
+    /// Subscribe with a dynamic format-field key, preserving the mapping's missing-key policy.
+    pub(super) fn logging_item(&mut self, key: &OwnedWord) -> Result<Option<OwnedWord>, Error> {
+        if key.kind.raw() != self.tables.key_kind() {
+            return Ok(matches!(self.missing, Missing::Zero).then(|| {
+                // SAFETY: a Counter has integer values and zero is immediate.
+                unsafe { self.value_kind.acquire(Int::small(0).unwrap().0) }
+            }));
+        }
+        // SAFETY: the rooted key matches the table's exact representation.
+        unsafe { self.subscript(key.word) }
+    }
+
+    /// The caller roots a key with this table's exact representation.
+    unsafe fn subscript(&mut self, key: usize) -> Result<Option<OwnedWord>, Error> {
+        // SAFETY: the table owns its values and only a sealed list factory can run.
+        unsafe {
+            table!(&mut self.tables, table => table.subscript(key, self.value_kind, self.missing))
+        }
+    }
+
     pub(super) fn integer_entries(&self) -> impl Iterator<Item = (&Int, usize)> {
         let Tables::Int(table) = &self.tables else {
             fail("SystemError", "expected an integer-key dictionary");
@@ -1337,7 +1371,7 @@ impl Storage {
             _ => fail("SystemError", "expected a dictionary object"),
         }
     }
-    fn dictionary_mut(&mut self) -> &mut Mapping {
+    pub(super) fn dictionary_mut(&mut self) -> &mut Mapping {
         match self {
             Self::Dictionary(value) => value,
             _ => fail("SystemError", "expected a dictionary object"),
@@ -1566,6 +1600,30 @@ pub unsafe extern "C" fn imre_cache_clear(state: *const Object, key: u32, value:
     });
 }
 
+/// Look up one value lazily through a read-only string-key mapping view.
+///
+/// # Safety
+/// Both handles are rooted; the mapping stores supported concrete or boxed values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_mapping_object_get(
+    value: *const Object,
+    key: *const Str,
+) -> *const Object {
+    // SAFETY: the shared dictionary borrow only retains the found value.
+    let found = unsafe { object(value).0.with(|s| s.dictionary().logging_key(&*key)) };
+    let Some(field) = found else {
+        // SAFETY: the same dictionary and string key remain rooted.
+        return unsafe { missing_key(value, key as usize) }.returning(std::ptr::null());
+    };
+    if field.kind.raw() == 5 {
+        // The only accepted object-handle value layout is the existing box.
+        return field.into_word() as *const Object;
+    }
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ObjectValue(
+        field,
+    )))))
+}
+
 /// Creates a dictionary with concrete scalar keys and one shared value descriptor.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_dict_new(key_kind: u32, value_kind: u32) -> *const Object {
@@ -1773,10 +1831,9 @@ pub unsafe extern "C" fn imre_dict_get(value: *const Object, key: usize) -> usiz
     // SAFETY: this native subscription only hashes immutable keys and constructs
     // an empty builtin list, so no storage borrow crosses a user callback.
     let owned = unsafe {
-        object(value).0.with_mut(|storage| {
-        let mapping = storage.dictionary_mut();
-        table!(&mut mapping.tables, table => table.subscript(key, mapping.value_kind, mapping.missing))
-    })
+        object(value)
+            .0
+            .with_mut(|storage| storage.dictionary_mut().subscript(key))
     };
     match owned {
         Ok(Some(owned)) => return owned.into_word(),
@@ -2119,6 +2176,29 @@ pub extern "C" fn imre_set_new(kind: u32) -> *const Object {
     )))))
 }
 
+/// Materialize an immutable string set from an exact list of strings.
+///
+/// # Safety
+/// The caller roots the list and checks pending state before using the result.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_frozenset_strings(source: *const Object) -> *const Object {
+    // SAFETY: a fresh set cannot alias the list or reenter it during hashing.
+    unsafe {
+        let set = Rc::from_raw(imre_set_new(3));
+        let ok = object(source).0.with(|s| {
+            s.sequence().strings().all(|(word, _)| {
+                imre_set_add(Rc::as_ptr(&set), word);
+                super::exceptions::imre_error_pending() == 0
+            })
+        });
+        if ok {
+            Rc::into_raw(set)
+        } else {
+            std::ptr::null()
+        }
+    }
+}
+
 /// Reads distinct string keys directly from their source indexes and sorts the
 /// resulting list. Each dictionary already supplies unique keys and their hashes.
 ///
@@ -2366,8 +2446,10 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
                     .then(|| (OwnedWord::from_owned(path as usize, WordKind::new(5)), None))
             }),
             Storage::StringIterator(iterator) => Ok(iterator.next()),
+            Storage::RegexIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
+            Storage::DequeIterator(iterator) => iterator.next(),
             _ => storage
                 .mapping_iterator_mut()
                 .next()

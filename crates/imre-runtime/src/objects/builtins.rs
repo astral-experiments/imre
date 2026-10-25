@@ -1,6 +1,6 @@
 //! The default display hook owns the last displayed object in the builtins namespace.
 use super::words::{OwnedWord, WordKind};
-use super::{Error, Kind, Object, Storage, StorageCell, acquire_rc, exceptions, records, values};
+use super::{Error, Kind, Object, acquire_rc, boxed_values, exceptions, records};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -113,8 +113,7 @@ unsafe fn snapshot(kind: u32, word: usize) -> Rc<Object> {
         unsafe { acquire_rc(word) }
     } else {
         // SAFETY: the compiler supplies a rooted word with this concrete representation.
-        let value = unsafe { WordKind::new(kind).acquire(word) };
-        Rc::new(Object(StorageCell::new(Storage::ValueView(value))))
+        unsafe { Rc::from_raw(boxed_values::imre_box_value(kind, word)) }
     }
 }
 
@@ -135,16 +134,19 @@ pub unsafe extern "C" fn imre_builtins_set_last(kind: u32, word: usize) {
 pub unsafe extern "C" fn imre_sys_displayhook(kind: u32, word: usize) {
     // SAFETY: make an independent owner before touching the namespace binding.
     let view = unsafe { snapshot(kind, word) };
-    // SAFETY: view retains the concrete word throughout formatting.
-    let (kind, word) = unsafe { exceptions::value_word(Rc::as_ptr(&view)) };
-    if kind.raw() == 0 {
+    // SAFETY: the view roots any concrete value or dynamic module member.
+    if unsafe { exceptions::imre_system_exit_code_kind(Rc::as_ptr(&view)) } == 0 {
         return;
     }
     // SAFETY: (0, 0) is the native representation of None.
     unsafe { imre_builtins_set_last(0, 0) };
-    let mut rendered = String::new();
-    // SAFETY: the compiler accepts only values with a native repr.
-    unsafe { values::write_repr(&mut rendered, word, kind) };
+    // SAFETY: repr returns an owned string or NULL with a pending Python error.
+    let rendered = unsafe { exceptions::imre_exception_field_repr(Rc::as_ptr(&view)) };
+    if rendered.is_null() {
+        return;
+    }
+    // SAFETY: the runtime returned one owned reference.
+    let rendered = unsafe { Rc::from_raw(rendered) };
     if crate::sys::write_display_line(&rendered) {
         drop(LAST.replace(Some(view)));
     }
