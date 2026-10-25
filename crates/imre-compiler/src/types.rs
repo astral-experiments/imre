@@ -99,6 +99,7 @@ impl Types {
             | Type::Document(_)
             | Type::Logger
             | Type::Sha256
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::JsonRoot
@@ -404,6 +405,7 @@ impl Types {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => Some(true),
@@ -612,6 +614,7 @@ impl Types {
             }
             match ty {
                 Type::TextIO
+                | Type::CsvReader
                 | Type::BinaryIO
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)

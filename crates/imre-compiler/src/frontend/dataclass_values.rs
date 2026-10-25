@@ -35,6 +35,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::AsyncProcess(_)
         | Type::Logger
         | Type::Sha256
+        | Type::CsvReader
         | Type::RegexPattern
         | Type::RegexMatch
         | Type::ExitCode
@@ -116,7 +117,12 @@ pub(super) fn validate(
 fn contains_opaque(ty: Type, types: &Types) -> bool {
     matches!(
         ty,
-        Type::Logger | Type::Sha256 | Type::RegexPattern | Type::RegexMatch | Type::StringKeys
+        Type::Logger
+            | Type::Sha256
+            | Type::CsvReader
+            | Type::RegexPattern
+            | Type::RegexMatch
+            | Type::StringKeys
     ) || types
         .children(ty)
         .into_iter()

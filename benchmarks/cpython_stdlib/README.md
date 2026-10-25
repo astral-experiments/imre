@@ -2,6 +2,14 @@
 
 The `upstream` directory contains the complete, unmodified CPython 3.14.5 test modules and packages used by these benchmarks. The [manifest](UPSTREAM.json) records the release commit and each unmodified Git blob. [Upstream source](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test) · [CPython license](upstream/LICENSE)
 
+## Native CSV reader tests
+
+`native_csv.py` compiles 18 complete, unchanged reader methods from CPython's
+`TestDialectExcel`. A nineteenth multiline method supplies its original fixture
+from CPython because it assigns a reserved builtin name. A typed file fixture compares every native row and field
+against the original expected values. A second fixture compares errors, physical
+line counts, Unicode, input mutation and incremental consumption with CPython.
+
 ## Native SHA-256 tests
 
 `native_hashlib.py` takes the same arguments as the JSON runner. In each of CPython’s four `test_case_sha256_*` vectors, the original unittest checks the hex digest, raw digest and digest size from a single native hash object. Alternate constructors and `file_digest` run on CPython and are counted separately.

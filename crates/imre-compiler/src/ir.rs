@@ -60,6 +60,7 @@ pub(crate) enum Type {
     RegexPattern,
     Logger,
     Sha256,
+    CsvReader,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
@@ -148,6 +149,7 @@ impl std::fmt::Display for Type {
             Self::RegexPattern => "re.Pattern[str]",
             Self::Logger => "logging.Logger",
             Self::Sha256 => "SHA-256 hash",
+            Self::CsvReader => "CSV reader",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
@@ -537,6 +539,16 @@ pub(crate) enum Builtin {
     Decode,
     Sha256Hex,
     Sha256New,
+    CsvReader {
+        delimiter: char,
+        quote: Option<char>,
+        escape: Option<char>,
+        flags: u32,
+    },
+    CsvNext {
+        required: bool,
+    },
+    CsvLineNumber,
     Sha256Update,
     Sha256Digest {
         hex: bool,

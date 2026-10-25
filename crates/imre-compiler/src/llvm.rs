@@ -76,6 +76,7 @@ impl Type {
             | Self::TextIO
             | Self::Logger
             | Self::Sha256
+            | Self::CsvReader
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -120,6 +121,7 @@ impl Type {
             | Self::TextIO
             | Self::Logger
             | Self::Sha256
+            | Self::CsvReader
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -691,6 +693,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -3240,6 +3243,7 @@ impl Emitter<'_, '_> {
                 | Type::None
                 | Type::Class(_)
                 | Type::Sha256
+                | Type::CsvReader
                 | Type::Exception
                 | Type::ExitCode
                 | Type::TimeoutExpired
@@ -4013,6 +4017,48 @@ impl Emitter<'_, '_> {
             },
             Builtin::Encode => self.call("imre_str_encode", Type::Bytes, &[&args[0].value]),
             Builtin::Decode => self.call("imre_bytes_decode", Type::Str, &[&args[0].value]),
+            Builtin::CsvReader {
+                delimiter,
+                quote,
+                escape,
+                flags,
+            } => {
+                let source = &args[0].value;
+                let source_kind = match source.ty {
+                    Type::TextIO => 1,
+                    Type::Str => 2,
+                    _ => 0,
+                };
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_csv_reader(ptr {}, i32 {source_kind}, i32 {}, i32 {}, i32 {}, i32 {flags})",
+                    source.operand, u32::from(*delimiter), quote.map_or(u32::MAX, u32::from), escape.map_or(u32::MAX, u32::from),
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::CsvNext { required } => {
+                let pointer = self.checked_instruction(format!(
+                    "call ptr @imre_csv_next(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*required)
+                ));
+                let operand = if *required {
+                    pointer
+                } else {
+                    self.instruction(format!("ptrtoint ptr {pointer} to i64"))
+                };
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            Builtin::CsvLineNumber => {
+                self.call("imre_csv_line_number", Type::Int, &[&args[0].value])
+            }
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
             Builtin::Sha256Update => {
@@ -4686,6 +4732,7 @@ impl Emitter<'_, '_> {
                     | Type::AsyncProcess(_)
                     | Type::Logger
                     | Type::Sha256
+                    | Type::CsvReader
                     | Type::RegexPattern
                     | Type::JsonRoot
                     | Type::JsonValue
@@ -4905,6 +4952,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -4960,6 +5008,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -5505,6 +5554,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::AsyncProcess(_)
         | Type::Logger
         | Type::Sha256
+        | Type::CsvReader
         | Type::RegexPattern
         | Type::JsonRoot
         | Type::JsonValue
@@ -5751,6 +5801,9 @@ declare ptr @imre_str_encode(ptr)
 declare ptr @imre_bytes_decode_splitlines(ptr)
 declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_sha256_hex(ptr)
+declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
+declare ptr @imre_csv_next(ptr, i32)
+declare i64 @imre_csv_line_number(ptr)
 declare ptr @imre_sha256_new(ptr)
 declare void @imre_sha256_update(ptr, ptr)
 declare ptr @imre_sha256_digest(ptr)

@@ -19,6 +19,7 @@ mod calls;
 mod comprehensions;
 mod contexts;
 mod counter;
+mod csv;
 mod dataclass_values;
 mod dispatch;
 mod documents;
@@ -2782,8 +2783,12 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("range iteration returned above")
         };
-        if matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
-            let input = self.prepare_file_lines(iterable);
+        if matches!(iterable.ty, Type::TextIO | Type::BinaryIO | Type::CsvReader) {
+            let input = if iterable.ty == Type::CsvReader {
+                self.prepare_csv_reader(iterable)
+            } else {
+                self.prepare_file_lines(iterable)
+            };
             return self.lower_prepared_iteration(
                 target,
                 input,
@@ -3644,6 +3649,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CalledProcessError)) => Some(26),
             Some(Binding::Intrinsic(Intrinsic::TimeoutExpired)) => Some(27),
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
+            Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(38),
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),
@@ -4788,6 +4794,12 @@ impl<'a> Checker<'a> {
                         _ => return self.class_attribute(attribute, class, Some(receiver), None),
                     }
                 }
+                if receiver.ty == Type::CsvReader && attribute.attr.as_str() == "line_num" {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::CsvLineNumber, vec![receiver]),
+                    });
+                }
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
                 }
@@ -5147,6 +5159,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::CsvReader)) => return self.csv_reader(call),
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::WallTime)) if call.arguments.is_empty() => {
                 return Ok(Expr {
@@ -5649,6 +5662,35 @@ impl<'a> Checker<'a> {
             });
         }
         match name.id.as_str() {
+            "next" | "iter"
+                if !self.names.contains_key(name.id.as_str())
+                    && (name.id != "iter" || !self.local_iter)
+                    && self.resolve(&call.func).is_none() =>
+            {
+                if let ([input], []) = (
+                    call.arguments.args.as_ref(),
+                    call.arguments.keywords.as_ref(),
+                ) {
+                    let receiver = self.expr(input)?;
+                    if receiver.ty == Type::CsvReader {
+                        if name.id == "iter" {
+                            return Ok(receiver);
+                        }
+                        return Ok(Expr {
+                            ty: self.types.list(Type::Str),
+                            kind: ExprKind::Builtin(
+                                Builtin::CsvNext { required: true },
+                                vec![receiver],
+                            ),
+                        });
+                    }
+                }
+                return Err(error(
+                    self.source,
+                    call,
+                    "expected a CSV reader at this iterator call",
+                ));
+            }
             "list" => return self.list_call(call, None),
             "sorted" => return self.sorted_call(call, None),
             "abs" => return self.abs_call(call),
