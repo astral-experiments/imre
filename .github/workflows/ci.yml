@@ -164,7 +164,14 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$JSON_AUDIT" == decoder-current-main ]]; then
-            python3 -B tests/paths.py --compiler "$JSON_IMRE" --runtime "$JSON_RUNTIME" --clang /usr/bin/clang-18 --opt-levels 0 3 --fixture metadata_views | tee "$JSON_RESULTS/pathinfo-identity.txt"
+            python3 -B tests/paths.py --compiler "$JSON_IMRE" --runtime "$JSON_RUNTIME" --clang /usr/bin/clang-18 --opt-levels 0 3 --fixture metadata_views --fixture shutil_move_callables | tee "$JSON_RESULTS/pathinfo-and-move.txt"
+            source="$PWD/benchmarks/cpython_stdlib/full/unittest/callable_protocol.py"
+            python3 -I -B "$source" > "$JSON_RESULTS/assert-raises-reference.txt"
+            for level in 0 3; do
+              "$JSON_IMRE" build "$source" --no-cache --opt-level "$level" --runtime "$JSON_RUNTIME" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/assert-raises-control"
+              "$RUNNER_TEMP/assert-raises-control" > "$JSON_RESULTS/assert-raises-O$level.txt"
+              cmp "$JSON_RESULTS/assert-raises-reference.txt" "$JSON_RESULTS/assert-raises-O$level.txt"
+            done
           fi
           python3 -B - <<'PY'
           import os, subprocess, sys, tempfile
