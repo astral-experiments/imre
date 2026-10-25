@@ -266,8 +266,8 @@ pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *cons
     finish(result, std::ptr::null())
 }
 
-/// Popen acquires these handles before opening a parent stream with bufsize.
-fn check_buffer_error_handles(modes: [u32; 3]) -> io::Result<()> {
+/// Check only on a validation failure: a successful launch creates its own handles.
+fn check_handles(modes: &[u32], fork_error_pipe: bool) -> io::Result<()> {
     let mut pipes = [const { None }; 3];
     let mut devnull = None;
     for (pipe, mode) in pipes.iter_mut().zip(modes) {
@@ -284,7 +284,21 @@ fn check_buffer_error_handles(modes: [u32; 3]) -> io::Result<()> {
             _ => {}
         }
     }
+    if fork_error_pipe {
+        let (_read, write) = io::pipe()?;
+        // The fork child needs its error writer above the standard descriptors.
+        if write.as_raw_fd() < 3 {
+            let _above_stdio = write.try_clone()?;
+        }
+    }
     Ok(())
+}
+
+pub(super) fn error_after_handles(modes: &[u32], fork_error_pipe: bool, error: Error) -> Error {
+    match check_handles(modes, fork_error_pipe) {
+        Ok(()) => error,
+        Err(io) => errno_error(io),
+    }
 }
 
 /// Create a native child with independently owned pipe ends and the original argv owner.
@@ -334,7 +348,8 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
                 object(extras.redirects[i] as *const Object)
                     .0
                     .with(|s| s.file().fileno())
-            }?,
+            }
+            .map_err(|e| error_after_handles(&modes[..i], false, e))?,
             _ => -1,
         };
     }
@@ -344,33 +359,34 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
         let size = unsafe { Int::borrow(config.bufsize) };
         match c_int(&size) {
             Some(size) => size,
-            None => {
-                // Before reporting bufsize, preserve any error acquiring the pipe handles.
-                check_buffer_error_handles(modes).map_err(errno_error)?;
-                return Err(c_int_overflow());
-            }
+            None => return Err(error_after_handles(&modes, false, c_int_overflow())),
         }
     } else {
         -1
     };
-    let child = |may_spawn| {
-        let Some((group, mask, new_session)) = extras.child else {
-            return Ok(ChildAttributes::default());
-        };
+    let child_args = extras.child.map(|(group, mask, new_session)| {
         let group = (group != 0).then(|| {
             // SAFETY: a non-null group is a rooted Python integer.
             unsafe { Int::borrow(group) }
         });
-        // SAFETY: the caller roots the requested mask and descriptor collection.
-        let mask = unsafe { Int::borrow(mask) };
-        let direct = may_spawn
-            && !new_session
-            && group.as_ref().is_none_or(|n| n.as_small() == Some(-1))
-            && mask.big().sign() == num_bigint::Sign::Minus
-            && extras.keep.is_none_or(|(word, kind)| {
-                // SAFETY: the bit-19 trailer supplies the collection's exact kind.
-                !unsafe { super::pass_fds::nonempty(word, kind) }
-            });
+        // SAFETY: the launch trailer roots the mask through argument conversion.
+        (group, unsafe { Int::borrow(mask) }, new_session)
+    });
+    let allow_spawn = child_args
+        .as_ref()
+        .is_none_or(|(group, mask, new_session)| {
+            !new_session
+                && group.as_ref().is_none_or(|n| n.as_small() == Some(-1))
+                && mask.big().sign() == num_bigint::Sign::Minus
+        })
+        && extras.keep.is_none_or(|(word, kind)| {
+            // SAFETY: the bit-19 trailer supplies the collection's exact kind.
+            !unsafe { super::pass_fds::nonempty(word, kind) }
+        });
+    let child = |direct| {
+        let Some((group, mask, new_session)) = child_args else {
+            return Ok(ChildAttributes::default());
+        };
         if direct {
             return Ok(ChildAttributes::default());
         }
@@ -398,8 +414,17 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
         })
     };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
-    let child =
-        unsafe { launch_error::spawn(&args, config, streams, descriptors, oversized, child) };
+    let child = unsafe {
+        launch_error::spawn(
+            &args,
+            config,
+            streams,
+            descriptors,
+            oversized,
+            allow_spawn,
+            child,
+        )
+    };
     child.map(|mut child| {
         let text = streams & (1 << 16) != 0;
         let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
