@@ -100,6 +100,8 @@ for bad in [-1, 0x110000, 1 << 200, -(1 << 200)]:
 invalid("a", {97: "valid", 98: b"bad"})
 invalid("b", {97: "valid", 98: b"bad"})
 booleans("abcdab", {97: False, 98: True, 99: None})
+numeric_members: dict[int, bool | int | None] = {97: False, 98: True, 99: None, 100: 65}
+print(repr("abcde".translate(numeric_members)))
 invalid_float("")
 invalid_float("zz")
 invalid_float("a")
