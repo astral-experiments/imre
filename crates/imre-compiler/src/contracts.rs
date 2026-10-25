@@ -81,6 +81,7 @@ impl Builtin {
             Self::Text(operation) => Contract::new(
                 match operation {
                     TextOperation::Lower
+                    | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
@@ -104,6 +105,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ContextExit
@@ -111,6 +113,10 @@ impl Builtin {
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
                     | PathOperation::WithName
+                    | PathOperation::WithStem
+                    | PathOperation::WithSuffix
+                    | PathOperation::Suffixes
+                    | PathOperation::RelativeTo
                     | PathOperation::Match { .. }
                     | PathOperation::Resolve
                     | PathOperation::WriteText
@@ -137,6 +143,7 @@ impl Builtin {
                     | PathOperation::Root
                     | PathOperation::Anchor
                     | PathOperation::CountPart
+                    | PathOperation::IsRelativeTo
                     | PathOperation::AsPosix
                     | PathOperation::Join
                     | PathOperation::Text
@@ -174,6 +181,9 @@ impl Builtin {
                     operation,
                     crate::ir::LogOperation::Configure
                         | crate::ir::LogOperation::ConfigureName
+                        | crate::ir::LogOperation::DictConfig
+                        | crate::ir::LogOperation::DictConfigTyped
+                        | crate::ir::LogOperation::FileConfig
                         | crate::ir::LogOperation::CheckLevel
                 ),
                 PreservesLists,
@@ -192,7 +202,7 @@ impl Builtin {
                 | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire => Contract::new(true, Unknown),
                 ProcessOperation::Executable
-                | ProcessOperation::CheckOutput
+                | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
@@ -278,6 +288,7 @@ impl Builtin {
             | Self::RegexGroupDict
             | Self::DictGet
             | Self::DictCopy
+            | Self::RecordCopy
             | Self::JsonDecode(_)
             | Self::CsvReader { .. }
             | Self::CsvNext { .. }
@@ -484,6 +495,7 @@ impl Builtin {
             _ => false,
         };
         let valid = match self {
+            Self::RecordCopy => matches!(result, Type::Class(_)) && signature(&[result], result),
             Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
@@ -703,6 +715,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_formatter_message"
                 | "imre_logrecord_message"
                 | "imre_log_config"
+                | "imre_log_dict_config"
+                | "imre_log_typed_dict_config"
+                | "imre_log_file_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
                 | "imre_stderr_line"
@@ -733,6 +748,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
+                | "imre_fnmatch_translate"
+                | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
                 | "imre_hash_new"
                 | "imre_toml_keys"
@@ -763,6 +780,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_replace"
                 | "imre_path_absolute"
                 | "imre_path_with_name"
+                | "imre_path_change_extension"
+                | "imre_path_relative_to"
+                | "imre_path_suffixes"
                 | "imre_path_resolve"
                 | "imre_tempdir_new"
                 | "imre_tempdir_cleanup"
@@ -800,6 +820,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice_sum"
                 | "imre_str_get"
                 | "imre_str_lower"
+                | "imre_str_capitalize"
                 | "imre_str_slice"
                 | "imre_str_int_list"
                 | "imre_seq_get"
@@ -810,6 +831,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_repeat"
                 | "imre_str_repeat"
                 | "imre_seq_slice"
+                | "imre_record_shallow_copy"
                 | "imre_dict_copy"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"

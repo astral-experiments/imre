@@ -56,6 +56,77 @@ fn required(name: &str, ty: Type) -> Parameter {
 }
 
 impl Checker<'_> {
+    /// A configuration literal can contain differently typed values. Give each
+    /// nested map and list its ordered, mutable document layout at construction.
+    pub(super) fn logging_dictionary_config(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let parameters = [required("config", documents::MAP)];
+        let mut scalar = None;
+        let mut args = self.arguments_with(call, &parameters, None, |checker, _, argument| {
+            if matches!(argument, ast::Expr::Dict(_)) {
+                return checker.expr_expected(argument, documents::MAP);
+            }
+            let value = checker.expr(argument)?;
+            if let Some((Type::Str, ty)) = checker.types.mapping(value.ty) {
+                scalar = match ty {
+                    Type::None => Some(0),
+                    Type::Bool => Some(1),
+                    Type::Int => Some(2),
+                    Type::Str => Some(3),
+                    Type::Float => Some(7),
+                    _ => None,
+                };
+                if scalar.is_some() {
+                    return Ok(value);
+                }
+            }
+            checker.document_coerce(value, documents::MAP, argument)
+        })?;
+        let op = if let Some(kind) = scalar {
+            args.order.push(args.values.len());
+            args.values.push(number(kind));
+            Log::DictConfigTyped
+        } else {
+            Log::DictConfig
+        };
+        Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args))
+    }
+
+    /// Read the configuration path only after evaluating all call arguments.
+    pub(super) fn logging_file_config(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let parameters = [
+            required("fname", Type::Str),
+            parameter(
+                "defaults",
+                Type::None,
+                ParameterKind::PositionalOrKeyword,
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+            ),
+            parameter(
+                "disable_existing_loggers",
+                Type::Bool,
+                ParameterKind::PositionalOrKeyword,
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(true),
+                },
+            ),
+            parameter(
+                "encoding",
+                self.types.optional(Type::Str),
+                ParameterKind::PositionalOrKeyword,
+                absent(self.types.optional(Type::Str)),
+            ),
+        ];
+        let args = self.arguments(call, &parameters, None)?;
+        Ok(self.ordered_builtin(Builtin::Logging(Log::FileConfig), Type::None, args))
+    }
+
     pub(super) fn logging_level_map(&self, names: bool) -> Expr {
         let (op, key, value) = if names {
             (Log::Names, Type::Str, Type::Int)
@@ -181,6 +252,8 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         match attribute.attr.as_str() {
+            "disabled" => Ok(operation(Log::Disabled, Type::Bool, vec![logger])),
+            "propagate" => Ok(operation(Log::Propagate, Type::Bool, vec![logger])),
             "root" => Ok(operation(Log::Root, Type::Logger, vec![logger])),
             "parent" => Ok(operation(
                 Log::Parent,
