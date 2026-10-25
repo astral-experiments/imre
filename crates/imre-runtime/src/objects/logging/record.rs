@@ -2,7 +2,7 @@
 use crate::StrOwner;
 use std::cell::Cell;
 use std::collections::HashMap;
-thread_local! {static FLAGS:Cell<u8> = const {Cell::new(15)};}
+thread_local! {static FLAGS:Cell<u8> = const {Cell::new(31)};}
 use num_traits::ToPrimitive;
 use std::rc::Rc;
 use std::sync::OnceLock;

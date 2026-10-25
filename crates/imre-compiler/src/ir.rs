@@ -883,6 +883,9 @@ pub(crate) enum Builtin {
     },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
+    FormatCursor {
+        split: bool,
+    },
     ExactRecord(usize),
     CsvReader {
         delimiter: char,
@@ -1368,6 +1371,7 @@ pub(crate) enum LogOperation {
     Get,
     HandlerRename,
     HandlerLookup,
+    PrintActiveException,
     AddLevel,
     LevelName,
     LevelForName,
