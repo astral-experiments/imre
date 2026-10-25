@@ -506,15 +506,17 @@ impl Checker<'_> {
             // A reference to an exact, unbound synchronous definition has no
             // evaluation effects. Retaining its direct edge also avoids
             // spuriously treating every other same-signature callback as recursive.
-            let direct = if let ExprKind::Callable {
-                function,
-                receiver: None,
-            } = callback.kind
-                && !matches!(returns, Type::Coroutine(_))
-            {
-                Some(function)
-            } else {
-                None
+            let direct = match &callback.kind {
+                ExprKind::Callable {
+                    function,
+                    receiver: None,
+                }
+                | ExprKind::Builtin(Builtin::StaticFunction(function), _)
+                    if !matches!(returns, Type::Coroutine(_)) =>
+                {
+                    Some(*function)
+                }
+                _ => None,
             };
             let callback = direct
                 .is_none()
