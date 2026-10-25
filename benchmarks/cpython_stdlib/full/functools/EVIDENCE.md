@@ -1,7 +1,32 @@
 # Native functools evidence
 
-Both reports use the [shared per-occurrence contract](../../SUITE_RUNNER.md).
-Each has a row for every upstream ID at each optimization level.
+Each observation uses the [shared per-occurrence contract](../../SUITE_RUNNER.md)
+and includes every upstream ID at both optimization levels.
+
+## Canonical main at `56731b6`
+
+The [Linux job](https://github.com/astral-sh/imre/actions/runs/40179400348/job/121127002553)
+checked out [the #766 squash](https://github.com/astral-sh/imre/commit/56731b668c9d44bfbcbcbec42f8a4e12b25e448c),
+verified tree `5a4cdf11e5ac7cd54628b5c7705913392e6a89dc`, then built that compiler
+and runtime. It reproduced both pinned CPython references. Counts were identical
+at `-O0` and `-O3`:
+
+| Original Linux suite | Reference passes | Native bodies with host fixtures | Host-driven native operations | Mixed | Failed | Blocked |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| [test.test_functools](observations/56731b6/evidence-linux.json) | 325 | 2 | 15 | 13 | 0 | 295 |
+| [test.test_free_threading.test_functools](observations/56731b6/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
+
+The two C and Python `test_with_bound_and_unbound_methods` bodies constructed
+and called `partial` and made their assertions in Imre; CPython ran the fixtures.
+Of the other 323 primary bodies, 174 stopped during fixture compilation, 128
+during method compilation, and 21 at a method decorator. The separate cache
+and reduce probes drove some of those operations from the host. On the
+free-threaded CPython 3.14.5 build, all four original threaded tests passed with
+the GIL disabled. The four native attempts stopped at the original `random`
+import before any worker ran. Neither suite has a fully native fixture, a
+reference-only occurrence, a skip, or an exclusion in this run.
+
+## Development branch at `4735cac`
 
 The [tested compiler and drivers](https://github.com/astral-sh/imre/commit/4735cacfa95c66d17b8942d4882b291f7088861d)
 come from [the cache parameter comparison PR](https://github.com/astral-sh/imre/pull/811).

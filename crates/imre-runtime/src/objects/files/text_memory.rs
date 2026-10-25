@@ -2,7 +2,7 @@
 //! existing data or pads a gap after seeking past the end.
 
 use super::*;
-use crate::objects::{bytes::native_size, exceptions::string_repr, os::c_int};
+use crate::objects::{bytes::native_size, c_int, exceptions::string_repr};
 use num_traits::ToPrimitive;
 
 #[derive(Clone, Copy)]
