@@ -27,6 +27,14 @@ pub(super) fn adapters(
                 enum_receiver |= receiver
                     .as_ref()
                     .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
+            } else if let ExprKind::Builtin(
+                Builtin::Accumulate {
+                    static_function: Some(id),
+                },
+                _,
+            ) = &value.kind
+            {
+                targets.insert((*id, false, false));
             }
             invoked |= matches!(value.kind, ExprKind::Invoke { .. });
         });

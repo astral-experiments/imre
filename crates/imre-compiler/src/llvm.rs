@@ -5274,13 +5274,13 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::Accumulate => {
+            Builtin::Accumulate { static_function } => {
                 let (source, function, initial) = (&args[0].value, &args[1].value, &args[2].value);
                 let mode = checked_iterable_mode(source.ty);
                 let item = self.module.types.cursor_element(returns).unwrap();
                 let kind = |ty| representation_kind(ty, &self.module.types);
                 let (fk, ik, rk) = (kind(function.ty), kind(initial.ty), kind(item));
-                let abi = if matches!(function.ty, Type::Callable(_)) {
+                let abi = if static_function.is_some() || matches!(function.ty, Type::Callable(_)) {
                     match item.llvm() {
                         "i64" => 1,
                         "ptr" => 2,
@@ -5292,7 +5292,14 @@ impl Emitter<'_, '_> {
                     0
                 };
                 let owned = u32::from(self.resource_types.contains(&item));
-                let (s, f, i) = (self.word(source), self.word(function), self.word(initial));
+                let s = self.word(source);
+                let f = if let Some(id) = static_function {
+                    let name = self.output.adapter_ref(*id, false);
+                    format!("ptrtoint (ptr @{name} to i64)")
+                } else {
+                    self.word(function)
+                };
+                let i = self.word(initial);
                 let operand = self.checked_pointer(format!("call ptr @imre_accumulate(i32 {mode}, i64 {s}, i32 {fk}, i64 {f}, i32 {ik}, i64 {i}, i32 {rk}, i32 {abi}, i32 {owned})"));
                 Value {
                     ty: returns,

@@ -531,7 +531,9 @@ pub(crate) enum Builtin {
         bounded: bool,
     },
     Islice,
-    Accumulate,
+    Accumulate {
+        static_function: Option<usize>,
+    },
     Compress,
     Chain,
     ChainFrom(Type),

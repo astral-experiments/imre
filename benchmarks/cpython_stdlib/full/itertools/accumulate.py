@@ -100,3 +100,25 @@ changing = accumulate([3, 4, 5], Mutate(shared).add)
 print(repr((sum(shared), next(changing), sum(shared))))
 print(repr((next(changing), sum(shared))))
 print(repr((list(changing), sum(shared))))
+
+
+def choose_addition() -> None:
+    print('evaluate func')
+
+
+def initial_value() -> int:
+    print('evaluate initial')
+    return 7
+
+
+def input_values() -> list[int]:
+    print('evaluate iterable')
+    return [2, 3]
+
+
+ordered = accumulate(func=choose_addition(), initial=initial_value(), iterable=input_values())
+print(list(ordered))
+try:
+    accumulate(func=choose_addition(), iterable=8, initial=initial_value())
+except TypeError as exc:
+    print(str(exc))

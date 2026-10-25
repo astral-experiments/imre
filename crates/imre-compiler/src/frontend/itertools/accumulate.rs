@@ -76,16 +76,18 @@ impl Checker<'_> {
             ));
         }
         let signature = self.types.callable(vec![item, item], item);
+        let mut static_function = None;
         if let Some(node) = deferred {
             args.values[*function] = self.expr_expected(&node, signature)?;
         } else if args.values[*function].ty == Type::None {
             // Compile ordinary source operations, including list concatenation and
-            // integer promotion. The first operand wins ties for min and max.
+            // integer promotion. Keep the actual None expression in evaluation
+            // order. The built-in operation has no per-instance callable record.
             let parsed = ruff_python_parser::parse_expression(operator).unwrap();
             let ast::Expr::Lambda(operation) = parsed.expr() else {
                 unreachable!()
             };
-            args.values[*function] = self
+            let helper = self
                 .lambda_value(operation, Some(vec![item, item]), Some(item))
                 .map_err(|_| {
                     error(
@@ -94,9 +96,19 @@ impl Checker<'_> {
                         "accumulate needs a supported operation with a stable total type",
                     )
                 })?;
+            let ExprKind::Callable {
+                function,
+                receiver: None,
+            } = helper.kind
+            else {
+                unreachable!("the built-in binary operation has no bound receiver")
+            };
+            self.calls.insert(function);
+            static_function = Some(function);
         }
         let func = args.values[*function].ty;
-        if func != signature
+        if static_function.is_none()
+            && func != signature
             && !matches!(
                 func,
                 Type::Bool | Type::Int | Type::Str | Type::Float | Type::Bytes
@@ -108,6 +120,10 @@ impl Checker<'_> {
                 "accumulate requires a binary callable with the input and result types of its total",
             ));
         }
-        Ok(self.ordered_builtin(Builtin::Accumulate, self.types.cursor(item), args))
+        Ok(self.ordered_builtin(
+            Builtin::Accumulate { static_function },
+            self.types.cursor(item),
+            args,
+        ))
     }
 }

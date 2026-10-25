@@ -474,7 +474,7 @@ impl Builtin {
             | Self::Chain
             | Self::ChainFrom(_)
             | Self::Islice
-            | Self::Accumulate
+            | Self::Accumulate { .. }
             | Self::Compress
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter

@@ -1,11 +1,16 @@
 //! A running total is published only after the current addition or callback succeeds.
 use super::*;
 
+enum Operation {
+    Builtin(*const ()),
+    Argument(OwnedWord),
+}
+
 pub(in crate::objects) struct Accumulate {
     pub(super) source: Option<Rc<Object>>,
     initial: RefCell<Option<OwnedWord>>,
     total: RefCell<Option<OwnedWord>>,
-    function: OwnedWord,
+    function: Operation,
     abi: u32,
     item_kind: WordKind,
     transfer: bool,
@@ -40,7 +45,10 @@ impl Accumulate {
 
     fn combine(&self, left: &OwnedWord, right: &OwnedWord) -> Result<OwnedWord, Error> {
         if self.abi == 0 {
-            let name = match self.function.kind.raw() {
+            let Operation::Argument(value) = &self.function else {
+                unreachable!("the built-in operation is callable")
+            };
+            let name = match value.kind.raw() {
                 1 => "bool",
                 2 => "int",
                 3 => "str",
@@ -61,13 +69,17 @@ impl Accumulate {
             }
         };
         let (a, b) = (parameter(left), parameter(right));
-        // SAFETY: the compiler passes an existing exact (T, T) -> T callable record.
-        // Its first field is the adapter, its second the bound context. The ABI tag
-        // matches the LLVM type of T; owning parameters receive separate references.
+        // SAFETY: both forms use the same exact (context, T, T) -> T native adapter.
+        // A static operation has no context. A Python callable owns its two-field
+        // record (adapter, context). Owning parameters receive separate references.
         let result = unsafe {
-            let record = self.function.word as *const *const ();
-            let target = *record;
-            let context = *record.add(1);
+            let (target, context) = match &self.function {
+                Operation::Builtin(target) => (*target, std::ptr::null()),
+                Operation::Argument(value) => {
+                    let record = value.word as *const *const ();
+                    (*record, *record.add(1))
+                }
+            };
             match self.abi {
                 1 => std::mem::transmute::<
                     *const (),
@@ -102,6 +114,7 @@ impl Accumulate {
 /// # Safety
 /// The compiler supplies rooted source, function and initial value words, their exact
 /// representations, and the homogeneous callable ABI (zero for a noncallable argument).
+/// For function kind zero, `function` is a static native adapter address instead.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_accumulate(
     mode: u32,
@@ -127,7 +140,11 @@ pub unsafe extern "C" fn imre_accumulate(
                 (initial_kind != 0).then(|| WordKind::new(initial_kind).acquire(initial)),
             ),
             total: RefCell::new(None),
-            function: WordKind::new(function_kind).acquire(function),
+            function: if function_kind == 0 {
+                Operation::Builtin(function as *const ())
+            } else {
+                Operation::Argument(WordKind::new(function_kind).acquire(function))
+            },
             abi,
             item_kind: WordKind::new(item_kind),
             transfer: transfer != 0,
