@@ -47,7 +47,7 @@ jobs:
           sparse-checkout: Lib/test
           persist-credentials: false
       - name: Prepare the exact merge with current main
-        if: matrix.name != 'receipts' && matrix.name != 'dispatch'
+        if: matrix.name != 'receipts' && matrix.name != 'dispatch' && matrix.name != 'len_binding'
         run: |
           cat > "$RUNNER_TEMP/prepare" <<'SH'
           set -euo pipefail
@@ -83,6 +83,7 @@ jobs:
               fixtures+=(tests/fixtures/callables/forward_refs.py tests/fixtures/unions/boolean_integer.py tests/fixtures/module_values/wrapper_attributes/main.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py)
               if test -f tests/fixtures/callables/annotations_deferred.py; then fixtures+=(tests/fixtures/callables/annotations_deferred.py); fi;;
             defaults) fixtures+=(tests/fixtures/module_values/wrapper_attributes/main.py);;
+            len_binding) fixtures+=(tests/fixtures/callables/cached_builtin_len.py);;
             dispatch) fixtures+=(tests/fixtures/callables/single_dispatch.py);;
             percent) fixtures+=(tests/fixtures/text/percent_scalar.py tests/fixtures/text/percent_tuple.py);;
             links|wraps)
@@ -95,7 +96,7 @@ jobs:
               extra=()
               if test "$opt" = 0; then extra+=(--sanitize); fi
               target/debug/imre build "$source" --module-root "$(dirname "$source")" --no-cache --opt-level "$opt" --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 "${extra[@]}" -o "$RUNNER_TEMP/exe"
-              if test "$opt" = 0 && [[ "$source" == */wrapper_links.py || "$source" == */wraps_application.py ]]; then
+              if test "$opt" = 0 && [[ "$source" == */wrapper_links.py || "$source" == */wraps_application.py || "$source" == */cached_builtin_len.py ]]; then
                 ASAN_OPTIONS=detect_leaks=1 "$RUNNER_TEMP/exe" > "$RUNNER_TEMP/out" 2> "$RUNNER_TEMP/err" || { cat "$RUNNER_TEMP/err"; exit 1; }
               else
                 "$RUNNER_TEMP/exe" > "$RUNNER_TEMP/out" 2> "$RUNNER_TEMP/err"
