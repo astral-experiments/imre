@@ -195,6 +195,20 @@ impl Checker<'_> {
                 expr
             });
         }
+        // Namespace owners and their backing dictionaries are distinct rooted
+        // objects. Optional storage preserves their pointer words and None tag.
+        if types
+            .iter()
+            .any(|ty| matches!(ty, Type::SimpleNamespace(_)))
+            && types
+                .iter()
+                .all(|ty| matches!(ty, Type::SimpleNamespace(_) | Type::Dict(_) | Type::None))
+        {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if types == [Type::BuiltinClass; 2] {
             return Ok(Expr {
                 ty: Type::Bool,

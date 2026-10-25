@@ -514,6 +514,7 @@ pub(crate) enum CheckedDiagnostic {
     Keyword(TextRange),
     TupleListRead(TextRange),
     MissingArgument(TextRange),
+    BuiltinImport(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -524,7 +525,8 @@ impl CheckedDiagnostic {
             Self::Keyword(range) => (range, 2),
             Self::TupleListRead(range) => (range, 3),
             Self::MissingArgument(range) => (range, 4),
-            Self::DeferredName(range) => (range, 5),
+            Self::BuiltinImport(range) => (range, 5),
+            Self::DeferredName(range) => (range, 6),
         };
         (range.start(), range.end(), kind)
     }
@@ -539,6 +541,7 @@ impl CheckedDiagnostic {
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
+            Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
         }
     }
 }

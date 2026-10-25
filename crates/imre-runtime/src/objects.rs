@@ -25,6 +25,7 @@ mod itertools;
 mod json;
 mod logging;
 mod mappings;
+mod namespaces;
 mod os;
 mod paths;
 pub(crate) mod posixpath;
@@ -58,9 +59,9 @@ enum Storage {
     Plain,
     StrDescriptor(u32),
     Sequence(Words),
-    Dictionary(Box<mappings::Mapping>),
+    Dictionary(mappings::TableOwner<mappings::Mapping>),
     FunctionCache(Box<mappings::FunctionCache>),
-    Set(Box<mappings::Set>),
+    Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     Repeat(itertools::Repeat),
@@ -68,6 +69,7 @@ enum Storage {
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
+    SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
     CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),

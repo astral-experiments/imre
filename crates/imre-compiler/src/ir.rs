@@ -86,6 +86,8 @@ pub(crate) enum Type {
     PlainObject,
     /// An exact immutable method descriptor on the builtin str class.
     StrDescriptor(StrDescriptor),
+    /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
+    SimpleNamespace(usize),
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -223,6 +225,7 @@ impl std::fmt::Display for Type {
             Self::ClockTime => "datetime.time",
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
+            Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -870,6 +873,10 @@ pub(crate) enum Builtin {
     FileFileno,
     DictGet,
     DictCopy,
+    NamespaceWrap,
+    NamespaceDict,
+    NamespaceGet,
+    NamespaceDelete,
     DeepCopy,
     RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
@@ -1098,6 +1105,7 @@ pub(crate) enum PathOperation {
     ContextExit,
     UnionText,
     Iterdir,
+    Walk,
     Glob {
         recursive: bool,
     },
@@ -1350,6 +1358,7 @@ pub(crate) enum ProcessOperation {
 pub(crate) enum InstanceType {
     Exact(Type),
     ForwardRef,
+    SimpleNamespace,
     StrEnum,
     List,
     Dict,
@@ -1373,6 +1382,7 @@ impl InstanceType {
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
             Self::Tuple => matches!(ty, Type::Tuple(_)),
+            Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::Exception(_) => matches!(
                 ty,
                 Type::Exception

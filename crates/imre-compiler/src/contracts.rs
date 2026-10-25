@@ -133,6 +133,7 @@ impl Builtin {
                     | PathOperation::TemporaryDirectory
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
+                    | PathOperation::Walk
                     | PathOperation::Glob { .. } => true,
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
@@ -291,6 +292,9 @@ impl Builtin {
             | Self::KeyDifference
             | Self::RegexGroupDict
             | Self::DictGet
+            | Self::NamespaceWrap
+            | Self::NamespaceDict
+            | Self::NamespaceGet
             | Self::DictCopy
             | Self::DeepCopy
             | Self::RecordCopy
@@ -412,6 +416,7 @@ impl Builtin {
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
+            | Self::NamespaceDelete
             | Self::DictDelete
             | Self::DictPop
             | Self::DictTryPop(_)
