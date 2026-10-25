@@ -5284,6 +5284,21 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::ExceptionArgs => self.call("imre_exception_args", returns, &[&args[0].value]),
+            Builtin::ExceptionTupleIdentity => {
+                let bit = self.instruction(format!(
+                    "call i32 @imre_exception_tuple_identity(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::SystemExitFromTuple => {
+                self.call("imre_system_exit_from_tuple", returns, &[&args[0].value])
+            }
             Builtin::ExceptionTupleView => {
                 self.call("imre_exception_tuple_view", returns, &[&args[0].value])
             }
@@ -7815,6 +7830,10 @@ declare ptr @imre_object_record_payload(ptr, ptr)
 declare ptr @imre_mapping_object_get(ptr, ptr)
 declare ptr @imre_exception_tuple_view(ptr)
 declare ptr @imre_exception_formatter_result(ptr, i32)
+declare ptr @imre_exception_args(ptr)
+declare i32 @imre_exception_field_matches(ptr, i32)
+declare i32 @imre_exception_tuple_identity(ptr, ptr)
+declare ptr @imre_system_exit_from_tuple(ptr)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)

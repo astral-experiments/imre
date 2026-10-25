@@ -59,20 +59,21 @@ impl Builtin {
         match self {
             Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
-                if args
-                    .first()
-                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_))) =>
+                if args.first().is_some_and(|e| {
+                    matches!(
+                        e.ty,
+                        Type::Exception | Type::NamedException(_) | Type::ObjectValue
+                    )
+                }) =>
             {
                 Contract::new(true, Unknown)
-            }
-            Self::Str if args.first().is_some_and(|e| e.ty == Type::ObjectValue) => {
-                Contract::new(true, PreservesOwners)
             }
             Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
+            | Self::ExceptionArgs
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
@@ -80,19 +81,20 @@ impl Builtin {
             Self::BoxValue
             | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
-            | Self::ObjectRecordIdentity { .. } => Contract::new(false, PreservesOwners),
-            Self::ExceptionKeywordSuggestion | Self::ExceptionRecordFields => {
-                Contract::new(false, PreservesOwners)
-            }
-            Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
-            Self::ExceptionRepr
+            | Self::ObjectRecordIdentity { .. }
+            | Self::ExceptionTupleIdentity
+            | Self::ExceptionKeywordSuggestion
+            | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
+            // Formatting a projected task-group member may call its own __repr__.
+            Self::ExceptionFieldRepr
+            | Self::ExceptionRepr
             | Self::ExceptionMessage
             | Self::Logging(crate::ir::LogOperation::PrintActiveException) => {
                 Contract::new(true, Unknown)
             }
-            Self::ExceptionArgument(_) | Self::NamedException { .. } => {
-                Contract::new(false, PreservesLists)
-            }
+            Self::SystemExitFromTuple
+            | Self::ExceptionArgument(_)
+            | Self::NamedException { .. } => Contract::new(false, PreservesLists),
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(

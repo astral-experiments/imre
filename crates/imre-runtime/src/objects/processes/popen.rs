@@ -467,6 +467,7 @@ pub unsafe extern "C" fn imre_call_config(
                     kind: WordKind::new(0),
                 };
                 raise_process(ProcessError {
+                    positional_streams: false,
                     cmd: p.args.clone(),
                     returncode: code,
                     stdout: absent(),
@@ -479,6 +480,7 @@ pub unsafe extern "C" fn imre_call_config(
                 raise_timeout(TimeoutError {
                     cmd: p.args.clone(),
                     timeout: timeout.expect("timed wait"),
+                    wait_budget: None,
                     stdout: None,
                     stderr: None,
                 });
@@ -568,6 +570,7 @@ pub unsafe extern "C" fn imre_child_wait(
                 raise_timeout(TimeoutError {
                     cmd,
                     timeout: timeout.expect("timed wait"),
+                    wait_budget: None,
                     stdout: None,
                     stderr: None,
                 });

@@ -239,7 +239,8 @@ impl Checker<'_> {
         // SystemExit(a, b) stores the tuple of constructor arguments. sys.exit
         // passes a tuple as the argument vector to SystemExit, so only the
         // latter unwraps a singleton or omits an empty tuple.
-        if args.len() > 1 {
+        let mut from_tuple = args.len() > 1;
+        if from_tuple {
             args = vec![Expr {
                 ty: self.types.tuple(args.iter().map(|arg| arg.ty).collect()),
                 kind: ExprKind::Tuple(args),
@@ -262,12 +263,19 @@ impl Checker<'_> {
                     });
                     omit_none = false;
                 }
-                _ => {}
+                _ => from_tuple = true,
             }
         }
         let mut exception = Expr {
             ty: Type::Exception,
-            kind: ExprKind::Builtin(Builtin::SystemExitNew { omit_none }, args),
+            kind: ExprKind::Builtin(
+                if from_tuple {
+                    Builtin::SystemExitFromTuple
+                } else {
+                    Builtin::SystemExitNew { omit_none }
+                },
+                args,
+            ),
         };
         if !evaluate.is_empty() {
             exception = Expr {

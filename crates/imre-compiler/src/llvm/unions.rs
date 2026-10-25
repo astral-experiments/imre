@@ -157,7 +157,9 @@ impl Emitter<'_, '_> {
                 (4, Type::ListInt),
                 (5, Type::Dict(0)),
                 (6, Type::Tuple(0)),
+                (7, Type::Float),
                 (8, Type::Bytes),
+                (12, Type::Set(0)),
             ]
             .iter()
             .filter(|(_, ty)| classes.iter().any(|class| class.accepts(*ty)))
@@ -172,14 +174,24 @@ impl Emitter<'_, '_> {
                 self.instruction(format!("icmp ne i32 {found}, 0"))
             });
             for class in classes {
-                if let InstanceType::Exact(Type::Class(class)) = class {
-                    let ptr = self.boxed_record(value, *class);
-                    let found = self.instruction(format!("icmp ne ptr {ptr}, null"));
-                    matched = Some(match matched {
-                        Some(previous) => self.instruction(format!("or i1 {previous}, {found}")),
-                        None => found,
-                    });
-                }
+                let found = match class {
+                    InstanceType::Exact(Type::Class(class)) => {
+                        let ptr = self.boxed_record(value, *class);
+                        self.instruction(format!("icmp ne ptr {ptr}, null"))
+                    }
+                    InstanceType::Exception(kind) => {
+                        let child = self.instruction(format!(
+                            "call i32 @imre_exception_field_matches(ptr {}, i32 {kind})",
+                            value.operand
+                        ));
+                        self.instruction(format!("icmp ne i32 {child}, 0"))
+                    }
+                    _ => continue,
+                };
+                matched = Some(match matched {
+                    Some(previous) => self.instruction(format!("or i1 {previous}, {found}")),
+                    None => found,
+                });
             }
             return matched.unwrap_or_else(|| "false".into());
         }

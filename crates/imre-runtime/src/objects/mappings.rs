@@ -910,8 +910,8 @@ impl Mapping {
         }
     }
 
-    /// Subscribe with a dynamic format-field key, preserving the mapping's missing-key policy.
-    pub(super) fn logging_item(&mut self, key: &OwnedWord) -> Result<Option<OwnedWord>, Error> {
+    /// Subscribe with a dynamically represented key, preserving the mapping's missing-key policy.
+    pub(super) fn subscript_value(&mut self, key: &OwnedWord) -> Result<Option<OwnedWord>, Error> {
         if key.kind.raw() != self.tables.key_kind() {
             return Ok(matches!(self.missing, Missing::Zero).then(|| {
                 // SAFETY: a Counter has integer values and zero is immediate.
@@ -1451,6 +1451,31 @@ impl Storage {
             Self::Dictionary(value) => value,
             _ => fail("SystemError", "expected a dictionary object"),
         }
+    }
+    /// Length of a mapping or set retained through a boxed Python value.
+    pub(super) fn mapping_or_set_len(&self) -> Option<usize> {
+        match self {
+            Self::Dictionary(mapping) => Some(mapping.tables.len()),
+            Self::Set(set) => Some(set.tables.len()),
+            _ => None,
+        }
+    }
+
+    /// Subscribe with a rooted Python int without interpreting it as a different table key kind.
+    pub(super) unsafe fn integer_subscript(
+        &mut self,
+        key: usize,
+    ) -> Option<Result<OwnedWord, Error>> {
+        let Self::Dictionary(mapping) = self else {
+            return None;
+        };
+        // SAFETY: the caller keeps its native integer alive until the boxed key acquires it.
+        let key = unsafe { WordKind::new(2).acquire(key) };
+        Some(
+            mapping
+                .subscript_value(&key)
+                .and_then(|item| item.ok_or_else(|| Error::key(key))),
+        )
     }
     pub(super) fn dictionary_mut(&mut self) -> &mut Mapping {
         match self {
