@@ -2,6 +2,8 @@
 
 use std::fmt::Write as _;
 
+use toml_datetime::{Datetime, Offset};
+
 use super::{Node, View, deep_values};
 
 impl View {
@@ -16,6 +18,16 @@ impl View {
     }
 
     pub(in crate::objects) fn equal(&self, right: &Self) -> bool {
+        if let (Some(left), Some(right)) = (self.nodes.root_items(), right.nodes.root_items()) {
+            // Preserve Python list identity shortcuts for the root and shared elements.
+            // SAFETY: both objects are rooted lists with JsonValue element storage.
+            return unsafe {
+                crate::objects::values::imre_sequence_equal(
+                    crate::ObjectOwner::as_ptr(left),
+                    crate::ObjectOwner::as_ptr(right),
+                ) != 0
+            };
+        }
         let left_root = self.snapshot_root();
         let right_root = right.snapshot_root();
         let left = left_root.as_ref().unwrap_or(self);
@@ -43,7 +55,7 @@ impl View {
         }
         match (left, right) {
             (Node::Null, Node::Null) | (Node::ConstantNan, Node::ConstantNan) => true,
-            (Node::Datetime(a), Node::Datetime(b)) => a == b,
+            (Node::Datetime(a), Node::Datetime(b)) => super::super::toml::datetimes_equal(a, b),
             (Node::String(a), Node::String(b)) => a == b,
             (Node::Float(a), Node::Float(b)) => a == b,
             (Node::Integer(a), Node::Integer(b)) => a.0 == b.0 || a.big() == b.big(),
@@ -81,7 +93,7 @@ impl View {
             unsafe {
                 crate::objects::values::try_write_repr(
                     output,
-                    std::rc::Rc::as_ptr(items) as usize,
+                    crate::ObjectOwner::as_ptr(items) as usize,
                     crate::objects::words::WordKind::new(5),
                 )
             }
@@ -100,7 +112,7 @@ impl View {
         let node = &self.nodes[i];
         match node {
             Node::Null => output.write_str("None")?,
-            Node::Datetime(value) => output.write_str(value)?,
+            Node::Datetime(value) => write_datetime_repr(value, output)?,
             Node::Bool(b) => output.write_str(if *b { "True" } else { "False" })?,
             Node::Integer(i) => {
                 if let Some(i) = i.as_small() {
@@ -140,5 +152,80 @@ impl View {
             }
         }
         Ok(())
+    }
+}
+
+fn write_datetime_repr(text: &str, output: &mut impl std::fmt::Write) -> std::fmt::Result {
+    let value: Datetime = text.parse().expect("validated TOML datetime");
+    match (value.date, value.time) {
+        (Some(date), time) => {
+            let kind = if time.is_some() { "datetime" } else { "date" };
+            write!(
+                output,
+                "datetime.{kind}({}, {}, {}",
+                date.year, date.month, date.day
+            )?;
+            if time.is_some() {
+                output.write_str(", ")?;
+            }
+        }
+        (None, Some(_)) => output.write_str("datetime.time(")?,
+        (None, None) => unreachable!("TOML datetimes contain a date or time"),
+    }
+    if let Some(time) = value.time {
+        write!(output, "{}, {}", time.hour, time.minute)?;
+        let seconds = time.second.unwrap_or(0);
+        let micros = time.nanosecond.unwrap_or(0) / 1000;
+        if seconds != 0 || micros != 0 {
+            write!(output, ", {seconds}")?;
+        }
+        if micros != 0 {
+            write!(output, ", {micros}")?;
+        }
+    }
+    if let Some(offset) = value.offset {
+        output.write_str(", tzinfo=datetime.timezone")?;
+        let minutes = match offset {
+            Offset::Z => 0,
+            Offset::Custom { minutes } => i32::from(minutes),
+        };
+        if minutes == 0 {
+            output.write_str(".utc")?;
+        } else {
+            output.write_str("(datetime.timedelta(")?;
+            let seconds = minutes * 60;
+            if seconds < 0 {
+                output.write_str("days=-1, ")?;
+            }
+            write!(output, "seconds={}))", seconds.rem_euclid(86_400))?;
+        }
+    }
+    output.write_char(')')?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_datetime_repr;
+
+    #[test]
+    fn toml_datetimes_use_python_constructor_representations() {
+        for (text, expected) in [
+            ("0001-05-27", "datetime.date(1, 5, 27)"),
+            ("07:32:00", "datetime.time(7, 32)"),
+            ("07:32:00.000042", "datetime.time(7, 32, 0, 42)"),
+            (
+                "1979-05-27 07:32:03+00:00",
+                "datetime.datetime(1979, 5, 27, 7, 32, 3, tzinfo=datetime.timezone.utc)",
+            ),
+            (
+                "1979-05-27 07:32:00-00:30",
+                "datetime.datetime(1979, 5, 27, 7, 32, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=84600)))",
+            ),
+        ] {
+            let mut output = String::new();
+            write_datetime_repr(text, &mut output).unwrap();
+            assert_eq!(output, expected);
+        }
     }
 }

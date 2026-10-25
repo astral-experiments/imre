@@ -1169,6 +1169,11 @@ impl Checker<'_> {
         node: &impl Ranged,
         reverse: bool,
     ) -> Result<Prepared, String> {
+        let iterable = if items {
+            iterable
+        } else {
+            self.json_iteration(iterable)
+        };
         if !reverse && iterable.ty == Type::CsvReader {
             return Ok(self.prepare_csv_reader(iterable));
         }
@@ -1204,7 +1209,7 @@ impl Checker<'_> {
             let first = fields.first().copied().unwrap_or(Type::None);
             fields.iter().all(|ty| *ty == first).then_some(first)
         });
-        let element = self.types.element(iterable.ty)
+        let element = self.types.element(iterable.ty).or_else(|| self.types.var_tuple_element(iterable.ty))
             .or(set_element)
             .or_else(|| self.types.deque_element(iterable.ty))
             .or((iterable.ty == Type::Str).then_some(Type::Str))
@@ -1233,8 +1238,10 @@ impl Checker<'_> {
         let mut acquire = vec![Statement::Assign(done, boolean(false))];
         let mut clear = vec![source, value, ready, done];
         let mut pull = Vec::new();
-        let indexed =
-            self.types.element(ty).is_some() || fields.is_some() || (reverse && ty == Type::Bytes);
+        let indexed = self.types.element(ty).is_some()
+            || self.types.var_tuple_element(ty).is_some()
+            || fields.is_some()
+            || (reverse && ty == Type::Bytes);
         if indexed {
             let cursor = self.hidden(Type::Int);
             clear.push(cursor);
@@ -1305,7 +1312,9 @@ impl Checker<'_> {
                 Expr {
                     ty: element,
                     kind: ExprKind::Builtin(
-                        if ty == Type::Bytes {
+                        if matches!(ty, Type::VarTuple(_)) {
+                            Builtin::TupleIndex
+                        } else if ty == Type::Bytes {
                             Builtin::BytesGet
                         } else if matches!(ty, Type::List(_)) {
                             Builtin::SequenceGetInBounds
@@ -2003,11 +2012,7 @@ impl Checker<'_> {
         let checked = if definition.is_some() || matches!(callback, ast::Expr::Lambda(_)) {
             None
         } else if let Some(binding) = self.local_function_binding(callback) {
-            Some(binding.target(self.source, callback)?.callback(
-                self.types,
-                self.source,
-                callback,
-            )?)
+            Some(self.local_callback(binding, callback)?)
         } else {
             Some(self.expr(callback)?)
         };
@@ -2154,11 +2159,7 @@ impl Checker<'_> {
             return self.callable_value(signature, None, None, expression);
         }
         if let Some(binding) = self.local_function_binding(expression) {
-            return binding.target(self.source, expression)?.callback(
-                self.types,
-                self.source,
-                expression,
-            );
+            return self.local_callback(binding, expression);
         }
         self.expr(expression)
     }
@@ -2200,11 +2201,15 @@ impl Checker<'_> {
                 Some(slot),
             ));
         }
-        let (kind, captured) = if let ExprKind::Callable {
-            function,
-            receiver: None,
-        } = callback.kind
-        {
+        let direct = match &callback.kind {
+            ExprKind::Callable {
+                function,
+                receiver: None,
+            }
+            | ExprKind::Builtin(Builtin::StaticFunction(function), _) => Some(*function),
+            _ => None,
+        };
+        let (kind, captured) = if let Some(function) = direct {
             self.calls.insert(function);
             (ExprKind::Call(function, args), None)
         } else {

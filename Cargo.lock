@@ -683,6 +683,7 @@ dependencies = [
 name = "imre-runtime"
 version = "0.1.2"
 dependencies = [
+ "allocator-api2",
  "base64",
  "cc",
  "compact_str",
@@ -710,7 +711,9 @@ dependencies = [
  "sha2",
  "smallvec",
  "toml",
+ "toml_datetime",
  "toml_parser",
+ "triomphe",
  "unicode-case-mapping",
 ]
 

@@ -1,4 +1,5 @@
 //! A log record owns one native Python value per attribute, including user-supplied extras.
+use crate::StrOwner;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -25,7 +26,7 @@ fn owned(word: usize, kind: u32) -> OwnedWord {
 }
 
 pub(super) fn string(s: &str) -> OwnedWord {
-    owned(Rc::into_raw(Rc::new(Str::from(s))) as usize, 3)
+    owned(StrOwner::into_raw(StrOwner::new(Str::from(s))) as usize, 3)
 }
 fn integer(n: usize) -> OwnedWord {
     owned(Int::from_usize(n).into_raw(), 2)
@@ -48,7 +49,7 @@ pub(super) fn write_display(out: &mut String, v: &OwnedWord) -> Result<()> {
         return append(out, s);
     }
     // SAFETY: v keeps the value graph rooted until the entire field is written.
-    unsafe { values::try_write_repr(&mut values::ReprWriter(out), v.word, v.kind) }
+    unsafe { values::try_write_unchecked_repr(&mut values::ReprWriter(out), v.word, v.kind) }
         .map_err(|_| Error::allocation())
 }
 
@@ -58,8 +59,10 @@ pub(super) fn display(v: &OwnedWord) -> Result<String> {
     Ok(out)
 }
 
-pub(super) fn owned_string(s: String) -> OwnedWord {
-    owned(Rc::into_raw(Rc::new(Str::from(s))) as usize, 3)
+pub(super) fn owned_string(s: String) -> Result<OwnedWord> {
+    StrOwner::try_new(Str::from(s))
+        .map(|text| owned(StrOwner::into_raw(text) as usize, 3))
+        .map_err(|_| Error::allocation())
 }
 
 pub(super) fn tuple_len(v: &OwnedWord) -> Option<usize> {
@@ -142,14 +145,14 @@ pub(super) fn brace_item(value: &OwnedWord, key: &str) -> Result<OwnedWord> {
         if let Some(item) = unsafe {
             object(value.word as *const Object)
                 .0
-                .with_mut(|s| s.dictionary_mut().logging_item(&lookup))
+                .with_mut(|s| s.dictionary_mut().subscript_value(&lookup))
         }? {
             return Ok(item);
         }
         let mut message = String::from("Formatting field not found in record: ");
         // SAFETY: lookup owns the integer or string key throughout the diagnostic.
         unsafe {
-            values::try_write_repr(
+            values::try_write_unchecked_repr(
                 &mut values::ReprWriter(&mut message),
                 lookup.word,
                 lookup.kind,
@@ -294,13 +297,16 @@ impl Record {
         let unknown_level = || -> Result<OwnedWord> {
             let mut out = String::from("Level ");
             write_display(&mut out, &level)?;
-            Ok(owned_string(out))
+            owned_string(out)
         };
         let levelname = match level.kind.raw() {
             2 => {
                 // SAFETY: level owns this Int until lookup finishes.
                 let number = unsafe { Int::borrow(level.word) };
-                owned(Rc::into_raw(super::levels::level_name(&number)) as usize, 3)
+                owned(
+                    StrOwner::into_raw(super::levels::level_name(&number)) as usize,
+                    3,
+                )
             }
             3 => {
                 // SAFETY: level is a rooted exact string.
@@ -393,7 +399,7 @@ impl Record {
             return if exact_text(msg).is_some() {
                 Ok(msg.clone())
             } else {
-                display(msg).map(owned_string)
+                display(msg).and_then(owned_string)
             };
         }
         let rendered;
@@ -403,7 +409,7 @@ impl Record {
             rendered = display(msg)?;
             &rendered
         };
-        format_arguments(fmt, args).map(owned_string)
+        format_arguments(fmt, args).and_then(owned_string)
     }
 }
 
@@ -474,8 +480,10 @@ fn percent_text(value: &OwnedWord, conversion: char, precision: Option<usize>) -
         return Ok(text);
     }
     // SAFETY: the argument roots its value graph throughout representation.
-    unsafe { values::try_write_repr(&mut values::ReprWriter(&mut text), value.word, value.kind) }
-        .map_err(|_| Error::allocation())?;
+    unsafe {
+        values::try_write_unchecked_repr(&mut values::ReprWriter(&mut text), value.word, value.kind)
+    }
+    .map_err(|_| Error::allocation())?;
     if conversion == 'a' && !text.is_ascii() {
         let mut ascii = String::new();
         let mut out = values::ReprWriter(&mut ascii);
@@ -537,6 +545,19 @@ fn star_integer(args: &mut impl Iterator<Item = OwnedWord>) -> Result<Int> {
         2 => Ok(Int(value.into_word())),
         _ => Err(Error::new(Kind::TypeError, "* wants int")),
     }
+}
+
+/// An exact scalar supplies its Python class name in a rejected conversion.
+fn scalar_name(kind: WordKind) -> Option<&'static str> {
+    Some(match kind.raw() {
+        0 => "NoneType",
+        1 => "bool",
+        2 => "int",
+        3 => "str",
+        7 => "float",
+        8 => "bytes",
+        _ => return None,
+    })
 }
 
 /// The full format supplies the Unicode character offset for invalid conversions.
@@ -617,12 +638,12 @@ fn percent_value_in<'a>(
                 // SAFETY: this arm has an integer descriptor and a live owner.
                 2 => unsafe { Int::borrow(value.word) }.big().into_owned(),
                 7 if "diu".contains(c) => {
-                    num_traits::FromPrimitive::from_f64(f64::from_bits(value.word as u64).trunc())
-                        .ok_or_else(|| {
-                        Error::new(Kind::ValueError, "cannot convert float to integer")
-                    })?
+                    crate::floats::float_to_integer(f64::from_bits(value.word as u64))?
                 }
-                3 => {
+                _ => {
+                    let Some(name) = scalar_name(value.kind) else {
+                        return Err(Error::new(Kind::TypeError, "format requires a number"));
+                    };
                     let required = if "diu".contains(c) {
                         "a real number"
                     } else {
@@ -630,10 +651,9 @@ fn percent_value_in<'a>(
                     };
                     return Err(Error::new(
                         Kind::TypeError,
-                        format!("%{c} format: {required} is required, not str"),
+                        format!("%{c} format: {required} is required, not {name}"),
                     ));
                 }
-                _ => return Err(Error::new(Kind::TypeError, "format requires a number")),
             };
             let mut digits = n.to_str_radix(if c == 'o' {
                 8
@@ -703,6 +723,11 @@ fn percent_value_in<'a>(
                         Error::new(Kind::OverflowError, "%c arg not in range(0x110000)")
                     })?
                     .to_string()
+            } else if let Some(name) = scalar_name(value.kind) {
+                return Err(Error::new(
+                    Kind::TypeError,
+                    format!("%c requires an int or a unicode character, not {name}"),
+                ));
             } else {
                 return Err(Error::new(Kind::TypeError, "%c requires int or char"));
             }
@@ -716,8 +741,13 @@ fn percent_value_in<'a>(
                     crate::floats::int_to_float(&n)?
                 }
                 1 => value.word as f64,
-                3 => return Err(Error::new(Kind::TypeError, "must be real number, not str")),
-                _ => return Err(Error::new(Kind::TypeError, "must be real number")),
+                _ => {
+                    let message = scalar_name(value.kind).map_or_else(
+                        || "must be real number".to_owned(),
+                        |name| format!("must be real number, not {name}"),
+                    );
+                    return Err(Error::new(Kind::TypeError, message));
+                }
             };
             let precision = precision.unwrap_or(6);
             let spec = format!("%{flags}{width}.{precision}{c}");
@@ -803,9 +833,9 @@ pub unsafe extern "C" fn imre_logrecord_new(
     let record = Record::new(fields.map(|(v, k)| unsafe { WordKind::new(k).acquire(v) }));
     finish(
         record.map(|record| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LogRecord(
-                Box::new(record),
-            )))))
+            crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                Storage::LogRecord(Box::new(record)),
+            ))))
         }),
         std::ptr::null(),
     )
@@ -935,7 +965,11 @@ pub unsafe extern "C" fn imre_logrecord_repr(record: *const Object) -> *const St
     // SAFETY: display only reads the live record and its rooted fields.
     let text = unsafe { with_record(record, Record::repr) };
     finish(
-        text.map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
+        text.and_then(|s| {
+            StrOwner::try_new(Str::from(s))
+                .map(StrOwner::into_raw)
+                .map_err(|_| Error::allocation())
+        }),
         std::ptr::null(),
     )
 }
@@ -991,7 +1025,8 @@ pub unsafe extern "C" fn imre_str_percent_tuple(
 
 fn percent(fmt: &Str, value: OwnedWord) -> *const Str {
     finish(
-        format_arguments(fmt.as_str(), &value).map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
+        format_arguments(fmt.as_str(), &value)
+            .map(|s| StrOwner::into_raw(StrOwner::new(Str::from(s)))),
         std::ptr::null(),
     )
 }
