@@ -517,7 +517,17 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
         _ => return Err(unsupported(&format!("file encoding {encoding}"))),
     };
     let source = if source.contains('\r') {
-        source.replace("\r\n", "\n").replace('\r', "\n")
+        let mut bytes = source.into_bytes();
+        let mut previous_cr = false;
+        bytes.retain_mut(|byte| {
+            let skip = previous_cr && *byte == b'\n';
+            previous_cr = *byte == b'\r';
+            if previous_cr {
+                *byte = b'\n';
+            }
+            !skip
+        });
+        String::from_utf8(bytes).expect("normalizing ASCII line endings preserves UTF-8")
     } else {
         source
     };
