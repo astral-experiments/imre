@@ -14,43 +14,39 @@ pub(super) struct Output {
     raw: BinaryOutput<File>,
     text: Option<crate::text_output::PendingText>,
     line_buffering: bool,
+    seekable: bool,
 }
 
 impl Output {
     pub(super) fn tell(&mut self) -> Result<u64> {
-        // BufferedWriter.tell includes pending bytes without flushing them.
+        // A partial flush already advanced the descriptor for the written prefix.
         let position = self
             .raw
-            .get_mut()
+            .inner
             .stream_position()
             .map_err(super::errno_error)?;
         position
-            .checked_add(self.raw.buffer().len() as u64)
+            .checked_add((self.raw.buffer.len() - self.raw.written) as u64)
             .ok_or_else(|| Error::new(Kind::OverflowError, "file position too large"))
     }
 
     pub(super) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
-        fn seek_error(error: io::Error) -> Error {
-            if error.raw_os_error() == Some(libc::ESPIPE) {
-                Error::new(
-                    Kind::UnsupportedOperation,
-                    "File or stream is not seekable.",
-                )
-            } else {
-                super::errno_error(error)
-            }
+        // BufferedWriter checks its FileIO's cached seekability before the
+        // flush. An unbuffered FileIO seeks directly on its current descriptor.
+        if !self.seekable && self.raw.buffer.capacity() != 0 {
+            return Err(Error::new(
+                Kind::UnsupportedOperation,
+                "File or stream is not seekable.",
+            ));
         }
-        // BufWriter::seek flushes before trying the raw descriptor. A Python
-        // BufferedWriter rejects an unseekable pipe with its buffer untouched.
-        if !self.raw.buffer().is_empty() {
-            self.raw.get_mut().stream_position().map_err(seek_error)?;
-        }
-        self.raw.seek(at).map_err(seek_error)
+        self.raw.flush_buffer().map_err(super::errno_error)?;
+        self.raw.inner.seek(at).map_err(super::errno_error)
     }
 
-    pub(super) fn new(file: File, capacity: usize, binary: bool) -> Self {
+    pub(super) fn new(mut file: File, capacity: usize, binary: bool) -> Self {
         Self {
             line_buffering: !binary && file.is_terminal(),
+            seekable: capacity != 0 && file.stream_position().is_ok(),
             raw: BinaryOutput::with_capacity(capacity, file),
             text: (!binary).then(crate::text_output::PendingText::default),
         }
@@ -62,6 +58,7 @@ impl Output {
             raw: BinaryOutput::with_capacity(capacity, file),
             text: None,
             line_buffering,
+            seekable: false,
         }
     }
 
