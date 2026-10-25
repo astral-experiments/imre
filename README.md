@@ -29,6 +29,9 @@ Hello, world!
 Imre compiles a restricted subset of Python into native executables that run
 without a Python installation.
 
+The [standard library support table](docs/stdlib.md) lists the operations and
+CPython test coverage for each module.
+
 For a complete example, Imre can build Ruff’s conformance reporter directly
 from its original Python file. The executable runs two versions of ty against
 a typing checkout and renders their differences. [Run the reporter](examples/conformance_report/README.md#run-directly-from-a-checkout).
@@ -55,6 +58,7 @@ Imre supports:
 - Read and write UTF-8 files, resolve native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
 - Stream lines from plain or gzip files and read binary inputs in bounded chunks.
 - Create scoped temporary workspaces and atomically replace completed files.
+- Use IPv4 TCP sockets on POSIX: bind and accept local connections, connect, exchange bytes, duplicate sockets, and control descriptor blocking and inheritance.
 - Run native subprocesses with captured UTF-8 output, deadlines, explicit arguments, working directories, and environment snapshots.
 
 But not:

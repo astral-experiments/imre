@@ -196,12 +196,7 @@ pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String>
 impl Reads {
     fn visit_function(&mut self, function: &ast::StmtFunctionDef) {
         let mut bound = narrowing::assigned_names(&function.body);
-        bound.extend(
-            function
-                .parameters
-                .iter_non_variadic_params()
-                .map(|p| p.name().to_string()),
-        );
+        bound.extend(closed_calls::parameters(&function.parameters).map(|p| p.name.to_string()));
         self.bound.push(bound);
         self.visit_body(&function.body);
         self.bound.pop();
@@ -541,6 +536,9 @@ impl Checker<'_> {
         let mut captures = reads.names.into_iter().collect::<Vec<_>>();
         captures.sort();
         let id = self.helpers.reserve();
+        // Eager displays share the enclosing Python frame, even when lowered to a helper.
+        let omitted_locals = self.omitted_assert_locals.clone();
+        let omitted_free = self.omitted_assert_free.clone();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -550,6 +548,8 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_locals = omitted_locals;
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.class = self.class;
         helper.class_receiver = self
