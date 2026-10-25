@@ -224,3 +224,24 @@ trace for operations whose completion alone would not establish compatibility.
 
 [Stopped child status](STOPPED.md) distinguishes a real kernel stop from the
 unchanged test's waitpid mock and records both optimization levels.
+
+### Raw pipe readiness
+
+[The original Linux readiness test](raw-pipe-readiness-linux.json) runs unchanged
+under the pinned CPython fixtures at O0 and O3. Imre launches the original data
+child, requests exactly four bytes from the raw pipe, returns `b'appl'`,
+closes the pipe through the fixture's cleanup, and reaps exit zero. Host
+`select.select` watches a descriptor for that same kernel pipe and returns the
+original stream. This occurrence is mixed: the body, assertions, and readiness
+check run on CPython.
+
+With the writer kept alive, the raw read leaves one of the five bytes ready
+in the kernel; default buffering fetches all five and host select reports no
+readiness. Both return the same four bytes to the caller. The earlier “int, or
+have a fileno()” failure came from the host adapter. The complete native body
+still stops at importing upstream test support.
+
+Run `readiness_original.py --imre ... --runtime ... --clang ... --opt-level {0,3}
+--result ...` with the pinned interpreter, Linux procfs and strace. Apply the
+pair with `readiness_evidence.py --previous <baseline> --readiness
+raw-pipe-readiness-linux.json --result evidence-linux.json`.

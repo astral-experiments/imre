@@ -77,6 +77,10 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
+                Type::Calendar(crate::ir::CalendarType::Delta) => self.instruction(format!(
+                    "call i1 @imre_calendar_truth(ptr {})",
+                    value.operand
+                )),
                 Type::ObjectValue => {
                     let bit = self.instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",
@@ -94,6 +98,13 @@ impl Emitter<'_, '_> {
                 Type::Union(_) => {
                     let byte = self.instruction(format!(
                         "call i32 @imre_union_truthy(i64 {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i32 {byte}, 0"))
+                }
+                Type::ChainMap(_) => {
+                    let byte = self.instruction(format!(
+                        "call i32 @imre_chainmap_truth(ptr {})",
                         value.operand
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
