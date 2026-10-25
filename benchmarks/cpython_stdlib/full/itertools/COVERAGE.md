@@ -18,8 +18,11 @@ Re-running all 137 primary occurrences on the tuple-display compiler after
 StringIO #928 kept every classification at O0 and O3. Three first diagnostics
 changed: the filter method now reaches `pickle` after `copy`; the groupby
 method reaches the restriction on how a group can be consumed; and the GC
-count method reaches a builtin keyword argument. The free-threading report
-was byte-identical. The [four whole-file startup checks](tuple-spread-controls-linux.json)
+count method stops while creating a subclass of `int`. With the merged
+Template and mapping support, the latter advances from the keyword in
+`dict(x=a)` to the enclosing three-argument `type` call, before the first
+`itertools.count` operation. Its role and outcome remain unchanged. The
+free-threading result is unchanged. The [four whole-file startup checks](tuple-spread-controls-linux.json)
 are separate from these method results.
 
 [coverage.py](coverage.py) copies complete original test methods and the
