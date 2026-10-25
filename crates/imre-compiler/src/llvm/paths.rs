@@ -11,12 +11,67 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            PathOperation::CheckStatPath => {
+                self.checked_line(format!(
+                    "call void @imre_path_check_stat(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            PathOperation::Stat { lstat } => {
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(returns)));
+                let follow = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_path_stat(ptr {}, i32 {follow}, i32 {}, ptr @{layout})",
+                    args[0].value.operand,
+                    u32::from(lstat)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            PathOperation::StatTime(index) => {
+                let call = format!(
+                    "call double @imre_stat_time(ptr {}, i32 {index})",
+                    args[0].value.operand
+                );
+                let operand = if index == 3 {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            PathOperation::StatExtraInt(index) => {
+                let call = format!(
+                    "call i64 @imre_stat_extra_int(ptr {}, i32 {index})",
+                    args[0].value.operand
+                );
+                let operand = if (6..=8).contains(&index) {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             PathOperation::WithName
             | PathOperation::WithStem
             | PathOperation::WithSuffix
             | PathOperation::RelativeTo => {
                 let path = &args[0].value.operand;
-                let other = self.directory_pointer(&args[1].value);
+                let other = self.optional_object_pointer(&args[1].value);
                 let call = match operation {
                     PathOperation::WithName => {
                         format!("call ptr @imre_path_with_name(ptr {path}, ptr {other})")
@@ -45,6 +100,7 @@ impl Emitter<'_, '_> {
                     "call i32 @imre_path_is_relative_to(ptr {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
+                self.check_error();
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {answer}, 0")),
@@ -148,6 +204,20 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
+            PathOperation::Link(kind) => {
+                let target = &args[1].value;
+                let tag = match target.ty {
+                    Type::Bytes => 1,
+                    Type::Union(_) => 2, // tagged str | bytes protocol result
+                    _ => 0,
+                };
+                let word = self.word(target);
+                self.checked_line(format!(
+                    "call void @imre_path_link(ptr {}, i64 {word}, i32 {tag}, i32 {})",
+                    args[0].value.operand, kind as u32,
+                ));
+                none()
+            }
             PathOperation::Mkdir => {
                 let parents = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
                 let exist_ok =
@@ -189,16 +259,21 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
-            PathOperation::OsExists
-            | PathOperation::Exists
-            | PathOperation::IsFile
-            | PathOperation::IsDir
-            | PathOperation::IsAbsolute => {
+            PathOperation::Query(query) => {
+                let follow = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let byte = self.instruction(format!(
+                    "call i32 @imre_path_query(ptr {}, i32 {}, i32 {follow})",
+                    args[0].value.operand, query as u32
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
+                    small_integer: false,
+                }
+            }
+            PathOperation::OsExists | PathOperation::IsAbsolute => {
                 let name = match operation {
                     PathOperation::OsExists => "text_exists",
-                    PathOperation::Exists => "exists",
-                    PathOperation::IsFile => "is_file",
-                    PathOperation::IsDir => "is_dir",
                     PathOperation::IsAbsolute => "is_absolute",
                     _ => unreachable!(),
                 };
@@ -211,6 +286,24 @@ impl Emitter<'_, '_> {
                     operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
                     small_integer: false,
                 }
+            }
+            PathOperation::Walk => {
+                let row = self.module.types.cursor_element(returns).unwrap();
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(row)));
+                let top_down =
+                    self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let follow = self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_path_walk(ptr {}, i32 {top_down}, i32 {follow}, ptr @{layout})",
+                    args[0].value.operand,
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
             }
             PathOperation::Iterdir | PathOperation::Glob { .. } => {
                 let path = &args[0].value.operand;
@@ -242,6 +335,8 @@ impl Emitter<'_, '_> {
                     PathOperation::JoinObject => "imre_path_join_object",
                     PathOperation::AsPosix => "imre_path_as_posix",
                     PathOperation::Text => "imre_path_text",
+                    PathOperation::Info => "imre_path_info",
+                    PathOperation::InfoRepr => "imre_path_info_repr",
                     PathOperation::Name => "imre_path_name",
                     PathOperation::CountPart => "imre_path_count_part",
                     PathOperation::Stem => "imre_path_stem",
@@ -249,6 +344,7 @@ impl Emitter<'_, '_> {
                     PathOperation::Suffixes => "imre_path_suffixes",
                     PathOperation::Parent => "imre_path_parent",
                     PathOperation::ReadBytes => "imre_path_read_bytes",
+                    PathOperation::Readlink => "imre_path_readlink",
                     PathOperation::ReadText if args.len() == 1 => "imre_path_read_text",
                     PathOperation::ReadText => "imre_path_read_text_options",
                     PathOperation::WriteText => "imre_path_write_text_options",

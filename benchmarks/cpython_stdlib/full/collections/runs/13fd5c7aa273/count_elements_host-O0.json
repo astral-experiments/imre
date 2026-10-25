@@ -1,0 +1,37 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_revision": "13fd5c7aa2738f4997e76603bcee6ff4386e4998",
+  "opt_level": 0,
+  "tests": {
+    "test.test_collections.TestCounter.test_helper_function": [
+      {
+        "observation": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "mixed",
+            "fixture": "cpython"
+          },
+          "evidence": {
+            "method_sha256": "7efa943383249c7719d6745454c7c420465d6cee55758a2cbac2c72896ac16d9",
+            "native_calls": {
+              "dict": 1
+            },
+            "host_calls": {
+              "OrderedDict": 1,
+              "CounterSubclassWithSetItem": 1,
+              "CounterSubclassWithGet": 1
+            },
+            "operation": "Imre counted the keys for the exact dict; its emitted pairs reconstruct the receiver. CPython executed the OrderedDict and both real Counter subclass operations.",
+            "fixture": "Original CPython module, class, instance, method, and unittest assertions."
+          }
+        }
+      }
+    ]
+  },
+  "failures": [],
+  "skips": [],
+  "controls": {
+    "wrong native count": "AssertionError: {'a': 6, 'b': 2, 'r': 2, 'c': 1, 'd': 1} != {'a': 5, 'r': 2, 'b': 2, 'c': 1, 'd': 1}"
+  }
+}

@@ -2,18 +2,114 @@
 
 use std::cell::RefCell;
 use std::ops::Range;
+use std::rc::Rc;
 
 use super::*;
 
+type ClassLiteral = (Option<ModuleId>, Rc<[String]>);
+
 #[derive(Default)]
 pub(super) struct ModuleValues {
+    pub(super) class_data: RefCell<class_data::Storage>,
     definitions: RefCell<HashMap<DefinitionId, (usize, Type)>>,
+    class_slots: RefCell<HashMap<(DefinitionId, usize), usize>>,
+    literal_tuples: RefCell<HashMap<ClassLiteral, usize>>,
     types: RefCell<Vec<Type>>,
     pub(super) regex_literals: RefCell<HashMap<String, regex::CaptureLayout>>,
     regex_globals: RefCell<HashMap<usize, regex::CaptureLayout>>,
 }
 
 impl ModuleValues {
+    /// Each declaration owns a single tuple for its entire class lifetime,
+    /// including references through aliases and subclasses.
+    fn initialize_class_tuples(
+        &self,
+        definition: DefinitionId,
+        class: &crate::classes::Class,
+        types: &Types,
+    ) -> Vec<Statement> {
+        let mut tuples: Vec<_> = class
+            .static_bindings
+            .values()
+            .filter_map(|value| match value {
+                crate::classes::ClassValue::Strings {
+                    owner,
+                    ordinal,
+                    values,
+                    literal,
+                } if *owner == definition => Some((*ordinal, values, *literal)),
+                _ => None,
+            })
+            .collect();
+        tuples.sort_unstable_by_key(|(ordinal, ..)| *ordinal);
+        tuples.dedup_by_key(|(ordinal, ..)| *ordinal);
+        let mut slots = self.types.borrow_mut();
+        tuples
+            .into_iter()
+            .filter_map(|(ordinal, values, literal)| {
+                let ty = types.tuple(vec![Type::Str; values.len()]);
+                let slot = slots.len();
+                // CPython shares literal constants within one compilation unit;
+                // the empty tuple is shared across units as well.
+                if literal {
+                    let key = (
+                        (!values.is_empty()).then_some(definition.module),
+                        Rc::clone(values),
+                    );
+                    let existing = *self.literal_tuples.borrow_mut().entry(key).or_insert(slot);
+                    if existing != slot {
+                        self.class_slots
+                            .borrow_mut()
+                            .insert((definition, ordinal), existing);
+                        return None;
+                    }
+                }
+                slots.push(ty);
+                assert!(
+                    self.class_slots
+                        .borrow_mut()
+                        .insert((definition, ordinal), slot)
+                        .is_none()
+                );
+                let tuple = Expr {
+                    ty,
+                    kind: ExprKind::Tuple(
+                        values
+                            .iter()
+                            .map(|value| Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Str(value.clone()),
+                            })
+                            .collect(),
+                    ),
+                };
+                Some(Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![tuple]),
+                }))
+            })
+            .collect()
+    }
+
+    pub(super) fn class_value(&self, owner: DefinitionId, ordinal: usize) -> Option<Expr> {
+        let slot = *self.class_slots.borrow().get(&(owner, ordinal))?;
+        Some(self.slot_value(slot))
+    }
+
+    pub(super) fn slot_value(&self, slot: usize) -> Expr {
+        Expr {
+            ty: self.types.borrow()[slot],
+            kind: ExprKind::Builtin(Builtin::GlobalGet(slot), vec![]),
+        }
+    }
+
+    pub(super) fn reserve(&self, ty: Type) -> usize {
+        let mut slots = self.types.borrow_mut();
+        let next = slots.len();
+        slots.push(ty);
+        next
+    }
+
     /// Resolves storage only after the defining initializer has been checked.
     pub fn get(&self, definition: DefinitionId) -> Option<(usize, Type)> {
         self.definitions.borrow().get(&definition).copied()
@@ -38,7 +134,7 @@ impl ModuleValues {
 
     pub(super) fn regex_groups(&self, pattern: &Expr) -> Option<regex::CaptureLayout> {
         match &pattern.kind {
-            ExprKind::Builtin(Builtin::RegexCompile(source), _) => {
+            ExprKind::Builtin(Builtin::RegexCompile { source, .. }, _) => {
                 self.regex_literals.borrow().get(source).cloned()
             }
             ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
@@ -58,6 +154,105 @@ struct Checkpoint {
 }
 
 impl Checker<'_> {
+    /// Execute assignments in the class namespace at the definition's source position.
+    /// A class local is visible to later initializers, but inherited names are not.
+    fn initialize_class_values(
+        &mut self,
+        definition: DefinitionId,
+        class_id: usize,
+        available: &HashSet<DefinitionId>,
+        body: &mut Vec<Statement>,
+        checkpoints: &mut Vec<Checkpoint>,
+    ) -> Result<(), String> {
+        use crate::classes::ClassValue;
+        let class = &self.classes.declarations.definitions[class_id];
+        if !class
+            .static_bindings
+            .values()
+            .any(|v| matches!(v, ClassValue::Runtime { owner, .. } if *owner == definition))
+        {
+            return self.inherit_class_data(class_id, body);
+        }
+        let mut locals = Vec::new();
+        for (ordinal, stmt) in class.node.body.iter().enumerate() {
+            let ast::Stmt::Assign(assign) = stmt else {
+                continue;
+            };
+            let [ast::Expr::Name(target)] = &*assign.targets else {
+                continue;
+            };
+            let name = target.id.as_str();
+            let start = body.len();
+            let initialized = self.globals.types.borrow().len();
+            let binding = class.static_bindings.get(name);
+            let value = match binding {
+                Some(ClassValue::Runtime { owner, ordinal: at })
+                    if *owner == definition && *at == ordinal =>
+                {
+                    if class_scoped_child(&assign.value) {
+                        return Err(error(
+                            self.source,
+                            assign.value.as_ref(),
+                            "nested scopes in a class initializer are unsupported",
+                        ));
+                    }
+                    let value = self.expr(&assign.value)?;
+                    if !class_data_type(value.ty, self.types) {
+                        return Err(error(
+                            self.source,
+                            assign.value.as_ref(),
+                            "a shared class attribute requires plain scalar or container values",
+                        ));
+                    }
+                    value
+                }
+                Some(ClassValue::String(text)) => unpacking::string(text),
+                Some(ClassValue::Strings { owner, ordinal, .. }) => {
+                    self.globals.class_value(*owner, *ordinal).unwrap()
+                }
+                _ => continue,
+            };
+            let temporary = self.hidden(value.ty);
+            body.push(Statement::Assign(temporary, value));
+            if matches!(binding, Some(ClassValue::Runtime { .. })) {
+                let value =
+                    self.class_storage_value(class_id, name, self.local(temporary), assign)?;
+                let slot = self.globals.reserve(value.ty);
+                self.globals
+                    .class_slots
+                    .borrow_mut()
+                    .insert((definition, ordinal), slot);
+                self.record_class_cell(class_id, name, slot, value.ty);
+                body.push(Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
+                }));
+            }
+            let previous = self.names.insert(name.to_owned(), temporary);
+            self.class_lexical.insert(name.to_owned());
+            self.assigned.insert(temporary);
+            locals.push((name.to_owned(), temporary, previous));
+            checkpoints.push(Checkpoint {
+                statement: definition.statement,
+                body: start..body.len(),
+                initialized,
+                definitions: available.clone(),
+                class_reads: std::mem::take(self.class_reads.get_mut()),
+            });
+        }
+        for (name, slot, previous) in locals.into_iter().rev() {
+            self.class_lexical.remove(&name);
+            if let Some(old) = previous {
+                self.names.insert(name, old);
+            } else {
+                self.names.remove(&name);
+            }
+            self.assigned.remove(&slot);
+            body.push(Statement::Clear(slot));
+        }
+        self.inherit_class_data(class_id, body)
+    }
+
     fn initialize_global(
         &mut self,
         statement: &ast::Stmt,
@@ -108,6 +303,51 @@ impl Checker<'_> {
     }
 }
 
+fn class_data_type(ty: Type, types: &Types) -> bool {
+    match ty {
+        Type::None
+        | Type::Bool
+        | Type::Int
+        | Type::Float
+        | Type::Str
+        | Type::Bytes
+        | Type::ListInt => true,
+        Type::List(_) => types.element(ty).is_some_and(|t| class_data_type(t, types)),
+        Type::Set(_) => types
+            .set_element(ty)
+            .is_some_and(|t| class_data_type(t, types)),
+        Type::Dict(_) => types
+            .mapping(ty)
+            .is_some_and(|(k, v)| class_data_type(k, types) && class_data_type(v, types)),
+        _ => false,
+    }
+}
+
+fn class_scoped_child(value: &ast::Expr) -> bool {
+    use ruff_python_ast::visitor::{Visitor, walk_expr};
+    struct Nested(bool);
+    impl<'a> Visitor<'a> for Nested {
+        fn visit_expr(&mut self, node: &'a ast::Expr) {
+            if matches!(
+                node,
+                ast::Expr::Lambda(_)
+                    | ast::Expr::ListComp(_)
+                    | ast::Expr::SetComp(_)
+                    | ast::Expr::DictComp(_)
+                    | ast::Expr::Generator(_)
+                    | ast::Expr::Named(_)
+            ) {
+                self.0 = true;
+            } else if !self.0 {
+                walk_expr(self, node);
+            }
+        }
+    }
+    let mut nested = Nested(false);
+    nested.visit_expr(value);
+    nested.0
+}
+
 pub(super) struct Initialization {
     pub module: ModuleId,
     pub function: ir::Function,
@@ -141,8 +381,57 @@ impl Initialization {
                 continue;
             }
             match statement {
-                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {
+                ast::Stmt::ClassDef(_) => {
+                    let declarations = &checker.classes.declarations;
+                    if let Some(&class) = declarations.ids.get(&definition) {
+                        body.extend(checker.globals.initialize_class_tuples(
+                            definition,
+                            &declarations.definitions[class],
+                            checker.types,
+                        ));
+                        checker.initialize_class_values(
+                            definition,
+                            class,
+                            available,
+                            &mut body,
+                            &mut checkpoints,
+                        )?;
+                    }
                     available.insert(definition);
+                    continue;
+                }
+                ast::Stmt::FunctionDef(_) => {
+                    available.insert(definition);
+                    if module.overloads.contains(&index) {
+                        let signature = &checker.functions[&definition];
+                        let original = checker.callable_value(signature, None, None, statement)?;
+                        body.push(Statement::Expr(Expr {
+                            ty: Type::OverloadStub,
+                            kind: ExprKind::Builtin(
+                                Builtin::Typing(ir::TypingOperation::Register),
+                                vec![original],
+                            ),
+                        }));
+                    }
+                    continue;
+                }
+                ast::Stmt::ImportFrom(import)
+                    if crate::modules::errno_import(statement).is_some() =>
+                {
+                    let start = body.len();
+                    body.extend(import.names.iter().map(|alias| {
+                        checker
+                            .graph
+                            .checked_builtin_import(checker.module, alias.range());
+                        checker.check_errno_import(alias.name.as_str())
+                    }));
+                    checkpoints.push(Checkpoint {
+                        statement: index,
+                        body: start..body.len(),
+                        initialized: checker.globals.types.borrow().len(),
+                        definitions: available.clone(),
+                        class_reads: std::mem::take(checker.class_reads.get_mut()),
+                    });
                     continue;
                 }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => continue,

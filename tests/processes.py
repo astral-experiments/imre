@@ -3,6 +3,7 @@
 import argparse
 import fcntl
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -72,12 +73,6 @@ REJECTED = {
     "optional_result": "result: CompletedProcess[str] | None = None\nprint(result.stdout)",
     "result_subclass": "class Custom(CompletedProcess):\n    pass",
 }
-for name, value in {
-    "stdin": "0",
-    "stdout": "1",
-    "stderr": "2",
-}.items():
-    REJECTED[f"unsupported_{name}"] = f"run(['command'], capture_output=True, encoding='utf-8', {name}={value})"
 for name, value in {"args": "['other']", "returncode": "0", "stdout": "'text'", "stderr": "'text'"}.items():
     REJECTED[f"write_{name}"] = f"result = {CALL}\nresult.{name} = {value}"
 REJECTED["write_error_field"] = "error: Exception = ValueError('message')\nerror.stdout = 'text'"
@@ -161,6 +156,7 @@ def run(
     limited: bool = False,
     empty_name: bool = False,
     invalid: tuple[bytes, bytes] | None = None,
+    high_fds: bool = False,
 ):
     environment = files.environment()
     environment.update(IMRE_PROCESS_PARENT="inherited λ", IMRE_PROCESS_OVERRIDE="parent")
@@ -172,6 +168,21 @@ def run(
     if invalid is not None:
         environment = {os.fsencode(key): os.fsencode(value) for key, value in environment.items()}
         environment[invalid[0]] = invalid[1]
+    if high_fds:
+        # Fill the target parent's descriptor table across exec, without
+        # changing the test runner's own soft limit or open files.
+        prepare = """import os, resource, sys
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+if soft != resource.RLIM_INFINITY and soft < 1060:
+    resource.setrlimit(resource.RLIMIT_NOFILE, (1060, hard))
+while True:
+    fd = os.open(os.devnull, os.O_RDONLY)
+    os.set_inheritable(fd, True)
+    if fd >= 1030:
+        break
+os.execv(sys.argv[1], sys.argv[1:])
+"""
+        command = [sys.executable, "-c", prepare, *command]
     return subprocess.run(
         command,
         cwd=directory,
@@ -183,6 +194,18 @@ def run(
         pass_fds=() if descriptor is None else (descriptor,),
         preexec_fn=files.descriptor_limit if limited else None,
     )
+
+
+def unobserved_children(result):
+    """Match emitted warning PIDs to each operation; PIDs and source filenames vary."""
+    assert result.returncode == 0, result
+    lines = result.stdout.splitlines()
+    assert lines[-1] == b"invalid action: 'invented'", result
+    pids = dict(zip(lines[:-1:2], lines[1:-1:2], strict=True))
+    assert set(pids) == {b"default", b"live", b"exited", b"waited", b"polled", b"other-category", b"ignored"}
+    emitted = re.findall(rb"ResourceWarning: subprocess (\d+) is still running", result.stderr)
+    assert emitted == [pids[key] for key in (b"live", b"exited", b"other-category")], result
+    assert not re.search(rb"(?:Error|Sanitizer|panicked):", result.stderr), result
 
 
 def main() -> None:
@@ -230,9 +253,12 @@ def main() -> None:
                     "limited": name in {"cleanup", "stdin_fds", "timeouts"},
                     "descriptor": descriptor if name == "stdin_fds" else None,
                     "empty_name": name == "environment",
+                    "high_fds": name == "select_high_fds",
                 }
                 reference = run([python, "-E", "-B", str(source), *arguments], reference_dir, **options)
-                if name == "check_output":
+                if name == "unobserved_child":
+                    unobserved_children(reference)
+                elif name == "check_output":
                     assert reference.returncode == 0 and reference.stderr == b"inherited", reference
                 else:
                     files.check_result(reference, None, f"CPython {name}")
@@ -246,11 +272,14 @@ def main() -> None:
                     native_dir = project / f"imre-O{level}" / "work"
                     seed(native_dir, python)
                     actual = run([str(binary), *arguments], native_dir, **options)
-                    if name == "check_output":
+                    if name == "unobserved_child":
+                        unobserved_children(actual)
+                    elif name == "check_output":
                         assert actual.returncode == 0 and actual.stderr == reference.stderr, actual
                     else:
                         files.check_result(actual, None, f"Imre {name} O{level}")
-                    assert actual.stdout == reference.stdout, (name, level, actual.stdout, reference.stdout)
+                    if name != "unobserved_child":
+                        assert actual.stdout == reference.stdout, (name, level, actual.stdout, reference.stdout)
                     assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
                     checks += 1
         for name, source in REJECTED.items():

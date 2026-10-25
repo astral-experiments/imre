@@ -10,6 +10,56 @@ struct Expected {
 }
 
 impl Checker<'_> {
+    /// Read the concrete case's class metadata even when a fixture receives a base-typed case.
+    pub(super) fn testcase_class_text(
+        &mut self,
+        attribute: &ast::ExprAttribute,
+    ) -> Result<Option<Expr>, String> {
+        let name = attribute.attr.as_str();
+        let Some(owner) = attribute.value.as_attribute_expr() else {
+            return Ok(None);
+        };
+        if owner.attr.as_str() != "__class__" || !matches!(name, "__module__" | "__qualname__") {
+            return Ok(None);
+        }
+        let receiver = self.expr(&owner.value)?;
+        let Type::Class(base) = receiver.ty else {
+            return Ok(None);
+        };
+        if !self.unittest_case(base) {
+            return Ok(None);
+        }
+        self.dispatch_record(base, receiver, attribute, |checker, class, _| {
+            let record = &checker.classes.declarations.definitions[class];
+            if record
+                .methods
+                .iter()
+                .any(|m| m.name.as_str() == "__class__")
+                || record.fields.iter().any(|f| f.name == "__class__")
+                || record.static_bindings.contains_key("__class__")
+                || record.static_bindings.contains_key(name)
+            {
+                return Err(error(
+                    checker.source,
+                    attribute,
+                    "custom TestCase class metadata requires its original descriptor",
+                ));
+            }
+            let module = &checker.graph.modules[record.definition.module];
+            let text = if name == "__qualname__" {
+                record.name.as_str()
+            } else if record.definition.module == checker.graph.entry {
+                "__main__"
+            } else if module.bundled && module.name == "unittest" && record.name == "TestCase" {
+                "unittest.case"
+            } else {
+                module.name.as_str()
+            };
+            Ok(unpacking::string(text))
+        })
+        .map(Some)
+    }
+
     pub(super) fn unittest_case(&self, class: usize) -> bool {
         let classes = &self.classes.declarations.definitions;
         std::iter::once(&class)
@@ -171,6 +221,7 @@ impl Checker<'_> {
                 ("tomllib", "TOMLDecodeError"),
                 ("json", "JSONDecodeError"),
                 ("csv", "Error"),
+                ("socket", "gaierror"),
             ]
             .into_iter()
             .find(|(module, name)| symbol.exported_by(module, name))?;
@@ -277,9 +328,23 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         class: usize,
         receiver: &Expr,
+        name: &str,
     ) -> Result<Option<Expr>, String> {
-        if !self.unittest_case(class) || call.arguments.args.len() > 1 {
+        if !self.unittest_case(class) {
             return Ok(None);
+        }
+        let regex = name == "assertRaisesRegex";
+        if regex && call.arguments.args.len() > 2 {
+            return Err(error(
+                self.source,
+                call,
+                "callable assertRaisesRegex requires native callback argument forwarding",
+            ));
+        }
+        if !regex && call.arguments.args.len() > 1 {
+            return self
+                .unittest_callable_raises(call, class, receiver)
+                .map(Some);
         }
         let this = call
             .func
@@ -311,9 +376,18 @@ impl Checker<'_> {
             .first()
             .map(|value| self.unittest_expected(value, &mut body, this))
             .transpose()?;
+        let mut pattern = if regex {
+            call.arguments
+                .args
+                .get(1)
+                .map(|arg| self.unittest_pattern(arg, &mut body, &mut clear))
+                .transpose()?
+        } else {
+            None
+        };
         let mut msg_slot = None;
         let mut unexpected = None;
-        let mut duplicate = false;
+        let mut duplicate = None;
         for keyword in &call.arguments.keywords {
             let key = keyword
                 .arg
@@ -322,8 +396,16 @@ impl Checker<'_> {
                 .as_str();
             match key {
                 "expected_exception" => {
-                    duplicate = expected.is_some();
+                    if expected.is_some() {
+                        duplicate.get_or_insert(key);
+                    }
                     expected = Some(self.unittest_expected(&keyword.value, &mut body, this)?);
+                }
+                "expected_regex" if regex => {
+                    if pattern.is_some() {
+                        duplicate.get_or_insert(key);
+                    }
+                    pattern = Some(self.unittest_pattern(&keyword.value, &mut body, &mut clear)?);
                 }
                 "msg" => {
                     let value = self.expr(&keyword.value)?;
@@ -338,17 +420,30 @@ impl Checker<'_> {
                 }
             }
         }
-        let error = if duplicate {
-            Some(
-                "TestCase.assertRaises() got multiple values for argument 'expected_exception'"
-                    .into(),
-            )
+        let binding_failed =
+            duplicate.is_some() || expected.is_none() || regex && pattern.is_none();
+        let error = if let Some(key) = duplicate {
+            Some(format!(
+                "TestCase.{name}() got multiple values for argument '{key}'"
+            ))
+        } else if regex && expected.is_none() && pattern.is_none() {
+            Some(format!(
+                "TestCase.{name}() missing 2 required positional arguments: 'expected_exception' and 'expected_regex'"
+            ))
         } else if expected.is_none() {
-            Some("TestCase.assertRaises() missing 1 required positional argument: 'expected_exception'".into())
+            Some(format!(
+                "TestCase.{name}() missing 1 required positional argument: 'expected_exception'"
+            ))
+        } else if regex && pattern.is_none() {
+            Some(format!(
+                "TestCase.{name}() missing 1 required positional argument: 'expected_regex'"
+            ))
+        } else if let Some((_, Some(error))) = pattern {
+            Some(error.into())
         } else if expected.as_ref().is_some_and(Option::is_none) {
-            Some(
-                "assertRaises() arg 1 must be an exception type or tuple of exception types".into(),
-            )
+            Some(format!(
+                "{name}() arg 1 must be an exception type or tuple of exception types"
+            ))
         } else {
             unexpected
                 .map(|key| format!("'{key}' is an invalid keyword argument for this function"))
@@ -377,6 +472,41 @@ impl Checker<'_> {
                     .collect(),
             ),
         };
+        let mut pattern = pattern
+            .and_then(|(slot, _)| slot)
+            .filter(|_| !binding_failed);
+        if let Some(slot) = pattern
+            && self.local(slot).ty != Type::RegexPattern
+        {
+            // Python evaluates all arguments before re.compile inside unittest.
+            // A failed signature binding never enters the assertion at all.
+            let compiled = self.hidden(Type::RegexPattern);
+            body.push(Statement::Assign(
+                compiled,
+                Expr {
+                    ty: Type::RegexPattern,
+                    kind: ExprKind::Builtin(
+                        Builtin::UnittestCompilePattern,
+                        vec![Self::string_value(self.local(slot))],
+                    ),
+                },
+            ));
+            clear.push(compiled);
+            pattern = Some(compiled);
+        }
+        let spelling = pattern.map_or_else(
+            || unpacking::string(""),
+            |slot| Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::RegexSpelling, vec![self.local(slot)]),
+            },
+        );
+        let optional_pattern = self.types.optional(Type::RegexPattern);
+        let pattern = self.coerce(
+            pattern.map_or_else(absent, |slot| self.local(slot)),
+            optional_pattern,
+            call,
+        )?;
         let value = Expr {
             ty: Type::Class(context),
             kind: ExprKind::Construct {
@@ -387,6 +517,8 @@ impl Checker<'_> {
                     unpacking::string(label),
                     msg,
                     error,
+                    pattern,
+                    spelling,
                 ]),
             },
         };
@@ -398,6 +530,386 @@ impl Checker<'_> {
                 clear,
             },
         }))
+    }
+
+    /// Evaluate the pattern once, before the exception context is entered. A
+    /// compiled value retains its flags and original Python spelling.
+    fn unittest_pattern(
+        &mut self,
+        arg: &ast::Expr,
+        body: &mut Vec<Statement>,
+        clear: &mut Vec<usize>,
+    ) -> Result<(Option<usize>, Option<&'static str>), String> {
+        let value = if matches!(arg, ast::Expr::StringLiteral(_)) {
+            self.fixed_regex(arg, false)?
+        } else {
+            self.expr(arg)?
+        };
+        match value.ty {
+            Type::RegexPattern | Type::Str | Type::StrLiteral(_) => {
+                let slot = self.hidden(value.ty);
+                body.push(Statement::Assign(slot, value));
+                clear.push(slot);
+                Ok((Some(slot), None))
+            }
+            Type::None => {
+                body.push(Statement::Expr(value));
+                Ok((None, None))
+            }
+            Type::Bytes => Err(error(
+                self.source,
+                arg,
+                "native exception assertions do not support bytes regex patterns yet",
+            )),
+            _ => {
+                body.push(Statement::Expr(value));
+                Ok((
+                    None,
+                    Some("first argument must be string or compiled pattern"),
+                ))
+            }
+        }
+    }
+
+    /// Capture a forwarded value before entering the callback's exception
+    /// handler. Reads from these synthetic locals cannot repeat user code.
+    fn unittest_argument(
+        &mut self,
+        arg: &ast::Expr,
+        body: &mut Vec<Statement>,
+        locals: &mut Vec<(String, usize)>,
+        discarded: bool,
+    ) -> Result<ast::Expr, String> {
+        // A rejected call still constructs its arguments. An unused empty
+        // container has no element from which to infer a storage layout.
+        let value = match arg {
+            ast::Expr::Dict(d) if discarded && d.items.is_empty() => {
+                self.expr_expected(arg, self.types.dict(Type::Str, Type::Int))?
+            }
+            ast::Expr::List(l) if discarded && l.elts.is_empty() => {
+                self.expr_expected(arg, Type::ListInt)?
+            }
+            _ => self.expr(arg)?,
+        };
+        let slot = self.hidden(value.ty);
+        let name = format!("@unittest_arg{slot}");
+        self.names.insert(name.clone(), slot);
+        self.assigned.insert(slot);
+        body.push(Statement::Assign(slot, value));
+        locals.push((name.clone(), slot));
+        Ok(ast::Expr::Name(ast::ExprName {
+            node_index: ast::AtomicNodeIndex::NONE,
+            range: arg.range(),
+            id: name.into(),
+            ctx: ast::ExprContext::Load,
+        }))
+    }
+
+    /// Raise at the Python binding or invocation boundary, after its inputs have
+    /// run. A regular call also gives expression scopes a normal cleanup edge.
+    fn unittest_call_type_error(&mut self, message: String) -> Statement {
+        let module = self
+            .graph
+            .modules
+            .iter()
+            .find(|m| m.bundled && m.name == "unittest")
+            .unwrap();
+        let Binding::Definition(def) = module.bindings["_raise_call_type_error"] else {
+            unreachable!()
+        };
+        let id = self.functions[&def].id;
+        self.calls.insert(id);
+        Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(
+                id,
+                ir::CallArgs::positional(vec![unpacking::string(message)]),
+            ),
+        })
+    }
+
+    /// Callable assertRaises catches the invocation only, after the case,
+    /// category, bound receiver and all forwarded arguments have been evaluated.
+    fn unittest_callable_raises(
+        &mut self,
+        call: &ast::ExprCall,
+        class: usize,
+        receiver: &Expr,
+    ) -> Result<Expr, String> {
+        let args = &call.arguments.args;
+        if args.iter().any(ast::Expr::is_starred_expr) {
+            return Err(error(
+                self.source,
+                call,
+                "callable assertRaises requires explicit positional arguments",
+            ));
+        }
+        let this = call
+            .func
+            .as_attribute_expr()
+            .and_then(|a| a.value.as_name_expr())
+            .map(|n| (n.id.as_str(), class));
+        let case = self.hidden(receiver.ty);
+        let mut body = vec![Statement::Assign(case, receiver.clone())];
+        let expected = self.unittest_expected(&args[0], &mut body, this)?;
+        let mut locals = Vec::new();
+        let checked = (|| {
+            let target = &args[1];
+            let mut callee = target.clone();
+            let lexical = target
+                .as_name_expr()
+                .is_some_and(|n| self.names.contains_key(n.id.as_str()));
+            let binding = if lexical { None } else { self.resolve(target) };
+            let mut noncallable = None;
+            let mut binding_error = None;
+            let mut lambda_invocation = None;
+            let nargs = args.len() - 2;
+            let keys = &call.arguments.keywords;
+            let label = match binding {
+                Some(Binding::Definition(def)) => {
+                    match &self.graph.modules[def.module].parsed.syntax().body[def.statement] {
+                        ast::Stmt::FunctionDef(f) => {
+                            binding_error = call_binding_errors::arity_error(f, None, nargs, keys);
+                            f.name.to_string()
+                        }
+                        ast::Stmt::ClassDef(c) => c.name.to_string(),
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "assertRaises needs a known callable name",
+                            ));
+                        }
+                    }
+                }
+                Some(Binding::Intrinsic(_)) => {
+                    if let Some(attr) = target.as_attribute_expr() {
+                        attr.attr.to_string()
+                    } else {
+                        let spelling = target
+                            .as_name_expr()
+                            .ok_or_else(|| {
+                                error(self.source, target, "unknown intrinsic callback")
+                            })?
+                            .id
+                            .as_str();
+                        self.graph.modules[self.module]
+                            .parsed
+                            .syntax()
+                            .body
+                            .iter()
+                            .find_map(|stmt| {
+                                let ast::Stmt::ImportFrom(import) = stmt else {
+                                    return None;
+                                };
+                                import
+                                    .names
+                                    .iter()
+                                    .find(|a| {
+                                        a.asname.as_ref().unwrap_or(&a.name).as_str() == spelling
+                                    })
+                                    .map(|a| a.name.to_string())
+                            })
+                            .unwrap_or_else(|| spelling.to_owned())
+                    }
+                }
+                _ => match &mut callee {
+                    ast::Expr::Attribute(attr) => 'method: {
+                        let unbound = if attr
+                            .value
+                            .as_name_expr()
+                            .is_some_and(|n| self.names.contains_key(n.id.as_str()))
+                        {
+                            None
+                        } else if let Some(Binding::Definition(def)) = self.resolve(&attr.value) {
+                            self.classes.declarations.ids.get(&def).copied()
+                        } else {
+                            None
+                        };
+                        let owner = if let Some(class) = unbound {
+                            class
+                        } else {
+                            let root =
+                                self.unittest_argument(&attr.value, &mut body, &mut locals, false)?;
+                            let slot = locals.last().unwrap().1;
+                            // Sealed poll methods have no property lookup or user callback.
+                            if self.locals[slot] == Type::Poll
+                                && matches!(
+                                    attr.attr.as_str(),
+                                    "poll" | "register" | "modify" | "unregister"
+                                )
+                            {
+                                *attr.value = root;
+                                break 'method attr.attr.to_string();
+                            }
+                            let Type::Class(owner) = self.locals[slot] else {
+                                return Err(error(
+                                    self.source,
+                                    target,
+                                    "assertRaises needs a fixed native method receiver",
+                                ));
+                            };
+                            *attr.value = root;
+                            owner
+                        };
+                        if self.classes.methods[owner]
+                            .get(attr.attr.as_str())
+                            .is_some_and(|s| {
+                                s.method.is_some_and(|m| {
+                                    m.kind(&self.classes.declarations)
+                                        == crate::classes::MethodKind::Property
+                                })
+                            })
+                        {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "assertRaises needs the property to resolve its callable before the arguments",
+                            ));
+                        }
+                        binding_error = self.assertion_callback_arity(
+                            owner,
+                            attr.attr.as_str(),
+                            unbound.is_none(),
+                            nargs,
+                            keys,
+                        );
+                        attr.attr.to_string()
+                    }
+                    ast::Expr::Lambda(lambda) => {
+                        if lambda.parameters.is_none() && nargs == 0 && keys.is_empty() {
+                            // A direct zero-argument lambda needs no escaping closure.
+                            // Read its captured slots when the protected invocation runs.
+                            lambda_invocation = Some(self.pull_lambda(lambda)?);
+                        } else {
+                            callee =
+                                self.unittest_argument(target, &mut body, &mut locals, false)?;
+                        }
+                        "<lambda>".into()
+                    }
+                    ast::Expr::Name(name) if !lexical && binding.is_none() => name.id.to_string(),
+                    _ => {
+                        callee = self.unittest_argument(target, &mut body, &mut locals, false)?;
+                        let ty = self.locals[locals.last().unwrap().1];
+                        if let Some(name) = self.stored_assertion_name(ty) {
+                            name.to_owned()
+                        } else {
+                            let name = match ty {
+                                Type::None => "NoneType",
+                                Type::Bool => "bool",
+                                Type::Int => "int",
+                                Type::Float => "float",
+                                Type::Str | Type::StrLiteral(_) => "str",
+                                Type::Bytes => "bytes",
+                                Type::List(_) | Type::ListInt => "list",
+                                Type::Dict(_) => "dict",
+                                Type::Set(_) => "set",
+                                Type::Tuple(_) => "tuple",
+                                _ => {
+                                    return Err(error(
+                                        self.source,
+                                        target,
+                                        "assertRaises needs a known function or bound method",
+                                    ));
+                                }
+                            };
+                            noncallable = Some(format!("'{name}' object is not callable"));
+                            String::new()
+                        }
+                    }
+                },
+            };
+            let mut forwarded = call.arguments.clone();
+            let discarded = noncallable.is_some()
+                || binding_error.is_some()
+                || expected.is_none()
+                || keys
+                    .iter()
+                    .any(|kw| kw.arg.as_deref() == Some("expected_exception"));
+            forwarded.args = args[2..]
+                .iter()
+                .map(|arg| self.unittest_argument(arg, &mut body, &mut locals, discarded))
+                .collect::<Result<_, _>>()?;
+            let mut duplicate = false;
+            for kw in &mut forwarded.keywords {
+                if kw.arg.as_deref() == Some("expected_exception") {
+                    self.unittest_expected(&kw.value, &mut body, this)?;
+                    duplicate = true;
+                } else {
+                    kw.value =
+                        self.unittest_argument(&kw.value, &mut body, &mut locals, discarded)?;
+                }
+            }
+            if duplicate || expected.is_none() {
+                let message = if duplicate {
+                    "TestCase.assertRaises() got multiple values for argument 'expected_exception'"
+                } else {
+                    "assertRaises() arg 1 must be an exception type or tuple of exception types"
+                };
+                body.push(self.unittest_call_type_error(message.into()));
+                return Ok(());
+            }
+            let expected = expected.unwrap();
+            let action = if let Some(message) = noncallable.or(binding_error) {
+                self.unittest_call_type_error(message)
+            } else if let Some(invocation) = lambda_invocation {
+                Statement::Expr(invocation)
+            } else {
+                Statement::Expr(self.call(&ast::ExprCall {
+                    node_index: ast::AtomicNodeIndex::NONE,
+                    range_start: call.range_start,
+                    func: Box::new(callee),
+                    arguments: forwarded,
+                })?)
+            };
+            let missing = self.classes.methods[class]["_raise_missing_callable"].id;
+            self.calls.insert(missing);
+            let failure = Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Call(
+                    missing,
+                    ir::CallArgs::positional(vec![
+                        self.local(case),
+                        unpacking::string(expected.label),
+                        unpacking::string(label),
+                    ]),
+                ),
+            });
+            if expected.kinds.is_empty() {
+                // An empty tuple never catches, unlike a bare except clause.
+                body.extend([action, failure]);
+            } else {
+                body.push(Statement::Try {
+                    body: vec![action],
+                    handlers: vec![ir::ExceptHandler {
+                        kinds: expected.kinds,
+                        name: None,
+                        body: vec![],
+                    }],
+                    orelse: vec![failure],
+                    finalbody: vec![],
+                });
+            }
+            Ok(())
+        })();
+        let mut clear = vec![case];
+        for (name, slot) in locals {
+            self.names.remove(&name);
+            self.assigned.remove(&slot);
+            clear.push(slot);
+        }
+        checked?;
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body,
+                clear,
+                value: Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                }),
+            },
+        })
     }
 
     /// A normal exit (including return, break and continue) must raise an
@@ -470,6 +982,15 @@ impl Checker<'_> {
             self.coerce(self.local(exc), self.classes.fields[class][caught], item)?,
         );
         let missing = self.classes.methods[class]["_missing"].id;
+        let check = self.classes.methods[class]["_check_regex"].id;
+        self.calls.insert(check);
+        let search = Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(
+                check,
+                ir::CallArgs::positional(vec![self.local(root), self.local(exc)]),
+            ),
+        });
         self.calls.insert(missing);
         let fail = Statement::Expr(Expr {
             ty: Type::None,
@@ -482,7 +1003,7 @@ impl Checker<'_> {
                 name: Some(exc),
                 body: vec![
                     Statement::Assign(exceptional, flag(true)),
-                    Statement::If(matches, vec![store], vec![Statement::Raise(None)]),
+                    Statement::If(matches, vec![store, search], vec![Statement::Raise(None)]),
                 ],
             }],
             orelse: vec![],

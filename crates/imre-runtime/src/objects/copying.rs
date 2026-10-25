@@ -101,8 +101,12 @@ impl Graph {
                 }
                 6 => {
                     let record = source.word as *const usize;
-                    // SAFETY: admission allows only plain tuples with known fields.
+                    // SAFETY: admission allows only scalar structs and plain tuples.
                     let metadata = unsafe { descriptor(record) };
+                    if metadata.is_value_struct() {
+                        push(&mut results, source)?;
+                        continue;
+                    }
                     let len = metadata.length;
                     work.try_reserve(len.checked_add(1).ok_or_else(Error::allocation)?)
                         .map_err(|_| Error::allocation())?;
@@ -146,6 +150,9 @@ impl Graph {
             let contents = unsafe {
                 source.0.with(|storage| match storage {
                     Storage::Sequence(words) => {
+                        if let Some(rows) = words.rows() {
+                            return Ok(Storage::Sequence(rows.repeat(1)?));
+                        }
                         let words = words.resolved();
                         let mut out = Words::new(words.kind.raw());
                         out.values
@@ -158,10 +165,14 @@ impl Graph {
                         out.update_header();
                         Ok(Storage::Sequence(out))
                     }
-                    Storage::Dictionary(map) => Ok(Storage::Dictionary(Box::new(
-                        map.copy_values(|value| self.copy(value))?,
+                    Storage::Dictionary(map) => {
+                        Ok(Storage::Dictionary(super::mappings::TableOwner::new(
+                            map.copy_values(|value| self.copy(value))?,
+                        )))
+                    }
+                    Storage::Set(set) => Ok(Storage::Set(super::mappings::TableOwner::new(
+                        set.copy_keys()?,
                     ))),
-                    Storage::Set(set) => Ok(Storage::Set(Box::new(set.copy_keys()?))),
                     _ => unreachable!("deep-copy admission requires an exact builtin container"),
                 })
             }?;
@@ -181,7 +192,7 @@ impl Graph {
 ///
 /// # Safety
 /// The word is a live value of the supplied representation. Generic objects
-/// must be closed lists, mappings or sets; records must be ordinary tuples.
+/// must be closed lists, mappings or sets; records must be plain tuples or scalar structs.
 /// Dictionary and set keys must be recursively immutable under deepcopy.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_deep_copy(source: usize, kind: u32) -> usize {

@@ -4,6 +4,7 @@ import argparse
 from contextlib import chdir
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -15,9 +16,16 @@ from suite_evidence import reference_cases, roles, write_reports
 from suite_inventory import load_suite, verify_interpreter_tests
 from suite_native import Toolchain, run_evidence
 from upstream import verify_upstream
+from body_report import report_blockers
 import native_lexical
+from native_basics import basic_adapters
 from native_traversal import traversal_adapters
 from native_components import component_adapters
+from native_walk import walk_adapters
+from native_metadata import metadata_adapters
+from native_stat import stat_adapters
+from native_segments import segment_adapters
+from native_samefile import samefile_adapters
 
 
 def skip_source(case_id, reason):
@@ -115,11 +123,16 @@ def file_adapters(tools, work):
 
 def main():
     cohorts = {'lexical': lexical_adapters, 'files': file_adapters, 'traversal': traversal_adapters,
-               'components': component_adapters}
+               'components': component_adapters, 'walk': walk_adapters, 'basics': basic_adapters,
+               'metadata': metadata_adapters, 'stat': stat_adapters, 'segments': segment_adapters,
+               'samefile': samefile_adapters}
     parser = argparse.ArgumentParser(description=__doc__)
     for option in ('imre', 'runtime', 'clang', 'result'):
         parser.add_argument('--' + option, required=True, type=Path)
     parser.add_argument('--cpython-source', type=Path)
+    parser.add_argument('--imre-commit', help='full source commit used to build both supplied native artifacts')
+    parser.add_argument('--body-report', type=Path,
+                        help='use the complete O0/O3 whole-method probe from the same compiler for remaining IDs')
     parser.add_argument('--cohort', choices=cohorts, action='append')
     args = parser.parse_args()
     if sys.version_info[:3] != (3, 14, 5) or sys.platform != 'linux':
@@ -133,6 +146,11 @@ def main():
     if reference['cpython_commit'] != verify_upstream():
         raise ValueError('reference release does not match vendored tests')
     imre, runtime, clang = (p.resolve() for p in (args.imre, args.runtime, args.clang))
+    body_report = json.loads(args.body_report.read_bytes()) if args.body_report else None
+    if args.imre_commit and not re.fullmatch(r'[0-9a-f]{40}', args.imre_commit):
+        parser.error('--imre-commit requires a full lowercase Git object ID')
+    if body_report and body_report['imre_commit'] != args.imre_commit:
+        parser.error('--body-report requires a matching --imre-commit for the supplied compiler and runtime')
     reports = []
     with tempfile.TemporaryDirectory(prefix='pl-') as tmp, chdir(tmp):
         for level in (0, 3):
@@ -145,13 +163,19 @@ def main():
                 if adapters.keys() & selected.keys():
                     raise ValueError(f'duplicate method in {cohort} cohort')
                 adapters.update(selected)
-            report = run_evidence(load_suite('test.test_pathlib'), adapters, reference, level,
+            preflight = report_blockers(body_report, reference, level, adapters) if body_report else None
+            report = run_evidence(load_suite('test.test_pathlib'), adapters, reference, level, preflight=preflight,
                                   exceptions=exceptions(reference, level))
+            if args.imre_commit:
+                for row in report['records']:
+                    if row['outcome'] == 'pass':
+                        row['evidence']['imre_commit'] = args.imre_commit
             print(f"O{level}: {report['counts']}", flush=True)
             reports.append(report)
     write_reports(args.result, reports, reference)
     failures = [r for report in reports for r in report['records']
-                if r['outcome'] not in ('pass', 'not-run')]
+                if r['outcome'] not in ('pass', 'not-run')
+                and not (r['outcome'] == 'blocked' and 'whole_method_probe' in r['evidence'])]
     if failures:
         raise RuntimeError([(r['id'], r.get('reason')) for r in failures])
 

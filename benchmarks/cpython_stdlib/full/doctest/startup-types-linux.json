@@ -1,0 +1,74 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "4c0057e8d70b808f9259f885f95725f93d8b578766468881acbd0c5ed134ec9e",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "vendored and pinned Git Lib/test",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_itertools",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:4:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:277:63: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:4:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:277:63: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:7:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\""
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:7:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+    }
+  ],
+  "provenance": {
+    "main": "dd54215249c3df91bc69cbd721e1fd0b59526c48",
+    "doctest_pr": 646,
+    "doctest_head": "f1cb878a7e6d20a480972c1393ce0f16b7d302b9",
+    "prospective_merge_tree": "f964ac4cc13601dd1a76b99615dcae5bc7f0a109",
+    "hosted_check": "https://github.com/astral-sh/imre/actions/runs/40175929298/job/121116474512",
+    "normalization": "Only the randomly generated staging directory before /Lib is replaced by <staged>."
+  }
+}

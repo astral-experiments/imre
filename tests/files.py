@@ -16,6 +16,7 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "string_io_import": "from io import StringIO\nStringIO()",
     "concat_write_order": r"""
 from typing import TextIO
 
@@ -118,6 +119,7 @@ with open("buffered.txt", "w", encoding="utf-8") as writer:
     with open("buffered.txt", "rb") as reader:
         print(len(reader.read()))
 """,
+    "splitlines_argument": 'print("a\\nb".splitlines(True))',
     "splitlines_and_formatting": r"""
 def nothing() -> None:
     print("None argument evaluated")
@@ -372,6 +374,7 @@ class Group:
     first: Leaf
     direct: BinaryIO
     nested: list[Leaf]
+    mapped: dict[tuple[int, int], Leaf]
     pair: tuple[Leaf, Leaf]
     last: Leaf
 
@@ -384,7 +387,10 @@ def group(shared: bool) -> Group:
     first = Leaf(writer(b"A"))
     last = first if shared else Leaf(writer(b"D"))
     nested = [Leaf(writer(b"C")), Leaf(writer(b"E")), Leaf(writer(b"H")), Leaf(writer(b"I"))]
-    return Group(first, writer(b"B"), nested,
+    mapped: dict[tuple[int, int], Leaf] = {}
+    for i, mark in enumerate([b"J", b"K", b"L", b"M"]):
+        mapped[(i, i + 1)] = Leaf(writer(mark))
+    return Group(first, writer(b"B"), nested, mapped,
                  (Leaf(writer(b"F")), Leaf(writer(b"G"))), last)
 
 def discard(shared: bool) -> None:
@@ -569,7 +575,6 @@ REJECTED = {
     "seek": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.seek(0)',
     "write_type": 'with open("output.txt", "w", encoding="utf-8") as stream:\n    stream.write(1)',
     "closed_assignment": 'stream = open("input.txt", "r", encoding="utf-8")\nstream.closed = False',
-    "splitlines_argument": 'print("a\\nb".splitlines(True))',
     "str_resource_list": "print(str([open('input.txt', 'r')]))",
     "text_constructor": "from typing import TextIO\nTextIO()",
     "decode_constructor": 'raise UnicodeDecodeError("not a valid constructor")',
@@ -577,7 +582,8 @@ REJECTED = {
     "tuple_target": 'with open("input.txt", "r", encoding="utf-8") as (left, right):\n    pass',
     "attribute_target": 'from typing import TextIO\nclass Box:\n    stream: TextIO\n    def __init__(self, stream: TextIO) -> None:\n        self.stream = stream\nbox = Box(open("input.txt", "r", encoding="utf-8"))\nwith box.stream as box.stream:\n    pass',
     "sys_member": "import sys\nprint(sys.path)",
-    "io_member": "from io import StringIO\nStringIO()",
+    "io_unknown_member": "from io import TextCapture\nTextCapture()",
+    "string_io_binary_input": "from io import StringIO\nStringIO(b'input')",
     "typing_member": "from typing import Any\nvalue: Any = 1",
     "module_rebind": 'import sys\nsys.argv = ["replacement"]',
     "alias_rebind": 'from sys import argv\nargv = ["replacement"]',

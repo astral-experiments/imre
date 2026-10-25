@@ -44,3 +44,11 @@ print(maybe_raw(None))
 print(maybe_buffered(None))
 print(isinstance("text", (str, io.BufferedIOBase)))
 print(isinstance(123, io.IOBase))
+
+memory = io.StringIO("text")
+for closed in (False, True):
+    if closed:
+        memory.close()
+    print(isinstance(memory, io.IOBase))
+    print(isinstance(memory, io.TextIOBase))
+    print(isinstance(memory, (io.RawIOBase, io.BufferedIOBase)))
