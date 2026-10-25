@@ -34,20 +34,20 @@ pub unsafe extern "C" fn imre_calendar_seconds(d: *const Object) -> f64 {
 pub unsafe extern "C" fn imre_calendar_zoneoffset(z: *const Object) -> *const Object {
     // SAFETY: the caller roots the zone that owns the returned offset.
     with(unsafe { object(z) }, |v| match v {
-        Value::Zone { offset, .. } => Rc::into_raw(offset.clone()),
+        Value::Zone { offset, .. } => crate::ObjectOwner::into_raw(offset.clone()),
         _ => unreachable!(),
     })
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_calendar_zone_limit(max: bool) -> *const Object {
     thread_local! {
-        static MIN:Rc<Object>=owner(Value::Zone{offset:owner(Value::Delta(-86_340_000_000)),name:None});
-        static MAX:Rc<Object>=owner(Value::Zone{offset:owner(Value::Delta(86_340_000_000)),name:None});
+        static MIN:crate::ObjectOwner=owner(Value::Zone{offset:owner(Value::Delta(-86_340_000_000)),name:None});
+        static MAX:crate::ObjectOwner=owner(Value::Zone{offset:owner(Value::Delta(86_340_000_000)),name:None});
     }
-    Rc::into_raw(if max {
-        MAX.with(Rc::clone)
+    crate::ObjectOwner::into_raw(if max {
+        MAX.with(crate::ObjectOwner::clone)
     } else {
-        MIN.with(Rc::clone)
+        MIN.with(crate::ObjectOwner::clone)
     })
 }
 /// # Safety
@@ -116,17 +116,17 @@ pub(super) enum Value {
     // use the same calendar; the fixed offset matters for instant comparison, not day addition.
     Date {
         local: i128,
-        zone: Option<Rc<Object>>,
+        zone: Option<crate::ObjectOwner>,
         fold: i32,
     },
     Zone {
-        offset: Rc<Object>,
+        offset: crate::ObjectOwner,
         name: Option<crate::StrOwner>,
     },
 }
 
-fn owner(value: Value) -> Rc<Object> {
-    Rc::new(Object(StorageCell::new(Storage::Calendar(Box::new(value)))))
+fn owner(value: Value) -> crate::ObjectOwner {
+    crate::ObjectOwner::new(Object(StorageCell::new(Storage::Calendar(Box::new(value)))))
 }
 
 fn with<T>(obj: &Object, f: impl FnOnce(&Value) -> T) -> T {
@@ -161,10 +161,10 @@ fn offset(zone: &Object) -> i128 {
 }
 
 thread_local! {
-    static UTC: Rc<Object> = owner(Value::Zone { offset:owner(Value::Delta(0)), name:None });
+    static UTC: crate::ObjectOwner = owner(Value::Zone { offset:owner(Value::Delta(0)), name:None });
 }
-fn utc() -> Rc<Object> {
-    UTC.with(Rc::clone)
+fn utc() -> crate::ObjectOwner {
+    UTC.with(crate::ObjectOwner::clone)
 }
 
 fn validate_delta(value: &BigInt) -> Result<i128, Error> {
@@ -188,7 +188,7 @@ fn validate_delta(value: &BigInt) -> Result<i128, Error> {
 
 // The C constructor accumulates integer units exactly, carries the integral portion of
 // each floating unit and rounds their combined fractional microseconds once, ties to even.
-fn make_delta(mask: u32, words: [usize; 7]) -> Result<Rc<Object>, Error> {
+fn make_delta(mask: u32, words: [usize; 7]) -> Result<crate::ObjectOwner, Error> {
     let mut total = BigInt::from(0);
     let mut fraction = 0.0;
     for i in [2, 3, 1, 4, 5, 0, 6] {
@@ -344,7 +344,10 @@ fn offset_text(offset: i128) -> String {
     }
     s
 }
-fn make_zone(delta_obj: Rc<Object>, name: Option<crate::StrOwner>) -> Result<Rc<Object>, Error> {
+fn make_zone(
+    delta_obj: crate::ObjectOwner,
+    name: Option<crate::StrOwner>,
+) -> Result<crate::ObjectOwner, Error> {
     let us = delta(&delta_obj);
     if us.abs() >= DAY {
         return Err(Error::new(
@@ -439,7 +442,10 @@ fn check(value: i32, name: &str, low: i32, high: i32) -> Result<(), Error> {
         ))
     }
 }
-fn new_date(words: [usize; 8], zone: Option<Rc<Object>>) -> Result<Rc<Object>, Error> {
+fn new_date(
+    words: [usize; 8],
+    zone: Option<crate::ObjectOwner>,
+) -> Result<crate::ObjectOwner, Error> {
     let [y, m, d, h, mn, s, u, fold] = words.map(c_component);
     let (y, m, d, h, mn, s, u, fold) = (y?, m?, d?, h?, mn?, s?, u?, fold?);
     check(y, "year", 1, 9999)?;
@@ -466,7 +472,7 @@ fn new_date(words: [usize; 8], zone: Option<Rc<Object>>) -> Result<Rc<Object>, E
         + i128::from(u);
     Ok(owner(Value::Date { local, zone, fold }))
 }
-fn date(local: i128, zone: Option<Rc<Object>>) -> Result<Rc<Object>, Error> {
+fn date(local: i128, zone: Option<crate::ObjectOwner>) -> Result<crate::ObjectOwner, Error> {
     if !(0..MAX_ORD * DAY).contains(&local) {
         return Err(Error::new(Kind::OverflowError, "date value out of range"));
     }
@@ -491,7 +497,7 @@ fn date_fields(local: i128, fold: i32) -> [i128; 8] {
         fold.into(),
     ]
 }
-fn date_text(local: i128, zone: &Option<Rc<Object>>, sep: char) -> String {
+fn date_text(local: i128, zone: &Option<crate::ObjectOwner>, sep: char) -> String {
     let [y, m, d, h, mi, s, u, _] = date_fields(local, 0);
     let mut text = format!("{y:04}-{m:02}-{d:02}{sep}{h:02}:{mi:02}:{s:02}");
     if u != 0 {
@@ -506,17 +512,14 @@ fn date_text(local: i128, zone: &Option<Rc<Object>>, sep: char) -> String {
 /// Makes a separately owned reference from a Python value retained by its caller.
 ///
 /// # Safety
-/// `p` must point to a live `Rc<T>` allocation.
-unsafe fn retain<T>(p: *const T) -> Rc<T> {
+/// `p` must point to a live native object.
+unsafe fn retain(p: *const Object) -> crate::ObjectOwner {
     // SAFETY: preserve the caller's strong reference when materializing the new owner.
-    unsafe {
-        Rc::increment_strong_count(p);
-        Rc::from_raw(p)
-    }
+    unsafe { crate::ObjectOwner::acquire_word(p as usize) }
 }
 
-fn rc_result(result: Result<Rc<Object>, Error>) -> *const Object {
-    finish(result.map(Rc::into_raw), std::ptr::null())
+fn rc_result(result: Result<crate::ObjectOwner, Error>) -> *const Object {
+    finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }
 
 /// # Safety
@@ -549,7 +552,7 @@ pub unsafe extern "C" fn imre_calendar_zone(d: *const Object, name: usize) -> *c
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_calendar_utc() -> *const Object {
-    Rc::into_raw(utc())
+    crate::ObjectOwner::into_raw(utc())
 }
 /// # Safety
 /// Integer arguments and any nonzero optional zone remain rooted until the constructor returns.
@@ -634,7 +637,7 @@ pub unsafe extern "C" fn imre_calendar_tzinfo(dt: *const Object) -> usize {
     with(unsafe { object(dt) }, |v| match v {
         Value::Date { zone, .. } => zone
             .as_ref()
-            .map_or(0, |z| Rc::into_raw(z.clone()) as usize),
+            .map_or(0, |z| crate::ObjectOwner::into_raw(z.clone()) as usize),
         _ => unreachable!(),
     })
 }
@@ -644,14 +647,14 @@ pub unsafe extern "C" fn imre_calendar_tzinfo(dt: *const Object) -> usize {
 pub unsafe extern "C" fn imre_calendar_offset(o: *const Object) -> usize {
     fn ret(z: &Object) -> usize {
         with(z, |v| match v {
-            Value::Zone { offset, .. } => Rc::into_raw(offset.clone()) as usize,
+            Value::Zone { offset, .. } => crate::ObjectOwner::into_raw(offset.clone()) as usize,
             _ => unreachable!(),
         })
     }
     // SAFETY: the caller roots the receiver, which owns its fixed offset when present.
     with(unsafe { object(o) }, |v| match v {
         Value::Date { zone, .. } => zone.as_ref().map_or(0, |z| ret(z)),
-        Value::Zone { offset, .. } => Rc::into_raw(offset.clone()) as usize,
+        Value::Zone { offset, .. } => crate::ObjectOwner::into_raw(offset.clone()) as usize,
         _ => unreachable!(),
     })
 }

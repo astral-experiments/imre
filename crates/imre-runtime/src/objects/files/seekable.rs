@@ -68,7 +68,7 @@ impl Memory {
 }
 
 impl FileState {
-    pub(in crate::objects) fn memory(data: crate::BytesOwner) -> Rc<Object> {
+    pub(in crate::objects) fn memory(data: crate::BytesOwner) -> crate::ObjectOwner {
         Self {
             fd: None,
             raw: false,
@@ -79,7 +79,7 @@ impl FileState {
         .into_object()
     }
 
-    pub(in crate::objects) fn member(member: Member) -> Rc<Object> {
+    pub(in crate::objects) fn member(member: Member) -> crate::ObjectOwner {
         Self {
             fd: None,
             raw: false,
@@ -90,8 +90,8 @@ impl FileState {
         .into_object()
     }
 
-    pub(super) fn into_object(self) -> Rc<Object> {
-        Rc::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
+    pub(super) fn into_object(self) -> crate::ObjectOwner {
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
     }
 
     pub(super) fn check_member(&mut self, message: &'static str) -> Result<()> {
@@ -223,7 +223,7 @@ pub unsafe extern "C" fn imre_bytes_io(initial: *const Bytes) -> *const Object {
         // SAFETY: the caller keeps the bytes owner live throughout construction.
         unsafe { crate::acquire_bytes(initial as usize) }
     };
-    Rc::into_raw(FileState::memory(data))
+    crate::ObjectOwner::into_raw(FileState::memory(data))
 }
 
 /// Reposition the cursor using Python's signed offset and integer whence.

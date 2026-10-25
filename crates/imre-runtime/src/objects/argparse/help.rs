@@ -1,5 +1,6 @@
 //! Usage and help formatting for long options, using Python code-point widths.
 
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::fmt::Write;
 use std::io::IsTerminal;
@@ -259,7 +260,7 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 }
 
 fn usage_lines(
-    parts: &[(usize, String)],
+    parts: &[(usize, impl AsRef<str>)],
     indent: usize,
     mut initial: usize,
     width: usize,
@@ -277,7 +278,7 @@ fn usage_lines(
             initial += 1;
             output.push(' ');
         }
-        output.push_str(part);
+        output.push_str(part.as_ref());
         initial += length;
         first = false;
     }
@@ -412,20 +413,24 @@ impl Parser {
         let Some(commands) = &mut self.subcommands else {
             return Ok(());
         };
-        let mut parts = vec![(len(&self.prog), self.prog.clone())];
+        let mut parts = vec![(len(&self.prog), Cow::Borrowed(self.prog.as_str()))];
         parts.extend(self.options.iter().filter(|o| o.positional()).map(|o| {
             let label = o.label(true, false);
-            (len(&label), label)
+            (len(&label), Cow::Owned(label))
         }));
         let width = width();
         let prog = if parts.len() == 1 {
-            self.prog.clone()
+            Cow::Borrowed(self.prog.as_str())
         } else if parts.iter().map(|(length, _)| length + 1).sum::<usize>() - 1 > width
             && len(&self.prog) * 4 > width.saturating_mul(3)
         {
-            format!("{}\n{}", self.prog, usage_lines(&parts[1..], 0, 0, width))
+            Cow::Owned(format!(
+                "{}\n{}",
+                self.prog,
+                usage_lines(&parts[1..], 0, 0, width)
+            ))
         } else {
-            usage_lines(&parts, len(&self.prog) + 1, 0, width)
+            Cow::Owned(usage_lines(&parts, len(&self.prog) + 1, 0, width))
         };
         let prog = prog.trim_matches(python_whitespace);
         for child in &mut commands.choices {

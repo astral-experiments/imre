@@ -2,7 +2,7 @@
 //! write detaches it without copying any Python value.
 use super::exceptions::{Error, Kind};
 use super::words::{OwnedWord, WordKind};
-use super::{Object, Storage, StorageCell, Str, acquire_rc, finish, object, values};
+use super::{Object, Storage, StorageCell, Str, finish, object, values};
 use crate::StrOwner;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -12,7 +12,7 @@ use std::rc::Rc;
 #[derive(Clone)]
 struct Binding {
     // Keeps the key address unique as long as the mapping contains it.
-    _key: Rc<Object>,
+    _key: crate::ObjectOwner,
     value: OwnedWord,
 }
 
@@ -34,8 +34,8 @@ impl State {
             .get(&(key as usize))
             .map(|b| b.value.clone())
     }
-    fn replace(&self, key: Rc<Object>, value: Option<OwnedWord>) -> Option<OwnedWord> {
-        let id = Rc::as_ptr(&key) as usize;
+    fn replace(&self, key: crate::ObjectOwner, value: Option<OwnedWord>) -> Option<OwnedWord> {
+        let id = crate::ObjectOwner::as_ptr(&key) as usize;
         let old = {
             let mut root = self.bindings.borrow_mut();
             let bindings = Rc::make_mut(&mut root);
@@ -52,7 +52,7 @@ pub(super) struct Variable {
     default: Option<OwnedWord>,
 }
 pub(super) struct Token {
-    key: Rc<Object>,
+    key: crate::ObjectOwner,
     context: Rc<State>,
     old: Option<OwnedWord>,
     used: Cell<bool>,
@@ -60,11 +60,11 @@ pub(super) struct Token {
 thread_local! {
     static CURRENT: RefCell<Option<Rc<State>>> = const { RefCell::new(None) };
     static TOUCHED: Cell<bool> = const { Cell::new(false) };
-    static MISSING: Rc<Object> = {
+    static MISSING: crate::ObjectOwner = {
         let raw = wrap(Storage::TokenMissing);
         // SAFETY: the static boxed view takes the freshly allocated sentinel's one owner.
         let word = unsafe { OwnedWord::from_owned(raw as usize,WordKind::new(5)) };
-        Rc::new(Object(StorageCell::new(Storage::ObjectValue(word))))
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::ObjectValue(word))))
     };
     static REPR: RefCell<HashSet<usize>> = RefCell::default();
 }
@@ -86,7 +86,7 @@ pub(super) fn swap_task(task: &mut Option<Rc<State>>) {
     }
 }
 fn wrap(storage: Storage) -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(storage))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(storage))))
 }
 fn state(obj: &Object) -> Rc<State> {
     // SAFETY: reads only the immutable handle; references never escape storage.
@@ -269,9 +269,14 @@ pub unsafe extern "C" fn imre_contextvars_set(
     value: usize,
 ) -> *const Object {
     // SAFETY: the caller's rooted arguments outlive both acquisitions.
-    let (key, value) = unsafe { (acquire_rc(key as usize), WordKind::new(kind).acquire(value)) };
+    let (key, value) = unsafe {
+        (
+            crate::ObjectOwner::acquire_word(key as usize),
+            WordKind::new(kind).acquire(value),
+        )
+    };
     let context = current();
-    let old = context.replace(Rc::clone(&key), Some(value));
+    let old = context.replace(crate::ObjectOwner::clone(&key), Some(value));
     wrap(Storage::ContextToken(Rc::new(Token {
         key,
         context,
@@ -291,7 +296,7 @@ pub unsafe extern "C" fn imre_contextvars_reset(key: *const Object, tok: *const 
         let context = current();
         let error = if t.used.get() {
             Some((Kind::RuntimeError, "has already been used once"))
-        } else if !key.is_null() && !std::ptr::eq(key, Rc::as_ptr(&t.key)) {
+        } else if !key.is_null() && !std::ptr::eq(key, crate::ObjectOwner::as_ptr(&t.key)) {
             Some((Kind::ValueError, "was created by a different ContextVar"))
         } else if !Rc::ptr_eq(&context, &t.context) {
             Some((Kind::ValueError, "was created in a different Context"))
@@ -321,7 +326,9 @@ pub unsafe extern "C" fn imre_contextvars_name(key: *const Object) -> *const Str
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_contextvars_token_var(tok: *const Object) -> *const Object {
     // SAFETY: the source attribute is checked against the receiver type.
-    token(unsafe { object(tok) }, |t| Rc::into_raw(t.key.clone()))
+    token(unsafe { object(tok) }, |t| {
+        crate::ObjectOwner::into_raw(t.key.clone())
+    })
 }
 /// # Safety
 /// The caller roots an exact token for the immutable presence test.
@@ -334,7 +341,7 @@ pub unsafe extern "C" fn imre_contextvars_was_missing(tok: *const Object) -> boo
 /// A nonnull token roots its old word; a null token returns Token.MISSING.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_contextvars_old(tok: *const Object) -> *const Object {
-    let missing = || MISSING.with(|m| Rc::into_raw(m.clone()));
+    let missing = || MISSING.with(|m| crate::ObjectOwner::into_raw(m.clone()));
     if tok.is_null() {
         return missing();
     }
@@ -346,7 +353,9 @@ pub unsafe extern "C" fn imre_contextvars_old(tok: *const Object) -> *const Obje
             // For kind 5 preserve that existing view, including module attributes.
             if v.kind.raw() == 5 {
                 // SAFETY: the token roots the checked view.
-                return Rc::into_raw(unsafe { acquire_rc(v.word) });
+                return crate::ObjectOwner::into_raw(unsafe {
+                    crate::ObjectOwner::acquire_word(v.word)
+                });
             }
             // SAFETY: the token retains this compiler-checked scalar or tuple.
             unsafe { super::boxed_values::imre_box_value(v.kind.raw(), v.word) }

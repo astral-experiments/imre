@@ -18,7 +18,7 @@ use super::*;
 type Ready = Rc<dyn Fn() -> bool>;
 type Fiber = Coroutine<Option<Cancellation>, Ready, Outcome>;
 type Callback = unsafe extern "C" fn(*const usize) -> usize;
-type Outcome = std::result::Result<OwnedWord, Rc<Object>>;
+type Outcome = std::result::Result<OwnedWord, crate::ObjectOwner>;
 
 #[derive(Clone, Copy)]
 pub(super) enum Cancellation {
@@ -52,7 +52,7 @@ impl Call {
 struct CoroutineFrame {
     call: RefCell<Option<Call>>,
     fiber: RefCell<Option<Fiber>>,
-    active: RefCell<Option<Rc<Object>>>,
+    active: RefCell<Option<crate::ObjectOwner>>,
 }
 
 pub(super) struct Task {
@@ -71,7 +71,7 @@ pub(super) struct Task {
 #[derive(Default)]
 pub(super) struct Group {
     children: RefCell<Vec<Rc<Task>>>,
-    error: RefCell<Option<Rc<Object>>>,
+    error: RefCell<Option<crate::ObjectOwner>>,
     parent: RefCell<Weak<Task>>,
     state: Cell<GroupState>,
     aborting: Cell<bool>,
@@ -344,7 +344,7 @@ fn for_scheduling(object: &Object) -> Rc<Task> {
 }
 
 fn resource(storage: Storage) -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(storage))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(storage))))
 }
 
 /// # Safety
@@ -555,7 +555,9 @@ pub unsafe extern "C" fn imre_async_abort_group(group: *const Object, error: *co
             let Storage::TaskGroup(group) = storage else {
                 fail("SystemError", "expected TaskGroup");
             };
-            group.error.replace(Some(acquire_rc(error as usize)));
+            group
+                .error
+                .replace(Some(crate::ObjectOwner::acquire_word(error as usize)));
         })
     };
 }
@@ -745,8 +747,8 @@ pub unsafe extern "C" fn imre_async_gather(
         let word = match outcome.as_ref().expect("all gather inputs completed") {
             Ok(value) if tagged && value.word != 0 => value.word | 4,
             Ok(value) => value.word,
-            Err(error) if kind & 0xff == 9 => Rc::as_ptr(error) as usize | 3,
-            Err(error) => Rc::as_ptr(error) as usize,
+            Err(error) if kind & 0xff == 9 => crate::ObjectOwner::as_ptr(error) as usize | 3,
+            Err(error) => crate::ObjectOwner::as_ptr(error) as usize,
         };
         // SAFETY: the outcome roots its word and the exact list acquires a
         // reference for the returned sequence before that owner is released.
@@ -789,17 +791,17 @@ mod tests {
         // SAFETY: the exact list and string remain rooted until failure consumes
         // the list's only raw owner.
         unsafe {
-            let output = Rc::<Object>::from_raw(imre_seq_new(3));
+            let output = crate::ObjectOwner::from_raw(imre_seq_new(3));
             assert_eq!(
                 imre_seq_append(
-                    Rc::as_ptr(&output),
+                    crate::ObjectOwner::as_ptr(&output),
                     crate::StrOwner::as_ptr(&text) as usize,
                     3
                 ),
                 1,
             );
             assert_eq!(crate::StrOwner::strong_count(&text), 2);
-            let output: *const () = Rc::into_raw(output).cast();
+            let output: *const () = crate::ObjectOwner::into_raw(output).cast();
             assert!(!finish_gather_append(output, 3, 0));
         }
         assert_eq!(crate::StrOwner::strong_count(&text), 1);

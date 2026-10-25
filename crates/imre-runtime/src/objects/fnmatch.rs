@@ -1,7 +1,6 @@
 //! POSIX shell patterns treat path separators and leading dots as ordinary characters.
 use crate::StrOwner;
 use std::borrow::Cow;
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, finish};
 use super::paths::{Pattern, class_characters, class_end};
@@ -94,7 +93,7 @@ pub unsafe extern "C" fn imre_fnmatch_filter(
                     .push(unsafe { source.kind.acquire(word) }.into_word());
             }
         }
-        Ok(Rc::into_raw(output.into_object()))
+        Ok(crate::ObjectOwner::into_raw(output.into_object()))
     };
     // SAFETY: names remains rooted; the scan does not call back into Python.
     let result = unsafe { object(names).0.with(filter) };
@@ -227,7 +226,7 @@ pub unsafe extern "C" fn imre_fnmatch_parts(
     let indices = crate::new_list(stars.into_iter().map(crate::Int::from_usize).collect());
     // SAFETY: both slots in the fresh tuple now receive their independent owners.
     unsafe {
-        out.write(Rc::into_raw(words.into_object()).cast());
+        out.write(crate::ObjectOwner::into_raw(words.into_object()).cast());
         out.add(1).write(indices.cast());
     }
 }
