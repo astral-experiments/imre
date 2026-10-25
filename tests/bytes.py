@@ -35,6 +35,12 @@ REJECTED = {
     "bytes_assignment": 'value = b"abc"\nvalue[0] = 1\n',
     "bytes_deletion": 'value = b"abc"\ndel value[0]\n',
     "bytes_slice_assignment": 'value = b"abc"\nvalue[:] = b"x"\n',
+    "bytes_contains_memoryview": 'print(memoryview(b"a") in b"abc")\n',
+    "bytes_contains_array": 'from array import array\nprint(array("B", [97]) in b"abc")\n',
+    "bytes_contains_user_index": (
+        "class Index:\n    def __index__(self) -> int:\n        return 97\n"
+        'print(Index() in b"abc")\n'
+    ),
     "bytes_mutable": 'value = bytearray(b"abc")\n',
     "encode_codec": 'print("text".encode("ascii"))\n',
     "encode_keyword": 'print("text".encode(encoding="utf-8"))\n',

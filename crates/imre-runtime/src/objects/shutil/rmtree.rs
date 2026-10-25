@@ -9,9 +9,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use super::super::exceptions::{
-    Error, Filename, Kind, Result, replace_pending, swap_active, take_pending,
-};
+use super::super::exceptions::{Error, Filename, Kind, replace_pending, swap_active, take_pending};
 use super::super::files::{close_file, errno_with_filenames};
 use super::super::tempdirs::scan_entries;
 use super::super::{Object, Str, acquire_rc, paths};
@@ -19,17 +17,13 @@ use super::Int;
 use num_traits::ToPrimitive;
 use rustix::fs::{AtFlags, CWD, Dir, Mode, OFlags, fstat, openat, statat, unlinkat};
 
-fn path_error(filename: Result<Filename>, error: io::Error) -> Error {
-    match filename {
-        Ok(path) => errno_with_filenames(error, Some(path), None),
-        Err(e) => e,
-    }
+fn path_error(filename: Filename, error: io::Error) -> Error {
+    errno_with_filenames(error, Some(filename), None)
 }
 
-fn filename(path: &Path) -> Result<Filename> {
+fn filename(path: &Path) -> Filename {
     // CPython's fd-safe walker calls fsdecode even for a bytes input.
-    super::super::paths::path_utf8(path.as_os_str().to_owned())
-        .map(|s| Filename::Str(std::rc::Rc::new(s)))
+    Filename::from_fs_text(path.as_os_str().to_owned())
 }
 
 /// The failing Python operation; the fd-safe walk reports islink for a failed
@@ -80,11 +74,11 @@ where
 {
     /// CPython assigns the original root object to errors from its root step.
     /// Child paths are strings produced by joining the directory and entry names.
-    fn error_filename(&self, path: &Path) -> Result<Filename> {
+    fn error_filename(&self, path: &Path) -> Filename {
         if path.as_os_str() == self.root.as_os_str()
             && let Some(original) = &self.root_object
         {
-            return Ok(Filename::Path(Rc::clone(original)));
+            return Filename::Path(Rc::clone(original));
         }
         filename(path)
     }
@@ -159,7 +153,7 @@ where
         if !same {
             let error = Error::os_message_with_filename(
                 "Cannot call rmtree on a symbolic link",
-                self.error_filename(&path)?,
+                self.error_filename(&path),
             );
             return (self.onexc)(Operation::IsLink, &path, error);
         }
@@ -346,9 +340,7 @@ pub unsafe extern "C" fn imre_shutil_rmtree(
                     Ok(())
                 };
             };
-            let Filename::Str(path) = filename(path)? else {
-                unreachable!()
-            };
+            let path = Rc::new(paths::path_utf8(path.as_os_str().to_owned())?);
             error.raise();
             let exc = take_pending().expect("the walk just raised this error");
             let mut previous = Some(Rc::clone(&exc));

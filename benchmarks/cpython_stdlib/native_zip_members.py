@@ -49,7 +49,7 @@ with io.BytesIO(Path(sys.argv[1]).read_bytes()) as buffer:
 CONTROL = '''import io
 import sys
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 def check(archive: ZipFile) -> None:
     entries = archive.infolist()
@@ -73,17 +73,48 @@ with ZipFile(path) as disk:
     check(disk)
 with open(sys.argv[1], "rb") as file:
     with ZipFile(file) as wrapped:
+        for entry in wrapped.infolist()[:2]:
+            with wrapped.open(entry) as member:
+                print(repr((member.seek(2), file.tell())))
+                print(repr(member.read()))
+                print(repr((member.seek(0), file.tell())))
+        with wrapped.open("lines") as lines:
+            lines.MIN_READ_SIZE = 1
+            print(repr(lines.readline()))
+            print(repr((lines.seek(-1, 1), file.tell())))
         check(wrapped)
     print(file.seek(0))
     print(repr(file.read(4)))
     print(file.tell())
 with io.BytesIO(path.read_bytes()) as mem:
+    with ZipFile(mem) as limits:
+        for entry in limits.infolist()[:2]:
+            with limits.open(entry) as member:
+                try:
+                    print(repr(member.read(2**63)))
+                except OverflowError:
+                    print("overflow")
+                print(repr((member.tell(), mem.tell())))
+                try:
+                    print(repr(member.read(1)))
+                except BadZipFile:
+                    print("bad CRC")
     with ZipFile(mem) as buffered:
         print(repr(buffered.filename))
         check(buffered)
     print(mem.seek(-3, 2))
     print(repr(mem.read()))
     print(mem.tell())
+with io.BytesIO(path.read_bytes()) as source:
+    with ZipFile(source) as archive:
+        with archive.open(archive.infolist()[0]) as member:
+            member.MIN_READ_SIZE = 2
+            source.close()
+            for _ in range(2):
+                try:
+                    print(repr(member.read(1)))
+                except ValueError:
+                    print("closed source " + str(member.tell()))
 '''
 
 
@@ -217,6 +248,7 @@ def main():
             writer.writestr("duplicate", b"first-stored", compress_type=zipfile.ZIP_STORED)
             writer.writestr("duplicate", b"second-deflated", compress_type=zipfile.ZIP_DEFLATED)
             writer.writestr("subdir/", b"")
+            writer.writestr("lines", b"abc\nxy\nz")
         for cmd in ([sys.executable, control], [binary]):
             result = subprocess.run([*cmd, fixture], capture_output=True, timeout=30)
             if len(cmd) == 2:

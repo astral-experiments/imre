@@ -23,11 +23,22 @@ enum Shape {
     NamedTuple(DefinitionId, Vec<Type>),
     PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
+    CachedCallable(CachedFunction),
     Awaitable(Type),
     DirectoryContext(Type),
     ProcessArgs(Type),
     Optional(Type),
     Union(Vec<Type>),
+}
+
+/// The callable ABI stays unchanged; the frame owns both the wrappee and its cache.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct CachedFunction {
+    pub callable: Type,
+    pub frame: Type,
+    pub table: Type,
+    pub capacity: i64,
+    pub typed: bool,
 }
 
 #[derive(Clone)]
@@ -51,6 +62,7 @@ struct Storage {
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
     custom_truth: HashSet<usize>,
+    pathlike_records: HashSet<usize>,
     fallible_keys: HashSet<usize>,
     concrete_subclasses: HashMap<usize, Vec<Type>>,
 }
@@ -72,6 +84,7 @@ impl Types {
             }
             Type::Cursor(id) => matches!(storage.shapes.get(id), Some(Shape::Cursor(_))),
             Type::List(id) => matches!(storage.shapes.get(id), Some(Shape::List(_))),
+            Type::CacheState(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
             Type::Dict(id) => matches!(
                 storage.shapes.get(id),
                 Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
@@ -81,7 +94,10 @@ impl Types {
                 storage.shapes.get(id),
                 Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
             ),
-            Type::Callable(id) => matches!(storage.shapes.get(id), Some(Shape::Callable(..))),
+            Type::Callable(id) => matches!(
+                storage.shapes.get(id),
+                Some(Shape::Callable(..) | Shape::CachedCallable(_))
+            ),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
             Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
@@ -94,7 +110,9 @@ impl Types {
                 matches!(storage.shapes.get(id), Some(Shape::DirectoryContext(_)))
             }
             Type::AsyncProcess(bits) => bits <= 3,
-            Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
+            Type::Popen(_, _, id) | Type::CompletedProcess(_, Some(id)) => {
+                matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_)))
+            }
             Type::Int
             | Type::Float
             | Type::BuiltinClass
@@ -114,7 +132,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
-            | Type::CompletedProcess(_)
+            | Type::CompletedProcess(_, None)
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
@@ -125,6 +143,8 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -162,6 +182,7 @@ impl Types {
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields)
                 | Shape::Union(fields) => fields.clone(),
+                Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
                 }
@@ -171,6 +192,7 @@ impl Types {
                 if let Type::StrLiteral(child_id)
                 | Type::Cursor(child_id)
                 | Type::List(child_id)
+                | Type::CacheState(child_id)
                 | Type::Dict(child_id)
                 | Type::Set(child_id)
                 | Type::Tuple(child_id)
@@ -222,6 +244,10 @@ impl Types {
 
     pub(crate) fn set_hashable_records(&self, records: HashSet<usize>) {
         self.0.borrow_mut().hashable_records = records;
+    }
+
+    pub(crate) fn set_pathlike_records(&self, records: HashSet<usize>) {
+        self.0.borrow_mut().pathlike_records = records;
     }
 
     pub(crate) fn set_custom_truth(&self, records: HashSet<usize>) {
@@ -398,6 +424,12 @@ impl Types {
             {
                 Type::Union(self.intern(Shape::Union(vec![Type::Str, *other])))
             }
+            [Type::Str, record @ Type::Class(id)] | [record @ Type::Class(id), Type::Str]
+                if self.0.borrow().pathlike_records.contains(id)
+                    && !self.0.borrow().custom_truth.contains(id) =>
+            {
+                Type::Union(self.intern(Shape::Union(vec![Type::Str, *record])))
+            }
             [record @ Type::Class(id), Type::Exception]
             | [Type::Exception, record @ Type::Class(id)]
                 if !self.0.borrow().custom_truth.contains(id) =>
@@ -446,6 +478,7 @@ impl Types {
             | Type::Enum(_)
             | Type::Iterator
             | Type::Cursor(_)
+            | Type::CacheState(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::ImportException
@@ -453,7 +486,7 @@ impl Types {
             | Type::TextIO
             | Type::Path
             | Type::PurePath(_)
-            | Type::CompletedProcess(_)
+            | Type::CompletedProcess(..)
             | Type::EventLoop
             | Type::Coroutine(_)
             | Type::Task(_)
@@ -469,6 +502,8 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -579,6 +614,16 @@ impl Types {
         command
     }
 
+    /// An unqualified CompletedProcess keeps its original list-of-strings ABI.
+    pub(crate) fn completed_command(&self, id: Option<usize>) -> Type {
+        id.map_or_else(|| self.list(Type::Str), |id| self.command_type(id))
+    }
+
+    pub(crate) fn completed(&self, capture: crate::ir::ProcessCapture, command: Type) -> Type {
+        let id = (command != self.list(Type::Str)).then(|| self.process_args(command));
+        Type::CompletedProcess(capture, id)
+    }
+
     pub(crate) fn directory_context(&self, result: Type) -> Type {
         Type::DirectoryContext(self.intern(Shape::DirectoryContext(result)))
     }
@@ -613,10 +658,23 @@ impl Types {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
     }
 
+    pub(crate) fn cached_callable(&self, layout: CachedFunction) -> Type {
+        Type::Callable(self.intern(Shape::CachedCallable(layout)))
+    }
+
+    pub(crate) fn cached_function(&self, ty: Type) -> Option<CachedFunction> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes[id] {
+            Shape::CachedCallable(layout) => Some(layout),
+            _ => None,
+        }
+    }
+
     pub(crate) fn signature(&self, ty: Type) -> Option<(Vec<Type>, Type)> {
         let Type::Callable(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
+            Shape::CachedCallable(c) => self.signature(c.callable),
             _ => unreachable!("callable type identity has a callable shape"),
         }
     }
@@ -860,6 +918,7 @@ impl TypeDescription<'_> {
                     write!(self, "{value:?}")?;
                 }
             }
+            Shape::CachedCallable(c) => return self.write_type(c.callable),
             Shape::Callable(params, returns) => {
                 self.write_str("Callable[[")?;
                 self.write_types(params, ", ")?;

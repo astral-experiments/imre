@@ -450,7 +450,7 @@ impl Checker<'_> {
         ) {
             return self.path_call(receiver, name, call);
         }
-        if matches!(name, "iterdir" | "glob" | "rglob") {
+        if matches!(name, "iterdir" | "glob" | "rglob" | "walk") {
             return self.path_iterator(receiver, call, name);
         }
         let (kind, ty, arity) = match name {
@@ -847,6 +847,25 @@ impl Checker<'_> {
                 PathOperation::Iterdir,
                 self.types.cursor(Type::Path),
                 vec![receiver],
+            ));
+        }
+        if name == "walk" {
+            let none = Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            };
+            let params = [
+                parameter("top_down", Type::Bool, Some(boolean(true))),
+                parameter("on_error", Type::None, Some(none)),
+                parameter("follow_symlinks", Type::Bool, Some(boolean(false))),
+            ];
+            let args = self.arguments(call, &params, Some(receiver))?;
+            let names = self.types.list(Type::Str);
+            let row = self.types.tuple(vec![Type::Path, names, names]);
+            return Ok(self.ordered_path_operation(
+                PathOperation::Walk,
+                self.types.cursor(row),
+                args,
             ));
         }
         let optional = self.types.optional(Type::Bool);

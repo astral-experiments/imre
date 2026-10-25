@@ -26,6 +26,145 @@ fn absent(ty: Type) -> Expr {
 }
 
 impl Checker<'_> {
+    pub(super) fn shlex_split(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let flag = |name, value| {
+            parameter(
+                name,
+                Type::Bool,
+                ParameterKind::PositionalOrKeyword,
+                Some(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(value),
+                }),
+            )
+        };
+        let parameters = [
+            parameter(
+                "s",
+                self.types.optional(Type::Str),
+                ParameterKind::PositionalOrKeyword,
+                None,
+            ),
+            flag("comments", false),
+            flag("posix", true),
+        ];
+        let args = self.arguments(call, &parameters, None)?;
+        let result = self.types.list(Type::Str);
+        Ok(self.ordered_builtin(Builtin::Text(TextOperation::ShlexSplit), result, args))
+    }
+
+    pub(super) fn shlex_call(
+        &mut self,
+        call: &ast::ExprCall,
+        operation: Intrinsic,
+    ) -> Result<Expr, String> {
+        let quote = matches!(operation, Intrinsic::ShlexQuote);
+        let name = if quote { "s" } else { "split_command" };
+        let source = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([arg], []) => arg,
+            ([], [kw]) if kw.arg.as_deref() == Some(name) => &kw.value,
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    &format!("expected one argument {name:?}"),
+                ));
+            }
+        };
+        if quote {
+            let value = self.expr(source)?;
+            self.shlex_quote_value(value, call)
+        } else {
+            self.join_parts(unpacking::string(" "), source, call, true)
+        }
+    }
+
+    /// CPython checks truth before validating the type: every false value quotes as two apostrophes.
+    pub(super) fn shlex_quote_value(
+        &mut self,
+        value: Expr,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        if matches!(value.ty, Type::Str | Type::StrLiteral(_)) {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Text(TextOperation::ShlexQuote), vec![value]),
+            });
+        }
+        if let Some(inner) = self.types.payload(value.ty) {
+            let slot = self.hidden(value.ty);
+            let local = self.local(slot);
+            let absent = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),
+            };
+            let quoted = self.shlex_quote_value(
+                Expr {
+                    ty: inner,
+                    kind: ExprKind::Unwrap(Box::new(local)),
+                },
+                call,
+            )?;
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Assign(slot, value)],
+                    value: Box::new(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Conditional(
+                            Box::new(absent),
+                            Box::new(unpacking::string("''")),
+                            Box::new(quoted),
+                        ),
+                    }),
+                    clear: vec![slot],
+                },
+            });
+        }
+        let name = match value.ty {
+            Type::None => "NoneType",
+            Type::Bool => "bool",
+            Type::Int => "int",
+            Type::Float => "float",
+            Type::Bytes => "bytes",
+            Type::ListInt | Type::List(_) => "list",
+            Type::Tuple(_) => "tuple",
+            Type::Dict(_) => "dict",
+            Type::Set(_) => "set",
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "shlex.quote needs a supported concrete argument type",
+                ));
+            }
+        };
+        let exception = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(format!(
+                    "expected string object, got '{name}'"
+                )))),
+            },
+        };
+        let raised = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::RaiseException, vec![exception]),
+        };
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Conditional(
+                Box::new(self.truth_value(value)),
+                Box::new(raised),
+                Box::new(unpacking::string("''")),
+            ),
+        })
+    }
+
     /// Checks the bounded native signatures while retaining source evaluation order.
     pub(super) fn text_method(
         &mut self,
@@ -224,11 +363,6 @@ impl Checker<'_> {
             None,
         )];
         let arguments = self.arguments(call, &parameters, None)?;
-        let returns = if matches!(operation, TextOperation::ShlexSplit) {
-            self.types.list(Type::Str)
-        } else {
-            Type::Str
-        };
-        Ok(self.ordered_builtin(Builtin::Text(operation), returns, arguments))
+        Ok(self.ordered_builtin(Builtin::Text(operation), Type::Str, arguments))
     }
 }
