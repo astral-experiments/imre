@@ -6,10 +6,8 @@ mod translate;
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
-use regex_automata::meta::Regex;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
-use std::sync::LazyLock;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
@@ -119,9 +117,12 @@ pub(super) fn python_alnum(text: &str) -> bool {
     if text.is_ascii() {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric());
     }
-    static ALNUM: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\A[\p{L}\p{N}]+\z").expect("fixed Unicode class"));
-    ALNUM.is_match(text.as_bytes())
+    const RANGES: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_alnum.rs"));
+    text.chars().all(|ch| {
+        let cp = u32::from(ch);
+        let index = RANGES.partition_point(|&(_, end)| end < cp);
+        RANGES.get(index).is_some_and(|&(start, _)| start <= cp)
+    })
 }
 
 /// Tests a native string with Python's alphanumeric predicate.
