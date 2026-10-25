@@ -45,6 +45,20 @@ jobs:
             --suites differential io files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
 
+      - name: Get CPython's POSIX stat test and support package
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-stdlib-stat
+          sparse-checkout: Lib/test
+          persist-credentials: false
+      - name: Check Darwin stat functions and exports against CPython
+        run: |
+          dir=benchmarks/cpython_stdlib/full/stat
+          python3 "$dir/run_operations.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang "$(xcrun -f clang)" --cpython-source .cpython-stdlib-stat --result "$RUNNER_TEMP/cpython-stat.json"
+          python3 "$dir/check_modes.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang "$(xcrun -f clang)"
+
       - name: Check pinned PyPA RECORD fixtures with reference CPython
         run: python3 tests/wheel_record.py --reference-only
       - name: Compare uv's upstream wheel checker with CPython
@@ -153,6 +167,10 @@ jobs:
             python3 "benchmarks/cpython_stdlib/full/os/$runner.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level 3 --result "$RUNNER_TEMP/$runner.json"
           done
           python3 benchmarks/cpython_stdlib/native_os_path.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-os-path.json"
+          stat_dir=benchmarks/cpython_stdlib/full/stat
+          python3 "$stat_dir/generate_module.py" --check
+          python3 "$stat_dir/run_operations.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-stat.json"
+          python3 "$stat_dir/check_modes.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
           python3 benchmarks/cpython_stdlib/full/logging/native_timed.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/native_logging.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/full/logging/native_levels.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference

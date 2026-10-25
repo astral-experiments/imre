@@ -571,6 +571,8 @@ Indexing uses exact integer indexes, including negative indexes, and returns an 
 
 ## Native paths and directory traversal
 
+On Linux and macOS, `stat` exposes the POSIX mode constants, `S_IFMT`, `S_IMODE`, the file-type predicates, and `filemode`. These accept positional integer modes, including arbitrary-precision inputs: the accelerated CPython rules raise `OverflowError` when a value does not fit the platform's unsigned mode type. Direct calls also accept booleans. Darwin's whiteout type and file flags use Darwin values. [CPython parity and exact test coverage](../benchmarks/cpython_stdlib/full/stat/README.md).
+
 On POSIX, `os.devnull` is `"/dev/null"`. `os.path.commonpath(paths)` compares path components for lists of `str`, `bytes`, or native `Path` objects and literal list or tuple displays. It removes redundant separators and `.` components, preserves `..`, and rejects an empty sequence, mixed string and byte paths, or mixed absolute and relative paths.
 
 On POSIX, `os.path.join(a, *parts)`, `basename(p)`, `dirname(p)`, and `splitext(p)` take strings, bytes, or native `pathlib.Path` values. Calls can also use `posixpath`, aliased modules, and imported function names. String and byte spellings preserve redundant slashes, dots, and trailing separators according to each function. A native `Path` supplies its normalized string spelling. A join accepts fixed positional components and raises `TypeError` when string and byte paths are mixed. `splitext` returns a pair of the input string or byte type.
