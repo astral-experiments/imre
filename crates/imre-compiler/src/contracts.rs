@@ -117,6 +117,9 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::DictContains | Self::DictGetDefault | Self::DictTryGet(_) | Self::SetContains => {
+                Contract::new(true, PreservesLists)
+            }
             Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
@@ -311,6 +314,7 @@ impl Builtin {
             | Self::SplitLines
             | Self::FreezeStrings
             | Self::SetAdd
+            | Self::SetDiscard
             | Self::CounterUpdate
             | Self::KeySet
             | Self::KeyUnion
@@ -364,11 +368,8 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
-            | Self::DictContains
-            | Self::DictGetDefault
             | Self::EnumLookup(_)
             | Self::DictSumValues
-            | Self::DictTryGet(_)
             | Self::Encode
             | Self::CsvLineNumber
             | Self::Sha256Hex
@@ -418,7 +419,6 @@ impl Builtin {
             | Self::RegexSearch
             | Self::RegexMatchStart
             | Self::SequenceGetInBounds
-            | Self::SetContains
             | Self::Split
             | Self::StringListFilter(_)
             | Self::StringListNonempty
@@ -531,7 +531,6 @@ impl Builtin {
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::DequeClear
-            | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
             | Self::SplitLinesIter
