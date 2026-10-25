@@ -14,6 +14,7 @@ def remove_owner(paths: list[Path]) -> str:
 path = Path("input.txt")
 print(path.read_text())
 print(path.exists())
+print(Path('.').exists(follow_symlinks=False))
 print(path.is_file())
 print(path.is_dir())
 output = Path("output.txt")
@@ -43,4 +44,9 @@ for name in ["tree", "missing", "input.txt/child", "file-link", "directory-link"
     print(candidate.exists())
     print(candidate.is_file())
     print(candidate.is_dir())
+    print(
+        candidate.exists(follow_symlinks=False),
+        candidate.is_file(follow_symlinks=False),
+        candidate.is_dir(follow_symlinks=False),
+    )
 print(Path("file-link").read_text(encoding="utf-8"))
