@@ -18,8 +18,10 @@ command-line runner are outside this result.
 Two additional runs deliberately cause original assertions to fail. Removing
 `EDOM` from `errorcode` must fail reverse membership; inserting a name that is
 absent from the module must fail `assertHasAttr`. Their messages are compared
-with CPython. Two unused from-import controls (one actual target-absent symbol
-and one unknown name) must raise ImportError before a later child initializer. A separate program compares every forward name and reverse
+with CPython. Three unused from-import controls (a target-absent symbol, a long absent name,
+and a close spelling) must raise ImportError before a later child initializer.
+The uncaught display suggests a target export only when CPython would; a
+caught exception keeps its original arguments, string, name, and name_from. A separate program compares every forward name and reverse
 entry, aliases, dictionary mutation, static and dynamic lookup, metadata and
 missing-name behavior with CPython on the machine under test.
 

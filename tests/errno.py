@@ -51,16 +51,17 @@ def main():
         shutil.copyfile(source, root / "suite.py")
         shutil.copyfile(HERE / "driver.py", root / "driver.py")
         shutil.copyfile(HERE / "operations.py", root / "operations.py")
-        cases = [("driver", test.rsplit(".", 1)[1]) for test in tests]
-        cases += [("driver", "missing-code"), ("driver", "missing-attribute"), ("operations",)]
+        original = [("driver", test.rsplit(".", 1)[1]) for test in tests]
+        failures = [("driver", "missing-code"), ("driver", "missing-attribute")]
+        cases = [*original, *failures, ("driver", "caught-import"), ("operations",)]
         oracle = {c: observe(run(args.python, "-E", root / (c[0] + ".py"), *c[1:], cwd=root)) for c in cases}
-        for c in cases[:len(tests)]:
+        for c in original:
             assert oracle[c] == (0, b"pass\n", b""), (c, oracle[c])
-        for c in cases[len(tests):-1]:
+        for c in failures:
             status, stdout, stderr = oracle[c]
             assert status == 0 and not stderr and stdout.startswith(b"assertion: "), (c, oracle[c])
         assert oracle[("operations",)][0] == 0 and not oracle[("operations",)][2]
-        print(f"CPython: {len(tests)} original methods, {len(cases) - len(tests) - 1} negative controls, {len(oracle[('operations',)][1].splitlines())} registry observations")
+        print(f"CPython: {len(tests)} original methods, {len(failures)} negative controls, {len(oracle[('operations',)][1].splitlines())} registry observations")
         # An unsupported symbol is a runtime property of the target. Verify that an unused
         # failing import precedes the next module initializer, including on an entry with no globals.
         symbols = (HERE.parents[3] / "crates/imre-runtime/native/errno-symbols.txt").read_text().splitlines()
@@ -68,7 +69,8 @@ def main():
                       and not hasattr(errno, line.split()[0]))
         unknown = "a_deliberately_missing_platform_attribute_well_over_32_bytes"
         (root / "side_effect.py").write_text('print("child initialized")\n')
-        for case, name in (("platform-missing", absent), ("unknown", unknown)):
+        missing = {"platform-missing": absent, "unknown": unknown, "close-spelling": "EDAOM"}
+        for case, name in missing.items():
             (root / f"{case}.py").write_text(f"from errno import {name} as unused\nimport side_effect\nprint('entry initialized')\n")
         for opt in args.opt_levels:
             for prog in sorted({c[0] for c in cases}):
@@ -104,7 +106,7 @@ def main():
                                                "original module-level frozenset and unittest case, and ran "
                                                "native unittest assertions; a host driver scheduled each ID",
                                      "source_blob": digest, "process_stdout": actual[1].decode().strip()}}
-            for case in ("platform-missing", "unknown"):
+            for case in missing:
                 command = [args.compiler.resolve(), "build", root / (case + ".py"), "--module-root", root,
                            "--runtime", args.runtime.resolve(), "--clang", args.clang,
                            "--opt-level", opt, "--no-cache", "-o", root / case]
@@ -118,8 +120,10 @@ def main():
                 actual = run(root / case, cwd=root)
                 assert expected.returncode == actual.returncode == 1 and expected.stdout == actual.stdout == b""
                 assert actual.stderr.startswith(b"ImportError: cannot import name ")
+                if case == "close-spelling":
+                    assert b"Did you mean: 'EDOM'?" in expected.stderr
                 assert actual.stderr.splitlines() == expected.stderr.splitlines()[-1:], (expected.stderr, actual.stderr)
-            print(f"O{opt}: {len(tests)}/{len(tests)} original methods, 2 failure controls, complete platform registry and two unused failing imports matched")
+            print(f"O{opt}: {len(tests)}/{len(tests)} original methods, 2 failure controls, complete platform registry and three unused failing imports and caught error fields matched")
             if args.evidence:
                 reports.append(build_report(reference, int(opt), [(t, "complete module, fresh native process")
                                             for t in tests], observations))
@@ -130,7 +134,8 @@ def main():
                           "execution": "fresh native process per original method, direct method driver",
                           "tests": {t: {"status": "native"} for t in tests},
                           "controls": {"missing-code": "matched", "missing-attribute": "matched",
-                                       "unknown-unused-import": "matched", "absent-target-unused-import": "matched"},
+                                       "unknown-unused-import": "matched", "absent-target-unused-import": "matched",
+                                       "close-spelling-import-hint": "matched", "caught-import-fields": "matched"},
                           "registry_observations": len(oracle[("operations",)][1].splitlines())}
                 (args.result_dir / f"native-{sys.platform}-O{opt}.json").write_text(json.dumps(report, indent=2) + "\n")
     if args.evidence:

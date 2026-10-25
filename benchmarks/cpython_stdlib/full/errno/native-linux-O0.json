@@ -20,7 +20,9 @@
     "missing-code": "matched",
     "missing-attribute": "matched",
     "unknown-unused-import": "matched",
-    "absent-target-unused-import": "matched"
+    "absent-target-unused-import": "matched",
+    "close-spelling-import-hint": "matched",
+    "caught-import-fields": "matched"
   },
   "registry_observations": 750
 }

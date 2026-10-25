@@ -10,6 +10,9 @@ for dev in "$(xcode-select -p)" /Applications/Xcode_26*.app/Contents/Developer; 
         echo "Using macOS SDK $version at $sdk"
         echo "DEVELOPER_DIR=$dev" >> "$GITHUB_ENV"
         echo "SDKROOT=$sdk" >> "$GITHUB_ENV"
+        # SDK selection changes the default minimum in Apple's C compiler. Keep
+        # the runtime objects linkable on older supported Apple Silicon systems.
+        echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
         exit 0
     fi
 done

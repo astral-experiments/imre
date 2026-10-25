@@ -143,6 +143,20 @@ pub extern "C" fn imre_errno_module() -> *const Object {
     })
 }
 
+/// Match `dir(errno)` at display time, including lazily installed attributes.
+pub(super) fn exported_names() -> Vec<&'static str> {
+    let owner = imre_errno_module();
+    if owner.is_null() {
+        return Vec::new();
+    }
+    // SAFETY: module acquisition transferred one owner. Its registry is distinct
+    // from the exception being formatted and cannot call user code here.
+    let owner = unsafe { Rc::from_raw(owner) };
+    with_registry(Rc::as_ptr(&owner), |registry| {
+        registry.ordered.borrow().clone()
+    })
+}
+
 fn with_registry<T>(owner: *const Object, f: impl FnOnce(&Rc<Registry>) -> T) -> T {
     // SAFETY: callers root a checked module or namespace object.
     unsafe {

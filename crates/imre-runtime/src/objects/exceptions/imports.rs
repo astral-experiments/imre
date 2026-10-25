@@ -31,6 +31,21 @@ impl Import {
         }
     }
 
+    /// A live native module supplies candidates just before uncaught display.
+    pub(super) fn suggestion(&self) -> Option<&'static str> {
+        let text = |field: &OwnedWord| {
+            (field.kind == WordKind::new(3)).then(|| {
+                // SAFETY: the concrete field owns this exact string through the lookup.
+                unsafe { &*(field.word as *const Str) }.as_str()
+            })
+        };
+        if text(&self.fields[0])? != "errno" {
+            return None;
+        }
+        let wrong = text(&self.fields[2])?;
+        super::suggestions::closest(wrong, crate::objects::errno::exported_names())
+    }
+
     pub(super) fn repr_args(&self) -> Str {
         let mut result = String::new();
         for i in 0..self.len() {

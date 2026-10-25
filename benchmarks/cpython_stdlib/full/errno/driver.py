@@ -11,6 +11,15 @@ def run(mode: str) -> None:
         ErrnoAttributeTests().test_using_errorcode()
     elif mode == "test_attributes_in_errorcode":
         ErrorcodeTests().test_attributes_in_errorcode()
+    elif mode == "caught-import":
+        try:
+            raise ImportError("cannot import", name="errno", name_from="EDAOM")
+        except ImportError as exc:
+            print(str(exc))
+            print(repr(exc))
+            print(repr(exc.args))
+            print(str(exc.name))
+            print(str(exc.name_from))
     elif mode == "missing-attribute":
         errorcode[-1234] = "MISSING_ERRNO_PROBE"
         ErrnoAttributeTests().test_using_errorcode()
