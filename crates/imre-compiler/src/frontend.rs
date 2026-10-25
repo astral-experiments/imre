@@ -4449,6 +4449,7 @@ impl<'a> Checker<'a> {
                     | Type::Float
                     | Type::Bytes
                     | Type::None
+                    | Type::ListInt
                     | Type::List(_)
                     | Type::Tuple(_)
                     | Type::Dict(_)
