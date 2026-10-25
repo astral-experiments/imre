@@ -92,7 +92,8 @@ def host_cache_case(toolchain, directory, blocker):
                                   disable=disable, DEBUG=upstream.DEBUG, ERROR=upstream.ERROR,
                                   NOTSET=upstream.NOTSET, CRITICAL=upstream.CRITICAL)
             try:
-                assert ast.literal_eval(read()) == (case.root_logger.level, case.root_logger.hasHandlers())
+                level, present = read().split(":")
+                assert (int(level), ast.literal_eval(present)) == (case.root_logger.level, case.root_logger.hasHandlers())
                 assert case.root_hdlr in case.root_logger.handlers
                 with patch.object(original, "logging", api), patch.object(case, "root_logger", Logger(case.root_logger.name)):
                     method()

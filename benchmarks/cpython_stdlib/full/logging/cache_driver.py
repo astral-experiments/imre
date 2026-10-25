@@ -7,7 +7,7 @@ def main() -> None:
     logging.basicConfig(level=logging.DEBUG, format="%(name)s -> %(levelname)s: %(message)s")
     root = logging.getLogger()
     loggers: dict[str, logging.Logger] = {root.name: root}
-    print((root.level, root.hasHandlers()))
+    print(str(root.level) + ":" + str(root.hasHandlers()))
     sys.stdout.flush()
     while True:
         op = input()
