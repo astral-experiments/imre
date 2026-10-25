@@ -9125,16 +9125,21 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1
-            && ((args[0].ty.is_path() && matches!(name.id.as_str(), "str" | "print"))
+            && (((args[0].ty.is_path() || self.types.payload(args[0].ty) == Some(Type::Str))
+                && matches!(name.id.as_str(), "str" | "print"))
                 || (args[0].ty == Type::PathInfo
                     && matches!(name.id.as_str(), "str" | "repr" | "print")))
         {
-            let op = if args[0].ty == Type::PathInfo {
-                ir::PathOperation::InfoRepr
+            let text = if self.types.payload(args[0].ty) == Some(Type::Str) {
+                self.optional_text(args.into_iter().next().unwrap())
             } else {
-                ir::PathOperation::Text
+                let op = if args[0].ty == Type::PathInfo {
+                    ir::PathOperation::InfoRepr
+                } else {
+                    ir::PathOperation::Text
+                };
+                paths::operation(op, Type::Str, args)
             };
-            let text = paths::operation(op, Type::Str, args);
             return Ok(if name.id != "print" {
                 text
             } else {

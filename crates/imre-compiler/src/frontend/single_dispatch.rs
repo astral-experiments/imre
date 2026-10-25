@@ -564,11 +564,9 @@ impl Checker<'_> {
         def: &ast::StmtFunctionDef,
     ) -> Result<Expr, String> {
         match decorator {
-            LocalDecorator::Dispatch => self.new_dispatcher(
-                target,
-                Some(function_text::FunctionText::from_definition(def)),
-                def,
-            ),
+            LocalDecorator::Dispatch => {
+                self.new_dispatcher(target, Some(self.function_text(def)), def)
+            }
             LocalDecorator::Register(selection) => selection.apply(self, target, def),
         }
     }
