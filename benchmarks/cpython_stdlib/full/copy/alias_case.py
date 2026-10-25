@@ -128,9 +128,12 @@ def memo_case(tools, work, method):
         # The upstream leaves are empty: check nonempty values and later
         # mutation separately, without counting another upstream occurrence.
         leaf = [-(2**170), 4]
-        graph = [leaf, [4], leaf, []]
+        graph = [leaf, [4], leaf, [4]]
         out = _copy(binary, graph)
-        if out != graph or out is graph or out[0] is not out[2] or out[0] is leaf:
+        if (
+            out != graph or out is graph or out[0] is not out[2] or out[0] is leaf
+            or out[1] is out[3] or out[1] is graph[1] or out[3] is graph[3]
+        ):
             raise AssertionError("the graph transport did not preserve values and aliases")
         out[0].append(9)
         if out[2][-1] != 9 or leaf != [-(2**170), 4]:
