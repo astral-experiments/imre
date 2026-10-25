@@ -3,6 +3,7 @@ import argparse
 import ast
 from contextlib import chdir, ExitStack
 import errno
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,13 +19,7 @@ from suite_inventory import cases, load_suite, verify_files, verify_interpreter_
 from suite_evidence import roles
 from suite_native import NativeCompileError, Toolchain, native_method, run_in_fixtures
 import archive_registry_case
-
-BLOCKED = {
-    "test_make_archive_cwd_default": "the registered user function inspects its keyword arguments and raises RuntimeError",
-    "test_make_archive_cwd": "the registered user callable and patched os.chdir must run in the same process",
-    "test_make_archive_cwd_supports_root_dir": "the registered user callable advertises supports_root_dir",
-    "test_register_archive_format": "archive registry stores user-defined callables and extra arguments",
-}
+import archive_packer_case
 
 DRIVER = '''import sys
 import shutil
@@ -80,18 +75,34 @@ def make_archive_fixture(case):
             f'    def mkdtemp(self) -> str:\n        return {case.mkdtemp()!r}\n')
 
 
-def executors(main, tools, folder, *, with_roles=False):
+def executors(main, tools, folder, *, with_roles=False, blockers=None):
     guard = folder / 'chdir.so'
     subprocess.run([tools.clang, '-shared', '-fPIC', '-Wall', '-Werror', HERE/'archive_chdir.c', '-o', guard], check=True)
     binary = tools.build(DRIVER.encode(), folder)
     registry = folder / "registry"
     registry.mkdir()
     registry_binary = tools.build(archive_registry_case.SOURCE.encode(), registry)
+    packing = folder / "packing"
+    packing.mkdir()
+    blocked = {} if blockers is None else blockers
+    try:
+        pack_binary = tools.build(archive_packer_case.SOURCE.encode(), packing)
+    except NativeCompileError as exc:
+        blocked.update(dict.fromkeys(archive_packer_case.METHODS, str(exc)))
     suite = load_suite('test.test_shutil')
     def execute(case, original):
         name = case._testMethodName
-        if name in BLOCKED:
-            return {"status": "blocked", "reason": BLOCKED[name]}
+        if name in blocked:
+            return {"status": "blocked", "reason": blocked[name]}
+        if name in archive_packer_case.METHODS:
+            detail = archive_packer_case.run(main, original, [pack_binary], guard)
+            counts = detail["calls_by_operation"]
+            detail.update(native_calls=sum(counts.values()), opt_level=tools.level,
+                          fixture="original host body, assertions and callbacks; integer tuple rows are transported as native lists; chdir events originate in the native process")
+            if with_roles:
+                return {"roles": roles(body="cpython", assertions="cpython", operation="mixed", fixture="cpython"),
+                        "evidence": dict(operation=", ".join("shutil." + op for op in counts), **detail)}
+            return {"status": "mixed", **detail}
         if name == "test_unpack_registry":
             counts, callback_types = archive_registry_case.run(main, original, [registry_binary])
             assert callback_types == [["str", "str", "int"]]
@@ -181,7 +192,7 @@ def executors(main, tools, folder, *, with_roles=False):
                                      **detail)}
         return {"status": "mixed" if conversions else "host_driven_native", "operations": counts, **detail, **native_blocker}
     return {c.id(): execute for c in cases(suite) if isinstance(c, main.TestArchives)
-            and (not with_roles or c._testMethodName not in BLOCKED)}
+            and (not with_roles or c._testMethodName not in blocked)}
 
 
 def run_level(tools, main, folder):
@@ -220,7 +231,12 @@ def main():
             folder=root/str(level)
             folder.mkdir()
             levels[level] = run_level(Toolchain(args.imre,args.runtime,args.clang,level), test_shutil, folder)
-    args.result.write_text(json.dumps({'cpython_commit':manifest['commit'],'optimization_levels':levels},indent=2)+'\n')
+    def digest(path):
+        with path.open('rb') as handle:
+            return hashlib.file_digest(handle, 'sha256').hexdigest()
+    args.result.write_text(json.dumps({'cpython_commit':manifest['commit'],
+                          'compiler_sha256':digest(args.imre), 'runtime_sha256':digest(args.runtime),
+                          'optimization_levels':levels},indent=2)+'\n')
     return int(any(v['status']=='failed' for rows in levels.values() for v in rows.values()))
 
 

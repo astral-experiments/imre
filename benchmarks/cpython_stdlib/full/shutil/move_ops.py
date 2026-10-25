@@ -173,21 +173,26 @@ def executors(module, tools, work, *, with_roles=False):
     def adapter(case, original):
         name = case._testMethodName
         native_blocker = {}
-        if name in NATIVE_METHODS:
+        if name in NATIVE_METHODS or name == "test_dont_move_dir_in_itself":
             source = Path(module.__file__)
-            fixture, helper_sha = native_fixture(case, source, NATIVE_METHODS[name])
             folder = work / name
             folder.mkdir()
+            helper_sha = None
             try:
-                execute = native_method(tools, folder, source, "TestMove", case.id(), fixture,
-                                        operation=("imre", "shutil.move"))
+                if name == "test_dont_move_dir_in_itself":
+                    from attempt_methods import native_operation_method
+                    execute = native_operation_method(tools, folder, case, module, "shutil.move")
+                else:
+                    fixture, helper_sha = native_fixture(case, source, NATIVE_METHODS[name])
+                    execute = native_method(tools, folder, source, "TestMove", case.id(), fixture,
+                                            operation=("imre", "shutil.move"))
             except NativeCompileError as exc:
                 # A compile failure does not mutate the real fixture. Preserve the
                 # diagnostic and still run the original body with native operations.
                 native_blocker["native_body_blocker"] = str(exc).strip().splitlines()[-1].split("Imre: ")[-1]
             else:
                 row = {"status": "native_body_host_fixture", **execute(case, original)}
-                row["observation"]["evidence"]["assertion_fixture"] = "typed equality on the original operands, using native unittest assertions"
+                row["observation"]["evidence"]["assertion_fixture"] = "native unittest assertions on the original operands"
                 if helper_sha:
                     row["helper_sha256"] = helper_sha
                     row["observation"]["evidence"]["helper_sha256"] = helper_sha

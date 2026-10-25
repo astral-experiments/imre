@@ -2,10 +2,9 @@
 
 import ast
 from contextlib import ExitStack
-import os
-import select
-import subprocess
 from unittest.mock import patch
+
+from archive_pipe import session
 
 SOURCE = '''import shutil
 import sys
@@ -67,42 +66,14 @@ def run(module, original, command):
     callback = None
     callback_types = []
     with ExitStack() as stack:
-        # Reopening inherited pipe descriptors works for native regular-file IO.
-        # Keep commands and replies separate: a live registry spans all calls.
-        incoming, parent_writer = os.pipe()
-        parent_reader, outgoing = os.pipe()
-        rx = stack.enter_context(os.fdopen(parent_reader, "rb", buffering=0))
-        tx = stack.enter_context(os.fdopen(parent_writer, "wb", buffering=0))
-        try:
-            proc = subprocess.Popen([*command, f"/proc/self/fd/{incoming}", f"/proc/self/fd/{outgoing}"],
-                                    pass_fds=(incoming, outgoing), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        finally:
-            os.close(incoming)
-            os.close(outgoing)
-        def cleanup():
-            if proc.poll() is None:
-                proc.kill()
-            proc.communicate()
-        stack.callback(cleanup)
-
-        def send(*fields):
-            lines = [str(field) for field in fields]
-            if any("\n" in line for line in lines):
-                raise ValueError("the line transport cannot represent embedded newlines")
-            tx.write(("\n".join(lines) + "\n").encode())
+        send, receive = stack.enter_context(session(command))
 
         def request(operation, op, *fields):
             counts[operation] = counts.get(operation, 0) + 1
             send(op, *fields)
             raised = None
             while True:
-                if not select.select([rx], [], [], 30)[0]:
-                    raise TimeoutError(f"archive registry stopped responding during {operation}")
-                line = rx.readline()
-                if not line:
-                    stdout, stderr = proc.communicate(timeout=10)
-                    raise AssertionError((proc.returncode, stdout, stderr))
-                event, data = line.decode().rstrip("\n").split(" ", 1)
+                event, data = receive().split(" ", 1)
                 value = ast.literal_eval(data)
                 if event == "callback":
                     filename, dst, extra = value
@@ -144,7 +115,4 @@ def run(module, original, command):
         stack.enter_context(patch.object(module, "unpack_archive",
                                          lambda filename, dst: request("unpack_archive", "unpack", filename, dst)))
         original()
-        send("quit")
-        stdout, stderr = proc.communicate(timeout=30)
-        assert (proc.returncode, stdout, stderr) == (0, b"", b""), (proc.returncode, stdout, stderr)
     return counts, callback_types

@@ -20,18 +20,18 @@ The implementation covers [file contents and copy errors (#492)](https://github.
 | Execution | `-O0` | `-O3` |
 | --- | ---: | ---: |
 | Fully native, including fixtures | 0 | 0 |
-| Native method body, assertions and operations; host fixtures | 12 | 12 |
-| Host body and assertions driving native operations | 59 | 59 |
-| Mixed host and native operations | 28 | 28 |
+| Native method body, assertions and operations; host fixtures | 15 | 15 |
+| Host body and assertions driving native operations | 73 | 73 |
+| Mixed host and native operations | 38 | 38 |
 | Reference only | 0 | 0 |
-| Blocked | 74 | 74 |
+| Blocked | 47 | 47 |
 | Observed failures | 0 | 0 |
 | Original CPython skips | 50 | 50 |
 | **Total** | **223** | **223** |
 
-Of the 28 mixed methods, 14 use the original rename mock, copy callback or path conversion during moves; 8 call original Python deletion handlers, 4 use host callbacks or path conversions during tree copying, and 2 use the original default-search-path mocks. In those last two methods, the native child has no `PATH`: it requests `os.confstr("CS_PATH")` and, after `ValueError`, `os.defpath`, then searches for the executable.
+Of the 38 mixed methods, 14 use the original rename mock, copy callback or path conversion during moves; 10 use host operands or callbacks for [archive dispatch](archives.md); 8 call original Python deletion handlers, 4 use host callbacks or path conversions during tree copying, and 2 use the original default-search-path mocks. In those last two methods, the native child has no `PATH`: it requests `os.confstr("CS_PATH")` and, after `ValueError`, `os.defpath`, then searches for the executable.
 
-Of the 74 blocked methods, 3 deletion methods and 1 tree-copy method need OS mocks. Each of the other 70 records the first complete-method diagnostic. The 50 skips retain their original CPython reasons.
+The 47 blocked methods include all 29 Linux zero-copy methods, 4 stream open/close methods, 3 `copyfileobj` methods, 4 terminal-size methods, 2 miscellaneous methods, 3 deletion methods, 1 tree-copy method and 1 public API inventory method. The 50 skips retain their original CPython reasons.
 
 ```sh
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/evidence.py \
@@ -65,14 +65,14 @@ The [paired run](https://github.com/astral-sh/imre/actions/runs/40184043145) obs
 
 ## Reproducing complete-method attempts
 
-[method-attempts-linux.json](method-attempts-linux.json) records the compiler and runtime hashes, original method and decorator hashes, and the first diagnostic for each blocked build. The [hosted run](https://github.com/astral-sh/imre/actions/runs/40184043145) tested tree `aeb787b3d67616a86cfc3a4e7ff2524614381187` (main `fcbda28`, move `f8c78ab`). All 173 reference passes were attempted under their original CPython fixtures at both levels. Twelve native bodies completed; 161 could not compile. Of these, 83 reach `import warnings` in the stock `test/support/__init__.py:21`, 40 reach the unsupported `unittest` import used by the original mocks, and 10 stop at `errno`. Each remaining diagnostic is recorded per method.
+[method-attempts-linux.json](method-attempts-linux.json) records the compiler and runtime hashes, original method and decorator hashes, and the first diagnostic for each blocked build. The devbox used the [verified hosted compiler and runtime](https://github.com/astral-sh/imre/actions/runs/40194394062) from archive and random tree `aa9cdee42fa02f88f14dcebbdbe06f972bdeb660`. All 173 reference passes were attempted under their original CPython fixtures at both levels. Fifteen native bodies completed; 158 could not compile. Of these, 105 reached the starred tuple in `test/support/os_helper.py:778`, tracked in [#958](https://github.com/astral-sh/imre/pull/958). Each remaining diagnostic is recorded per method.
 
 Reproduce the method attempts with the pinned interpreter and [vendored shared fixtures](../shared/UPSTREAM.json):
 
 ```sh
 /path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/attempt_methods.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
-    --compiler-tree aeb787b3d67616a86cfc3a4e7ff2524614381187 --result /tmp/method-attempts-linux.json
+    --compiler-tree aa9cdee42fa02f88f14dcebbdbe06f972bdeb660 --result /tmp/method-attempts-linux.json
 ```
 
 Pass `--method-attempts /tmp/method-attempts-linux.json` to the evidence runner to use this result.

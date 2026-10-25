@@ -88,13 +88,15 @@ def run_level(args, module, reference, level, directory):
     executions.update(move_ops.executors(module, tools, move_work, with_roles=True))
     archive_work = directory / "archives"
     archive_work.mkdir()
-    executions.update(archive_ops.executors(module, tools, archive_work, with_roles=True))
+    archive_blockers = {}
+    executions.update(archive_ops.executors(module, tools, archive_work, with_roles=True,
+                                           blockers=archive_blockers))
     preflight = {}
     for cls, operation, blockers in (
         (module.TestCopy, "shutil metadata", native_copy.MOCK_CASES),
         (module.TestRmTree, "shutil.rmtree", native_rmtree.BLOCKERS),
         (module.TestCopyTree, "shutil.copytree", tree_ops.BLOCKERS),
-        (module.TestArchives, "shutil archive registry", archive_ops.BLOCKED),
+        (module.TestArchives, "shutil archive registry", archive_blockers),
     ):
         for name, reason in blockers.items():
             test_id = cls(name).id()

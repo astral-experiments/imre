@@ -16,7 +16,7 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path.insert(0, str(STDLIB))
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_in_fixtures
+from suite_native import NativeCompileError, Toolchain, native_method, run_in_fixtures
 
 # An unexpectedly uncalled operation or a partially executed routine is a failure.
 HOST_CASES = {
@@ -149,6 +149,18 @@ def executors(args, suite, directory, level, *, with_roles=False):
         return {"status": "host_driven_native", **evidence}
 
     executions = {suite.TestCopy(name).id(): host for name in HOST_CASES}
+    def same_file(case, original):
+        from attempt_methods import native_operation_method
+        folder = directory / "same-file"
+        folder.mkdir()
+        try:
+            execute = native_operation_method(tools, folder, case, suite, "shutil.copyfile")
+        except NativeCompileError as exc:
+            result = host(case, original)
+            result["native_body_blocker"] = str(exc).strip().splitlines()[-1]
+            return result
+        return {"status": "native_body_host_fixture", **execute(case, original)}
+    executions[suite.TestCopy("test_copyfile_same_file").id()] = same_file
     executions[test_id] = native
     return executions
 
