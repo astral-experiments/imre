@@ -29,6 +29,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ matrix.commit }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Verify exact commit and tree
         run: |
@@ -45,6 +46,24 @@ jobs:
           path: .cpython-stdlib-reference
           sparse-checkout: Lib/test
           persist-credentials: false
+      - name: Prepare the exact merge with current main
+        run: |
+          cat > "$RUNNER_TEMP/prepare" <<'SH'
+          set -euo pipefail
+          git fetch --quiet --no-tags origin refs/heads/main:refs/remotes/origin/main
+          base=$(git rev-parse origin/main)
+          tree=$(git merge-tree --write-tree "$base" "$1")
+          commit=$(git -c user.name=Preflight -c user.email=preflight@users.noreply.github.com commit-tree "$tree" -p "$base" -p "$1" -m 'Test the live merge tree')
+          git checkout --quiet --detach "$commit"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$tree"
+          echo "$base $tree $commit" > "$RUNNER_TEMP/source"
+          cat "$RUNNER_TEMP/source"
+          SH
+          bash "$RUNNER_TEMP/prepare" "$CANDIDATE"
+          read -r base tree commit < "$RUNNER_TEMP/source"
+          echo "SEED=$CANDIDATE" >> "$GITHUB_ENV"
+          echo "CANDIDATE=$commit" >> "$GITHUB_ENV"
+          echo "TREE=$tree" >> "$GITHUB_ENV"
       - name: Build and test compiler and runtime
         run: |
           sudo apt-get update -qq
@@ -100,9 +119,51 @@ jobs:
           cmp "$dir/annotationlib-linux.json" "$out/format.json"
           python "$dir/run_annotationlib.py" "${args[@]}" --forward-refs --result "$out/forwardrefs.json"
           cmp "$dir/annotation-forwardrefs-linux.json" "$out/forwardrefs.json"
+      - name: Recheck an overlapping main change on the warm runner
+        if: matrix.name == 'cache' || matrix.name == 'both'
+        run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE/.cpython-stdlib-reference/Lib"
+          out="$RUNNER_TEMP/receipts"
+          dir=benchmarks/cpython_stdlib/full/functools
+          args=(--imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18)
+          while true; do
+            read -r base tree commit < "$RUNNER_TEMP/source"
+            mkdir -p "$out/history/$tree"
+            cp "$RUNNER_TEMP/source" "$out/history/$tree/source"
+            cp "$out/cache.json" "$out/reduce.json" "$out/bodies.json" "$out/history/$tree/"
+            if test -d "$out/errno"; then cp -R "$out/errno" "$out/history/$tree/"; fi
+            git fetch --quiet --no-tags origin refs/heads/main:refs/remotes/origin/main
+            if git diff --quiet "$base" origin/main -- crates Cargo.toml Cargo.lock "$dir" benchmarks/cpython_stdlib/full/errno; then
+              cp "$RUNNER_TEMP/source" "$out/final-source"
+              echo "Verified final source $(cat "$out/final-source")"
+              break
+            fi
+            bash "$RUNNER_TEMP/prepare" "$SEED"
+            read -r base tree commit < "$RUNNER_TEMP/source"
+            cargo build --locked -j 2 -p imre-compiler -p imre-runtime
+            cargo test --locked -j 2 -p imre-compiler -p imre-runtime --lib
+            source=tests/fixtures/callables/cache_parameters.py
+            python "$source" > "$RUNNER_TEMP/oracle" 2> "$RUNNER_TEMP/oracle-err"
+            for opt in 0 3; do
+              extra=()
+              if test "$opt" = 0; then extra+=(--sanitize); fi
+              target/debug/imre build "$source" --no-cache --opt-level "$opt" --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 "${extra[@]}" -o "$RUNNER_TEMP/exe"
+              "$RUNNER_TEMP/exe" > "$RUNNER_TEMP/out" 2> "$RUNNER_TEMP/err"
+              cmp "$RUNNER_TEMP/oracle" "$RUNNER_TEMP/out"
+              cmp "$RUNNER_TEMP/oracle-err" "$RUNNER_TEMP/err"
+            done
+            python "$dir/run_cache.py" "${args[@]}" --result "$out/cache.json"
+            cmp "$dir/cache-parameters-linux.json" "$out/cache.json"
+            python "$dir/run_reduce.py" "${args[@]}" --result "$out/reduce.json"
+            cmp "$dir/reduce-linux.json" "$out/reduce.json"
+            python "$dir/run_bodies.py" "${args[@]}" --compiler-commit "$commit" --result "$out/bodies.json"
+            if test "$KIND" = both; then
+              python tests/errno.py --compiler target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --opt-levels 0 3 --result-dir "$out/errno"
+            fi
+          done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always() && matrix.name != 'defaults'
         with:
-          name: ${{ matrix.name }}-${{ matrix.tree }}-receipts
+          name: ${{ matrix.name }}-${{ github.run_id }}-receipts
           path: ${{ runner.temp }}/receipts
           if-no-files-found: ignore
