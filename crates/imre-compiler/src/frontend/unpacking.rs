@@ -271,7 +271,13 @@ impl Checker<'_> {
                         .is_some_and(|options| options.frozen)
                     && let Some(setter) = self.classes.setters[class].get(attribute.attr.as_str())
                 {
-                    let value = self.coerce(value, setter.params[1].ty, target)?;
+                    let expected = if let Some(inference) = self.inference {
+                        inference.learn_parameter(setter.id, 1, value.ty);
+                        inference.parameter(setter.id, 1).unwrap()
+                    } else {
+                        setter.params[1].ty
+                    };
+                    let value = self.coerce(value, expected, target)?;
                     self.calls.insert(setter.id);
                     // Assignment roots the RHS before evaluating the target. The method
                     // receives them in the opposite order: (self, value).

@@ -433,6 +433,46 @@ fn collect_class(
             }
             ast::Stmt::Assign(assign)
                 if let [ast::Expr::Name(name)] = assign.targets.as_slice()
+                    && !class_bindings.contains("property")
+                    && let Some((read, write)) =
+                        property_accessors(graph, definition.module, &assign.value) =>
+            {
+                if !names.insert(name.id.to_string()) {
+                    return Err(module.error(name, "duplicate property binding"));
+                }
+                for (accessor, kind, arity) in [
+                    (Some(read), MethodKind::Property, 1),
+                    (write, MethodKind::PropertySetter, 2),
+                ] {
+                    let Some(accessor) = accessor else { continue };
+                    let Some((method, _)) = methods
+                        .iter()
+                        .zip(&method_kinds)
+                        .find(|(m, k)| m.name.as_str() == accessor && **k == MethodKind::Instance)
+                    else {
+                        return Err(module.error(
+                            assign,
+                            "property accessors must be preceding instance methods",
+                        ));
+                    };
+                    if method.parameters.len() != arity
+                        || method.parameters.posonlyargs.len() + method.parameters.args.len()
+                            != arity
+                    {
+                        return Err(module.error(
+                            assign,
+                            "property accessor has the wrong number of positional parameters",
+                        ));
+                    }
+                    let mut alias = method.clone();
+                    alias.name = ast::Identifier::new(name.id.as_str(), name.range);
+                    methods.push(alias);
+                    method_kinds.push(kind);
+                }
+                class_bindings.insert(name.id.to_string());
+            }
+            ast::Stmt::Assign(assign)
+                if let [ast::Expr::Name(name)] = assign.targets.as_slice()
                     && let Some(binding) = class_static_binding(
                         graph,
                         definition.module,
@@ -584,6 +624,30 @@ fn collect_class(
         generated_initializer,
         initializer,
     })
+}
+
+/// Recognize a fixed property declared from locally named accessors.
+pub(crate) fn property_accessors<'a>(
+    graph: &SourceGraph,
+    module: usize,
+    value: &'a ast::Expr,
+) -> Option<(&'a str, Option<&'a str>)> {
+    let ast::Expr::Call(call) = value else {
+        return None;
+    };
+    if !matches!(&*call.func, ast::Expr::Name(n) if n.id == "property")
+        || graph.resolve(module, &call.func).is_some()
+        || !call.arguments.keywords.is_empty()
+    {
+        return None;
+    }
+    match call.arguments.args.as_ref() {
+        [ast::Expr::Name(get)] => Some((get.id.as_str(), None)),
+        [ast::Expr::Name(get), ast::Expr::Name(set)] => {
+            Some((get.id.as_str(), Some(set.id.as_str())))
+        }
+        _ => None,
+    }
 }
 
 /// Resolve declarations whose descriptor cannot bind an instance: a sealed
