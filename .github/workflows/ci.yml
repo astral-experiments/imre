@@ -219,6 +219,8 @@ jobs:
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
       - run: cargo build --workspace --release --locked --features imre-compiler/verify-ir
+      - name: Verify the standard library support table
+        run: python3 -B benchmarks/cpython_stdlib/full/support_table.py --imre target/release/imre --check
       - name: Get the pinned CPython unittest support and extension docstrings
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
