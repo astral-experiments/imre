@@ -12,7 +12,9 @@ import textwrap
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1]))
+from alias_case import memo_case
 from suite_evidence import roles, write_reports
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_native import NativeCompileError, Toolchain, compile_blocker, method_bytes, run_evidence
@@ -149,6 +151,15 @@ def main():
                     selected[key] = native_instance(tools, work, name)
                 except NativeCompileError as exc:
                     blocked[key, 1] = compile_blocker(exc)
+            name = "test_deepcopy_memo"
+            work = Path(tmp) / name
+            work.mkdir()
+            key = module + ".TestCopy." + name
+            try:
+                method = method_bytes(HERE / "upstream/Lib/test/test_copy.py", "TestCopy", name)
+                selected[key] = memo_case(tools, work, method)
+            except NativeCompileError as exc:
+                blocked[key, 1] = compile_blocker(exc)
             report = run_evidence(load_suite(module), selected, reference, level, preflight=blocked)
             reports.append(report)
             print(f"O{level}: {report['counts']}", flush=True)
@@ -157,7 +168,7 @@ def main():
                     print(row["id"], row.get("reason"), file=sys.stderr)
     write_reports(args.result, reports, reference)
     return int(any(r["counts"].get("fully-native") != len(CASES) or
-                   r["counts"].get("host-driven-native-operation") != len(INSTANCE_CASES) for r in reports))
+                   r["counts"].get("host-driven-native-operation") != len(INSTANCE_CASES) + 1 for r in reports))
 
 
 if __name__ == "__main__":

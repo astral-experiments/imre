@@ -311,6 +311,28 @@ impl Member {
         result
     }
 
+    /// ZipExtFile reads compressed input before zlib checks the output limit.
+    /// Discard those new bytes in bounded blocks, keeping the inflater's existing tail.
+    #[cold]
+    fn oversized_deflate_read(&mut self) -> Result<Bytes> {
+        self.buffer.clear();
+        self.pos = 0;
+        let pending = self.packed.len() - self.packed_pos;
+        while self.packed_left != 0 {
+            let before = self.packed_left;
+            let read = self.input(usize::MAX);
+            self.packed.truncate(pending);
+            read?;
+            if before - self.packed_left < before.min(BLOCK as u64) {
+                break;
+            }
+        }
+        Err(Error::new(
+            Kind::OverflowError,
+            "Python int too large to convert to C ssize_t",
+        ))
+    }
+
     pub(in crate::objects) fn read(&mut self, size: Option<usize>) -> Result<Bytes> {
         let mut out = Vec::new();
         let limit = size.unwrap_or(usize::MAX);
@@ -319,7 +341,11 @@ impl Member {
                 if self.eof {
                     break;
                 }
-                self.refill(limit - out.len())?;
+                let remaining = limit - out.len();
+                if size.is_some() && remaining > isize::MAX as usize && self.inflater.is_some() {
+                    return self.oversized_deflate_read();
+                }
+                self.refill(remaining)?;
                 if self.buffer.is_empty() {
                     break;
                 }
@@ -329,12 +355,17 @@ impl Member {
             out.extend_from_slice(&self.buffer[self.pos..self.pos + n]);
             self.pos += n;
         }
+        if self.pos == self.buffer.len() {
+            self.buffer.clear();
+            self.pos = 0;
+        }
         Ok(out)
     }
 
     pub(in crate::objects) fn readline(&mut self) -> Result<Bytes> {
         let mut out = Vec::new();
         loop {
+            let cached = out.is_empty() && self.pos < self.buffer.len();
             if self.pos == self.buffer.len() {
                 if self.eof {
                     break;
@@ -347,6 +378,12 @@ impl Member {
             out.try_reserve(n).map_err(|_| Error::allocation())?;
             out.extend_from_slice(&data[..n]);
             self.pos += n;
+            // ZipExtFile's newline shortcut retains its existing read buffer.
+            // The buffered readline fallback consumes chunks through read().
+            if self.pos == self.buffer.len() && !(cached && line.is_some()) {
+                self.buffer.clear();
+                self.pos = 0;
+            }
             if line.is_some() || n == 0 {
                 break;
             }
@@ -375,16 +412,18 @@ impl Member {
             return Ok(to);
         }
         if self.info.method == 0 {
+            // Seeking a stored member skips data: its full CRC cannot be checked.
+            self.crc = None;
+            self.source.position(self.start + to)?;
             self.packed_at = self.start + to;
             self.left = self.info.file_size - to;
             self.packed_left = self.info.compress_size.saturating_sub(to);
             self.buffer.clear();
             self.pos = 0;
             self.eof = self.left == 0;
-            // Seeking a stored member skips data: its full CRC cannot be checked.
-            self.crc = None;
         } else {
             if to < now {
+                self.source.position(self.start)?;
                 self.packed_at = self.start;
                 self.packed_left = self.info.compress_size;
                 self.left = self.info.file_size;

@@ -33,6 +33,7 @@ enum LaunchApi {
     Popen,
     Call(bool),
     CheckOutput,
+    Run,
 }
 
 fn integer_deadline(value: &ast::Expr) -> bool {
@@ -194,12 +195,17 @@ pub(super) fn process_error_view(
                 timed = true;
                 (*capture, args[0].ty)
             }
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::Run { .. }), args) => {
-                timed |= args.len() == 5;
-                let Type::CompletedProcess(capture) = value.ty else {
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::Run {
+                    timed: deadline, ..
+                }),
+                _,
+            ) => {
+                timed |= *deadline;
+                let Type::CompletedProcess(capture, cmd) = value.ty else {
                     unreachable!()
                 };
-                (capture, types.list(Type::Str))
+                (capture, types.completed_command(cmd))
             }
             ExprKind::Builtin(
                 Builtin::Process(ProcessOperation::PopenCommunicate { .. }),
@@ -230,10 +236,10 @@ pub(super) fn process_error_view(
                 )
             }
             ExprKind::Builtin(Builtin::Process(ProcessOperation::CheckReturnCode), args) => {
-                let Type::CompletedProcess(capture) = args[0].ty else {
+                let Type::CompletedProcess(capture, cmd) = args[0].ty else {
                     unreachable!()
                 };
-                (capture, types.list(Type::Str))
+                (capture, types.completed_command(cmd))
             }
             _ => return,
         };
@@ -259,6 +265,8 @@ fn stream_plan(
 ) -> Result<(u32, ProcessCapture), &'static str> {
     let checked_output =
         graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::CheckOutput));
+    let run =
+        graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::SubprocessRun));
     let mut streams = [u32::from(checked_output), 0];
     let mut capture = false;
     let mut text = false;
@@ -302,7 +310,9 @@ fn stream_plan(
                     capture = flag;
                 }
             }
-            Some("errors") if checked_output && !matches!(value, ast::Expr::NoneLiteral(_)) => {
+            Some("errors")
+                if (checked_output || run) && !matches!(value, ast::Expr::NoneLiteral(_)) =>
+            {
                 if !matches!(value, ast::Expr::StringLiteral(v) if matches!(v.value.to_str(), "strict" | "ignore" | "replace"))
                 {
                     return Err("check_output errors requires strict, ignore, replace, or None");
@@ -336,6 +346,7 @@ fn stream_plan(
             text: text
                 && (stdout
                     || stderr
+                    || run
                     || graph.resolve(module, &call.func)
                         == Some(Binding::Intrinsic(Intrinsic::Popen))),
         },
@@ -350,6 +361,7 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
         module: ModuleId,
         stdout: bool,
         variable_command: bool,
+        check_command: bool,
         types: &'a Types,
         timeout: bool,
         found: Vec<Type>,
@@ -382,6 +394,19 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
                             })
                     }
                     Some(Binding::Intrinsic(Intrinsic::SubprocessRun)) => {
+                        if self.check_command && !self.variable_command {
+                            let arg = call.arguments.args.first().or_else(|| {
+                                call.arguments
+                                    .keywords
+                                    .iter()
+                                    .find(|k| k.arg.as_deref() == Some("args"))
+                                    .map(|k| &k.value)
+                            });
+                            self.variable_command = !arg.is_some_and(|arg|
+                                matches!(arg, ast::Expr::List(list) if list.elts.iter().all(|e| matches!(e, ast::Expr::StringLiteral(_))))
+                                || self.graph.session.is_string_list(self.module, arg)
+                            );
+                        }
                         stream_plan(self.graph, self.module, call)
                             .ok()
                             .filter(|(mode, _)| mode & 256 == 0)
@@ -410,6 +435,7 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
         module: graph.entry,
         stdout: field != 3,
         variable_command: false,
+        check_command: field == 0,
         types,
         timeout,
         found: Vec::new(),
@@ -601,7 +627,10 @@ impl Checker<'_> {
                 _ => return self.process_run(call),
             }
         }
-        let argv = self.expr_expected(argv, self.types.list(Type::Str))?;
+        let argv = self.command_argument(argv)?;
+        if argv.ty != self.types.list(Type::Str) {
+            return self.process_run(call);
+        }
         let check = match check {
             Some(value) => self.expr_expected(value, Type::Bool)?,
             None => boolean(false),
@@ -668,7 +697,12 @@ impl Checker<'_> {
                 Type::Str | Type::StrLiteral(_) | Type::Bytes | Type::Path | Type::PurePath(_)
             )
         };
-        let value = if let ast::Expr::List(display) = arg {
+        let value = if let ast::Expr::List(display) = arg
+            && !display
+                .elts
+                .iter()
+                .any(|item| matches!(item, ast::Expr::Starred(_)))
+        {
             let items = display
                 .elts
                 .iter()
@@ -806,9 +840,9 @@ impl Checker<'_> {
             _ => 0,
         };
         let input_given = api == LaunchApi::CheckOutput && keyword("input").is_some();
-        let validation = if keyword("stdout").is_some() {
+        let validation = if api == LaunchApi::CheckOutput && keyword("stdout").is_some() {
             1
-        } else if keyword("check").is_some() {
+        } else if api == LaunchApi::CheckOutput && keyword("check").is_some() {
             2
         } else if input_given && stdin != 0 {
             3
@@ -864,7 +898,7 @@ impl Checker<'_> {
                 kind: ParameterKind::KeywordOnly,
             });
         }
-        if api == LaunchApi::CheckOutput {
+        if matches!(api, LaunchApi::CheckOutput | LaunchApi::Run) {
             let input = self
                 .types
                 .optional(if capture.text { Type::Str } else { Type::Bytes });
@@ -907,6 +941,7 @@ impl Checker<'_> {
                 }
                 4..=8 => Ok(boolean(false)), // effect-free literals checked by stream_plan
                 11 => checker.condition(arg),
+                14 if api == LaunchApi::Run => checker.expr_expected(arg, Type::Bool),
                 14 => checker.expr(arg), // evaluated before reporting a forbidden check keyword
                 15..=17 => Ok(boolean(false)), // literals validated by stream_plan
                 12 => checker.deadline_value(arg),
@@ -922,6 +957,15 @@ impl Checker<'_> {
                     capture,
                 },
                 capture.stream(true),
+            ),
+            LaunchApi::Run => (
+                ProcessOperation::Run {
+                    streams,
+                    validation,
+                    errors,
+                    timed: timeout_argument(call).is_some(),
+                },
+                self.types.completed(capture, args.values[args.order[0]].ty),
             ),
             LaunchApi::Call(check) => (ProcessOperation::Call { streams, check }, Type::Int),
             LaunchApi::Popen => (
@@ -1085,85 +1129,8 @@ impl Checker<'_> {
         self.coerce(value, timeout, argument)
     }
 
-    /// Literal mode arguments establish each output’s exact representation. Dynamic values are
-    /// rooted in source order before their permutation into the runtime ABI.
     pub(super) fn process_run(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let strings = self.types.list(Type::Str);
-        let directory = self.types.optional(Type::Str);
-        let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
-        let timeout = self.types.optional(Type::Float);
-        let (streams, capture) = stream_plan(self.graph, self.module, call)
-            .map_err(|message| error(self.source, call, message))?;
-        let params = [
-            ("args", strings, None),
-            ("cwd", directory, Some(absent(directory))),
-            ("env", environment, Some(absent(environment))),
-            ("check", Type::Bool, Some(boolean(false))),
-            ("capture_output", Type::Bool, Some(boolean(false))),
-            ("encoding", Type::Bool, Some(boolean(false))),
-            ("text", Type::Bool, Some(boolean(false))),
-            ("timeout", timeout, Some(absent(timeout))),
-            ("stdout", Type::Bool, Some(boolean(false))),
-            ("stderr", Type::Bool, Some(boolean(false))),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(index, (name, ty, default))| Parameter {
-            name: name.to_owned(),
-            ty,
-            kind: if index == 0 {
-                ParameterKind::PositionalOrKeyword
-            } else {
-                ParameterKind::KeywordOnly
-            },
-            default,
-            sign_only: false,
-        })
-        .collect::<Vec<_>>();
-        let supplied = self.arguments_with(call, &params, None, |checker, index, argument| {
-            match index {
-                1 => checker.optional_path_argument(argument),
-                // stream_plan has already checked these effect-free static options.
-                4..=6 | 8 | 9 => Ok(boolean(false)),
-                7 => checker.deadline_value(argument),
-                _ => checker.expr_expected(argument, params[index].ty),
-            }
-        })?;
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        let mut order = supplied.order[..4].to_vec();
-        if timeout_argument(call).is_some() {
-            order.push(supplied.order[7]);
-        }
-        let mut values = vec![None; supplied.values.len()];
-        for (index, value) in supplied.values.into_iter().enumerate() {
-            // The validated mode literals have no effects and need no runtime storage.
-            if order.contains(&index) {
-                let slot = self.hidden(value.ty);
-                values[index] = Some(Expr {
-                    ty: value.ty,
-                    kind: ExprKind::Local(slot),
-                });
-                body.push(Statement::Assign(slot, value));
-                clear.push(slot);
-            }
-        }
-        let args = order
-            .iter()
-            .map(|&index| values[index].take().unwrap())
-            .collect();
-        Ok(Expr {
-            ty: Type::CompletedProcess(capture),
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(operation(
-                    ProcessOperation::Run { streams },
-                    Type::CompletedProcess(capture),
-                    args,
-                )),
-                clear,
-            },
-        })
+        self.launch_process(call, LaunchApi::Run)
     }
 
     /// Path conversion is sealed and pure; optional paths retain their absence.
@@ -1289,11 +1256,11 @@ impl Checker<'_> {
         receiver: Expr,
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
-        let Type::CompletedProcess(capture) = receiver.ty else {
+        let Type::CompletedProcess(capture, cmd) = receiver.ty else {
             unreachable!()
         };
         let (field, ty) = match attribute.attr.as_str() {
-            "args" => (0, self.types.list(Type::Str)),
+            "args" => (0, self.types.completed_command(cmd)),
             "returncode" => (1, Type::Int),
             "stdout" => (2, capture.stream(true)),
             "stderr" => (3, capture.stream(false)),

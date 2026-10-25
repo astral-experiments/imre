@@ -17,7 +17,7 @@ import tempfile
 import unittest
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1]))
+sys.path[:0] = [str(HERE.parents[1]), str(HERE)]
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import Toolchain, native_method, run_in_fixtures
 from native_counter import assertion_fixture
