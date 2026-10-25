@@ -1169,6 +1169,11 @@ impl Checker<'_> {
         node: &impl Ranged,
         reverse: bool,
     ) -> Result<Prepared, String> {
+        let iterable = if items {
+            iterable
+        } else {
+            self.json_iteration(iterable)
+        };
         if !reverse && iterable.ty == Type::CsvReader {
             return Ok(self.prepare_csv_reader(iterable));
         }
@@ -2200,11 +2205,15 @@ impl Checker<'_> {
                 Some(slot),
             ));
         }
-        let (kind, captured) = if let ExprKind::Callable {
-            function,
-            receiver: None,
-        } = callback.kind
-        {
+        let direct = match &callback.kind {
+            ExprKind::Callable {
+                function,
+                receiver: None,
+            }
+            | ExprKind::Builtin(Builtin::StaticFunction(function), _) => Some(*function),
+            _ => None,
+        };
+        let (kind, captured) = if let Some(function) = direct {
             self.calls.insert(function);
             (ExprKind::Call(function, args), None)
         } else {

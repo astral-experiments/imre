@@ -133,6 +133,31 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // CPython truth-tests any non-None debug_override and raises for conflicting
+        // optimization arguments. Preserve these catchable routes and the original
+        // unrelated frozen-importlib declarations, including their version guards.
+        let bootstrap = vendored
+            .read_to_string("stdlib/_frozen_importlib_external.pyi")
+            .map_err(|e| e.to_string())?
+            .replace(
+                "def cache_from_source(path: StrPath,",
+                "def cache_from_source(path: object,",
+            )
+            .replace(
+                "debug_override: bool, *, optimization: None = None",
+                "debug_override: object, *, optimization: object = None",
+            )
+            .replace(
+                "def source_from_cache(path: StrPath)",
+                "def source_from_cache(path: object)",
+            );
+        system
+            .fs()
+            .write_file_all(
+                SystemPathBuf::from(root).join("_frozen_importlib_external.pyi"),
+                bootstrap,
+            )
+            .map_err(|e| e.to_string())?;
         // typeshed omits inspect's private default; preserve all its public signatures.
         let inspect = vendored
             .read_to_string("stdlib/inspect.pyi")
@@ -529,6 +554,7 @@ pub(crate) enum CheckedDiagnostic {
     OptionalLockContext(TextRange),
     Call(TextRange),
     DictDeletion(TextRange),
+    DeferredName(TextRange),
     Keyword(TextRange),
     CheckedIndexRead(TextRange),
     MissingArgument(TextRange),
@@ -547,12 +573,13 @@ impl CheckedDiagnostic {
             Self::Call(range) => (range, 1),
             Self::Keyword(range) => (range, 2),
             Self::CheckedIndexRead(range) => (range, 3),
+            Self::RepeatedKeyword(range) => (range, 11),
             Self::DictDeletion(range) => (range, 8),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
             Self::ExcessArgument(range) => (range, 6),
             Self::PositionalKeyword(range) => (range, 7),
-            Self::RepeatedKeyword(range) => (range, 8),
+            Self::DeferredName(range) => (range, 9),
         };
         (range.start(), range.end(), kind)
     }
@@ -565,6 +592,7 @@ impl CheckedDiagnostic {
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
+            Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
             Self::OptionalLockContext(expr) => {
                 diagnostic == "invalid-context-manager" && expr == range
             }

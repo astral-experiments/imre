@@ -14,6 +14,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1])]
+from cache_evidence import register
 from product_controls import check
 from suite_evidence import reference_cases, roles, write_reports
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
@@ -32,6 +33,8 @@ METHODS = (
     "test_cached_no_origin",
     "test_cached_with_origin_not_location",
     "test_cached_source_unknown_suffix",
+    "test_cached_source",
+    "test_cached_source_missing_cache_tag",
     "test_cached_sourceless",
 )
 
@@ -76,6 +79,8 @@ class Heap:
 
     def call(self, op, *fields):
         self.calls[op] += 1
+        if op == "cached":
+            fields = (*fields, *self.text(sys.implementation.cache_tag), *self.text(sys.pycache_prefix))
         request = [op, *map(str, fields)]
         assert not any("\n" in x for x in request)
         self.proc.stdin.write("\n".join(request) + "\n")
@@ -152,7 +157,7 @@ def host_method(binary, method, level):
             ),
             "evidence": {
                 "operation": "All observed spec construction, attribute access and mutation use one live native heap.",
-                "fixture": "Original CPython Frozen/Source setUp and TestCase assertions; native heap reconstructs both initial specs and retains the fixture loader by identity handle. No finder, loader method or bytecode cache is forwarded to CPython.",
+                "fixture": "Original CPython Frozen/Source setUp and TestCase assertions; native heap reconstructs both initial specs and retains the fixture loader by identity handle. The cached getter sees the live fixture tag/prefix. For test_cached_source the original CPython util independently computes its expected value; the observed ModuleSpec getter is native.",
                 "native_calls": dict(sorted(calls.items())),
                 "opt_level": level,
                 "method_sha256": hashlib.sha256(body).hexdigest(),
@@ -302,6 +307,7 @@ def main():
                     executions[
                         f"test.test_importlib.test_spec.{variant}_ModuleSpecTests.{method}"
                     ] = execute
+            register(lang, root, level, executions)
             suite = load_suite(manifest["module"])
             report = run_evidence(
                 suite, executions, ref, level, exceptions=skips(suite, ref, level)
