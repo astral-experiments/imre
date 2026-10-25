@@ -505,7 +505,12 @@ def main():
     for name in ("imre", "runtime", "clang", "result"):
         p.add_argument("--" + name, required=True, type=Path)
     p.add_argument("--opt-level", type=int, required=True, choices=(0, 3))
+    p.add_argument(
+        "--test-id", action="append", choices=sorted(IDS),
+        help="run only the named original occurrence (repeatable)",
+    )
     a = p.parse_args()
+    selected = set(a.test_id) if a.test_id else IDS
     man = json.loads((HERE / "UPSTREAM.json").read_text())
     verify_files(HERE / "upstream", man["files"])
     verify_interpreter_tests(man)
@@ -547,9 +552,9 @@ def main():
             )
 
         rows, fail, skips = run_in_fixtures(
-            load_suite(man["module"]), dict.fromkeys(IDS, measure)
+            load_suite(man["module"]), dict.fromkeys(selected, measure)
         )
-        if fail or skips or rows.keys() != IDS:
+        if fail or skips or rows.keys() != selected:
             raise AssertionError((fail, skips))
         data = dict(
             cpython_commit=man["commit"],
