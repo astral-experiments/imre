@@ -3,9 +3,9 @@ use super::*;
 use crate::ir::FdOperation;
 
 impl Emitter<'_, '_> {
-    pub(super) fn os_open_flag(&mut self, name: &str) -> Value {
-        // The runtime stores target-specific open flags as tagged ints.
-        let operand = self.instruction(format!("load i64, ptr @imre_os_o_{name}"));
+    /// Read the target's descriptor constant as a tagged integer.
+    pub(super) fn os_descriptor_constant(&mut self, name: &str) -> Value {
+        let operand = self.instruction(format!("load i64, ptr @imre_os_{name}"));
         Value {
             ty: Type::Int,
             operand,
@@ -37,12 +37,33 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 };
             }
-            FdOperation::Pipe => {
+            FdOperation::Unlink | FdOperation::Remove => {
+                let [path, fd] = args else { unreachable!() };
+                let bytes = u32::from(path.value.ty == Type::Bytes);
+                self.checked_line(format!(
+                    "call void @imre_os_unlink(ptr {}, i32 {bytes}, i64 {}, i32 {})",
+                    path.value.operand,
+                    fd.value.operand,
+                    u32::from(op == FdOperation::Remove)
+                ));
+                return none();
+            }
+            FdOperation::Pipe | FdOperation::Pipe2 => {
                 let tuple = self.record(returns);
-                self.checked_line(format!("call void @imre_os_pipe(ptr {})", tuple.operand));
+                match args {
+                    [] => {
+                        self.checked_line(format!("call void @imre_os_pipe(ptr {})", tuple.operand))
+                    }
+                    [flags] => self.checked_line(format!(
+                        "call void @imre_os_pipe2(ptr {}, i64 {})",
+                        tuple.operand, flags.value.operand
+                    )),
+                    _ => unreachable!(),
+                }
                 return tuple;
             }
             FdOperation::Close => "close",
+            FdOperation::Seek => "lseek",
             FdOperation::Dup => "dup",
             FdOperation::Dup2 => "dup2",
             FdOperation::Isatty => "isatty",

@@ -1,0 +1,42 @@
+{
+  "containers/sequence_predicates.py": {
+    "lines": 56,
+    "stdout_sha256": "54c9f19ca8b4737ab61f0e8b0100ceba64d575eb5df75561d1cca936c67aeb79"
+  },
+  "containers/array_registration.py": {
+    "lines": 532,
+    "stdout_sha256": "92c6791ec605fc0ef0d3d25f05d2296cfa15583f8bf311cdadad5797d0dd0ddd"
+  },
+  "classes/mapping_alias.py": {
+    "lines": 14,
+    "stdout_sha256": "8d75aad84b9ab52ae3aa21b94a790ea907415be06b5dc7eca0178373423afe7d"
+  },
+  "classes/mapping_abc.py": {
+    "lines": 33,
+    "stdout_sha256": "38637d1d0aecd6e2289971902dffd8a5ccc50c6362b42fe6765e9cfc5e867a78"
+  },
+  "containers/namedtuple.py": {
+    "lines": 23,
+    "stdout_sha256": "4645b7fdead47d6b82b3ad876375228205673a0946643044b5ed81dde427ba4a"
+  },
+  "module_values/namedtuple/main.py": {
+    "lines": 3,
+    "stdout_sha256": "e30189274b7cb9fe119fb71c37300682aeb8e8c90d953ea7e22bc15631ebbb40"
+  },
+  "bytes/membership.py": {
+    "lines": 128,
+    "stdout_sha256": "ac56aaa1bfea77bb514b0f27e6e600b9c330460dba650264b8d2e2488543d7a2"
+  },
+  "text/percent_scalar.py": {
+    "lines": 132,
+    "stdout_sha256": "018a9b6c9605932033612327366271bfb6f558fe6c5cc6be04ab6688e59361b0"
+  },
+  "processes/file_redirects.py": {
+    "lines": 35,
+    "stdout_sha256": "b845254efdc75b74f592c3e1adea1efbfd41aa1e16d73da7e271a0b55548c48a"
+  },
+  "json_records/stdlib_deep_decode.py": {
+    "lines": 18,
+    "stdout_sha256": "0dc983649b99f10acc1d5b2dd57c864619dd1d53088b1f54e1d2ec6ed1c27f92"
+  }
+}

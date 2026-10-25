@@ -62,10 +62,7 @@ fn bytes(output: &mut String, name: &str, value: &str) {
 /// Names and field flags are shared constants. Record allocation size, field
 /// offsets, and ownership operations do not depend on generated value behavior.
 pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut String) -> String {
-    let named = module
-        .types
-        .namedtuple_definition(ty)
-        .and_then(|id| module.types.namedtuple(id));
+    let named = module.types.tuple_metadata(ty);
     let (kind, flags, class_name, qualified_name, fields) = match ty {
         Type::Class(class) => {
             let Some(metadata) = module.class_metadata.get(class) else {
@@ -73,12 +70,17 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             };
             let flags = u32::from(metadata.dataclass_eq)
                 | (u32::from(metadata.dataclass_repr) << 1)
-                | (u32::from(metadata.toml_hash) << 2);
-            let layout = metadata.fields.iter().map(|field| {
-                (
-                    field.name.as_str(),
-                    u32::from(field.compare) | (u32::from(field.repr) << 1),
-                )
+                | (u32::from(metadata.toml_hash) << 2)
+                | (u32::from(metadata.value_struct) << 3);
+            // The runtime walks the physical layout. Hidden cache and shadow fields
+            // own their payloads, but have no public name, equality, or repr role.
+            let layout = (0..module.class_fields[class].len()).map(|index| {
+                metadata.fields.get(index).map_or(("", 0), |field| {
+                    (
+                        field.name.as_str(),
+                        u32::from(field.compare) | (u32::from(field.repr) << 1),
+                    )
+                })
             });
             (
                 0,
@@ -88,7 +90,26 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                 field_metadata(output, name, layout),
             )
         }
-        Type::CompletedProcess(capture) => {
+        Type::ModuleSpec(_) => {
+            let layout = [
+                ("name", 2),
+                ("loader", 2),
+                ("origin", 2),
+                ("loader_state", 0),
+                ("submodule_search_locations", 2),
+                ("_uninitialized_submodules", 0),
+                ("_set_fileattr", 0),
+                ("_cached", 0),
+            ];
+            (
+                2,
+                2,
+                "ModuleSpec",
+                "_frozen_importlib.ModuleSpec",
+                field_metadata(output, name, layout.into_iter()),
+            )
+        }
+        Type::CompletedProcess(capture, _) => {
             let layout = [
                 ("args", true),
                 ("returncode", true),
@@ -107,9 +128,11 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
         }
         Type::Tuple(_) if named.is_some() => {
             let declaration = named.as_ref().unwrap();
+            // stat_result appends raw numeric attributes after the visible tuple.
+            let flags = 3 | (u32::from(module.types.is_stat_result(ty)) << 3);
             (
                 1,
-                3,
+                flags,
                 declaration.name.as_str(),
                 declaration.name.as_str(),
                 field_metadata(
@@ -147,6 +170,10 @@ fn field_metadata<'a>(
 ) -> String {
     let mut fields = Vec::new();
     for (index, (field, flags)) in layout.enumerate() {
+        if field.is_empty() {
+            fields.push("{ ptr, i64, i32 } zeroinitializer".to_owned());
+            continue;
+        }
         let symbol = format!("repr_field_{name}_{index}");
         bytes(output, &symbol, field);
         fields.push(format!(

@@ -1,26 +1,26 @@
 //! Format a failed stdlib JSON parse at Python's character offset. Serde owns
-//! the successful path. This cursor only distinguishes the tokens Python expected.
+//! the shallow successful path; the iterative decoder reuses these token rules.
 
-use std::rc::Rc;
+use crate::StrOwner;
 use std::sync::LazyLock;
 
 use regex_automata::meta::Regex;
 
-use crate::{Error, Str};
+use crate::Error;
 
-type Failure = (usize, &'static str);
+pub(super) type Failure = (usize, &'static str);
 
-struct Cursor<'a> {
-    source: &'a str,
-    pos: usize,
+pub(super) struct Cursor<'a> {
+    pub(super) source: &'a str,
+    pub(super) pos: usize,
 }
 
-impl Cursor<'_> {
-    fn peek(&self) -> Option<u8> {
+impl<'a> Cursor<'a> {
+    pub(super) fn peek(&self) -> Option<u8> {
         self.source.as_bytes().get(self.pos).copied()
     }
 
-    fn space(&mut self) {
+    pub(super) fn space(&mut self) {
         while matches!(self.peek(), Some(b' ' | b'\t' | b'\r' | b'\n')) {
             self.pos += 1;
         }
@@ -29,19 +29,25 @@ impl Cursor<'_> {
     fn value(&mut self) -> Result<(), Failure> {
         self.space();
         match self.peek() {
-            Some(b'"') => self.string(),
             Some(open @ (b'[' | b'{')) => self.container(open == b'{'),
-            _ => {
-                static ATOM: LazyLock<Regex> = LazyLock::new(|| {
-                    Regex::new(r"^(?:-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null|NaN|-?Infinity)").unwrap()
-                });
-                let token = ATOM
-                    .find(&self.source[self.pos..])
-                    .ok_or((self.pos, "Expecting value"))?;
-                self.pos += token.end();
-                Ok(())
-            }
+            _ => self.scalar().map(|_| ()),
         }
+    }
+
+    pub(super) fn scalar(&mut self) -> Result<&'a str, Failure> {
+        let start = self.pos;
+        if self.peek() == Some(b'"') {
+            self.string()?;
+        } else {
+            static ATOM: LazyLock<Regex> = LazyLock::new(|| {
+                Regex::new(r"^(?:-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null|NaN|-?Infinity)").unwrap()
+            });
+            let token = ATOM
+                .find(&self.source[self.pos..])
+                .ok_or((self.pos, "Expecting value"))?;
+            self.pos += token.end();
+        }
+        Ok(&self.source[start..self.pos])
     }
 
     fn string(&mut self) -> Result<(), Failure> {
@@ -131,7 +137,7 @@ impl Cursor<'_> {
 pub(super) fn decode_error(
     text: &str,
     fallback: serde_json::Error,
-    owner: impl FnOnce() -> Option<Rc<Str>>,
+    owner: impl FnOnce() -> Option<StrOwner>,
 ) -> Error {
     let mut cursor = Cursor {
         source: text,
@@ -170,7 +176,7 @@ pub(super) fn decode_error(
 }
 
 #[cold]
-pub(super) fn at_error(doc: Rc<Str>, at: usize, msg: &str) -> Error {
+pub(super) fn at_error(doc: StrOwner, at: usize, msg: &str) -> Error {
     let prefix = &doc[..at];
     let lineno = 1 + memchr::memchr_iter(b'\n', prefix.as_bytes()).count();
     let colno = 1 + prefix

@@ -5,6 +5,7 @@
 use super::difflib::{Output, materialize_words};
 use super::exceptions::Error;
 use super::{Object, Str, Words, object};
+use crate::StrOwner;
 use std::cell::{OnceCell, Ref, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -173,7 +174,7 @@ fn filter(
             // SAFETY: retain the source string before adding it to the independent list.
             unsafe { values.kind.acquire(word) }.into_word()
         } else {
-            Rc::into_raw(Rc::new(Str::new(selected))) as usize
+            StrOwner::into_raw(StrOwner::new(Str::new(selected))) as usize
         };
         result.values.push(element);
     }
@@ -248,17 +249,17 @@ pub unsafe extern "C" fn imre_ndiff_deferred(
 /// The caller roots a list of exact strings. The result transfers one distinct list.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_list_copy(list: *const Object) -> *const Object {
-    // SAFETY: reading a plan or retaining string elements cannot invoke user code.
-    let words = unsafe {
-        object(list).0.with(|storage| {
-            let words = storage.sequence_storage();
-            words.plan().map_or_else(
-                || words.copy_strings(),
-                |plan| Words::deferred(plan.clone()),
-            )
-        })
+    // SAFETY: the caller roots the list while an immutable plan owner is cloned.
+    let plan = unsafe {
+        object(list)
+            .0
+            .with(|storage| storage.sequence_storage().plan().cloned())
     };
-    Rc::into_raw(words.into_object())
+    match plan {
+        Some(plan) => Rc::into_raw(Words::deferred(plan).into_object()),
+        // SAFETY: omitted bounds copy the entire rooted sequence.
+        None => unsafe { super::sequences::imre_seq_slice(list, 0, 0, 0) },
+    }
 }
 
 fn same_sign(first: &str, second: Option<&str>) -> bool {
@@ -356,25 +357,42 @@ pub unsafe extern "C" fn imre_str_list_sorted_suffix(
             let source = match (skip, words.plan()) {
                 (2, Some(Deferred(View::Signed(source)))) => Some(source),
                 (2, Some(plan @ Deferred(View::Sorted { .. }))) => {
-                    return Words::deferred(plan.clone());
+                    return Ok(Words::deferred(plan.clone()));
                 }
                 _ => None,
             };
             let input = source.map_or_else(|| words.resolved(), |source| source.projected());
-            let mut sorted = input.copy_strings();
+            let mut sorted = snapshot(input, std::iter::empty())?;
             let key = |word: usize| suffix(&*(word as *const Str), skip as usize);
-            sorted.values.sort_by(|&a, &b| key(a).cmp(key(b)));
-            if let Some(source) = source {
+            // The standard stable slice sort allocates scratch and aborts when
+            // that allocation fails. Keep a stack fallback, as direct string
+            // sorting does, so the already-owned result remains sortable.
+            let mut local = [std::mem::MaybeUninit::uninit(); 64];
+            let mut heap = Vec::<usize>::new();
+            let scratch = if sorted.values.len() <= 128
+                || heap.try_reserve_exact(sorted.values.len()).is_err()
+            {
+                local.as_mut_slice()
+            } else {
+                heap.spare_capacity_mut()
+            };
+            glidesort::sort_with_buffer_by(&mut sorted.values, scratch, |&a, &b| {
+                key(a).cmp(key(b))
+            });
+            Ok(if let Some(source) = source {
                 Words::deferred(Deferred(View::Sorted {
                     rows: Rc::new(sorted),
                     origin: Rc::downgrade(source),
                 }))
             } else {
                 sorted
-            }
+            })
         })
     };
-    Rc::into_raw(result.into_object())
+    crate::finish(
+        result.map(|words| Rc::into_raw(words.into_object())),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety

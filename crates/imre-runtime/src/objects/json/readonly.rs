@@ -2,10 +2,14 @@
 //! so nested values survive the source array; typed scalar results own only
 //! their native string or integer. No Python object graph or mutable alias is exposed.
 
+use crate::StrOwner;
 mod arrays;
 mod constants;
+mod deep;
+mod deep_values;
 pub(in crate::objects) mod document;
 mod elements;
+mod keys;
 mod values;
 mod writer;
 
@@ -22,6 +26,7 @@ use super::{Key, check_depth};
 use crate::objects::words::Words;
 use crate::objects::{Object, Storage, object};
 use crate::{Error, Int, Kind, StorageCell, Str, finish};
+use keys::{KeyMemo, ObjectFields};
 
 #[derive(Clone)]
 pub(super) enum Node {
@@ -31,11 +36,11 @@ pub(super) enum Node {
     Float(f64),
     /// The default decoder reuses a single NaN object, observable in container equality.
     ConstantNan,
-    String(Rc<Str>),
+    String(StrOwner),
     Datetime(Str),
     Array(Vec<usize>),
     Deferred(Rc<arrays::Deferred>),
-    Object(Vec<(Str, usize)>),
+    Object(ObjectFields),
 }
 
 impl Node {
@@ -101,8 +106,11 @@ impl Node {
 #[derive(Clone)]
 pub(super) enum Nodes {
     Document(Rc<Vec<Node>>),
+    /// The iterative parser emits every subtree contiguously in postorder.
+    Deep(Rc<Vec<Node>>),
     /// Keep aliases of a mutable root array without enlarging every scalar view.
     Root(Rc<Vec<Node>>, Rc<Object>),
+    DeepRoot(Rc<Vec<Node>>, Rc<Object>),
     /// Computed scalars and missing defaults do not need a second allocation.
     Single(Node),
 }
@@ -111,7 +119,10 @@ impl std::ops::Deref for Nodes {
     type Target = [Node];
     fn deref(&self) -> &[Node] {
         match self {
-            Self::Document(nodes) | Self::Root(nodes, _) => nodes,
+            Self::Document(nodes)
+            | Self::Deep(nodes)
+            | Self::Root(nodes, _)
+            | Self::DeepRoot(nodes, _) => nodes,
             Self::Single(node) => std::slice::from_ref(node),
         }
     }
@@ -120,7 +131,7 @@ impl std::ops::Deref for Nodes {
 impl Nodes {
     pub(super) fn root_items(&self) -> Option<&Rc<Object>> {
         match self {
-            Self::Root(_, items) => Some(items),
+            Self::Root(_, items) | Self::DeepRoot(_, items) => Some(items),
             _ => None,
         }
     }
@@ -128,7 +139,20 @@ impl Nodes {
     fn child(&self) -> Self {
         match self {
             Self::Root(nodes, _) => Self::Document(Rc::clone(nodes)),
+            Self::DeepRoot(nodes, _) => Self::Deep(Rc::clone(nodes)),
             _ => self.clone(),
+        }
+    }
+
+    fn deep(&self) -> bool {
+        matches!(self, Self::Deep(_) | Self::DeepRoot(..))
+    }
+
+    fn copied(nodes: Vec<Node>, deep: bool) -> Self {
+        if deep {
+            Self::Deep(Rc::new(nodes))
+        } else {
+            Self::Document(Rc::new(nodes))
         }
     }
 }
@@ -179,7 +203,7 @@ impl View {
         let mut nodes = Vec::new();
         let index = self.copy_to(self.index, &mut nodes);
         Some(Self {
-            nodes: Nodes::Document(Rc::new(nodes)),
+            nodes: Nodes::copied(nodes, self.nodes.deep()),
             index,
         })
     }
@@ -203,6 +227,9 @@ impl View {
     /// Preserve nested array elements and object lookups when concatenating
     /// values borrowed from two independently owned documents.
     fn copy_to(&self, index: usize, destination: &mut Vec<Node>) -> usize {
+        if self.nodes.deep() && !(index == self.index && self.nodes.root_items().is_some()) {
+            return deep_values::copy(self, index, destination);
+        }
         let node = match (&self.nodes[index], self.nodes.root_items()) {
             (Node::Array(_), Some(items)) if index == self.index => {
                 // SAFETY: the list roots all immutable JSON views while their children are copied.
@@ -228,10 +255,12 @@ impl View {
                     .collect(),
             ),
             (Node::Object(fields), _) => Node::Object(
-                fields
-                    .iter()
-                    .map(|(key, i)| (key.clone(), self.copy_to(*i, destination)))
-                    .collect(),
+                fields.with_entries(
+                    fields
+                        .iter()
+                        .map(|(key, i)| (key.clone(), self.copy_to(*i, destination)))
+                        .collect(),
+                ),
             ),
             (scalar, _) => scalar.clone(),
         };
@@ -273,7 +302,7 @@ impl View {
         } else if let (Node::String(a), Node::String(b)) = (left, right) {
             let mut s = a.as_ref().clone();
             s.push_str(b);
-            Node::String(Rc::new(s))
+            Node::String(StrOwner::new(s))
         } else if let (Node::Array(a), Node::Array(b)) = (left, right) {
             let mut nodes = Vec::new();
             let mut items = Vec::with_capacity(a.len() + b.len());
@@ -282,7 +311,7 @@ impl View {
             let index = nodes.len();
             nodes.push(Node::Array(items));
             return Ok(Self {
-                nodes: Nodes::Document(Rc::new(nodes)),
+                nodes: Nodes::copied(nodes, self.nodes.deep() || other.nodes.deep()),
                 index,
             });
         } else {
@@ -347,7 +376,7 @@ impl View {
             .into_handle()
                 as usize),
             (0, _) | (1, Node::Object(_)) => Ok(Self::handle(&self.nodes, index) as usize),
-            (2, Node::String(text)) => Ok(Rc::into_raw(Rc::clone(text)) as usize),
+            (2, Node::String(text)) => Ok(StrOwner::into_raw(StrOwner::clone(text)) as usize),
             (3, Node::Integer(integer)) => Ok(integer.clone().into_raw()),
             (4, _) => Ok(usize::from(
                 matches!(node, Node::String(text) if Some(text.as_ref()) == literal),
@@ -393,7 +422,8 @@ struct Source<'a> {
     refused: &'a Cell<bool>,
     text: &'a str,
     original: Option<(&'a str, &'a Rc<String>)>,
-    shared: Option<(&'a Rc<Str>, usize)>,
+    shared: Option<(&'a StrOwner, usize)>,
+    keys: &'a KeyMemo,
 }
 
 impl Source<'_> {
@@ -419,23 +449,34 @@ fn push_node(
 ) -> Result<usize, serde_json::Error> {
     let raw = raw.get();
     let node = match raw.as_bytes()[0] {
-        b'{' => Node::Object(
+        b'{' => Node::Object(source.keys.fields(
             serde_json::Deserializer::from_str(raw).deserialize_map(Fields(nodes, source))?,
-        ),
+        )),
         b'[' => match arrays::Deferred::new(raw, source)? {
             Some(array) => Node::Deferred(array),
             None => push_array(nodes, raw, source)?,
         },
-        b'"' => Node::String(Rc::new(Str::from(serde_json::from_str::<String>(raw)?))),
+        b'"' => Node::String(StrOwner::new(Str::from(serde_json::from_str::<String>(
+            raw,
+        )?))),
         b't' => Node::Bool(true),
         b'f' => Node::Bool(false),
         b'n' => Node::Null,
-        _ if raw.contains(['.', 'e', 'E']) => match source.token(raw) {
-            "NaN" => Node::ConstantNan,
-            "Infinity" => Node::Float(f64::INFINITY),
-            "-Infinity" => Node::Float(f64::NEG_INFINITY),
-            _ => Node::Float(raw.parse().expect("validated JSON float")),
-        },
+        _ => number(source.token(raw)),
+    };
+    let index = nodes.len();
+    nodes.push(node);
+    Ok(index)
+}
+
+fn number(raw: &str) -> Node {
+    match raw {
+        "NaN" => Node::ConstantNan,
+        "Infinity" => Node::Float(f64::INFINITY),
+        "-Infinity" => Node::Float(f64::NEG_INFINITY),
+        _ if raw.contains(['.', 'e', 'E']) => {
+            Node::Float(raw.parse().expect("validated JSON float"))
+        }
         _ => Node::Integer(
             raw.parse::<i64>()
                 .ok()
@@ -447,10 +488,7 @@ fn push_node(
                     )
                 }),
         ),
-    };
-    let index = nodes.len();
-    nodes.push(node);
-    Ok(index)
+    }
 }
 
 fn push_array(
@@ -531,7 +569,7 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
             && let Some(fields) = root_fields(source, &mut nodes)
         {
             let index = nodes.len();
-            nodes.push(Node::Object(fields));
+            nodes.push(Node::Object(source.keys.fields(fields)));
             index
         } else {
             if source.refused.get() {
@@ -573,15 +611,19 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
 
 pub(super) fn loads(
     text: &str,
-    owner: impl FnOnce() -> Option<Rc<Str>>,
+    owner: impl FnOnce() -> Option<StrOwner>,
 ) -> Result<*const Object, Error> {
-    check_depth(text).map_err(|message| Error::new(Kind::ValueError, message))?;
+    if check_depth(text).is_err() {
+        return deep::loads(text, owner);
+    }
+    let keys = KeyMemo::default();
     let refused = Cell::new(false);
     build(Source {
         refused: &refused,
         text,
         original: None,
         shared: None,
+        keys: &keys,
     })
     .or_else(|error| {
         if refused.get() {
@@ -594,6 +636,7 @@ pub(super) fn loads(
                 text: &patched,
                 original: Some((text, &patched)),
                 shared: None,
+                keys: &keys,
             })
             .map_err(|error| {
                 if refused.get() {
@@ -617,7 +660,7 @@ pub unsafe extern "C" fn imre_json_loads(text: *const Str) -> *const Object {
     // The str entry rejects its BOM before scanning. The binary entry already
     // consumed its encoding marker; a second one is ordinary invalid JSON.
     // SAFETY: the caller roots this immutable string while the error takes its own reference.
-    let owner = || unsafe { crate::objects::acquire_rc(text as usize) };
+    let owner = || unsafe { StrOwner::acquire_word(text as usize) };
     let result = if source.starts_with('\u{feff}') {
         Err(super::syntax::at_error(
             owner(),
@@ -780,8 +823,8 @@ pub unsafe extern "C" fn imre_json_get(
                 2 => Node::Integer((*Int::borrow(word)).clone()),
                 3 => {
                     let text = word as *const Str;
-                    Rc::increment_strong_count(text);
-                    Node::String(Rc::from_raw(text))
+                    StrOwner::increment_strong_count(text);
+                    Node::String(StrOwner::from_raw(text))
                 }
                 4 => Node::Bool(word != 0),
                 5 => Node::Float(f64::from_bits(word as u64)),
@@ -828,7 +871,7 @@ pub unsafe extern "C" fn imre_json_add_fields(
 /// Creates one separate read-only dictionary for a dataclass default factory.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_json_empty_object() -> *const Object {
-    View::single(Node::Object(Vec::new())).into_handle()
+    View::single(Node::Object(KeyMemo::default().fields(Vec::new()))).into_handle()
 }
 
 pub(super) fn keys(fields: &[(Str, usize)]) -> impl Iterator<Item = &Str> {
@@ -836,6 +879,49 @@ pub(super) fn keys(fields: &[(Str, usize)]) -> impl Iterator<Item = &Str> {
     fields
         .iter()
         .filter_map(move |(name, _)| seen.insert(name).then_some(name))
+}
+
+/// Collect the first occurrence of each key in insertion order. Typed
+/// mapping iteration returns strings; unknown JSON containers yield views.
+fn collect_keys<const STRINGS: bool>(fields: &ObjectFields) -> Result<*const Object, Error> {
+    let mut items = Words::new(if STRINGS { 3 } else { 5 });
+    let mut seen = std::collections::HashSet::new();
+    for (name, _) in fields.iter() {
+        if seen.contains(name) {
+            continue;
+        }
+        seen.try_reserve(1).map_err(|_| Error::allocation())?;
+        seen.insert(name);
+        items
+            .values
+            .try_reserve(1)
+            .map_err(|_| Error::allocation())?;
+        let owner = fields.owner(name)?;
+        items.values.push(if STRINGS {
+            crate::StrOwner::into_raw(owner) as usize
+        } else {
+            View::single(Node::String(owner)).into_handle() as usize
+        });
+    }
+    Ok(Rc::into_raw(items.into_object()))
+}
+
+/// # Safety
+/// The caller roots an immutable JSON object view whose keys are strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_json_object_keys(value: *const Object) -> *const Object {
+    // SAFETY: the source is a rooted JSON view. Array element types can
+    // be projected lazily, so check the mapping before exposing string keys.
+    let result = unsafe {
+        with_view(value, |view| match &view.nodes[view.index] {
+            Node::Object(fields) => collect_keys::<true>(fields),
+            node => Err(Error::new(
+                Kind::TypeError,
+                format!("expected dict, got {} from JSON", node.kind()),
+            )),
+        })
+    };
+    finish(result, std::ptr::null())
 }
 
 /// # Safety
@@ -849,12 +935,12 @@ pub unsafe extern "C" fn imre_json_iter(value: *const Object) -> *const Object {
             let mut items = Words::new(5);
             match &view.nodes[view.index] {
                 Node::Array(children) => return Ok(view.array(children)),
-                Node::Object(fields) => items.values.extend(keys(fields).map(|name| {
-                    View::single(Node::String(Rc::new(name.clone()))).into_handle() as usize
-                })),
+                Node::Object(fields) => return collect_keys::<false>(fields),
                 Node::String(text) => items.values.extend(text.chars().map(|ch| {
-                    View::single(Node::String(Rc::new(Str::new(ch.encode_utf8(&mut [0; 4])))))
-                        .into_handle() as usize
+                    View::single(Node::String(StrOwner::new(Str::new(
+                        ch.encode_utf8(&mut [0; 4]),
+                    ))))
+                    .into_handle() as usize
                 })),
                 node => {
                     return Err(Error::new(
@@ -929,7 +1015,7 @@ pub unsafe extern "C" fn imre_json_index(value: *const Object, key: usize) -> *c
                 Node::String(text) => {
                     let index = crate::index(at()?, text.chars().count())
                         .map_err(|_| Error::new(Kind::IndexError, "string index out of range"))?;
-                    Ok(View::single(Node::String(Rc::new(Str::new(
+                    Ok(View::single(Node::String(StrOwner::new(Str::new(
                         text.chars().nth(index).unwrap().encode_utf8(&mut [0; 4]),
                     ))))
                     .into_handle())

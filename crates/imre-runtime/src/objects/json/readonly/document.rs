@@ -1,11 +1,12 @@
 //! Mutable TOML/JSON views reuse native ordered dictionaries and list storage.
 //! A subscript or shallow spread retains the same nested container owner.
 
+use crate::StrOwner;
 use ::toml::de::{DeTable, DeValue};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use super::{Node, Nodes, View};
+use super::{KeyMemo, Node, Nodes, View};
 use crate::objects::mappings::{
     dict_set, imre_dict_contains, imre_dict_delete, imre_dict_get, imre_dict_new,
 };
@@ -19,14 +20,14 @@ pub(in crate::objects) enum Value {
     Bool(bool),
     Integer(Int),
     Float(f64),
-    String(Rc<Str>),
+    String(StrOwner),
     Datetime(Str),
     Array(Rc<Object>),
     Table(Rc<Object>),
 }
 
 impl Value {
-    fn object(self) -> Rc<Object> {
+    pub(in crate::objects) fn object(self) -> Rc<Object> {
         Rc::new(Object(StorageCell::new(Storage::Document(self))))
     }
     fn word(self) -> usize {
@@ -46,7 +47,7 @@ impl Value {
         Ok(Self::Array(storage.into_object()))
     }
     fn table(
-        pairs: impl Iterator<Item = Result<(Rc<Str>, Rc<Object>), Error>>,
+        pairs: impl Iterator<Item = Result<(StrOwner, Rc<Object>), Error>>,
     ) -> Result<Self, Error> {
         // SAFETY: a fresh string/object dictionary transfers one owner.
         let dict = unsafe { Rc::from_raw(imre_dict_new(3, 5)) };
@@ -56,18 +57,18 @@ impl Value {
             unsafe {
                 dict_set(
                     Rc::as_ptr(&dict),
-                    Rc::as_ptr(&key) as usize,
+                    StrOwner::as_ptr(&key) as usize,
                     Rc::as_ptr(&value) as usize,
                 )?
             };
         }
         Ok(Self::Table(dict))
     }
-    fn items(source: &Object) -> Vec<(Rc<Str>, Rc<Object>)> {
+    pub(in crate::objects) fn items(source: &Object) -> Vec<(StrOwner, Rc<Object>)> {
         // SAFETY: this operation copies all owners before traversing child values.
         unsafe { source.0.with(|v| v.dictionary().document_pairs()) }
     }
-    fn elements(source: &Object) -> Vec<Rc<Object>> {
+    pub(in crate::objects) fn elements(source: &Object) -> Vec<Rc<Object>> {
         // SAFETY: only native list[document value] owners enter this path.
         unsafe {
             source.0.with(|s| {
@@ -141,7 +142,7 @@ impl Value {
                         Ok::<_, Error>(())
                     })
                 }?;
-                Node::Object(fields)
+                Node::Object(KeyMemo::default().fields(fields))
             }
         };
         nodes.try_reserve(1).map_err(|_| Error::allocation())?;
@@ -162,13 +163,25 @@ impl Value {
         })
     }
     fn from_json(view: &View, index: usize) -> Result<Self, Error> {
+        Self::from_json_at(view, index, 0)
+    }
+
+    fn from_json_at(view: &View, index: usize, depth: usize) -> Result<Self, Error> {
         if index == view.index
             && let Some(root) = view.snapshot_root()
         {
-            return Self::from_json(&root, root.index);
+            return Self::from_json_at(&root, root.index, depth);
+        }
+        if depth >= super::super::MAX_DEPTH
+            && matches!(&view.nodes[index], Node::Array(_) | Node::Object(_))
+        {
+            return Err(Error::new(
+                Kind::ValueError,
+                "document nesting exceeds 128 containers",
+            ));
         }
         Ok(match &view.nodes[index] {
-            Node::Deferred(array) => Self::from_json(array.view(), array.view().index)?,
+            Node::Deferred(array) => Self::from_json_at(array.view(), array.view().index, depth)?,
             Node::Null => Self::Null,
             Node::Bool(x) => Self::Bool(*x),
             Node::Integer(x) => Self::Integer(x.clone()),
@@ -178,19 +191,19 @@ impl Value {
             Node::Datetime(x) => Self::Datetime(x.clone()),
             Node::Array(a) => Self::array(
                 a.iter()
-                    .map(|&index| Self::from_json(view, index).map(Self::object)),
+                    .map(|&index| Self::from_json_at(view, index, depth + 1).map(Self::object)),
             )?,
             Node::Object(t) => Self::table(t.iter().map(|(key, index)| {
                 Ok((
-                    Rc::new(key.clone()),
-                    Self::from_json(view, *index)?.object(),
+                    t.owner(key)?,
+                    Self::from_json_at(view, *index, depth + 1)?.object(),
                 ))
             }))?,
         })
     }
     fn from_toml(node: &DeValue<'_>) -> Result<Self, Error> {
         Ok(match node {
-            DeValue::String(value) => Self::String(Rc::new(Str::new(value.as_ref()))),
+            DeValue::String(value) => Self::String(StrOwner::new(Str::new(value.as_ref()))),
             DeValue::Integer(value) => Self::Integer(Int::new(
                 num_bigint::BigInt::parse_bytes(value.as_str().as_bytes(), value.radix())
                     .ok_or_else(|| Error::new(Kind::TomlDecodeError, "invalid integer"))?,
@@ -235,13 +248,13 @@ impl Value {
             )?,
             DeValue::Table(table) => Self::table(table.iter().map(|(k, v)| {
                 Ok((
-                    Rc::new(Str::new(k.get_ref())),
+                    StrOwner::new(Str::new(k.get_ref())),
                     Self::from_toml(v.get_ref())?.object(),
                 ))
             }))?,
         })
     }
-    fn read(obj: &Object) -> Self {
+    pub(in crate::objects) fn read(obj: &Object) -> Self {
         // SAFETY: callers hold a typed document owner. No storage borrow escapes.
         unsafe {
             obj.0.with(|storage| match storage {
@@ -267,7 +280,7 @@ impl Value {
             ))
         }
     }
-    fn truth(&self) -> bool {
+    pub(in crate::objects) fn truth(&self) -> bool {
         match self {
             Self::Null => false,
             Self::Bool(b) => *b,
@@ -347,7 +360,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             0 => Value::Null.word(),
             1 => Value::table(std::iter::empty())?.word(),
             2 => Value::array(std::iter::empty())?.word(),
-            3 => Value::String(acquire_rc(a)).word(),
+            3 => Value::String(crate::StrOwner::acquire_word(a)).word(),
             4 => Value::Bool(a != 0).word(),
             5 => Value::Integer((*Int::borrow(a)).clone()).word(),
             6 => Value::Float(f64::from_bits(a as u64)).word(),
@@ -365,7 +378,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 let Value::String(s) = doc(a) else {
                     return Err(Error::new(Kind::TypeError, "expected a document string"));
                 };
-                Rc::into_raw(s) as usize
+                StrOwner::into_raw(s) as usize
             }
             13 | 14 => {
                 if op == 13 {
@@ -382,7 +395,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             19 => {
                 let mut repr = String::new();
                 doc(a).view()?.write_repr(&mut repr);
-                Rc::into_raw(Rc::new(Str::new(repr))) as usize
+                StrOwner::into_raw(StrOwner::new(Str::new(repr))) as usize
             }
             20 => usize::from(doc(a).truth()),
             21 => {
@@ -402,7 +415,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 }
                 result?;
                 if op == 22 {
-                    Rc::into_raw(Rc::new(Str::new(text))) as usize
+                    StrOwner::into_raw(StrOwner::new(Str::new(text))) as usize
                 } else {
                     0
                 }
@@ -413,7 +426,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 for (key, val) in Value::items(&source) {
                     dict_set(
                         Rc::as_ptr(&target),
-                        Rc::as_ptr(&key) as usize,
+                        StrOwner::as_ptr(&key) as usize,
                         Rc::as_ptr(&val) as usize,
                     )?;
                 }
@@ -546,7 +559,7 @@ mod tests {
         }
         assert!(value.view().is_ok());
         let too_deep = Value::table(std::iter::once(Ok((
-            Rc::new(Str::new("child")),
+            StrOwner::new(Str::new("child")),
             value.object(),
         ))))
         .ok()

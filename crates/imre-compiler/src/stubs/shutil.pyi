@@ -1,8 +1,10 @@
 from os import PathLike
-from typing import TypeVar, overload
+from typing import Callable, Protocol, TypeVar, overload
 
 _S = TypeVar("_S", str, bytes)
 _D = TypeVar("_D", bound=str | bytes | PathLike[str] | PathLike[bytes])
+_TextPath = TypeVar("_TextPath", bound=PathLike[str])
+_BytesPath = TypeVar("_BytesPath", bound=PathLike[bytes])
 
 _Path = str | bytes | PathLike[str] | PathLike[bytes]
 
@@ -19,6 +21,15 @@ def copystat(src: _Path, dst: _Path, *, follow_symlinks: bool = True) -> None: .
 
 def _copyxattr(src: _Path, dst: _Path, *, follow_symlinks: bool = True) -> None: ...
 
+# copy_function is evaluated on entry but only called if a file has to be copied.
+@overload
+def move(src: _Path, dst: _S, copy_function: object = ...) -> _S | None: ...
+@overload
+def move(src: _Path, dst: _TextPath, copy_function: object = ...) -> _TextPath | str | None: ...
+@overload
+def move(src: _Path, dst: _BytesPath, copy_function: object = ...) -> _BytesPath | bytes | None: ...
+def _destinsrc(src: _Path, dst: _Path) -> bool: ...
+
 @overload
 def copy(src: _Path, dst: _S, *, follow_symlinks: bool = True) -> _S: ...
 @overload
@@ -28,3 +39,15 @@ def copy(src: _Path, dst: PathLike[_S], *, follow_symlinks: bool = True) -> Path
 def copy2(src: _Path, dst: _S, *, follow_symlinks: bool = True) -> _S: ...
 @overload
 def copy2(src: _Path, dst: PathLike[_S], *, follow_symlinks: bool = True) -> PathLike[_S] | _S: ...
+
+class _RmTree(Protocol):
+    avoids_symlink_attacks: bool
+    def __call__(self, path: _Path, ignore_errors: bool = False, onerror: Callable | None = None, *, onexc: Callable | None = None, dir_fd: int | None = None) -> None: ...
+
+rmtree: _RmTree
+
+def ignore_patterns(*patterns: _S) -> Callable[[_S, list[_S]], set[_S]]: ...
+
+def copytree(src: _Path, dst: _D, symlinks: bool = False, ignore: Callable | None = None,
+             copy_function: object = ..., ignore_dangling_symlinks: bool = False,
+             dirs_exist_ok: bool = False) -> _D: ...

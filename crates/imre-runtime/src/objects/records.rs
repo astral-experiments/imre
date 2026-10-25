@@ -1,5 +1,6 @@
 //! Fixed native records with a compact header and compiler-described payload.
 
+use crate::StrOwner;
 use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::rc::Rc;
@@ -7,16 +8,24 @@ use std::rc::Rc;
 use super::{Object, fail, words::WordKind};
 
 pub(super) mod strings;
+pub(super) mod tuples;
+pub(super) mod weak;
+
+// Keep the first queue block available even when destruction cannot allocate.
+type ReleaseQueue = RefCell<smallvec::SmallVec<[Release; 4]>>;
 
 enum Release {
+    Fields(*const usize, usize),
     Record(*const usize),
     Object(Rc<Object>),
+    Sequence(WordKind, Vec<usize>),
+    Table(Box<dyn super::mappings::ReleaseEntries>, usize),
 }
 
 thread_local! {
     // The outer release owns the queue on its stack. This slot has no TLS
     // destructor, so records can also be released during thread teardown.
-    static PENDING_RELEASES: Cell<*const RefCell<Vec<Release>>> = const { Cell::new(std::ptr::null()) };
+    static PENDING_RELEASES: Cell<*const ReleaseQueue> = const { Cell::new(std::ptr::null()) };
 }
 
 /// Compiler-emitted immutable metadata; every field occupies one eight-byte word.
@@ -44,6 +53,35 @@ pub struct RecordSemantics {
 }
 
 impl RecordDescriptor {
+    /// Class and tuple records share storage but have distinct Python protocols.
+    pub(super) fn class_semantics(&self) -> Option<&RecordSemantics> {
+        // SAFETY: generated semantics are immutable and outlive the descriptor.
+        unsafe { self.semantics.as_ref() }.filter(|s| s.kind == 0)
+    }
+
+    /// Codegen units may own different descriptors for one Python class.
+    pub(super) fn same_class(&self, other: &Self) -> bool {
+        let Some((left, right)) = self.class_semantics().zip(other.class_semantics()) else {
+            return false;
+        };
+        if std::ptr::eq(self, other) {
+            return true;
+        }
+        if left.qualified_name_len == 0 || left.qualified_name_len != right.qualified_name_len {
+            return false;
+        }
+        // SAFETY: generated class descriptors root nonempty immutable UTF-8 identifiers.
+        unsafe {
+            std::slice::from_raw_parts(left.qualified_name, left.qualified_name_len)
+                == std::slice::from_raw_parts(right.qualified_name, right.qualified_name_len)
+        }
+    }
+
+    pub(super) fn is_value_struct(&self) -> bool {
+        // SAFETY: the compiler emits immutable metadata for the lifetime of the program.
+        unsafe { self.semantics.as_ref().is_some_and(|s| s.flags & 8 != 0) }
+    }
+
     /// Only records with a pure TOML hash reserve an extra untraced cache word.
     pub(super) fn has_toml_hash(&self) -> bool {
         // SAFETY: every descriptor used by the runtime owns static metadata or null.
@@ -51,8 +89,16 @@ impl RecordDescriptor {
     }
 
     fn allocated_words(&self) -> usize {
+        // These struct-sequence attributes contain only raw numbers. They are
+        // neither Python tuple elements nor owners to be visited during release.
+        // SAFETY: a non-null semantics pointer refers to the descriptor's permanent metadata.
+        let stat_words = if unsafe { self.semantics.as_ref() }.is_some_and(|s| s.flags & 8 != 0) {
+            super::os::stat_result::EXTRA_WORDS
+        } else {
+            0
+        };
         self.length
-            .checked_add(usize::from(self.has_toml_hash()))
+            .checked_add(usize::from(self.has_toml_hash()) + stat_words)
             .unwrap_or_else(|| fail("MemoryError", "record allocation is too large"))
     }
 }
@@ -68,8 +114,9 @@ pub struct RecordField {
 #[repr(C)]
 struct Header {
     references: Cell<usize>,
-    /// An aligned descriptor, or a pointer to a shared block with bit zero set.
-    descriptor: *const RecordDescriptor,
+    /// Descriptor (untagged), shared block (bit 0), weak anchor (bit 1),
+    /// or owned tuple layout (bit 2). An anchor retains the original tagged layout.
+    descriptor: Cell<*const RecordDescriptor>,
 }
 
 const _: () = assert!(size_of::<Header>() == 16 && align_of::<Header>() == 8);
@@ -81,6 +128,60 @@ pub(super) unsafe fn descriptor<'a>(payload: *const usize) -> &'a RecordDescript
     unsafe { (*payload.cast::<Header>().sub(1)).descriptor() }
 }
 
+/// Copy the inner cached callable's public policy, as update_wrapper does.
+/// Capacity used for lookup and eviction belongs to the new wrapper's table.
+///
+/// # Safety
+/// The destination is a newly allocated four-word cache callable; source is
+/// null or a rooted native callable (two ordinary words or four cache words).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_callable_copy_cache_policy(
+    destination: *mut usize,
+    source: *const usize,
+    capacity: i64,
+    typed: u32,
+) {
+    // SAFETY: all four fields exist on a cache callable. Its two public
+    // policy fields are plain words and do not own references.
+    unsafe {
+        debug_assert_eq!(descriptor(destination).length, 4);
+        if !source.is_null() && descriptor(source).length == 4 {
+            destination.add(2).write(*source.add(2));
+            destination.add(3).write(*source.add(3));
+        } else {
+            destination.add(2).write(capacity as usize);
+            destination.add(3).write(typed as usize);
+        }
+    }
+}
+
+/// Read a cached callable's public maxsize or typed flag as a dictionary value.
+///
+/// # Safety
+/// The owner roots a four-word cache callable. Its last two words contain
+/// an immutable signed capacity and a boolean, in that order.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_callable_cache_parameter(
+    wrapper: *const usize,
+    typed: u32,
+) -> *const Object {
+    use super::json::readonly::document::Value;
+    // SAFETY: generated code verified the wrapper layout.
+    let value = unsafe {
+        if typed != 0 {
+            Value::Bool(*wrapper.add(3) != 0)
+        } else {
+            let size = *wrapper.add(2) as i64;
+            if size < 0 {
+                Value::Null
+            } else {
+                Value::Integer(crate::Int::from_usize(size as usize))
+            }
+        }
+    };
+    Rc::into_raw(value.object())
+}
+
 /// Checks the declared identity of a record, including across codegen units.
 ///
 /// # Safety
@@ -90,19 +191,8 @@ pub unsafe extern "C" fn imre_record_has_type(
     payload: *const usize,
     expected: *const RecordDescriptor,
 ) -> u32 {
-    // SAFETY: class descriptors and their qualified names outlive the program.
-    unsafe {
-        let actual = descriptor(payload);
-        if std::ptr::eq(actual, expected) {
-            return 1;
-        }
-        let left = &*actual.semantics;
-        let right = &*(*expected).semantics;
-        u32::from(
-            std::slice::from_raw_parts(left.qualified_name, left.qualified_name_len)
-                == std::slice::from_raw_parts(right.qualified_name, right.qualified_name_len),
-        )
-    }
+    // SAFETY: the caller supplies a rooted class and an immutable class descriptor.
+    unsafe { u32::from(descriptor(payload).same_class(&*expected)) }
 }
 
 /// Initializes caller-owned scratch for a tuple used only by a read-only lookup.
@@ -121,27 +211,38 @@ pub unsafe extern "C" fn imre_tuple_probe(
         let header = scratch.cast::<Header>();
         header.write(Header {
             references: Cell::new(0),
-            descriptor,
+            descriptor: Cell::new(descriptor),
         });
         header.add(1).cast()
     }
 }
 
 impl Header {
+    fn tuple_layout(&self) -> Option<*const tuples::TupleLayout> {
+        let layout = self.layout_pointer();
+        (layout.addr() & tuples::LAYOUT_TAG != 0)
+            .then(|| layout.map_addr(|addr| addr & !tuples::LAYOUT_TAG).cast())
+    }
+
     fn block(&self) -> Option<*const Block> {
-        if self.descriptor.addr() & 1 == 0 {
+        let layout = self.layout_pointer();
+        if layout.addr() & 1 == 0 {
             return None;
         }
         // Each tagged pointer owns a live block. Removing its tag
         // recovers the original aligned pointer and its allocation provenance.
-        Some(self.descriptor.map_addr(|addr| addr - 1).cast::<Block>())
+        Some(layout.map_addr(|addr| addr - 1).cast::<Block>())
     }
 
     fn descriptor(&self) -> &RecordDescriptor {
         // SAFETY: a tagged header owns its Rc until its last record owner drops.
-        let descriptor = self
-            .block()
-            .map_or(self.descriptor, |block| unsafe { (*block).descriptor });
+        let layout = self.layout_pointer();
+        let descriptor = if layout.addr() & 1 == 0 {
+            layout.map_addr(|addr| addr & !tuples::LAYOUT_TAG)
+        } else {
+            // SAFETY: the untagged block is rooted for this record's lifetime.
+            unsafe { (*layout.map_addr(|addr| addr - 1).cast::<Block>()).descriptor }
+        };
         // SAFETY: both forms carry the original immutable compiler metadata.
         unsafe { &*descriptor }
     }
@@ -214,7 +315,7 @@ impl<'a> RecordBatch<'a> {
             self.next += self.words;
             slot.write(Header {
                 references: Cell::new(1),
-                descriptor: block.cast::<RecordDescriptor>().map_addr(|addr| addr | 1),
+                descriptor: Cell::new(block.cast::<RecordDescriptor>().map_addr(|addr| addr | 1)),
             });
             slot.add(1).cast()
         }
@@ -254,6 +355,33 @@ pub unsafe extern "C" fn imre_record_try_new(descriptor: *const RecordDescriptor
     record
 }
 
+/// Shallow-copies a plain class instance without evaluating Python code.
+///
+/// # Safety
+/// The caller roots a live record throughout the call. Its immutable descriptor
+/// describes all public fields and any cached-property storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_record_shallow_copy(source: *const usize) -> *mut usize {
+    // SAFETY: the source descriptor outlives these allocations. The allocation
+    // helper reports MemoryError before we acquire any field references.
+    unsafe {
+        let layout = descriptor(source);
+        let copy = imre_record_try_new(layout);
+        if copy.is_null() {
+            return copy;
+        }
+        for i in 0..layout.length {
+            let kind = WordKind::new(layout.kinds.add(i).read());
+            // A cold cached property may carry a zero, uninitialized owner.
+            kind.retain(kind.read_record_field(source.add(i)));
+        }
+        // Byte-copy the original scalar and pointer representations, including
+        // their provenance. Private hash-cache storage starts cold in the copy.
+        std::ptr::copy_nonoverlapping(source, copy, layout.length);
+        copy
+    }
+}
+
 /// Returns a record with zeroed fields, or null on allocation failure.
 ///
 /// # Safety
@@ -276,7 +404,7 @@ pub(super) unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mu
     unsafe {
         allocation.cast::<Header>().write(Header {
             references: Cell::new(1),
-            descriptor,
+            descriptor: Cell::new(descriptor),
         });
         // Only the payload needs zeroing for partial-field cleanup. The ordinary
         // allocation can reuse a freed small record without clearing its header.
@@ -336,13 +464,25 @@ unsafe fn cached_result(
 ) -> *mut usize {
     // SAFETY: the caller roots this cache and its immutable descriptor.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
-    if header.references.get() == 1 {
+    if header.references.get() == 1 && !header.has_weak_anchor() {
         header.references.set(2);
         payload.cast_mut()
     } else {
         // SAFETY: a fresh record uses the cache's static descriptor; it does not
         // expose or mutate any existing tuple's observable field values.
-        unsafe { allocate(header.descriptor()) }
+        unsafe {
+            let next = allocate(header.descriptor());
+            if let Some(layout) = header.tuple_layout()
+                && !next.is_null()
+            {
+                Rc::increment_strong_count(layout);
+                // The new record shares its immutable layout, not the cache's identity.
+                (*next.cast::<Header>().sub(1))
+                    .descriptor
+                    .set(header.layout_pointer());
+            }
+            next
+        }
     }
 }
 
@@ -364,6 +504,15 @@ pub(super) fn release_object_word(object: Rc<Object>) {
     release(Release::Object(object));
 }
 
+/// Transfers the sequence's existing heap buffer and all of its owned words.
+pub(super) fn release_sequence_words(kind: WordKind, values: Vec<usize>) {
+    release(Release::Sequence(kind, values));
+}
+
+pub(super) fn release_table(table: Box<dyn super::mappings::ReleaseEntries>) {
+    release(Release::Table(table, 0));
+}
+
 fn release(owner: Release) {
     PENDING_RELEASES.with(|slot| {
         // SAFETY: a non-null pointer belongs to the enclosing release on this
@@ -378,15 +527,34 @@ fn release(owner: Release) {
         {
             return;
         }
-        let pending = RefCell::new(Vec::new());
+        let pending = ReleaseQueue::default();
         slot.set(&pending);
         let mut current = owner;
         loop {
             let siblings = pending.borrow().len();
             match current {
                 // SAFETY: each entry transfers one live owner of this record.
-                Release::Record(record) => unsafe { release_record_owner(record) },
-                Release::Object(object) => drop(object),
+                Release::Record(record) => unsafe { release_record_owner(record, &pending) },
+                // SAFETY: an unfinished frame owns the standalone allocation and remaining fields.
+                Release::Fields(record, next) => unsafe {
+                    release_standalone_fields(record, descriptor(record), next, &pending);
+                },
+                Release::Object(object) => super::release_object_owner(object),
+                Release::Table(mut table, mut next) => {
+                    if table.release_next(&mut next) {
+                        pending.borrow_mut().push(Release::Table(table, next));
+                    }
+                }
+                Release::Sequence(kind, mut values) => {
+                    if let Some(word) = values.pop() {
+                        // SAFETY: the sequence transferred this independently owned word.
+                        unsafe { kind.release(word) };
+                    }
+                    if !values.is_empty() {
+                        // Visit the child before resuming the remaining words.
+                        pending.borrow_mut().push(Release::Sequence(kind, values));
+                    }
+                }
             }
             let mut pending = pending.borrow_mut();
             // Children were enqueued in field or container order. Finish this
@@ -401,7 +569,7 @@ fn release(owner: Release) {
 
 /// # Safety
 /// The caller transfers one live record owner on its execution thread.
-unsafe fn release_record_owner(payload: *const usize) {
+unsafe fn release_record_owner(payload: *const usize, pending: &ReleaseQueue) {
     // SAFETY: the payload follows its live header, and this thread owns access.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
     let count = header.references.get();
@@ -412,35 +580,74 @@ unsafe fn release_record_owner(payload: *const usize) {
     if count != 1 {
         return;
     }
+    header.drop_weak_anchor();
     // SAFETY: metadata remains immutable and live even while payloads are released.
     let descriptor = header.descriptor();
     if let Some(block) = header.block() {
         // SAFETY: no live owner can reach this record now. Other records in
         // the block, and an active cursor, keep their own storage alive.
         unsafe {
-            release_fields::<true>(payload, descriptor);
+            release_fields::<true>(payload, descriptor, 0..descriptor.length);
             Rc::decrement_strong_count(block);
         }
     } else {
-        // SAFETY: the standalone constructor already checked this exact layout,
-        // and the immutable descriptor cannot change during the record's lifetime.
-        unsafe {
-            release_fields::<false>(payload, descriptor);
-            let size = size_of::<Header>() + descriptor.allocated_words() * size_of::<usize>();
-            let layout = Layout::from_size_align_unchecked(size, align_of::<Header>());
-            dealloc(payload.cast::<Header>().sub(1).cast_mut().cast(), layout);
+        // SAFETY: the final owner transfers this standalone allocation and all its fields.
+        unsafe { release_standalone_fields(payload, descriptor, 0, pending) };
+    }
+}
+
+unsafe fn release_standalone_fields(
+    payload: *const usize,
+    descriptor: &RecordDescriptor,
+    mut next: usize,
+    pending: &ReleaseQueue,
+) {
+    let (siblings, room) = {
+        let queue = pending.borrow();
+        (queue.len(), queue.capacity() - queue.len())
+    };
+    while next < descriptor.length {
+        // Leave room for the continuation when this batch cannot finish the record.
+        let batch = if descriptor.length - next <= room {
+            room
+        } else {
+            room.saturating_sub(1)
+        };
+        let end = (next + batch.clamp(1, 32)).min(descriptor.length);
+        // SAFETY: this frame owns the untouched fields starting at next.
+        unsafe { release_fields::<false>(payload, descriptor, next..end) };
+        next = end;
+        if next < descriptor.length && pending.borrow().len() > siblings {
+            pending.borrow_mut().push(Release::Fields(payload, next));
+            return;
+        }
+    }
+    // SAFETY: every field has transferred its owner and the constructor used this layout.
+    unsafe {
+        let size = size_of::<Header>() + descriptor.allocated_words() * size_of::<usize>();
+        let layout = Layout::from_size_align_unchecked(size, align_of::<Header>());
+        let header = payload.cast::<Header>().sub(1);
+        // A suspended field-release frame still needs its tuple descriptor.
+        // Transfer its owner only after the last field has been visited.
+        let tuple_layout = (*header).tuple_layout();
+        dealloc(header.cast_mut().cast(), layout);
+        if let Some(tuple_layout) = tuple_layout {
+            Rc::decrement_strong_count(tuple_layout);
         }
     }
 }
 
-/// # Safety
 /// The caller transfers the final record's fields with their original descriptor.
-unsafe fn release_fields<const PACKED: bool>(payload: *const usize, descriptor: &RecordDescriptor) {
+unsafe fn release_fields<const PACKED: bool>(
+    payload: *const usize,
+    descriptor: &RecordDescriptor,
+    fields: std::ops::Range<usize>,
+) {
     // Dataclass fields release in definition order. Tuples release their last
     // element first. Both kinds use the same native record layout.
     // SAFETY: semantic metadata, when present, lives as long as the descriptor.
     let is_tuple = unsafe { descriptor.semantics.as_ref() }.is_some_and(|value| value.kind == 1);
-    for field in 0..descriptor.length {
+    for field in fields {
         let index = if is_tuple {
             descriptor.length - 1 - field
         } else {
@@ -451,7 +658,7 @@ unsafe fn release_fields<const PACKED: bool>(payload: *const usize, descriptor: 
             let kind = WordKind::new(descriptor.kinds.add(index).read());
             let word = kind.read_record_field(payload.add(index));
             if PACKED && kind.raw() & !super::words::NULLABLE == 3 && word != 0 {
-                strings::release(Rc::from_raw(word as *const crate::Str));
+                strings::release(StrOwner::from_raw(word as *const crate::Str));
             } else {
                 kind.release(word);
             }
@@ -522,12 +729,12 @@ mod tests {
             kinds: string_kind.as_ptr(),
             semantics: std::ptr::null(),
         };
-        let text = Rc::new(Str::from("shared leaf"));
+        let text = StrOwner::new(Str::from("shared leaf"));
         // SAFETY: each new field receives one live owner of its declared kind.
         // Both descriptors outlive every release, including the saved leaf.
         unsafe {
             let leaf = imre_record_new(&leaf_descriptor);
-            leaf.write(Rc::into_raw(text.clone()) as usize);
+            leaf.write(StrOwner::into_raw(text.clone()) as usize);
             imre_record_retain(leaf);
             let mut root = leaf;
             for _ in 0..50_000 {
@@ -536,9 +743,9 @@ mod tests {
                 root = parent;
             }
             imre_record_release(root);
-            assert_eq!(Rc::strong_count(&text), 2);
+            assert_eq!(StrOwner::strong_count(&text), 2);
             imre_record_release(leaf);
-            assert_eq!(Rc::strong_count(&text), 1);
+            assert_eq!(StrOwner::strong_count(&text), 1);
         }
     }
 
@@ -581,8 +788,8 @@ mod tests {
             semantics: std::ptr::null(),
         };
         assert_eq!(layout(kinds.len()).size(), 16 + kinds.len() * 8);
-        let text = Rc::new(Str::from("partial owned field"));
-        let weak_text = Rc::downgrade(&text);
+        let text = StrOwner::new(Str::from("partial owned field"));
+        let weak_text = StrOwner::downgrade(&text);
         let integer = Rc::new(BigInt::from(1_u128 << 120));
         let weak_integer = Rc::downgrade(&integer);
         // SAFETY: metadata outlives all allocated records, every word has the
@@ -593,12 +800,12 @@ mod tests {
             let object = Rc::from_raw(imre_seq_new(2));
             let weak_object = Rc::downgrade(&object);
             let child = imre_record_new(&child_descriptor);
-            replace(child, 0, Rc::as_ptr(&text) as usize, 3);
+            replace(child, 0, StrOwner::as_ptr(&text) as usize, 3);
             let record = imre_record_new(&descriptor);
             assert!((0..kinds.len()).all(|index| record.add(index).read() == 0));
             replace(record, 1, 1, 1);
             replace(record, 2, Rc::as_ptr(&integer) as usize, 2);
-            replace(record, 3, Rc::as_ptr(&text) as usize, 3);
+            replace(record, 3, StrOwner::as_ptr(&text) as usize, 3);
             replace(record, 4, Rc::as_ptr(&list) as usize, 4);
             replace(record, 5, Rc::as_ptr(&object) as usize, 5);
             replace(record, 6, child as usize, 6);
@@ -629,9 +836,9 @@ mod tests {
             kinds: kinds.as_ptr(),
             semantics: std::ptr::null(),
         };
-        let text = Rc::new(Str::from("snapshot"));
-        let weak = Rc::downgrade(&text);
-        let word = Rc::as_ptr(&text) as usize;
+        let text = StrOwner::new(Str::from("snapshot"));
+        let weak = StrOwner::downgrade(&text);
+        let word = StrOwner::as_ptr(&text) as usize;
         // SAFETY: metadata outlives the aliases; the replacement function models
         // exactly the compiler's owned field access protocol.
         unsafe {
@@ -643,9 +850,9 @@ mod tests {
             imre_record_retain(record);
             replace(record, 0, word, 3);
             let saved = WordKind::new(3).acquire(WordKind::new(3).read_record_field(record));
-            let replacement = Rc::new(Str::from("replacement"));
-            let replacement_weak = Rc::downgrade(&replacement);
-            replace(record, 0, Rc::as_ptr(&replacement) as usize, 3);
+            let replacement = StrOwner::new(Str::from("replacement"));
+            let replacement_weak = StrOwner::downgrade(&replacement);
+            replace(record, 0, StrOwner::as_ptr(&replacement) as usize, 3);
             drop(replacement);
             imre_record_release(record);
             assert_eq!(record.add(1).read(), 1);
@@ -656,6 +863,29 @@ mod tests {
             drop(saved);
         }
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn wide_record_releases_every_initialized_field() {
+        let kinds = [5; 65];
+        let layout = RecordDescriptor {
+            length: kinds.len(),
+            kinds: kinds.as_ptr(),
+            semantics: std::ptr::null(),
+        };
+        let leaf = crate::objects::Words::new(2).into_object();
+        let weak = Rc::downgrade(&leaf);
+        // SAFETY: the descriptor outlives the record and populated fields retain a live object.
+        unsafe {
+            let row = imre_record_try_new(&layout);
+            assert!(!row.is_null());
+            for field in (0..kinds.len()).step_by(2) {
+                replace(row, field, Rc::as_ptr(&leaf) as usize, 5);
+            }
+            drop(leaf);
+            imre_record_release(row);
+        }
+        assert_eq!(weak.strong_count(), 0);
     }
 
     #[test]
@@ -679,9 +909,9 @@ mod tests {
                 if blocks.last().is_none_or(|previous| !block.ptr_eq(previous)) {
                     blocks.push(block);
                 }
-                let field = Rc::new(Str::new("owned field"));
-                fields.push(Rc::downgrade(&field));
-                replace(row, 0, Rc::as_ptr(&field) as usize, 3);
+                let field = StrOwner::new(Str::new("owned field"));
+                fields.push(StrOwner::downgrade(&field));
+                replace(row, 0, StrOwner::as_ptr(&field) as usize, 3);
                 rows.values.push(row as usize);
             }
             assert!(blocks.len() > 1 && blocks.len() < fields.len());
@@ -704,11 +934,11 @@ mod tests {
                     .all(|(index, field)| (field.strong_count() > 0) == (index == 20))
             );
 
-            let replacement = Rc::new(Str::new("replacement"));
-            replace(escaped, 0, Rc::as_ptr(&replacement) as usize, 3);
+            let replacement = StrOwner::new(Str::new("replacement"));
+            replace(escaped, 0, StrOwner::as_ptr(&replacement) as usize, 3);
             assert_eq!(fields[20].strong_count(), 0);
             imre_record_release(escaped);
-            assert_eq!(Rc::strong_count(&replacement), 1);
+            assert_eq!(StrOwner::strong_count(&replacement), 1);
             assert!(blocks.iter().all(|block| block.strong_count() == 0));
         }
     }
@@ -721,17 +951,17 @@ mod tests {
             kinds: kinds.as_ptr(),
             semantics: std::ptr::null(),
         };
-        let original = Rc::new(Str::from("cached field"));
-        let original_weak = Rc::downgrade(&original);
-        let replacement = Rc::new(Str::from("independent field"));
-        let replacement_weak = Rc::downgrade(&replacement);
+        let original = StrOwner::new(Str::from("cached field"));
+        let original_weak = StrOwner::downgrade(&original);
+        let replacement = StrOwner::new(Str::from("independent field"));
+        let replacement_weak = StrOwner::downgrade(&replacement);
         // SAFETY: immutable metadata outlives every record. Each returned owner
         // is released once, and only a returned result mutates record fields.
         unsafe {
             let cache = imre_record_new(&descriptor);
             let exclusive = imre_record_cached_result(cache);
             assert_eq!(exclusive, cache);
-            replace(exclusive, 0, Rc::as_ptr(&original) as usize, 3);
+            replace(exclusive, 0, StrOwner::as_ptr(&original) as usize, 3);
             replace(exclusive, 1, Int::small(7).unwrap().into_raw(), 258);
             drop(original);
 
@@ -739,7 +969,7 @@ mod tests {
             assert_ne!(shared, cache);
             assert_eq!(shared.read(), 0);
             assert_eq!(shared.add(1).read(), 0);
-            replace(shared, 0, Rc::as_ptr(&replacement) as usize, 3);
+            replace(shared, 0, StrOwner::as_ptr(&replacement) as usize, 3);
             replace(shared, 1, Int::small(9).unwrap().into_raw(), 258);
             drop(replacement);
             assert_eq!(

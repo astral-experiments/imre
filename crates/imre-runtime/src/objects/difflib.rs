@@ -2,11 +2,11 @@
 //! intraline guides use the same longest-contiguous-match rule.
 
 use super::{Str, Words, python_whitespace};
+use crate::StrOwner;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::ops::Range;
-use std::rc::Rc;
 
 /// A view into a rooted string-list buffer. Each word is already a string
 /// handle, so the sorted merge needs no temporary array of fat string slices.
@@ -437,7 +437,9 @@ pub(super) unsafe fn materialize_words(left: &Words, right: &Words, output: Outp
         let mut tagged = Str::with_capacity(prefix.len() + line.len());
         tagged.push_str(prefix);
         tagged.push_str(line);
-        words.values.push(Rc::into_raw(Rc::new(tagged)) as usize);
+        words
+            .values
+            .push(StrOwner::into_raw(StrOwner::new(tagged)) as usize);
     });
     words.update_header();
     words
@@ -452,7 +454,7 @@ mod tests {
         for &line in lines {
             words
                 .values
-                .push(Rc::into_raw(Rc::new(Str::from(line))) as usize);
+                .push(StrOwner::into_raw(StrOwner::new(Str::from(line))) as usize);
         }
         words
     }

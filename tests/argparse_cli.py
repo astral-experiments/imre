@@ -9,6 +9,29 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "registration_errors": [[], ["const"], ["invalid"], ["both"], ["effects"], ["interrupt"],
+                            ["nested-group"], ["nested-child"], ["nested-child-group"],
+                            ["mutex-group"], ["mutex-child"], ["mutex-child-name"]],
+    "class_constants": [[], ["--as-class"], ["--optional"], ["--as-class", "--optional"],
+                        ["--help"], ["--as-class=value"], ["--text", "<class 'tuple'>"]],
+    "boolean_options": [
+        [], ["--help"], ["-x"], ["-xxv"], ["--fe"], ["--no-f"], ["--no-q"], ["--no"],
+        ["--no-extra", "--extra"], ["--feature", "--no-feature"], ["--quiet=no"],
+        ["--no-extra=x"], ["-vx", "--no-quiet"], ["--no-f", "-x", "--no-e"],
+        ["prefix"], ["prefix", "+ββ"], ["prefix", "++m", "--no-e"],
+        ["prefix", "++no-mode"], ["prefix", "/v"], ["prefix", "--help"],
+    ],
+    "mutually_exclusive": [
+        [], ["-aaa"], ["-ab"], ["-ba"], ["-hba"], ["-ahb"], ["-abh"], ["-hab=2"],
+        ["-ahi"], ["-ahi", "bad"], ["-abi", "bad"], ["-a", "--integer", "bad"],
+        ["-a", "--integer", "3"], ["-i", "3", "-i", "4"], ["-a", "--pick"],
+        ["-a", "path", "--pick=x"], ["-a", "--pick=x", "path"], ["-a", "--", "file"],
+        ["-a", "--unknown"], ["empty"], ["empty", "--help"], ["child", "run"],
+        ["child", "run", "--help"], ["child", "run", "-x"], ["child", "run", "-x", "-y", "1"],
+        ["toggle"], ["toggle", "--help"], ["toggle", "--no-fe"], ["toggle", "--no-feature", "-ff"],
+        ["toggle", "-f", "--no-feature"], ["toggle", "-fxh"], ["toggle", "-hfx"],
+        ["toggle", "--no-feature", "-x"], ["toggle", "-x", "--no-feature"],
+    ],
     "numbers": [
         [], ["--help"], ["-i", "１２_３"], ["-i", "123456789012345678901234567890"],
         ["-i", "0" * 4301], ["-i", "\x1c34\x1f"],
@@ -21,6 +44,8 @@ CASES = {
         ["--unit", "ab"], ["--unit=c", "-.１２"], ["--label"], ["--label=-42"],
         ["--note", "red"], ["--note=42"],
     ],
+    "format": [[], ["--help"], ["--mode", "text"], ["--unknown"]],
+    "blank_help": [[], ["format"], ["print"], ["parse"]],
     "counts": [
         [], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
         ["--", "a", "b"], ["a", "--", "--", "b"], ["a", "b", "-v", "c"],
@@ -106,12 +131,37 @@ CASES = {
         ["one", "-v", "two"], ["one", "--", "-v", "--"], ["--", "--", "tail"],
         ["one", "--unknown", "two"], ["--unknown", "one"], ["one", "--help"],
     ],
+    "flag_actions": [[], ["--help"], ["-v"], ["-vvv"], ["-vqvfq"], ["-s", "-n", "--pi", "--toggle"],
+                     ["-q", "-q", "-q"], ["--off"], ["--off=x"], ["-s=x"], ["-v=3"], ["-vh"],
+                     ["-v=f", "--help"], ["--help", "--off=x"], ["-f", "extra"]],
     "method_args": [[]],
+    "known_args": [
+        [], ["--help"], ["--foo", "F", "--bar", "--baz"], ["--foo"],
+        ["one", "two", "--unknown", "-v", "three"], ["-vvv", "π", "one", "两"],
+        ["-vx", "--foo", "F"], ["a", "--", "b", "--", "c"], ["--", "--", "tail"],
+        ["commands", "run"], ["commands", "--unknown", "run", "--flag", "--child", "tail"],
+        ["commands", "--parent=x", "run", "a", "--flag", "b"], ["commands", "bad"],
+        ["commands", "--unknown"], ["commands", "run", "--help"],
+        ["commands", "--parent=x", "--before", "r", "--flag", "--after"], ["repeat"],
+    ],
     "numeric_defaults": [[], ["--help"], ["word"], ["--amount", "2"], ["--amount=2", "word"],
                          ["--amount", "bad", "--help"], ["--help", "--amount", "bad"],
                          ["range", "--big", "4999", "100000000000000000001"],
                          ["radix", str(2**80)], ["radix", str(2**80 + 3)], ["radix", "--help"]],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
+    "optional_commands": [
+        [], ["-v"], ["run"], ["r", "--value", "x"], ["-v", "start", "--value=-v"],
+        ["list", "a"], ["ls"], ["invalid"], ["--help"], ["r", "--help"], ["start", "--bogus"],
+        ["--", "run"], ["absent"], ["absent", "run"], ["absent", "run", "--mark"],
+        ["absent", "t"], ["absent", "--help"], ["required"], ["required", "r", "--value=1"],
+        ["required", "list"], ["required", "--help"], ["required", "r", "--help"],
+        ["required", "bad"], ["required", "--", "list"],
+        ["named"], ["named", "bad"], ["named", "g"], ["named", "go-now", "--help"],
+        ["named", "--help"], ["empty"], ["empty", "bad"], ["empty", "--help"],
+        ["empty-required"], ["empty-required", "--key=ok"], ["empty-required", "bad"],
+        ["named", "two words"], ["named", ""], ["named", "Δ"], ["dispatch"],
+        ["dispatch", "r", "--value=selected"], ["dispatch", "ls", "name"],
+    ],
     "spellings": [[], ["+h"], ["++help"], ["++hel"], ["--help"], ["++value=x"], ["/v", "v"],
                   ["+xz"], ["+x+z"], ["+xZ"], ["+"], ["++v", "x"], ["--", "++value"],
                   ["abbrev"], ["abbrev", "-h"], ["abbrev", "-foo"], ["abbrev", "-foob=x"],
@@ -176,8 +226,12 @@ def main():
                     samples.extend(([mode, "--unknown"], width, color) for mode in ("bare", "pos") for color in (False, True))
                 if name == "groups":
                     samples.extend((["foo", "check", "--help"], width, color) for color in (False, True))
+                if name == "blank_help":
+                    samples.extend(([], width, color) for color in (False, True))
             for width in (" 34\t", "+3_4", "٣٤", "3__4", "9" * 20, "0" * 4300 + "34"):
                 samples.append((["--help"], width, False))
+            for separator in ("\x1c", "\x1d", "\x1e", "\x1f"):
+                samples.append((["--help"], separator + "34" + separator, False))
             for level in args.opt_levels:
                 subprocess.run(
                     [
@@ -243,11 +297,15 @@ def main():
         # The successful guard relies on a stable receiver and a read-only field.
         source = Path(directory) / "bad_field.py"
         prelude = "from argparse import ArgumentParser\nfrom pathlib import Path\ndef read():\n    p = ArgumentParser()\n    p.add_argument('--out', type=Path)\n    return p.parse_args()\na = read()\n"
-        for statement in [
+        invalid_field_reads = [
             "a.out = Path('else')",
             "print(a.out.name)",
             "if a.out:\n    a = read()\n    print(a.out.name)",
-        ]:
+            "if a.out is None:\n    print(a.out.name)",
+            "if None is not a.out:\n    a = read()\n    print(a.out.name)",
+            "if a.out is None:\n    pass\nelse:\n    a = read()\n    print(a.out.name)",
+        ]
+        for statement in invalid_field_reads:
             source.write_text(prelude + statement + "\n")
             check = subprocess.run(
                 [args.compiler, "check", source], capture_output=True, check=False
@@ -262,6 +320,11 @@ def main():
             checked = subprocess.run([args.compiler, "check", source], capture_output=True)
             if checked.returncode == 0:
                 raise AssertionError(wrong)
+        alias_source = (FIXTURES / "optional_commands.py").read_text()
+        source.write_text(alias_source.replace("print(repr(namespace.value))", "print(repr(namespace.name))"))
+        checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+        if checked.returncode == 0 or b"unknown field" not in checked.stderr:
+            raise AssertionError(checked.stderr)
         source.write_text(commands.replace("    return args\n", "    print(args.text)\n    return args\n"))
         checked = subprocess.run([args.compiler, "check", source], capture_output=True)
         if checked.returncode == 0 or b"unknown field" not in checked.stderr:
@@ -274,7 +337,7 @@ def main():
         if checked.returncode == 0 or b"argparse.Namespace requires" not in checked.stderr:
             raise AssertionError(checked.stderr)
     print(
-        f"Validated {checks} argparse process comparisons and {len(REJECTED) + 7} compile-time rejections"
+        f"Validated {checks} argparse process comparisons and {len(REJECTED) + len(invalid_field_reads) + 5} compile-time rejections"
     )
 
 

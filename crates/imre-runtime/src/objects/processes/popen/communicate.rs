@@ -14,7 +14,176 @@ pub(super) struct Communication {
 
 enum Exchange {
     Done([Vec<u8>; 2]),
-    Timeout([Option<Vec<u8>>; 2]),
+    Timeout([Option<Vec<u8>>; 2], Option<f64>),
+}
+
+/// Decode the rooted input using the stream mode chosen at the call site.
+unsafe fn input_bytes<'a>(input: *const (), text: bool) -> &'a [u8] {
+    if input.is_null() {
+        &[]
+    } else if text {
+        // SAFETY: the caller roots an exact native string for this borrow.
+        unsafe { (&*input.cast::<Str>()).as_bytes() }
+    } else {
+        // SAFETY: the caller roots an exact byte buffer for this borrow.
+        unsafe { (&*input.cast::<Bytes>()).as_slice() }
+    }
+}
+
+/// Capture stdout, keep checked failures' streams, and reap the direct child
+/// before exposing a timeout. Descendants may still hold the far pipe ends.
+///
+/// # Safety
+/// The launch configuration, deadline word and optional input have the layouts
+/// selected by the compiler and stay rooted until the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_check_output_config(
+    config: *const LaunchConfig,
+    deadline_kind: u32,
+    deadline: usize,
+    input: usize,
+    validation: u32,
+    errors: u32,
+) -> *const () {
+    // SAFETY: the legacy API supplies the same rooted parameters; a null
+    // descriptor asks for the stdout object instead of a CompletedProcess.
+    unsafe {
+        imre_run_config(
+            config,
+            deadline_kind,
+            deadline,
+            input,
+            validation,
+            errors,
+            true,
+            std::ptr::null(),
+        )
+    }
+}
+
+/// Run a native command and return either an exact CompletedProcess or checked stdout.
+///
+/// # Safety
+/// Launch fields (including a trailer when a stream is borrowed), the deadline
+/// and input must remain rooted and have the stated types. A present result
+/// descriptor has the original command's exact layout.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_run_config(
+    config: *const LaunchConfig,
+    deadline_kind: u32,
+    deadline: usize,
+    input: usize,
+    validation: u32,
+    errors: u32,
+    check: bool,
+    descriptor: *const RecordDescriptor,
+) -> *const () {
+    // SAFETY: the caller roots this immutable configuration throughout launch.
+    let (mut config, extras) = unsafe { (*config, LaunchConfig::extras(config)) };
+    let mut validation = validation;
+    if !descriptor.is_null() && input != 0 {
+        // run(input=None) inherits stdin; a present value, even empty, demands a pipe.
+        if (config.streams >> 12) & 15 != 0 {
+            validation = 3;
+        } else {
+            config.streams |= 1 << 12;
+        }
+    }
+    let invalid = match validation {
+        0 => None,
+        1 => Some("stdout argument not allowed, it will be overridden."),
+        2 => Some("check argument not allowed, it will be overridden."),
+        3 => Some("stdin and input arguments may not both be used."),
+        4 => Some("stdout and stderr arguments may not be used with capture_output."),
+        5 => return Error::new(Kind::SubprocessError, "Cannot disambiguate when both text and universal_newlines are supplied but different. Pass one or the other.").returning(std::ptr::null()),
+        _ => fail("SystemError", "unknown check_output validation"),
+    };
+    if let Some(message) = invalid {
+        return Error::new(Kind::ValueError, message).returning(std::ptr::null());
+    }
+    // SAFETY: the caller roots the configuration and its typed launch fields;
+    // the timeout representation and input type were selected at the same call site.
+    let (timeout, input, process) = unsafe {
+        (
+            Deadline::from_word(deadline_kind, deadline),
+            input_bytes(input as *const (), config.streams & (1 << 16) != 0),
+            spawn(&config, extras),
+        )
+    };
+    let kind = if config.streams & (1 << 16) != 0 {
+        3
+    } else {
+        8
+    };
+    let stream = |bytes: Vec<u8>, kind| {
+        let bytes = if kind == 3 && errors != 0 {
+            match errors {
+                1 => bytes
+                    .utf8_chunks()
+                    .flat_map(|chunk| chunk.valid().bytes())
+                    .collect(),
+                2 => String::from_utf8_lossy(&bytes).into_owned().into_bytes(),
+                _ => fail("SystemError", "unknown process decoding policy"),
+            }
+        } else {
+            bytes
+        };
+        completed_stream(bytes, WordKind::new(kind))
+    };
+    let result = process.and_then(|mut p| {
+        // No caller can have consumed the freshly opened streams. Decode them
+        // once after communication so timeouts keep their original raw bytes.
+        let exchange = p.communicate(input, timeout.as_ref(), false);
+        let killed = if matches!(exchange, Ok(Exchange::Done(_))) {
+            Ok(())
+        } else {
+            p.signal(|| Ok(libc::SIGKILL))
+        };
+        p.close_wait()?;
+        killed?;
+        match exchange? {
+            Exchange::Done([stdout, stderr]) => {
+                let stdout_kind = if config.streams & 15 == 1 { kind } else { 0 };
+                let stdout = stream(stdout, stdout_kind)?;
+                let stderr_kind = if (config.streams >> 4) & 15 == 1 {
+                    kind
+                } else {
+                    0
+                };
+                let stderr = stream(stderr, stderr_kind)?;
+                let code = p.control.status().expect("communicate reaped the child");
+                if check && code != 0 {
+                    raise_process(ProcessError {
+                        positional_streams: false,
+                        cmd: p.args.clone(),
+                        returncode: code,
+                        stdout,
+                        stderr,
+                    });
+                    Ok(std::ptr::null())
+                } else if descriptor.is_null() {
+                    Ok(stdout.into_word() as *const ())
+                } else {
+                    // SAFETY: the compiler's descriptor uses this same command and capture layout.
+                    Ok(unsafe {
+                        completed_record(descriptor, p.args.clone(), code, stdout, stderr)
+                    }
+                    .cast())
+                }
+            }
+            Exchange::Timeout([stdout, stderr], wait_budget) => {
+                raise_timeout(TimeoutError {
+                    cmd: p.args.clone(),
+                    timeout: timeout.expect("timed communication"),
+                    wait_budget,
+                    stdout: stdout.map(Rc::new),
+                    stderr: stderr.map(Rc::new),
+                });
+                Ok(std::ptr::null())
+            }
+        }
+    });
+    finish(result, std::ptr::null())
 }
 
 fn file<T>(owner: &Object, f: impl FnOnce(&mut FileState) -> T) -> T {
@@ -31,7 +200,7 @@ fn copy(bytes: &[u8]) -> Result<Vec<u8>> {
 impl Communication {
     fn timeout(&self) -> Result<Exchange> {
         let snapshot = |i: usize| self.observed[i].then(|| copy(&self.output[i])).transpose();
-        Ok(Exchange::Timeout([snapshot(0)?, snapshot(1)?]))
+        Ok(Exchange::Timeout([snapshot(0)?, snapshot(1)?], None))
     }
 }
 
@@ -99,19 +268,14 @@ impl Popen {
                 };
             }
         }
+        let select = selector::current();
         while pollfds.iter().any(|poll| poll.fd >= 0) {
             let remaining = timeout.map(|t| t - start.elapsed().as_secs_f64());
             if remaining.is_some_and(|t| t <= 0.0) {
                 return data.timeout();
             }
-            let ms = remaining.map(poll_milliseconds).transpose()?.unwrap_or(-1);
-            // SAFETY: each open descriptor remains rooted in self.pipes for this poll.
-            if unsafe { libc::poll(pollfds.as_mut_ptr(), 3, ms) } < 0 {
-                let error = io::Error::last_os_error();
-                if error.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(errno_error(error));
+            if !selector::wait(select, &mut pollfds, remaining)? {
+                continue;
             }
             if timeout.is_some_and(|t| start.elapsed().as_secs_f64() >= t) {
                 return data.timeout();
@@ -166,10 +330,13 @@ impl Popen {
                 }
             }
         }
-        let remaining = timeout.map(|t| Deadline::Float(t - start.elapsed().as_secs_f64()));
-        if self.wait(remaining.as_ref())?.is_none() {
+        let remaining = timeout.map(|t| t - start.elapsed().as_secs_f64());
+        if self
+            .wait(remaining.map(Deadline::Float).as_ref())?
+            .is_none()
+        {
             // A timeout raised by wait itself has no captured streams.
-            return Ok(Exchange::Timeout([None, None]));
+            return Ok(Exchange::Timeout([None, None], remaining));
         }
         Ok(Exchange::Done([
             copy(&self.communication.output[0])?,
@@ -193,13 +360,7 @@ pub unsafe extern "C" fn imre_popen_communicate(
     // SAFETY: all storage types follow the call site's sealed Popen signature.
     unsafe {
         let timeout = Deadline::from_word(deadline_kind, deadline);
-        let bytes = if input.is_null() {
-            &[][..]
-        } else if text {
-            (&*input.cast::<Str>()).as_bytes()
-        } else {
-            (&*input.cast::<Bytes>()).as_slice()
-        };
+        let bytes = input_bytes(input, text);
         let result = with_process(handle, |p| -> Result<_> {
             match p.communicate(bytes, timeout.as_ref(), text)? {
                 Exchange::Done([stdout, stderr]) => {
@@ -217,10 +378,11 @@ pub unsafe extern "C" fn imre_popen_communicate(
                     }
                     Ok(tuple)
                 }
-                Exchange::Timeout([stdout, stderr]) => {
+                Exchange::Timeout([stdout, stderr], wait_budget) => {
                     raise_timeout(TimeoutError {
                         cmd: p.args.clone(),
                         timeout: timeout.expect("timed communication"),
+                        wait_budget,
                         stdout: stdout.map(Rc::new),
                         stderr: stderr.map(Rc::new),
                     });

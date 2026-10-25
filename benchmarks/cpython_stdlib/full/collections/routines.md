@@ -2,16 +2,25 @@
 
 The [versioned per-occurrence report](evidence-linux.json) covers the same
 659 original IDs separately at O0 and O3 on Imre
-`43755cbf6e6be29a6c1e68e78a483b4ed5d837c6`. Each level has seven
-Counter methods with native bodies, operations and assertions under the
-original CPython fixture hooks. Three native doctest bodies (initialization,
-update and subtract) have host output checking. One additional method,
+[`8bed1fe03437`](runs/8bed1fe03437/source.json), using merged deque support
+from [#561](https://github.com/astral-sh/imre/pull/561). The
+[O0](runs/8bed1fe03437/routines-O0.json) and [O3](runs/8bed1fe03437/routines-O3.json)
+routine runs retain the first diagnostic or execution for each ID. Each level has thirteen
+methods with native bodies, operations and assertions under the original
+CPython fixture hooks: seven Counter methods, four 100,000-item deque
+queue and stack methods, and the complete deque `test_clear` and
+`test_maxlen_zero`. The last test checks that construction, `extend`, and
+`extendleft` consume the source iterator even when no items can be stored.
+On the earlier `d041aeb3fd05` tree, independent native assertion controls reported `0 != 3` after clear and
+`[] != [0]` after a zero-capacity extension at both optimization levels.
+Twelve native Counter doctest bodies have host
+output checking, including the arithmetic methods and `most_common`. One additional method,
 `test_subtract`, runs its original body and assertions in CPython with 24
 native Counter operations. Its direct body compilation blocker is retained
-in the same record. The shared classification places those three doctests and
+in the same record. The shared classification places those twelve doctests and
 that host-driven method in `host-driven-native-operation`; their separate roles
 show which code ran where. Four routines have no collections operation, and
-three have justified reference skips. The other 641 report their first blocker. No
+three have justified reference skips. The other 626 report their first blocker. No
 occurrence on this build is classified as fully native.
 
 The four non-product methods are three original deque methods whose bodies
@@ -91,3 +100,15 @@ first diagnostics. None earns native ID credit on this installer revision.
 For example, `test_instance` starts with a local factory, then checks keyword
 construction, arity, `_make`, `_replace` and `_asdict`. The module-level
 gate cannot establish those behaviors.
+
+On wheel integration `1a03f4affbb17d2fcb74a04da7c5da7cc1f9fc6e`, both
+wheel fixtures again matched CPython at O0 and O3: 22 output lines from
+the container fixture and three from the imported namedtuple fixture.
+The [new run of all 23 unchanged methods](namedtuple-1a03f4a.tsv) still
+has 17 compiler blockers and six original-decorator blockers at both levels.
+Twelve of the compiler errors are at a factory inside a method. Only
+`test_copy` moved: the `copy` import now resolves, and the body stops at
+the loop over `copy.copy` and `copy.deepcopy` (line 581).
+The separate 11-prompt `collections.namedtuple` docstring stops at
+`Point.__doc__` in its second prompt. Neither the 23 methods nor the
+docstring earns native pass credit on this revision.

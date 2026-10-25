@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_socket",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/socket.py": "bbb476f2fc010e2e3178b97d1253b26f30f7e900",
+    "Lib/test/support/socket_helper.py": "a41e487f3e4bc52012425e30eab9b430a3b3a7ab",
+    "Lib/test/support/threading_helper.py": "cf87233f0e2e938a9f2e7d7906844ca009416432",
+    "Lib/test/test_socket.py": "249bfeaa14cf374a047c58176da6cbb6e6ff43f4",
+    "Modules/socketmodule.c": "f92b7995840fa4dacced4b6b3ab76264c0f76e11",
+    "Modules/socketmodule.h": "6f8f4b21599cfb735ef005b6c2f2bb2bad812345"
+  }
+}

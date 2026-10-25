@@ -19,7 +19,9 @@ On Linux, 215 executions passed. `TestCEncodeBasestringAscii.test_overflow` has 
 
 ## Full native evidence
 
-The [v1 report](evidence-linux.json) covers the entire package at each optimization level. There is one package denominator, including its submodules, the two backend fixtures, and both CLI variants. It was exercised on Imre `6bafa669b5af591bfe855168f28505fdac4324dd`. At each level, 12 complete native methods ran under 24 host fixture IDs; 40 additional fixture IDs called native operations from host methods. The remaining 152 occurrences are 98 blocked, four failed, 38 reference-only, 11 individually reviewed backend/private API exclusions, and the single upstream skip. The report includes partial calls, concrete diagnostics and source locations.
+The [v1 report](evidence-linux.json) covers all 216 occurrences at each optimization level. Nineteen complete native methods ran under 38 host fixture IDs. Another 45 fixture IDs called native operations under host methods and assertions. The remaining 133 occurrences are 83 blocked, 38 reference-only, 11 reviewed backend or private API exclusions, and one original CPython skip. Both decoder fixtures use the same native implementation.
+
+The [first hosted key-method run](https://github.com/astral-sh/imre/actions/runs/40183239009) measured both levels on commit `5438ae285d65b25126f9f3632a8c5e174b9bdac9`. A rerun on the merged decoder from [#896](https://github.com/astral-sh/imre/pull/896) reproduced every key observation and refreshed the [intact-package](doctest-startup-linux.json) and [direct doctest](doctest-direct-linux.json) diagnostics. The [earlier hosted decoder run](https://github.com/astral-sh/imre/actions/runs/40179030429) verified the 216 reference occurrences and recorded decoder and nesting behavior. The [complete-method sweep](routine-sweep-linux.json) and [round-trip report](roundtrips-linux.json) from [#874](https://github.com/astral-sh/imre/pull/874) retain the earlier measurements.
 
 ```sh
 python -B benchmarks/cpython_stdlib/full/json/evidence.py \
@@ -29,7 +31,13 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
     benchmarks/cpython_stdlib/full/json/reference-linux.json /tmp/json-evidence.json
 ```
 
-The four failed fixture occurrences cover key identity and excessive nesting. The [doctest handoff](DOCTEST.md) identifies the first shared intact-package import blocker.
+The [doctest handoff](DOCTEST.md) identifies the first shared intact-package import blocker.
+
+The [first key identity rerun](key-identity-linux.json) showed that rebuilding strings from their repr loses identity. The [decoder instance report](decoder-keys-linux.json) then ran the original methods on the host with four native operations per fixture: `json.loads`, decoder construction, `decode`, and `memo`. The host reconstructed keys using the observed native owner groups. The ordinary repr path still failed its first identity assertion.
+
+The [native key-method report](key-methods-linux.json) runs the unchanged `TestDecode.test_keys_reuse` and its unchanged `check_keys_reuse` helper for both inherited fixture IDs at O0 and O3. The child sorts actual native string keys, checks identity with `is`, and checks the decoder memo's truth value. CPython runs the original module, class, and instance fixtures. Separate controls reject equal strings owned by independent scans and a nonempty memo; they also check string-list equality by value and length. The general `TestCase`, untyped sorting, and repr attempts remain in the report with their original diagnostics. Run `key_identity.py` with the same options as `evidence.py` to repeat these observations.
+
+The [deep decoder rerun](deep-decoder-linux.json) records both original `test_highly_nested_objects_decoding` fixture IDs. At O0 and O3 all six native loads per level raised `RecursionError` for the original 500,000-level documents. The method, decorators, recursion context and assertions ran on CPython; only the loads ran in Imre. The report retains Imre's exception text alongside CPython's C and pure reference messages. Separate controls traverse accepted deep values, compare equality and repr through 50,000 levels, and compare all five `JSONDecodeError` fields on malformed inputs. Run `deep_decode.py` with the same command-line options as `evidence.py`.
 
 ## Native calls with host assertions
 
@@ -43,15 +51,15 @@ The [native report](native-linux.json) records both `-O0` and `-O3`. The [shared
 
 ## Compiled upstream methods
 
-Run `bodies.py` with the same options as `native.py`. It uses the [shared suite runner](../../SUITE_RUNNER.md) to compile each complete verified method into a native fixture. The original CPython module, class, and instance fixtures run on the host. The child process executes the unmodified body, its assertions, and standard JSON operations in Imre. Both CPython fixture IDs call the same native executable. The [body report](bodies-linux.json) records per-ID execution evidence and source hashes at both levels. Each level passed 24 fixture executions from 12 methods. Each fixture ran all 55,295 iterations of the Unicode escape sweep, and all 34 inputs in the JSON checker failure test.
+Run `bodies.py` with the same options as `native.py`. The [shared suite runner](../../SUITE_RUNNER.md) compiles each verified method. The original CPython module, class, and instance fixtures run on the host. The child executes the unchanged body, its assertions, and its JSON operations in Imre. Both fixture IDs call the same native executable. The [body report](bodies-linux.json) records 36 fixture executions from 18 methods at each level, including all 55,295 iterations of the Unicode escape sweep, all 34 JSON checker failure inputs, and integer serialization through `2**64`. The separate [key-method report](key-methods-linux.json) accounts for the nineteenth complete method and its two inherited fixture IDs.
 
-Run `sweep.py` with the same flags to try every one of the 112 defining unittest methods with the native TestCase and the pinned module declarations and class helpers it references. The [sweep](routine-sweep-linux.json) records the outcome for each definition and its fixture IDs at O0 and O3. With this general fixture, two methods completed, three compiled but failed at runtime, 106 had compile or decorator blockers, and one retained its upstream resource skip. These are alternate attempts at the same occurrences, not an additional denominator. The typed fixture checks above cover another ten methods. For example, the general integer assertion projects the decoded results of the three `test_parse` round trips to int; it fails when those results are lists or dictionaries.
+Run `sweep.py` with the same flags to try every one of the 112 defining unittest methods with the native TestCase and the pinned declarations and helpers it references. The [general fixture sweep](routine-sweep-linux.json) records 13 completed methods, three runtime failures, 95 compile or decorator blockers, and the original resource skip at each level. These are alternate attempts at the same occurrences. Typed fixtures complete five further methods: two Unicode decoding methods and the three round trips described below.
 
 ### The three round-trip failures
 
 The [diagnostic run](roundtrips-linux.json) isolates `test_pass1`, `test_pass2` and `test_pass3`. Each defines one `test_parse` method inherited by a Python and a C fixture. At both optimization levels the native parse–serialize–parse sequence produced the same output bytes as the pinned reference for all three inputs. The final inherited `TestCase.assertEqual` raised `TypeError: expected int, got list from JSON` for the first two and `TypeError: expected int, got dict from JSON` for the third.
 
-The [reproducer](roundtrips.py) also compiles the unchanged methods with just `assertEqual` overridden to compare its operands directly. On the measured revision, the compiler rejected comparisons between two parsed JSON values. Three independent controls change a nested leaf and require the native assertion to reject the unequal documents. These controls exercise the assertion; they add no upstream occurrences. The fixture lifecycle remains on CPython in both attempts.
+The [reproducer](roundtrips.py) also compiles the unchanged methods with just `assertEqual` overridden to compare its parsed operands directly. All three original methods complete under both fixture IDs with this assertion. Three independent controls change a nested leaf; the native assertion rejects every unequal pair. These controls add no upstream occurrences. The fixture lifecycle remains on CPython in both attempts.
 
 ```sh
 python -B benchmarks/cpython_stdlib/full/json/roundtrips.py \
