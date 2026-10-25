@@ -23,9 +23,12 @@ def main():
         if proc.returncode not in (0, 1) or proc.stderr:
             raise RuntimeError((proc.returncode, proc.stderr))
         report = json.loads(proc.stdout)
-        if report.pop("source") != source or len(report["checks"]) != 4:
+        checks = report["checks"]
+        expected = {(entry, reachable) for entry in ("import", "runner") for reachable in (False, True)}
+        if (report.pop("source") != source or len(checks) != 4
+                or {(row["entry"], row["reachable_only"]) for row in checks} != expected):
             raise ValueError("incomplete JSON startup report")
-        for row in report["checks"]:
+        for row in checks:
             row["diagnostic"] = re.sub(root, "<staged>/Lib", row["diagnostic"])
         reports.append(report)
     if reports[0] != reports[1]:

@@ -27,7 +27,7 @@ These are two source cases and four occurrences of the 216, including when the r
 
 The [shared doctest implementation](https://github.com/astral-sh/imre/pull/646) discovers the same cases from the original docstrings. Its direct native runs reached the missing `io.StringIO` export in the root case and the missing `json.encoder.JSONEncoder` class in the encoder case. Neither direct run completed the corresponding package fixture.
 
-With native doctest, annotationlib, and inspect present, the [four intact-package checks](doctest-startup-linux.json) reach `Lib/test/support/__init__.py:11`, `import _opcode`. Both import and runner entry points stop there, with and without `--reachable-only`. The vendored and full pinned Git fixture trees produce the same diagnostics. No tests execute on this path. In the release source, `test.support` reads `_opcode.ENABLE_SPECIALIZATION` and `_opcode.ENABLE_SPECIALIZATION_FT` in two specialization decorators. The JSON package uses neither decorator.
+After native doctest, annotationlib, inspect, and [the two specialization flags](https://github.com/astral-sh/imre/pull/800), the [four intact-package checks](doctest-startup-linux.json) reach `Lib/test/support/__init__.py:19`, `import types`. Both import and runner entry points stop there, with and without `--reachable-only`. The vendored and full pinned Git fixture trees produce the same diagnostics. No tests execute on this path. The JSON package does not directly import `types`; the release's shared `test.support` uses `FunctionType`, `ModuleType`, `SimpleNamespace`, `WrapperDescriptorType`, and `coroutine`.
 
 Reproduce using the shared checker on both sources:
 
