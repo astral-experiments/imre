@@ -462,6 +462,7 @@ pub(crate) enum Builtin {
         bounded: bool,
     },
     Islice,
+    Tee,
     Cycle,
     DirectoryContextView,
     Document(DocumentOp),
@@ -1011,6 +1012,10 @@ pub(crate) enum ProcessOperation {
     },
     Popen {
         streams: u32,
+    },
+    Call {
+        streams: u32,
+        check: bool,
     },
     PopenPid,
     PopenArgs,

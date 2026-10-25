@@ -185,6 +185,7 @@ impl Builtin {
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
+                | ProcessOperation::Call { .. }
                 | ProcessOperation::PopenPid
                 | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
@@ -399,6 +400,7 @@ impl Builtin {
             Self::Repeat
             | Self::CursorLengthHint
             | Self::Progression { .. }
+            | Self::Tee
             | Self::Islice
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter

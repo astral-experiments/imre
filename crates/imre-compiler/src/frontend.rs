@@ -25,6 +25,7 @@ mod dispatch;
 mod documents;
 mod enums;
 mod expansions;
+mod fixed_tuples;
 mod functools;
 mod hashlib;
 mod inference;
@@ -1246,19 +1247,58 @@ fn annotation_at(
     source: &str,
     owner: Option<usize>,
 ) -> Result<Type, String> {
+    annotation_with_aliases(
+        expression,
+        graph,
+        (module, source),
+        classes,
+        types,
+        owner,
+        0,
+    )
+}
+
+fn annotation_with_aliases(
+    expression: &ast::Expr,
+    graph: &SourceGraph,
+    (module, source): (ModuleId, &str),
+    classes: &Classes,
+    types: &Types,
+    owner: Option<usize>,
+    alias_depth: usize,
+) -> Result<Type, String> {
+    if alias_depth >= 32 {
+        return Err(error(
+            source,
+            expression,
+            "type aliases nest more than 32 levels or form a cycle",
+        ));
+    }
+    if let Some(Binding::TypeAlias(origin, index)) = graph.resolve_type(module, expression) {
+        let module = &graph.modules[origin];
+        return annotation_with_aliases(
+            &module.aliases[index].value,
+            graph,
+            (origin, &module.source),
+            classes,
+            types,
+            owner,
+            alias_depth + 1,
+        );
+    }
     if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
         let contents = value.value.to_str();
         let parsed = ruff_python_parser::parse_expression(contents)
             .map_err(|_| error(source, expression, "invalid quoted type annotation"))?;
-        return annotation_at(
+        return annotation_with_aliases(
             parsed.expr(),
             graph,
-            module,
+            (module, contents),
             classes,
             types,
-            contents,
             owner,
+            alias_depth,
         )
         .map_err(|message| {
             error(
@@ -1311,7 +1351,15 @@ fn annotation_at(
         _ => {}
     }
     let nested = |expression: &ast::Expr| {
-        annotation_at(expression, graph, module, classes, types, source, owner)
+        annotation_with_aliases(
+            expression,
+            graph,
+            (module, source),
+            classes,
+            types,
+            owner,
+            alias_depth,
+        )
     };
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
@@ -1639,6 +1687,7 @@ struct Checker<'a> {
     /// A later local assignment shadows builtin iter throughout a function.
     local_iter: bool,
     context_method: bool,
+    fixed_tuple: Option<fixed_tuples::Call>,
     generator_item: Option<Type>,
     asynchronous: bool,
     /// Capture only the outer sum of an assignment with a neighboring sum.
@@ -1700,6 +1749,7 @@ impl<'a> Checker<'a> {
             zip_sum_rhs: None,
             asynchronous: false,
             context_method: false,
+            fixed_tuple: None,
             generator_item: None,
             zip_sums: HashMap::new(),
             source: &graph.modules[module].source,
@@ -3235,6 +3285,7 @@ impl<'a> Checker<'a> {
         let reachable = self.reachable;
         let enclosing_sum = self.zip_sum_rhs;
         let mut previous_sum = false;
+        let mut length_guard = None;
         for (index, statement) in statements.iter().enumerate() {
             if let ast::Stmt::Assign(assignment) = statement
                 && let [ast::Expr::Name(name)] = assignment.targets.as_slice()
@@ -3284,7 +3335,13 @@ impl<'a> Checker<'a> {
                     && (previous_sum || statements.get(index + 1).and_then(zip_sums::rhs).is_some())
             });
             previous_sum = sum.is_some();
+            let tuple = length_guard.and_then(|guard| self.guarded_tuple(statement, guard));
+            let enclosing_tuple = std::mem::replace(&mut self.fixed_tuple, tuple);
             let (mut lowered, continues) = self.statement(statement)?;
+            self.fixed_tuple = enclosing_tuple;
+            length_guard = self
+                .list_length_guard(statement)
+                .or_else(|| length_guard.filter(|guard| fixed_tuples::preserves(*guard, &lowered)));
             self.remember_regex_assignment(statement, &mut lowered, &statements[index + 1..]);
             if let Some(flag) =
                 unbound_locals::assigned(statement).and_then(|n| self.bound_flags.get(n))
@@ -3495,6 +3552,22 @@ impl<'a> Checker<'a> {
             ast::Stmt::Delete(delete) => {
                 let mut statements = Vec::new();
                 for target in &delete.targets {
+                    if let ast::Expr::Name(name) = target
+                        && let Some(&slot) = self.names.get(name.id.as_str())
+                        && matches!(self.locals[slot], Type::Cursor(_))
+                    {
+                        if !self.assigned.contains(&slot) {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "iterator deletion requires a bound local",
+                            ));
+                        }
+                        self.assigned.remove(&slot);
+                        self.narrowed.remove_mut(&slot);
+                        statements.push(Statement::Clear(slot));
+                        continue;
+                    }
                     let ast::Expr::Subscript(target) = target else {
                         return Err(error(
                             self.source,
@@ -3937,7 +4010,16 @@ impl<'a> Checker<'a> {
         let mut normal_exit = (body_falls && else_falls).then(|| self.local_state());
 
         let mut handler_assigned = before.clone();
-        for name in narrowing::deleted_names(&try_.body) {
+        // Releasing a definitely bound cursor cannot raise. A handler can only
+        // be reached before a trailing deletion of plain locals takes effect.
+        let protected_prefix = if let [prefix @ .., ast::Stmt::Delete(last)] = try_.body.as_slice()
+            && last.targets.iter().all(ast::Expr::is_name_expr)
+        {
+            prefix
+        } else {
+            try_.body.as_slice()
+        };
+        for name in narrowing::deleted_names(protected_prefix) {
             if let Some(slot) = self.names.get(&name) {
                 handler_assigned.remove(slot);
             }
@@ -4660,6 +4742,9 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
+                    if let Some(fields) = self.types.fields(receiver.ty) {
+                        return self.tuple_contains(key, receiver, &fields, compare);
+                    }
                     let (key_type, builtin) =
                         if let Some((key, _)) = self.types.mapping(receiver.ty) {
                             (key, Builtin::DictContains)
@@ -4851,6 +4936,10 @@ impl<'a> Checker<'a> {
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
+                    if let Some(order) = counter::comparison(self.types, ty, right, op) {
+                        ops.push(order);
+                        continue;
+                    }
                     let numeric = matches!(ty, Type::Int | Type::Float)
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
@@ -5306,6 +5395,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
+            return Ok(self.materialize_fixed_tuple(tuple));
+        }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
@@ -5513,6 +5605,19 @@ impl<'a> Checker<'a> {
                     &format!("no native implementation for {symbol}"),
                 ));
             }
+            Some(Binding::TypeAlias(module, index))
+                if self.graph.modules[module].aliases[index].constructor =>
+            {
+                self.reject_builtin_keywords(call)?;
+                let [value] = call.arguments.args.as_ref() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "NewType constructors take one positional value",
+                    ));
+                };
+                return self.typed_expr(value);
+            }
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
@@ -5554,6 +5659,7 @@ impl<'a> Checker<'a> {
                 return self.cursor_length_hint(call);
             }
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
+            Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Islice | Intrinsic::Cycle)) => {
                 return self.source_adapter(call);
@@ -5573,7 +5679,13 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
                 });
             }
-            Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call),
+            Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
+            Some(Binding::Intrinsic(Intrinsic::SubprocessCall)) => {
+                return self.popen(call, Some(false));
+            }
+            Some(Binding::Intrinsic(Intrinsic::SubprocessCheckCall)) => {
+                return self.popen(call, Some(true));
+            }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::CopyFile)) => return self.shutil_copyfile(call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
