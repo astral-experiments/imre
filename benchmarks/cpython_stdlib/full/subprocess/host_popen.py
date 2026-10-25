@@ -25,6 +25,7 @@ PIPE, STDOUT, DEVNULL = subprocess.PIPE, subprocess.STDOUT, subprocess.DEVNULL
 # Repetitions matter: a success after a timeout must use the same child.
 METHODS = {
     "ContextManagerTests": {
+        "test_broken_pipe_cleanup": "stdin.write returncode exit:OSError stdin.closed",
         "test_communicate_stdin": "communicate returncode exit",
         "test_invalid_args": "Popen:FileNotFoundError",
         "test_pipe": "stdout.read stderr.read exit stdout.closed stderr.closed",
@@ -39,6 +40,7 @@ METHODS = {
         "test_terminate_dead": "stdout.read_size terminate communicate",
     },
     "ProcessTestCase": {
+        "test_invalid_cmd": "Popen:ValueError Popen:ValueError",
         "test_communicate": "communicate stdout.close stderr.close stdin.close",
         "test_communicate_epipe": "communicate",
         "test_communicate_epipe_only_stdin": "communicate wait",
@@ -119,9 +121,12 @@ def send(reply: TextIO, message: str) -> None:
     reply.flush()
 
 payload = Path(sys.argv[3])
+argv: list[str] = []
+for argument in sys.argv[4:]:
+    argv.append(Path(argument).read_bytes().decode())
 with open(sys.argv[1]) as channel, open(sys.argv[2], "w") as reply:
     try:
-        p = subprocess.Popen(sys.argv[4:]{opts})
+        p = subprocess.Popen(argv{opts})
         send(reply, "ok " + repr(p.pid))
         try:
             while True:
@@ -136,10 +141,14 @@ with open(sys.argv[1]) as channel, open(sys.argv[2], "w") as reply:
                     send(reply, "timeout " + repr((str(error), error.output, error.stderr)))
                 except ValueError as error:
                     send(reply, "ValueError " + repr(str(error)))
+                except OSError as error:
+                    send(reply, "OSError " + repr(str(error)))
         finally:
             if p.poll() is None:
                 p.kill()
             p.wait()
+    except ValueError as error:
+        send(reply, "ValueError " + repr(str(error)))
     except FileNotFoundError as error:
         send(reply, "FileNotFoundError " + repr(str(error)))
     except OSError as error:
@@ -194,10 +203,17 @@ class Remote:
         binary = harness.actor(tuple(sorted(keywords.items())))
         self.folder = tempfile.TemporaryDirectory(dir=harness.work)
         self.file = Path(self.folder.name, "payload")
+        # The host exec API rejects NUL before a native parent could inspect it.
+        # Pass original argument bytes through files; the native launch validates them.
+        arguments = []
+        for position, argument in enumerate(argv):
+            path = Path(self.folder.name, str(position))
+            path.write_bytes(argument.encode())
+            arguments.append(path)
         control, cmd = os.pipe()
         reply, response = os.pipe()
         try:
-            self.actor = subprocess.Popen([binary, f"/dev/fd/{control}", f"/dev/fd/{response}", self.file, *argv],
+            self.actor = subprocess.Popen([binary, f"/dev/fd/{control}", f"/dev/fd/{response}", self.file, *arguments],
                                           pass_fds=(control, response))
         finally:
             os.close(control)

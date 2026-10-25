@@ -87,7 +87,7 @@ change the results of the default reference command.
 ## Pipes and communication
 
 The same native-body command now executes 11 unchanged methods (the keys
-under `fully_native` in its result) at both levels. It covers stdin writes,
+under `native_body_host_fixtures` in its result) at both levels. It covers stdin writes,
 stdout/stderr reads, merged output, EOF/closed state, and `communicate` with
 zero or one pipe. `ProcessTestCase.test_communicate_stdout` and
 `test_communicate_stderr` now have native-parent evidence as well as the older
@@ -122,3 +122,38 @@ table is not a native subprocess pass.
 
 Run either script with the same flags as `native_bodies.py`. The latter's
 `blocked` and the audit's failed/blocked rows remain in the denominator.
+
+[native-linux.json](native-linux.json) records the strongest evidence for each
+of the **353** IDs on the pipes implementation. Both levels produced the same
+category totals. Repeated operations, including timeout retries, retain their
+separate counts if the levels differ.
+
+| Execution of the tested operation | -O0 | -O3 |
+| --- | ---: | ---: |
+| Native body, assertions, and subprocess operation; original host fixtures | 11 | 11 |
+| Host body and assertions, verified native subprocess operation | 36 | 36 |
+| Mixed (including a subprocess operation inside a CPython child) | 8 | 8 |
+| Reference-only | 6 | 6 |
+| Blocked | 227 | 227 |
+| Failed | 26 | 26 |
+| Original reference skip, with individual reason | 39 | 39 |
+| **Total** | **353** | **353** |
+
+There are zero end-to-end native unittest fixture executions. Eight of the 36
+host-driven IDs use the older `native_subprocess.py` reconstructed host case;
+the other 28 use the original CPython fixtures. String argument sequences are
+transported by value to the native launcher. This route does not establish
+tuple identity, ownership of inherited host descriptors, or a native
+`SelectSelector` when the NoPoll fixture patches the host module. The Linux
+reference passes the strace case outside the devbox sandbox. An unavailable
+worker fixture is a blocker rather than a new reference skip.
+
+The host can verify a closed pipe after a native context exit raises an
+`OSError`. The control process continues using that same native handle to
+check the reaped status. Arguments containing NUL travel in separate files:
+both invalid commands reach Imre instead of failing at the host's exec call.
+
+To regenerate the report, run `audit.py`, `native_bodies.py`, and
+`../../native_subprocess.py` for each level, capturing the latter's combined
+output. Pass the two files from each command, in level order, to
+`report.py --audit O0 O3 --bodies O0 O3 --run-log O0 O3 --imre-revision REV --result FILE`.
