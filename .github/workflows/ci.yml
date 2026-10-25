@@ -204,6 +204,8 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/shutil/native_rmtree.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-rmtree.json"
           python3 benchmarks/cpython_stdlib/native_json.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
           python3 benchmarks/cpython_stdlib/native_json_values.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json-values.json"
+          python3 benchmarks/cpython_stdlib/full/shlex/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shlex.json"
+          diff -u benchmarks/cpython_stdlib/full/shlex/native-linux.json "$RUNNER_TEMP/cpython-shlex.json"
           python3 benchmarks/cpython_stdlib/native_os.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/native_os_path.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-os-path.json"
           python3 benchmarks/cpython_stdlib/full/logging/native_timed.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference

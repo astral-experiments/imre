@@ -85,7 +85,8 @@ impl Builtin {
                     | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
-                    | TextOperation::ShlexSplit => true,
+                    | TextOperation::ShlexSplit
+                    | TextOperation::ShlexQuote => true,
                     TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith

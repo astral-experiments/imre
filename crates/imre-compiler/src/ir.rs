@@ -956,6 +956,7 @@ pub(crate) enum TextOperation {
     Unquote,
     Dedent,
     ShlexSplit,
+    ShlexQuote,
 }
 
 /// Native path operations keep their exact result types in the checked IR.

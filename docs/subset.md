@@ -781,8 +781,14 @@ On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes
 
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
-`shlex.split(text)` returns POSIX shell words with Python’s default quoting,
-escaping, and comment handling. A discarded `subprocess.run(argv, check=True,
+`shlex.split(s, comments=False, posix=True)` accepts a string or `None`
+and boolean mode flags. `shlex.quote(s)` quotes a POSIX shell word;
+`shlex.join(split_command)` quotes each item from a supported iterable before
+requesting the next. Both handle false scalar values and concrete containers
+before checking their type, as CPython does. The stateful `shlex.shlex` lexer
+is unsupported.
+
+A discarded `subprocess.run(argv, check=True,
 stdout=sys.stderr)` forwards both child streams to the parent’s stderr while
 the child is running. Failure raises `CalledProcessError` with uncaptured
 streams set to `None`. A handler around direct calls with the same stream mode,
