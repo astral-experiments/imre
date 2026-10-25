@@ -19,6 +19,7 @@ mod bytes;
 mod cached_properties;
 mod callables;
 mod calls;
+pub(crate) use calls::scalar_literal;
 mod comprehensions;
 mod contexts;
 mod copying;
@@ -5293,30 +5294,43 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 if values.iter().any(|value| value.ty == Type::ExceptionField) {
-                    if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
-                        || !values.iter().all(|v| {
-                            v.ty == Type::ExceptionField || self.import_argument_supported(v.ty)
-                        })
+                    let identity =
+                        matches!(compare.ops.as_ref(), [ast::CmpOp::Is | ast::CmpOp::IsNot])
+                            && values.iter().any(|value| {
+                                matches!(value.ty, Type::None | Type::ListInt | Type::List(_))
+                            });
+                    if !identity
+                        && !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+                        || !values.iter().all(|v| self.forwarding_value_supported(v.ty))
                     {
                         return Err(error(
                             self.source,
                             expression,
-                            "exception fields support equality with None, bool, int, str, bytes, or tuples",
+                            "exception fields support equality with native scalars, fixed tuples, and typed lists",
                         ));
                     }
                     let reversed = values[0].ty != Type::ExceptionField;
                     let eq = Expr {
                         ty: Type::Bool,
-                        kind: ExprKind::Builtin(Builtin::SystemExitCodeEqual { reversed }, values),
+                        kind: ExprKind::Builtin(
+                            if identity {
+                                Builtin::ExceptionFieldIdentity { reversed }
+                            } else {
+                                Builtin::SystemExitCodeEqual { reversed }
+                            },
+                            values,
+                        ),
                     };
-                    return Ok(if compare.ops[0] == ast::CmpOp::NotEq {
-                        Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Not(Box::new(eq)),
-                        }
-                    } else {
-                        eq
-                    });
+                    return Ok(
+                        if matches!(compare.ops[0], ast::CmpOp::NotEq | ast::CmpOp::IsNot) {
+                            Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Not(Box::new(eq)),
+                            }
+                        } else {
+                            eq
+                        },
+                    );
                 }
                 // Python StrEnum compares by its underlying str value, even
                 // against raw str or a member of another enum. A same-class

@@ -1262,29 +1262,18 @@ pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *co
     }
 }
 
-/// Compare the original exit code against a scalar, tuple or a second code view.
+/// Compare a retained field against another Python value (including a field view).
 ///
 /// # Safety
-/// `value` is a rooted code view. `word` is rooted with kind 0 (None), 1
-/// (bool), 2 (int), 3 (str), 5 (another code view) or 6 (tuple).
+/// The view and the checked native value both remain rooted during comparison.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_equal(
     value: *const Object,
     kind: u32,
     word: usize,
 ) -> u32 {
-    // SAFETY: both code views and all inferred scalar arguments remain rooted.
-    let ((left_kind, left), (right_kind, right)) = unsafe {
-        let (k, w) = exit_word(value);
-        let (j, v) = if kind == 5 {
-            exit_word(word as *const Object)
-        } else {
-            (WordKind::new(kind), word)
-        };
-        ((k, w), (j, v))
-    };
-    // SAFETY: matching immutable scalar kinds describe both words.
-    u32::from(unsafe { imports::equal((left_kind, left), (right_kind, right)) })
+    // SAFETY: both words remain rooted; equal unwraps owner views before comparing.
+    u32::from(unsafe { imports::equal(exit_word(value), (WordKind::new(kind), word)) })
 }
 
 /// # Safety
@@ -1299,6 +1288,8 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
+        4 | 5 => imports::length(kind, word).is_some_and(|n| n != 0),
+        7 => f64::from_bits(word as u64) != 0.0,
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
         // SAFETY: the tuple remains rooted while its immutable length is read.

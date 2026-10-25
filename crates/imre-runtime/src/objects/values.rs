@@ -389,6 +389,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
                         }
+                        Storage::ExceptionField(v) => Some(ReprTask::Word(v.word, v.kind)),
                         Storage::StrDescriptor(index) => {
                             write!(
                                 output,

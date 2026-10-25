@@ -76,6 +76,7 @@ impl Builtin {
             Self::ExceptionTupleView
             | Self::ExceptionFieldRepr
             | Self::BoxExceptionField
+            | Self::ExceptionKeywordSuggestion
             | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
@@ -460,6 +461,7 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::ExceptionFieldIdentity { .. }
             | Self::SysPlatform
             | Self::OsName
             | Self::SysOrigArgv
@@ -820,6 +822,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_splitlines"
                 | "imre_str_splitlines_options"
                 | "imre_exception_field_index"
+                | "imre_exception_formatter_result"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"

@@ -899,6 +899,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::ExcessArgument(argument));
     }
 
+    /// The native Python binder found that this specific keyword also received a positional value.
+    pub(crate) fn checked_duplicate_argument(&self, module: ModuleId, keyword: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::DuplicateArgument(keyword));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,

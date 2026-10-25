@@ -4412,13 +4412,19 @@ impl Emitter<'_, '_> {
             Builtin::SystemExitCode => {
                 self.call("imre_system_exit_code", returns, &[&args[0].value])
             }
-            Builtin::SystemExitCodeEqual { reversed } => {
+            Builtin::SystemExitCodeEqual { reversed }
+            | Builtin::ExceptionFieldIdentity { reversed } => {
                 let i = usize::from(*reversed);
                 let other = &args[1 - i].value;
                 let kind = representation_kind(other.ty, &self.module.types);
                 let word = self.word(other);
+                let function = if matches!(builtin, Builtin::ExceptionFieldIdentity { .. }) {
+                    "imre_exception_field_identity"
+                } else {
+                    "imre_system_exit_code_equal"
+                };
                 let bit = self.instruction(format!(
-                    "call i32 @imre_system_exit_code_equal(ptr {}, i32 {kind}, i64 {word})",
+                    "call i32 @{function}(ptr {}, i32 {kind}, i64 {word})",
                     args[i].value.operand
                 ));
                 Value {
@@ -4933,6 +4939,11 @@ impl Emitter<'_, '_> {
                 }
                 record
             }
+            Builtin::ExceptionKeywordSuggestion => self.call(
+                "imre_exception_keyword_message",
+                returns,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::ExceptionFormatterResult(repr) => Value {
                 ty: returns,
                 operand: self.instruction(format!(
@@ -7191,6 +7202,7 @@ declare ptr @imre_exception_formatter_result(ptr, i32)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
+declare ptr @imre_exception_keyword_message(ptr, ptr, ptr)
 declare ptr @imre_exception_argument(i32, ptr, i64, i32)
 declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)
@@ -7417,6 +7429,7 @@ declare ptr @imre_system_exit_code(ptr)
 declare i32 @imre_system_exit_code_kind(ptr)
 declare ptr @imre_system_exit_code_text(ptr)
 declare i32 @imre_system_exit_code_equal(ptr, i32, i64)
+declare i32 @imre_exception_field_identity(ptr, i32, i64)
 declare i32 @imre_system_exit_code_truth(ptr)
 declare void @imre_args_clear()
 declare void @imre_int_retain(i64)

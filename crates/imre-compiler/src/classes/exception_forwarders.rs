@@ -4,11 +4,12 @@ use super::*;
 #[derive(Clone)]
 pub(crate) struct ForwardingInitializer {
     pub owner: DefinitionId,
-    pub parameters: Vec<(String, Option<ast::Expr>)>,
+    pub receiver: String,
+    pub parameters: Vec<(String, Option<crate::ir::Expr>)>,
     pub positional: usize,
-    pub positional_only: usize,
     pub variadic: Option<String>,
     pub stores: Vec<(String, String)>,
+    pub before_super: usize,
     /// A true flag expands this constructor's positional tail.
     pub arguments: Vec<(String, bool)>,
     pub keywords: Vec<(String, String)>,
@@ -20,6 +21,7 @@ impl ForwardingInitializer {
         definition: DefinitionId,
         node: &ast::StmtClassDef,
         parent: Option<&Class>,
+        source: &str,
     ) -> Option<Self> {
         let inherited = parent.and_then(|c| c.forwarder.as_ref());
         let Some(init) = node
@@ -33,6 +35,7 @@ impl ForwardingInitializer {
         let p = &init.parameters;
         if (p.vararg.is_none() && inherited.is_none())
             || p.kwarg.is_some()
+            || !p.posonlyargs.is_empty()
             || !init.decorator_list.is_empty()
             || parent.is_some() && inherited.is_none()
             || p.iter_non_variadic_params()
@@ -46,8 +49,17 @@ impl ForwardingInitializer {
         let parameters: Vec<_> = p
             .iter_non_variadic_params()
             .skip(1)
-            .map(|p| (p.name().to_string(), p.default.as_deref().cloned()))
-            .collect();
+            .map(|p| {
+                Some((
+                    p.name().to_string(),
+                    p.default
+                        .as_deref()
+                        .map(|d| crate::frontend::scalar_literal(d, source))
+                        .transpose()
+                        .ok()?,
+                ))
+            })
+            .collect::<Option<_>>()?;
         let is_parameter = |name: &str| parameters.iter().any(|(n, _)| n == name);
         let variadic = p.vararg.as_ref().map(|p| p.name.to_string());
         let mut stores = Vec::new();
@@ -98,19 +110,20 @@ impl ForwardingInitializer {
                     if inherited.is_none() && !keywords.is_empty() {
                         return None;
                     }
-                    forwarded = Some((arguments, keywords));
+                    forwarded = Some((arguments, keywords, stores.len()));
                 }
                 _ => return None,
             }
         }
-        let (arguments, keywords) = forwarded?;
+        let (arguments, keywords, before_super) = forwarded?;
         Some(Self {
             owner: definition,
+            receiver: receiver.to_owned(),
             parameters,
             positional,
-            positional_only: p.posonlyargs.len().saturating_sub(1),
             variadic,
             stores,
+            before_super,
             arguments,
             keywords,
         })

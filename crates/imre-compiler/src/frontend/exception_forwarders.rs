@@ -7,6 +7,11 @@ struct Bound {
     tail: Vec<Expr>,
 }
 
+enum BindFailure {
+    Argument(String),
+    Unknown(String, String),
+}
+
 /// Python spells the missing names in declaration order.
 fn missing(names: &[&str]) -> String {
     let quoted: Vec<_> = names.iter().map(|name| format!("'{name}'")).collect();
@@ -19,13 +24,78 @@ fn missing(names: &[&str]) -> String {
 }
 
 impl Checker<'_> {
+    /// Only admit values whose runtime type, repr, scalar comparison and indexing we can expose.
+    pub(super) fn forwarding_value_supported(&self, ty: Type) -> bool {
+        matches!(
+            ty,
+            Type::None
+                | Type::Bool
+                | Type::Int
+                | Type::Str
+                | Type::StrLiteral(_)
+                | Type::Bytes
+                | Type::Float
+                | Type::ExceptionField
+        ) || self
+            .types
+            .payload(ty)
+            .or_else(|| self.types.element(ty))
+            .is_some_and(|item| self.forwarding_value_supported(item))
+            || self.types.fields(ty).is_some_and(|items| {
+                items
+                    .into_iter()
+                    .all(|item| self.forwarding_value_supported(item))
+            })
+    }
+
+    /// Prove only the exact argument ranges independently diagnosed by ty.
+    fn checked_forwarding_call(
+        &self,
+        plan: &ForwardingInitializer,
+        call: &ast::ExprCall,
+        given: usize,
+    ) {
+        let keywords = &call.arguments.keywords;
+        let mut missing = false;
+        for (i, (name, default)) in plan.parameters.iter().enumerate() {
+            let positional = i < plan.positional && i < given;
+            let keyword = keywords
+                .iter()
+                .find(|kw| kw.arg.as_ref().is_some_and(|n| n.as_str() == name));
+            if positional && let Some(kw) = keyword {
+                self.graph
+                    .checked_duplicate_argument(self.module, kw.range());
+            }
+            missing |= !positional && keyword.is_none() && default.is_none();
+        }
+        if missing {
+            self.graph
+                .checked_missing_argument(self.module, call.range());
+        }
+        if plan.variadic.is_none() && !calls::starred(call) {
+            for arg in call.arguments.args.iter().skip(plan.positional) {
+                self.graph.checked_excess_argument(self.module, arg.range());
+            }
+        }
+        for kw in keywords {
+            let Some(name) = &kw.arg else { continue };
+            if name.as_str() == plan.receiver {
+                self.graph
+                    .checked_duplicate_argument(self.module, kw.range());
+            } else if !plan.parameters.iter().any(|(key, _)| key == name.as_str()) {
+                self.graph
+                    .checked_keywords(self.module, std::iter::once(kw.range()));
+            }
+        }
+    }
+
     fn bind_forwarder(
         &self,
         plan: &ForwardingInitializer,
         name: &str,
         positional: Vec<Expr>,
         named: Vec<(String, Expr)>,
-    ) -> Result<Bound, String> {
+    ) -> Result<Bound, BindFailure> {
         let supplied = positional.len();
         let mut names = HashMap::new();
         let mut tail = Vec::new();
@@ -37,20 +107,21 @@ impl Checker<'_> {
             }
         }
         for (keyword, value) in named {
-            let Some(i) = plan.parameters.iter().position(|(n, _)| n == &keyword) else {
-                return Err(format!(
-                    "{name}.__init__() got an unexpected keyword argument '{keyword}'"
+            if keyword == plan.receiver {
+                return Err(BindFailure::Argument(format!(
+                    "{name}.__init__() got multiple values for argument '{keyword}'"
+                )));
+            }
+            if !plan.parameters.iter().any(|(n, _)| n == &keyword) {
+                return Err(BindFailure::Unknown(
+                    format!("{name}.__init__() got an unexpected keyword argument '{keyword}'"),
+                    keyword,
                 ));
             };
-            if i < plan.positional_only {
-                return Err(format!(
-                    "{name}.__init__() got some positional-only arguments passed as keyword arguments: '{keyword}'"
-                ));
-            }
             if names.insert(keyword.clone(), value).is_some() {
-                return Err(format!(
+                return Err(BindFailure::Argument(format!(
                     "{name}.__init__() got multiple values for argument '{keyword}'"
-                ));
+                )));
             }
         }
         if plan.variadic.is_none() && !tail.is_empty() {
@@ -65,10 +136,22 @@ impl Checker<'_> {
                 format!("from {minimum} to {count}")
             };
             let noun = if count == 1 { "argument" } else { "arguments" };
-            return Err(format!(
-                "{name}.__init__() takes {expected} positional {noun} but {} were given",
+            let kw_only = plan.parameters[plan.positional..]
+                .iter()
+                .filter(|(key, _)| names.contains_key(key))
+                .count();
+            let suffix = if kw_only == 0 {
+                String::new()
+            } else {
+                format!(
+                    " positional arguments (and {kw_only} keyword-only argument{})",
+                    if kw_only == 1 { "" } else { "s" }
+                )
+            };
+            return Err(BindFailure::Argument(format!(
+                "{name}.__init__() takes {expected} positional {noun} but {}{suffix} were given",
                 supplied + 1
-            ));
+            )));
         }
         for (kind, from, to) in [
             ("positional", 0, plan.positional),
@@ -80,18 +163,18 @@ impl Checker<'_> {
                     continue;
                 }
                 if let Some(default) = default {
-                    names.insert(key.clone(), calls::scalar_literal(default, self.source)?);
+                    names.insert(key.clone(), default.clone());
                 } else {
                     absent.push(key.as_str());
                 }
             }
             if !absent.is_empty() {
                 let plural = if absent.len() == 1 { "" } else { "s" };
-                return Err(format!(
+                return Err(BindFailure::Argument(format!(
                     "{name}.__init__() missing {} required {kind} argument{plural}: {}",
                     absent.len(),
                     missing(&absent)
-                ));
+                )));
             }
         }
         Ok(Bound { names, tail })
@@ -127,6 +210,16 @@ impl Checker<'_> {
         }
         let mut current = class;
         let mut stored = HashMap::new();
+        let mut after_super = Vec::new();
+        for value in args.iter().chain(kwargs.iter().map(|(_, v)| v)) {
+            if !self.forwarding_value_supported(value.ty) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "forwarding exception fields require native scalars, fixed tuples, or typed lists of these values",
+                ));
+            }
+        }
         loop {
             let plan = self.classes.declarations.definitions[current]
                 .forwarder
@@ -134,19 +227,38 @@ impl Checker<'_> {
                 .unwrap();
             let lexical = self.classes.declarations.ids[&plan.owner];
             let decl = &self.classes.declarations.definitions[lexical];
+            if current == class {
+                self.checked_forwarding_call(plan, call, args.len());
+            }
             let bound = match self.bind_forwarder(plan, &decl.name, args, kwargs) {
                 Ok(bound) => bound,
-                Err(message) => {
-                    self.graph.checked_overload(self.module, call.range());
-                    self.graph.checked_keywords(
-                        self.module,
-                        call.arguments.keywords.iter().map(Ranged::range),
-                    );
+                Err(failure) => {
+                    let message = match failure {
+                        BindFailure::Argument(s) => unpacking::string(s),
+                        BindFailure::Unknown(s, k) => {
+                            let candidates: Vec<_> = std::iter::once(&plan.receiver)
+                                .chain(plan.parameters.iter().map(|(name, _)| name))
+                                .cloned()
+                                .map(unpacking::string)
+                                .collect();
+                            let tuple = Expr {
+                                ty: self.types.tuple(vec![Type::Str; candidates.len()]),
+                                kind: ExprKind::Tuple(candidates),
+                            };
+                            Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Builtin(
+                                    Builtin::ExceptionKeywordSuggestion,
+                                    vec![unpacking::string(s), unpacking::string(k), tuple],
+                                ),
+                            }
+                        }
+                    };
                     let error = Expr {
                         ty: Type::Exception,
                         kind: ExprKind::Exception {
                             kind: exception_kind("TypeError").unwrap(),
-                            message: Some(Box::new(unpacking::string(message))),
+                            message: Some(Box::new(message)),
                         },
                     };
                     return Ok(scope.finish(Expr {
@@ -155,9 +267,15 @@ impl Checker<'_> {
                     }));
                 }
             };
-            for (field, source) in &plan.stores {
+            for (field, source) in &plan.stores[..plan.before_super] {
                 stored.insert(field.clone(), bound.names[source].clone());
             }
+            after_super.push(
+                plan.stores[plan.before_super..]
+                    .iter()
+                    .map(|(field, source)| (field.clone(), bound.names[source].clone()))
+                    .collect::<Vec<_>>(),
+            );
             args = Vec::new();
             for (name, spread) in &plan.arguments {
                 if *spread {
@@ -176,6 +294,9 @@ impl Checker<'_> {
             } else {
                 break;
             }
+        }
+        for assignments in after_super.into_iter().rev() {
+            stored.extend(assignments);
         }
         let tuple = Expr {
             ty: self.types.tuple(args.iter().map(|arg| arg.ty).collect()),

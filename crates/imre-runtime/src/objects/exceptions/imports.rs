@@ -1,4 +1,6 @@
 //! ImportError retains its positional arguments separately from its named attributes.
+mod suggestions;
+
 use super::*;
 use crate::objects::{records, values};
 use crate::{Bytes, Int};
@@ -89,12 +91,33 @@ pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rc<Str> {
 // expose the contained Python value, not the slot's storage tag.
 fn concrete(kind: WordKind, word: usize) -> (WordKind, usize) {
     if kind.raw() & crate::objects::words::NULLABLE == 0 {
-        (kind, word)
+        if kind.raw() == 5 {
+            // SAFETY: kind 5 roots a native object; a nested field retains its own value.
+            unsafe {
+                object(word as *const Object).0.with(|s| match s {
+                    Storage::ExceptionField(value) => (value.kind, value.word),
+                    Storage::Exception(e) => match &e.payload {
+                        Payload::Exit(Some(value)) => (value.kind, value.word),
+                        Payload::Exit(None) => (WordKind::new(0), 0),
+                        _ => (kind, word),
+                    },
+                    _ => (kind, word),
+                })
+            }
+        } else {
+            (kind, word)
+        }
     } else if word == 0 {
         (WordKind::new(0), 0)
     } else {
         let base = kind.raw() & !crate::objects::words::NULLABLE;
-        (WordKind::new(base), if base == 1 { word - 1 } else { word })
+        let value = match base {
+            1 => word - 1,
+            // SAFETY: a present nullable float points to its rooted boxed f64.
+            7 => unsafe { (*(word as *const f64)).to_bits() as usize },
+            _ => word,
+        };
+        concrete(WordKind::new(base), value)
     }
 }
 
@@ -114,6 +137,22 @@ fn view(kind: WordKind, word: usize) -> *const Object {
     )))))
 }
 
+/// Test identity against the None singleton or a list with a stable native owner.
+///
+/// # Safety
+/// Both the retained view and the compiler-checked comparison operand are rooted.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_field_identity(
+    value: *const Object,
+    kind: u32,
+    word: usize,
+) -> u32 {
+    debug_assert!(matches!(kind, 0 | 4 | 5));
+    // SAFETY: a field view owns the concrete value.
+    let (actual, stored) = unsafe { exit_word(value) };
+    u32::from(actual.raw() == kind && (kind == 0 || word == stored))
+}
+
 /// Retain a Python argument independently for a stored exception attribute.
 ///
 /// # Safety
@@ -121,6 +160,35 @@ fn view(kind: WordKind, word: usize) -> *const Object {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_exception_box_field(word: usize, kind: u32) -> *const Object {
     view(WordKind::new(kind), word)
+}
+
+/// Apply CPython's spelling hint in original parameter order.
+///
+/// # Safety
+/// Both strings and every element of the fixed string tuple are rooted for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_keyword_message(
+    prefix: *const Str,
+    wrong: *const Str,
+    names: *const usize,
+) -> *const Str {
+    // SAFETY: the compiler describes this bounds-checked tuple as all exact strings.
+    unsafe {
+        let count = records::descriptor(names).length;
+        let choices: Vec<_> = (0..count)
+            .map(|i| {
+                let (kind, ptr) = tuple_item(names as usize, i);
+                debug_assert_eq!(kind.raw(), 3);
+                (&*(ptr as *const Str)).as_str()
+            })
+            .collect();
+        match suggestions::declaration_order((&*wrong).as_str(), &choices) {
+            Some(spelling) => Rc::into_raw(Rc::new(
+                format!("{}. Did you mean '{spelling}'?", &*prefix).into(),
+            )),
+            None => Rc::into_raw(acquire_rc(prefix as usize)),
+        }
+    }
 }
 
 /// Verify the formatter's result before using it as a native UTF-8 string.
@@ -274,17 +342,24 @@ fn type_name(kind: WordKind) -> &'static str {
         1 => "bool",
         2 => "int",
         3 => "str",
+        4 | 5 => "list",
         6 => "tuple",
+        7 => "float",
         8 => "bytes",
         _ => unreachable!("checked exception field"),
     }
 }
 
-fn length(kind: WordKind, word: usize) -> Option<usize> {
+pub(super) fn length(kind: WordKind, word: usize) -> Option<usize> {
     // SAFETY: each admitted exact type is read through its own representation.
     unsafe {
         match kind.raw() {
             3 => Some((&*(word as *const Str)).chars().count()),
+            4 => Some((&*(word as *const crate::List)).0.with(Vec::len)),
+            5 => object(word as *const Object).0.with(|s| match s {
+                Storage::Sequence(v) => Some(v.values.len()),
+                _ => None,
+            }),
             6 => Some(records::descriptor(word as *const usize).length),
             8 => Some((&*(word as *const Bytes)).len()),
             _ => None,
@@ -305,6 +380,27 @@ pub unsafe extern "C" fn imre_exception_field_len(value: *const Object) -> usize
             format!("object of type '{}' has no len()", type_name(kind)),
         )
         .returning(0),
+    }
+}
+
+/// # Safety
+/// The caller roots a sequence and has checked the element index against its length.
+unsafe fn sequence_item(kind: WordKind, word: usize, i: usize) -> (WordKind, usize) {
+    // SAFETY: each concrete representation retains its element during the read.
+    unsafe {
+        match kind.raw() {
+            4 => (&*(word as *const crate::List))
+                .0
+                .with(|v| (WordKind::new(2), v[i].0)),
+            5 => object(word as *const Object).0.with(|s| {
+                let Storage::Sequence(v) = s else {
+                    unreachable!("admitted typed list")
+                };
+                concrete(v.kind, v.values[i])
+            }),
+            6 => tuple_item(word, i),
+            _ => unreachable!("list or tuple"),
+        }
     }
 }
 
@@ -340,6 +436,7 @@ pub unsafe extern "C" fn imre_exception_field_index(
                 Kind::IndexError,
                 match kind.raw() {
                     3 => "string index out of range",
+                    4 | 5 => "list index out of range",
                     6 => "tuple index out of range",
                     8 => "index out of range",
                     _ => unreachable!(),
@@ -353,8 +450,8 @@ pub unsafe extern "C" fn imre_exception_field_index(
                 let s = Rc::new(Str::from(ch.to_string()));
                 view(WordKind::new(3), Rc::as_ptr(&s) as usize)
             }
-            6 => {
-                let (k, w) = tuple_item(word, i);
+            4..=6 => {
+                let (k, w) = sequence_item(kind, word, i);
                 view(k, w)
             }
             8 => view(
@@ -366,8 +463,7 @@ pub unsafe extern "C" fn imre_exception_field_index(
     }
 }
 
-/// Compare nested fixed tuples by their members, even across distinct native descriptors.
-/// Python's bool/int equivalence applies to leaves at every depth.
+/// Compare nested native sequences independent of their storage specialization.
 pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) -> bool {
     let numeric = |(k, w): (WordKind, usize)| {
         if k.raw() == 1 {
@@ -378,30 +474,48 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
     };
     // Only unvisited siblings occupy the worklist. A wide tuple costs no
     // auxiliary space, and ordinary scalar comparisons do not allocate.
-    let mut pending = smallvec::SmallVec::<[(usize, usize, usize, usize); 4]>::new();
+    type Field = (WordKind, usize);
+    let mut pending = smallvec::SmallVec::<[(Field, Field, usize, usize); 4]>::new();
     let mut next = (left, right);
     loop {
         let ((ka, wa), (kb, wb)) = (
             numeric(concrete(next.0.0, next.0.1)),
             numeric(concrete(next.1.0, next.1.1)),
         );
-        if ka != kb {
-            return false;
-        }
-        if ka.raw() == 6 && wa != wb {
-            // SAFETY: both words are rooted tuple payloads with static descriptors.
+        let sequence = |kind: WordKind| match kind.raw() {
+            4 | 5 => 1,
+            6 => 2,
+            _ => 0,
+        };
+        let (a, b) = ((ka, wa), (kb, wb));
+        if sequence(ka) != 0 && sequence(ka) == sequence(kb) {
+            // SAFETY: both words are rooted exact sequences, read within checked bounds.
             unsafe {
-                let n = records::descriptor(wa as *const usize).length;
-                if n != records::descriptor(wb as *const usize).length {
+                let n = length(ka, wa).unwrap();
+                if Some(n) != length(kb, wb) {
                     return false;
                 }
-                if n != 0 {
+                if !(ka == kb && wa == wb) && n != 0 {
                     if n > 1 {
-                        pending.push((wa, wb, 1, n));
+                        pending.push((a, b, 1, n));
                     }
-                    next = (tuple_item(wa, 0), tuple_item(wb, 0));
+                    next = (sequence_item(ka, wa, 0), sequence_item(kb, wb, 0));
                     continue;
                 }
+            }
+        } else if ka != kb {
+            let (integer, float) = match (ka.raw(), kb.raw()) {
+                (2, 7) => (wa, wb),
+                (7, 2) => (wb, wa),
+                _ => return false,
+            };
+            // SAFETY: the exact int stays rooted throughout the lossless comparison.
+            if crate::floats::compare(
+                &*unsafe { Int::borrow(integer) },
+                f64::from_bits(float as u64),
+            ) != 0
+            {
+                return false;
             }
         } else {
             // SAFETY: a matching concrete scalar or identical rooted tuple.
@@ -416,6 +530,6 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
             pending.push((a, b, i + 1, n));
         }
         // SAFETY: the outer exception or comparison operand roots every tuple.
-        next = unsafe { (tuple_item(a, i), tuple_item(b, i)) };
+        next = unsafe { (sequence_item(a.0, a.1, i), sequence_item(b.0, b.1, i)) };
     }
 }

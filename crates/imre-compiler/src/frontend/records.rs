@@ -28,6 +28,7 @@ pub(super) fn executable_method(
     method.decorator_list.clear();
     if classes.definitions[context.class].forwarder.is_some()
         && matches!(method.name.as_str(), "__str__" | "__repr__")
+        && method.returns.is_none()
     {
         method.returns = Some(Box::new(
             ruff_python_parser::parse_expression("str")
