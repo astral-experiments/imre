@@ -553,6 +553,14 @@ The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes
 
 ## Function arguments and defaults
 
+An ordinary wrapper can forward `**options` once to a statically known function
+that it calls by name. Supply all of that function's positional arguments;
+its remaining keyword-only parameters must have immutable scalar defaults.
+For example, `def report(value, **options): return format_row(value, **options)`
+accepts the same optional named arguments as `format_row`. Caller expressions
+still run in source order. Reading, changing, or returning the keyword
+dictionary requires general variadic support and is rejected.
+
 First-party functions, instance methods, and constructors accept positional and named arguments. Parameters before `/` are positional-only; parameters after a bare `*` are keyword-only. Other parameters accept either form. Imported aliases and re-exports retain the defining signature. Every call is bound during compilation, including checks for missing, duplicate, unexpected, or incorrectly typed arguments.
 
 ```python
