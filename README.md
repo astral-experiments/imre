@@ -46,7 +46,7 @@ Imre builds Ruff’s ecosystem checker from its original Python package. It clon
 
 Imre supports:
 
-- Statically resolved imports, including [rebuilt native extension wheels](docs/extensions.md)
+- Statically resolved imports, including [native wheels built from setuptools projects](docs/extensions.md)
 - Functions with exact declared or inferred signatures
 - Classes and dataclasses with fixed fields
 - String enums with named members and aliases, and string-valued `Literal` annotations

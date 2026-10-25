@@ -12,8 +12,6 @@ from types import ModuleType
 
 import pytest
 
-UPSTREAM = Path(__file__).resolve().parents[1] / "examples/google_crc32c/upstream"
-
 
 class ImreLeaf:
     """Forward only the two C methods. Upstream retains its own Checksum classes."""
@@ -57,6 +55,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("backend", choices=("cpython", "imre", "fallback"))
     parser.add_argument(
+        "--upstream", type=Path, required=True, help="google-crc32c 1.8.0 source tree"
+    )
+    parser.add_argument(
         "--cpython-package", type=Path, help="root containing the CPython accelerator"
     )
     parser.add_argument(
@@ -66,7 +67,9 @@ def main():
     args = parser.parse_args()
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     sys.dont_write_bytecode = True
-    package = args.cpython_package if args.backend == "cpython" else UPSTREAM
+    package = (
+        args.cpython_package if args.backend == "cpython" else args.upstream / "src"
+    )
     if package is None or (args.backend == "imre" and args.imre_binary is None):
         parser.error("supply the built artifact for the selected backend")
     sys.path.insert(0, str(package.resolve()))
@@ -106,7 +109,7 @@ def main():
         "-p",
         "no:cacheprovider",
         "--import-mode=importlib",
-        str(UPSTREAM / "test___init__.py"),
+        str(args.upstream / "tests/test___init__.py"),
     ]
     if args.backend == "fallback":
         options += ["-k", "not cext"]
