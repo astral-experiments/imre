@@ -470,6 +470,7 @@ impl Builtin {
             | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictClear
+            | Self::ListClear
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
