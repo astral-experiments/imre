@@ -5756,6 +5756,12 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(builtin, vec![receiver]),
                     });
                 }
+                if receiver.ty == Type::StringIO
+                    && let Some(value) =
+                        self.string_io_attribute(&receiver, attribute.attr.as_str())
+                {
+                    return Ok(value);
+                }
                 if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
                     && attribute.attr.as_str() == "closed"
                 {
@@ -6708,12 +6714,18 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::StringIO
                 && matches!(
                     attribute.attr.as_str(),
-                    "getvalue" | "read" | "readline" | "seek" | "tell" | "truncate"
+                    "getvalue" | "read" | "readline" | "readlines" | "seek" | "tell" | "truncate"
                 )
             {
                 return self.string_io_method(receiver, attribute.attr.as_str(), call);
             }
             self.reject_builtin_keywords(call)?;
+            if receiver.ty == Type::StringIO
+                && let Some(value) =
+                    self.string_io_protocol(&receiver, attribute.attr.as_str(), call)?
+            {
+                return Ok(value);
+            }
             if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
                 let binary = receiver.ty == Type::BinaryIO;
                 let data_type = if binary { Type::Bytes } else { Type::Str };
