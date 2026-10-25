@@ -153,6 +153,7 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) -> Result<()
                         current = (word as *const usize, 0);
                         continue 'tuples;
                     }
+                    7 if layout.is_value_struct() => super::structs::float_key(word).hash(state),
                     8 => (&*(word as *const Bytes)).hash(state),
                     _ => unreachable!("the checker excludes mutable and float tuple keys"),
                 }
