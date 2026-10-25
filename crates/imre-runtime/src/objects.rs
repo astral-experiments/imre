@@ -38,6 +38,7 @@ pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod shutil;
+mod source_modules;
 mod stdlib;
 mod string_enums;
 mod tempdirs;
@@ -98,6 +99,10 @@ enum Storage {
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
     SimpleNamespace(Rc<Object>),
+    SourceModule {
+        name: Rc<Str>,
+        filename: Rc<Str>,
+    },
     Sha256(Box<sha2::Sha256>),
     NativeModule(errno::Module),
     ModuleNamespace(Rc<errno::Registry>),

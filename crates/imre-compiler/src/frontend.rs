@@ -4960,6 +4960,18 @@ impl<'a> Checker<'a> {
             {
                 return Ok(module);
             }
+            if let Binding::Module(id) = target {
+                return Ok(Expr {
+                    ty: Type::SourceModule,
+                    kind: ExprKind::Builtin(
+                        Builtin::SourceModule,
+                        vec![
+                            unpacking::string(&self.graph.modules[id].name),
+                            unpacking::string(self.graph.module_filename(id).to_string_lossy()),
+                        ],
+                    ),
+                });
+            }
             if let Some(value) = self.errno_value(target, expression) {
                 return Ok(value);
             }
@@ -5475,6 +5487,11 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
+                    && values.iter().all(|v| v.ty == Type::SourceModule)
+                {
+                    return Ok(Self::identity_result(values, *op == ast::CmpOp::NotEq));
+                }
                 if values.iter().all(|v| matches!(v.ty, Type::ForwardRef(_))) {
                     let ops = compare
                         .ops
@@ -5908,6 +5925,19 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::SourceModule
+                    && matches!(attribute.attr.as_str(), "__name__" | "__file__")
+                {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::SourceModuleAttribute {
+                                filename: attribute.attr.as_str() == "__file__",
+                            },
+                            vec![receiver],
+                        ),
+                    });
+                }
                 if let Type::ForwardRef(layout) = receiver.ty {
                     return self.forward_ref_attribute(layout, receiver, attribute);
                 }

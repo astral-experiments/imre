@@ -159,6 +159,7 @@ impl Types {
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::StringIO
+            | Type::SourceModule
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
@@ -583,6 +584,7 @@ impl Types {
             | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
+            | Type::SourceModule
             | Type::BinaryIO => Some(true),
             Type::Optional(_) if self.truthiness(self.payload(ty).unwrap()) == Some(false) => {
                 Some(false)

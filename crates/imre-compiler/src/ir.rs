@@ -59,6 +59,8 @@ pub(crate) enum Type {
     StringIO,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
+    /// One live imported module from the closed source graph.
+    SourceModule,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
     PurePath(PathFlavor),
@@ -209,6 +211,7 @@ impl std::fmt::Display for Type {
             Self::TextIO => "typing.TextIO",
             Self::StringIO => "io.StringIO",
             Self::BinaryIO => "typing.BinaryIO",
+            Self::SourceModule => "module",
             Self::Path => "pathlib.Path",
             Self::PathInfo => "pathlib.types.PathInfo",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
@@ -615,6 +618,12 @@ pub(crate) enum Builtin {
     EnumLookup(usize),
     EnumString,
     NominalIdentity,
+    /// Intern a source module by its import name, retaining its source filename.
+    SourceModule,
+    /// Read __name__ or __file__ from the evaluated module.
+    SourceModuleAttribute {
+        filename: bool,
+    },
     /// Match an exception against the category list retained by an assertion context.
     ExceptionMatchesAny,
     LiteralStringView,
