@@ -10,7 +10,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE.parents[2]), str(HERE)]
-from suite_inventory import load_suite, verify_files, verify_interpreter_tests
+from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
 from suite_native import Toolchain, native_method, run_in_fixtures, testcase_fixture
 from stream_fixture import CASES as HOST_CASES, executor as host_executor
 
@@ -71,6 +71,11 @@ def main():
     sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     verify_interpreter_tests({"files": {SOURCE: BLOB}})
     source = args.cpython_source.resolve() / SOURCE
+    discovered = {c.id() for c in cases(load_suite("test.test_memoryio"))
+                  if c.id().startswith("test.test_memoryio.CStringIOTest.")}
+    selected = {"test.test_memoryio.CStringIOTest." + name for name in (*CASES, *HOST_CASES)}
+    if len(discovered) != 39 or not selected <= discovered:
+        raise ValueError("the selected prerequisite methods do not match the original class")
     stream = (HERE / "streams.py").read_bytes()
     reference = subprocess.run([sys.executable, "-B", HERE / "streams.py"],
                                capture_output=True, timeout=60, check=True)

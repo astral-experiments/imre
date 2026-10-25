@@ -31,12 +31,15 @@ under the host fixture; four host methods drove 34 native operations; eight
 methods stopped at compilation. Separate CSV and JSON shared-stream controls
 matched CPython. The other 20 methods were outside this prerequisite audit.
 
-Eight bodies and their assertions run in Imre, including the original non-BMP
-overwrite/append and character-position checks. Eleven more run unchanged in
-CPython's original fixtures and make every stream call on a live native
+In the [combined implementation run](https://github.com/astral-sh/imre/actions/runs/40179882259/job/121128473529),
+20 of the 39 original class methods passed at each optimization level. Eight
+bodies and their assertions run in Imre under the original host fixture,
+including the non-BMP overwrite/append and character-position checks. Twelve
+more run unchanged on the host and make 183 calls per level on a live native
 `StringIO` in a child process. These cover all five newline modes, the default
 mode, cumulative newline history, relative seeks, reading after closing, and
-writing after seeking beyond EOF. Each observation records the actual roles,
+writing after seeking beyond EOF, and closed/open stream flags. The 19
+unselected methods are outside this prerequisite audit. Each observation records the actual roles,
 the method hash and, for host bodies, the number of native calls by operation.
 
 [The initial integration run](integration-linux.json) used the CSV reader from
@@ -55,7 +58,11 @@ and `-O3`. These compile diagnostics do not count earlier examples as passes.
 `consumer_startup.py` invokes the shared startup probe for all twelve import
 and runner combinations on every CI run. It checks that the vendored and full
 Git fixtures agree and prints each compile result, including its first blocker.
-These checks do not execute test bodies.
+These checks do not execute test bodies. [On the combined implementation](unified-startup-linux.json),
+CSV reaches `tempfile.TemporaryFile`; both JSON and itertools reach `warnings`
+in normal mode. Reachable mode stops at `_imp` for JSON and at an unbounded
+starred tuple for itertools. The [original module doctest report](unified-doctest-linux.json)
+records the separate direct checks at both optimization levels.
 
 The separate `streams.py` transcript covers all five newline modes, Unicode
 character offsets, shared iteration and reads, EOF followed by seek, retained
