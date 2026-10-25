@@ -329,6 +329,10 @@ impl Checker<'_> {
                     ));
                 }
             };
+            // This exact call raises a native TypeError after evaluating its arguments.
+            if name == "getattr" {
+                self.graph.checked_overload(self.module, call.range());
+            }
             let result = if name == "hasattr" {
                 Type::Bool
             } else {
