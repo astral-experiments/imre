@@ -7046,6 +7046,9 @@ impl<'a> Checker<'a> {
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
         }
+        if let Some(registration) = self.immediate_registration(call)? {
+            return Ok(registration);
+        }
         if call
             .func
             .as_name_expr()
@@ -7489,6 +7492,11 @@ impl<'a> Checker<'a> {
                         .expect("an overloaded definition has a stub object"),
                 );
                 return self.invoke(call, callable);
+            }
+            if let Some(slot) = binding.value_slot
+                && self.types.dispatcher(self.locals[slot]).is_some()
+            {
+                return self.invoke(call, self.local(slot));
             }
             if let Some(definition) = binding.generic.clone() {
                 return self.call_generic_awaitable(call, &definition);
