@@ -477,25 +477,18 @@ impl Checker<'_> {
                 return Err(error(self.source, keyword, "repeated str.format keyword"));
             }
             let value = Self::string_value(self.expr(&keyword.value)?);
-            let text = match value.ty {
-                Type::Str => value,
-                Type::Int => Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Str, vec![value]),
-                },
-                _ => {
-                    return Err(error(
-                        self.source,
-                        keyword,
-                        "str.format fields require str or int",
-                    ));
-                }
-            };
+            if !matches!(value.ty, Type::Str | Type::Int) {
+                return Err(error(
+                    self.source,
+                    keyword,
+                    "str.format fields require str or int",
+                ));
+            }
             args.push(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Str(name.to_string()),
             });
-            args.push(text);
+            args.push(value);
         }
         Ok(Expr {
             ty: Type::Str,
@@ -558,16 +551,6 @@ impl Checker<'_> {
                 "debug f-string fields are unsupported",
             ));
         }
-        if !matches!(
-            field.conversion,
-            ast::ConversionFlag::None | ast::ConversionFlag::Str | ast::ConversionFlag::Repr
-        ) {
-            return Err(error(
-                self.source,
-                field,
-                "f-string conversions support only !s and !r",
-            ));
-        }
         let mut specification = String::new();
         if let Some(spec) = &field.format_spec {
             for part in &spec.elements {
@@ -580,6 +563,16 @@ impl Checker<'_> {
                 };
                 specification.push_str(&literal.value);
             }
+        }
+        if field.conversion == ast::ConversionFlag::Ascii {
+            if !specification.is_empty() {
+                return Err(error(
+                    self.source,
+                    field,
+                    "formatted strings support !a with an empty format specification",
+                ));
+            }
+            return self.ascii_expr(&field.expression);
         }
         if specification.is_empty()
             && let Some(text) = self.unittest_failure_repr(&field.expression)?
@@ -704,6 +697,9 @@ impl Checker<'_> {
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(..))
         {
             return self.record_text(value, field);
+        }
+        if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Class(_)) {
+            return self.record_repr(value, field);
         }
         if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
             return Ok(Expr {

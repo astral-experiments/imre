@@ -16,6 +16,23 @@ impl ClassInfo {
             .collect()
     }
 
+    /// A generated dataclass repr shadows an inherited override even though the
+    /// generated method has no source signature in the method table.
+    pub(super) fn has_repr_override(&self, id: usize) -> bool {
+        for &owner in std::iter::once(&id).chain(&self.declarations.definitions[id].bases) {
+            let class = &self.declarations.definitions[owner];
+            if class.node.body.iter().any(
+                |stmt| matches!(stmt, ast::Stmt::FunctionDef(f) if f.name.as_str() == "__repr__"),
+            ) {
+                return true;
+            }
+            if class.dataclass.is_some_and(|options| options.repr) {
+                return false;
+            }
+        }
+        false
+    }
+
     pub(super) fn has_concrete_subclasses(&self, class: usize) -> bool {
         self.declarations
             .definitions

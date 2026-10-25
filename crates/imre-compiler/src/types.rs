@@ -36,6 +36,8 @@ enum Shape {
     Callable(Vec<Type>, Type),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
+    DispatchCallable(DispatchFunction),
+    DispatchRegistry(Type),
     Awaitable(Type),
     DirectoryContext(Type),
     ProcessArgs(Type),
@@ -58,6 +60,14 @@ pub(crate) struct CachePolicy {
     /// Negative represents an unbounded cache; negative Python sizes normalize to zero.
     pub capacity: i64,
     pub typed: bool,
+}
+
+/// A dispatcher owns its original function and a private mutable registry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct DispatchFunction {
+    pub callable: Type,
+    pub frame: Type,
+    pub registry: Type,
 }
 
 /// A cache delegates annotation evaluation to the captured declaration.
@@ -132,7 +142,12 @@ impl Types {
             Type::CacheState(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
             Type::Dict(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
+                Some(
+                    Shape::Dict(..)
+                        | Shape::DefaultListDict(..)
+                        | Shape::Counter(_)
+                        | Shape::DispatchRegistry(_)
+                )
             ),
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
             Type::ChainMap(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
@@ -154,7 +169,12 @@ impl Types {
             ),
             Type::Callable(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Callable(..) | Shape::DeclaredCache(..) | Shape::CachedCallable(_))
+                Some(
+                    Shape::Callable(..)
+                        | Shape::DeclaredCache(..)
+                        | Shape::CachedCallable(_)
+                        | Shape::DispatchCallable(_)
+                )
             ),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
@@ -248,6 +268,7 @@ impl Types {
                 | Shape::Deque(ty)
                 | Shape::Set(ty)
                 | Shape::Counter(ty)
+                | Shape::DispatchRegistry(ty)
                 | Shape::Awaitable(ty)
                 | Shape::DirectoryContext(ty)
                 | Shape::ProcessArgs(ty)
@@ -260,6 +281,7 @@ impl Types {
                 | Shape::Union(fields) => fields.clone(),
                 Shape::DeclaredCache(callable, _) => vec![*callable],
                 Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
+                Shape::DispatchCallable(d) => vec![d.callable, d.frame, d.registry],
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
                 }
@@ -1030,12 +1052,36 @@ impl Types {
         }
     }
 
+    /// Only the dispatcher constructs this registry; source dictionaries cannot store callables.
+    pub(crate) fn dispatch_callable(&self, callable: Type) -> Type {
+        let registry = Type::Dict(self.intern(Shape::DispatchRegistry(callable)));
+        let frame = self.partial_frame(vec![callable, registry]);
+        Type::Callable(self.intern(Shape::DispatchCallable(DispatchFunction {
+            callable,
+            frame,
+            registry,
+        })))
+    }
+
+    pub(crate) fn dispatcher(&self, ty: Type) -> Option<DispatchFunction> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes[id] {
+            Shape::DispatchCallable(layout) => Some(layout),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_dispatch_registry(&self, ty: Type) -> bool {
+        matches!(ty, Type::Dict(id) if matches!(self.0.borrow().shapes[id], Shape::DispatchRegistry(_)))
+    }
+
     pub(crate) fn signature(&self, ty: Type) -> Option<(Vec<Type>, Type)> {
         let Type::Callable(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
             Shape::DeclaredCache(callable, _) => self.signature(*callable),
             Shape::CachedCallable(c) => self.signature(c.callable),
+            Shape::DispatchCallable(d) => self.signature(d.callable),
             _ => unreachable!("callable type identity has a callable shape"),
         }
     }
@@ -1196,6 +1242,7 @@ impl Types {
         };
         match self.0.borrow().shapes[id] {
             Shape::Counter(key) => Some((key, Type::Int)),
+            Shape::DispatchRegistry(target) => Some((Type::Str, target)),
             Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => Some((key, value)),
             _ => unreachable!("dictionary type identity has a dictionary shape"),
         }
@@ -1359,6 +1406,7 @@ impl TypeDescription<'_> {
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
             Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
             Shape::CachedCallable(c) => return self.write_type(c.callable),
+            Shape::DispatchCallable(d) => return self.write_type(d.callable),
             Shape::Callable(params, returns) => {
                 self.write_str("Callable[[")?;
                 self.write_types(params, ", ")?;
@@ -1408,6 +1456,10 @@ impl TypeDescription<'_> {
             Shape::Counter(key) => {
                 self.write_str("Counter[")?;
                 self.write_type(*key)?;
+            }
+            Shape::DispatchRegistry(target) => {
+                self.write_str("dict[str, ")?;
+                self.write_type(*target)?;
             }
             Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => {
                 self.write_str(if matches!(ty, Type::ChainMap(_)) {

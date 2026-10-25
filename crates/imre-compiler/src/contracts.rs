@@ -66,6 +66,9 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::Str if args.first().is_some_and(|e| e.ty == Type::Int) => {
+                Contract::new(true, PreservesOwners)
+            }
             Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
             Self::Calendar(op) => Contract::new(
                 matches!(
@@ -414,6 +417,7 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
+            | Self::DefaultFactoryEnabled
             | Self::EnumLookup(_)
             | Self::DictSumValues
             | Self::Encode
@@ -517,6 +521,7 @@ impl Builtin {
             | Self::ChainMapGet(_)
             | Self::DictPop
             | Self::DictSetDefault
+            | Self::DefaultDictMissing
             | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
@@ -569,7 +574,7 @@ impl Builtin {
             | Self::SysOrigArgv
             | Self::DocCaptureStart
             | Self::DocCaptureTake
-            | Self::DocAscii
+            | Self::AsciiEscape
             | Self::SysArgv
             | Self::FileFileno
             | Self::TextClose
@@ -591,6 +596,7 @@ impl Builtin {
             | Self::Cycle => Contract::new(true, PreservesLists),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
             | Self::CounterNew
@@ -688,7 +694,8 @@ impl Builtin {
                 args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
             }
             Self::CallableContext => {
-                matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+                matches!(args, [callable] if types.cached_function(callable.ty).map(|c| c.frame)
+                    .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame)) == Some(result))
             }
             Self::CacheParameter(_) => {
                 matches!(args, [wrapper] if types.cached_function(wrapper.ty).is_some())
@@ -1043,6 +1050,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_zip_open"
                 | "imre_zip_namelist"
                 | "imre_zip_close"
+                | "imre_int_str"
                 | "imre_int_parse"
                 | "imre_int_float"
                 | "imre_float_int"

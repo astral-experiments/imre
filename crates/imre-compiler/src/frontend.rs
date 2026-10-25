@@ -13,6 +13,7 @@ use crate::types::Types;
 
 mod annotations;
 mod argparse;
+mod ascii;
 mod assertion_syntax;
 mod assignments;
 mod asyncio;
@@ -31,6 +32,7 @@ mod copying;
 mod counter;
 mod csv;
 mod dataclass_values;
+mod defaultdict;
 mod defaultdict_factory;
 mod deque;
 mod dispatch;
@@ -89,6 +91,7 @@ mod regex;
 mod sequences;
 mod shutil;
 mod sign_parameters;
+mod single_dispatch;
 mod socket;
 mod sorted_rows;
 mod stdlib;
@@ -749,7 +752,7 @@ pub(crate) fn lower_with_owners(
             } else if matches!(method.name.as_str(), "__str__" | "__repr__")
                 && signature.returns != Type::Str
             {
-                return Err(module.error(&method, "__str__ must return str"));
+                return Err(module.error(&method, &format!("{} must return str", method.name)));
             }
             if keyword_copy {
                 classes.keyword_copies.insert(signature.id);
@@ -6389,6 +6392,11 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if attribute.attr.as_str() == "__wrapped__"
+                    && let Some(layout) = self.types.dispatcher(receiver.ty)
+                {
+                    return Ok(single_dispatch::original(receiver, layout));
+                }
                 if matches!(receiver.ty, Type::AnnotationValue(_)) {
                     return self.annotation_attribute(receiver, attribute);
                 }
@@ -6412,6 +6420,11 @@ impl<'a> Checker<'a> {
                             vec![receiver],
                         ),
                     });
+                }
+                if attribute.attr.as_str() == "default_factory"
+                    && self.types.is_default_list_dict(receiver.ty)
+                {
+                    return self.default_factory(receiver, attribute);
                 }
                 if let Type::ForwardRef(layout) = receiver.ty {
                     return self.forward_ref_attribute(layout, receiver, attribute);
@@ -6780,6 +6793,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
+            return self.ascii_call(call);
+        }
         if call
             .func
             .as_name_expr()
@@ -6983,6 +6999,20 @@ impl<'a> Checker<'a> {
         }
         if let Some(expr) = self.explicit_exception_initializer(call)? {
             return Ok(expr);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "__missing__"
+            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
+        {
+            let Some((owner, rest)) = call.arguments.args.split_first() else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "defaultdict.__missing__ requires a receiver",
+                ));
+            };
+            let receiver = self.expr(owner)?;
+            return self.defaultdict_missing(call, receiver, rest);
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "most_common"
@@ -7276,6 +7306,9 @@ impl<'a> Checker<'a> {
                 return self.typed_expr(value);
             }
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::SingleDispatch)) => {
+                return self.single_dispatch(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
@@ -7727,6 +7760,9 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if let Some(layout) = self.types.dispatcher(receiver.ty) {
+                return self.single_dispatch_method(call, attribute, receiver, layout);
+            }
             if receiver.ty == Type::ModuleNamespace
                 && attribute.attr.as_str() == "keys"
                 && call.arguments.is_empty()
@@ -7910,6 +7946,11 @@ impl<'a> Checker<'a> {
                     }
                     _ => {}
                 }
+            }
+            if attribute.attr.as_str() == "__missing__"
+                && self.types.is_default_list_dict(receiver.ty)
+            {
+                return self.defaultdict_missing(call, receiver, &call.arguments.args);
             }
             if self.types.is_counter(receiver.ty) {
                 match attribute.attr.as_str() {
@@ -8289,6 +8330,12 @@ impl<'a> Checker<'a> {
         {
             return self.ordinal_call(call);
         }
+        if name.id == "ascii"
+            && !self.names.contains_key("ascii")
+            && self.resolve(&call.func).is_none()
+        {
+            return self.ascii_call(call);
+        }
         self.reject_builtin_keywords(call)?;
         if name.id == "bool" {
             return match call.arguments.args.as_ref() {
@@ -8588,6 +8635,9 @@ impl<'a> Checker<'a> {
             && let Type::SimpleNamespace(id) = receiver.ty
         {
             return Ok(namespaces::backing(receiver.clone(), id));
+        }
+        if name.id == "repr" && args.len() == 1 && matches!(args[0].ty, Type::Class(_)) {
+            return self.record_repr(args.into_iter().next().unwrap(), call);
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
             if name.id == "repr" || (name.id == "str" && self.types.element(args[0].ty).is_some()) {

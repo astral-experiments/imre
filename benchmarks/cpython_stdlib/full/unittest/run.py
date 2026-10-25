@@ -48,7 +48,7 @@ ASSERTIONS = {
     "testAssertLess": "assertLess", "testAssertLessEqual": "assertLessEqual",
     "testAssertGreater": "assertGreater", "testAssertGreaterEqual": "assertGreaterEqual",
     "testNotEqual": "assertNotEqual", "test_baseAssertEqual": "_baseAssertEqual",
-    "testAssertRaises": "assertRaises",
+    "testAssertRaises": "assertRaises", "testAssertDictEqual": "assertDictEqual",
 }
 # These CPython passes still fail at native compilation. Keep their first
 # precise source diagnostic in the report; a different failure stops the gate.
@@ -62,13 +62,14 @@ DEFAULT_MOCK_METHODS = {
     "test_assert_not_called": "unittest.mock.Mock.assert_not_called",
     "test_assert_called": "unittest.mock.Mock.assert_called",
     "test_assert_called_once": "unittest.mock.Mock.assert_called_once",
+    "test_assert_called_once_message_not_called":
+        "unittest.TestCase.assertNotIn and the message from unittest.mock.Mock.assert_called_once",
     "test_ordered_call_signature": "unittest.mock.Mock.call_args and its representation",
     "test_assert_any_call": "unittest.TestCase.assertRaises and unittest.mock.Mock.assert_any_call",
     "test_assert_called_with": "unittest.TestCase.assertRaises and unittest.mock.Mock.assert_called_with",
     "test_assert_called_once_with": "unittest.TestCase.assertRaises and unittest.mock.Mock.assert_called_once_with",
 }
 MOCK_BLOCKERS = {
-    "test_assert_called_once_message_not_called": (1858, "10:9: Imre: unknown class method"),
     "test_reset_mock": (337, '9:35: Imre: unexpected keyword argument "parent"'),
     "test_reset_mock_recursion": (377, "8:9: Imre: properties are read-only"),
     "test_reset_sideeffect": (1890, '7:18: Imre: unexpected keyword argument "return_value"'),
@@ -107,6 +108,13 @@ def check_assertion(binary, operation, level):
             if operation == "assertRaises":
                 return scope
             def call(*operands, msg=None):
+                if operation == "assertDictEqual":
+                    if (len(operands) != 2 or any(type(d) is not dict for d in operands)
+                            or any(type(s) is not str for d in operands for pair in d.items() for s in pair)):
+                        raise TypeError("expected two string dictionaries")
+                    invoke([*(len(d) for d in operands),
+                            *(s for d in operands for pair in d.items() for s in pair)], msg)
+                    return
                 unary = operation in {"assertTrue", "assertFalse"}
                 if len(operands) != (1 if unary else 2) or not all(
                     type(value) is (bool if unary else int) for value in operands
@@ -134,7 +142,7 @@ def run(args, level, root):
     lang = Toolchain(args.imre, args.runtime, args.clang, level, args.reachable_only)
     verify_source_modules(lang, root)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["truth_protocol", "equality_protocol", "boolean_equality", "mock_protocol", "mock_reset", "mock_globals", "callable_protocol", "bound_assertions",
+    for name in ["truth_protocol", "equality_protocol", "membership", "mapping_protocol", "boolean_equality", "mock_protocol", "mock_reset", "mock_globals", "callable_protocol", "bound_assertions",
                  "callable_binding", "context_regex", "loader_names", *("context_" + family for family in families)]:
         control = root / name
         if (HERE / name).is_dir():
