@@ -309,6 +309,22 @@ impl Checker<'_> {
             ));
         }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if matches!((left.ty, right.ty), (Type::Callable(_), Type::Callable(_)))
+            && [left.ty, right.ty].iter().all(|&ty| {
+                let signature = self.types.cache_signature(ty).unwrap_or(ty);
+                self.types
+                    .signature(signature)
+                    .is_some_and(|(params, result)| {
+                        matches!(params.as_slice(), [arg] if self.types.is_len_argument(*arg))
+                            && result == Type::Int
+                    })
+            })
+        {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if types.iter().any(|&ty| self.types.is_value_struct(ty)) {
             return Err(error(
                 self.source,
@@ -362,7 +378,8 @@ impl Checker<'_> {
             && types
                 .iter()
                 .all(|ty| matches!(ty, Type::SimpleNamespace(_) | Type::Dict(_) | Type::None));
-        if wrapper_attributes || namespace {
+        if wrapper_attributes || namespace || types.iter().all(|ty| matches!(ty, Type::CmpKey(..)))
+        {
             return Ok(Self::identity_result(
                 vec![left, right],
                 op == ast::CmpOp::IsNot,

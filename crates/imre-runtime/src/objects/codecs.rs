@@ -445,6 +445,12 @@ fn decoding_error(
             text.push('\u{fffd}');
         }
         "ignore" => (),
+        "namereplace" | "xmlcharrefreplace" => {
+            return Err(Error::new(
+                Kind::TypeError,
+                "don't know how to handle UnicodeDecodeError in error callback",
+            ));
+        }
         "backslashreplace" => {
             let len = bytes.len().checked_mul(4).ok_or_else(Error::allocation)?;
             text.try_reserve(len).map_err(|_| Error::allocation())?;

@@ -123,6 +123,10 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let (op, input_type, result_type) = match attr.attr.as_str() {
+            "streamwriter" => {
+                let class = writer(Writer::Class, Type::CodecWriterClass, vec![receiver]);
+                return self.codec_writer_new(class, call);
+            }
             "encode" => (Builtin::CodecEncode, Type::Str, Type::Bytes),
             "decode" => (Builtin::CodecDecode, Type::Bytes, Type::Str),
             _ => {
