@@ -23,6 +23,7 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
 pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     match ty {
         Type::Exception
+        | Type::CmpKey(..)
         | Type::NamedException(_)
         | Type::StringKeys
         | Type::ImportException

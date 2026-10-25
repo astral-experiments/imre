@@ -202,7 +202,8 @@ impl Checker<'_> {
             && types
                 .iter()
                 .all(|ty| matches!(ty, Type::SimpleNamespace(_) | Type::Dict(_) | Type::None));
-        if wrapper_attributes || namespace {
+        if wrapper_attributes || namespace || types.iter().all(|ty| matches!(ty, Type::CmpKey(..)))
+        {
             return Ok(Self::identity_result(
                 vec![left, right],
                 op == ast::CmpOp::IsNot,

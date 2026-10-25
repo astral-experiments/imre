@@ -30,6 +30,8 @@ pub(crate) enum Type {
     /// The immutable top-level string keys of a private TOML document.
     StringKeys,
     Tuple(usize),
+    /// A functools key retains its comparator and, for a bound key, its object.
+    CmpKey(usize, bool),
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
     /// Private state retained by an independently constructed function cache.
@@ -192,6 +194,7 @@ impl std::fmt::Display for Type {
             Self::Bool => "bool",
             Self::BuiltinClass => "type",
             Self::ForwardRef(_) => "annotationlib.ForwardRef",
+            Self::CmpKey(..) => "functools.KeyWrapper",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",

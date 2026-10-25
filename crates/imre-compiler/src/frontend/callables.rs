@@ -14,7 +14,11 @@ pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
 }
 
 fn invalid_aggregate(ty: Type, types: &Types) -> bool {
-    if matches!(ty, Type::Callable(_) | Type::ForwardRef(_)) || types.is_partial_frame(ty) {
+    if matches!(
+        ty,
+        Type::Callable(_) | Type::ForwardRef(_) | Type::CmpKey(..)
+    ) || types.is_partial_frame(ty)
+    {
         false
     } else if let Some(payload) = types.payload(ty) {
         invalid_aggregate(payload, types)
@@ -388,6 +392,9 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if let Type::CmpKey(frame, _) = callable.ty {
+            return self.bind_cmp_key(call, callable, frame);
+        }
         if let Type::StrDescriptor(method) = callable.ty {
             return self.invoke_descriptor(call, callable, method);
         }

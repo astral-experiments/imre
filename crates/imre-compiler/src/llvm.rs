@@ -52,6 +52,7 @@ impl Type {
             Self::Bool => "i1",
             Self::Str
             | Self::ForwardRef(_)
+            | Self::CmpKey(..)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -121,6 +122,7 @@ impl Type {
             Self::Float => "0.0",
             Self::Str
             | Self::ForwardRef(_)
+            | Self::CmpKey(..)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -729,6 +731,7 @@ impl Emitter<'_, '_> {
             | Type::Tuple(_)
             | Type::Callable(_)
             | Type::ForwardRef(_)
+            | Type::CmpKey(..)
             | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
@@ -3223,6 +3226,7 @@ impl Emitter<'_, '_> {
             self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
         } else {
             match left.ty {
+                Type::CmpKey(..) => unreachable!("comparator keys use their callback"),
                 Type::ForwardRef(_) => {
                     let equal = self.instruction(format!(
                         "call i32 @imre_forward_ref_equal(ptr {}, ptr {})",
@@ -6076,6 +6080,7 @@ impl Emitter<'_, '_> {
                     Type::None => self.void_call("imre_print_none", &[]),
                     Type::ListInt
                     | Type::ForwardRef(_)
+                    | Type::CmpKey(..)
                     | Type::BuiltinClass
                     | Type::Class(_)
                     | Type::List(_)
@@ -6328,6 +6333,7 @@ impl Emitter<'_, '_> {
             Type::None => "0".to_owned(),
             Type::Str
             | Type::ForwardRef(_)
+            | Type::CmpKey(..)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -6411,6 +6417,7 @@ impl Emitter<'_, '_> {
             Type::None => "0".to_owned(),
             Type::Str
             | Type::ForwardRef(_)
+            | Type::CmpKey(..)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -7013,7 +7020,11 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
         Type::ListInt => 4,
-        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(..) => 6,
+        Type::Class(_)
+        | Type::Tuple(_)
+        | Type::CmpKey(..)
+        | Type::Callable(_)
+        | Type::CompletedProcess(..) => 6,
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
