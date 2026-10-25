@@ -4,6 +4,7 @@ use super::*;
 
 mod accumulate;
 mod batched;
+mod predicate;
 
 impl Checker<'_> {
     pub(super) fn repeat_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {

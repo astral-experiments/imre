@@ -99,6 +99,7 @@ mod accumulate;
 mod batched;
 mod chain;
 mod compress;
+mod predicate;
 mod sources;
 mod tee;
 use std::cell::{Cell, RefCell};
@@ -113,6 +114,7 @@ pub(super) enum Adapter {
     Chain(chain::Chain),
     Compress(compress::Compress),
     Accumulate(accumulate::Accumulate),
+    Predicate(predicate::Predicate),
     Cycle(Cycle),
     PathWalk(paths::Walker),
 }
@@ -157,6 +159,7 @@ impl Drop for Adapter {
         let source = match self {
             Self::Tee(fork) => fork.take_source(),
             Self::Accumulate(acc) => acc.source.take(),
+            Self::Predicate(predicate) => predicate.source.take(),
             Self::Batched(batch) => batch.take_source(),
             Self::Compress(filter) => {
                 if let Some(data) = filter.data.take() {
@@ -210,6 +213,7 @@ impl Adapter {
             Self::Chain(_) => "itertools.chain",
             Self::Compress(_) => "itertools.compress",
             Self::Accumulate(_) => "itertools.accumulate",
+            Self::Predicate(predicate) => predicate.name(),
             Self::Slice(_) => "itertools.islice",
             Self::Cycle(_) => "itertools.cycle",
             Self::PathWalk(_) => {
@@ -238,6 +242,7 @@ impl Adapter {
             Self::Chain(chain) => chain.advance(frame, item),
             Self::Compress(filter) => filter.advance(frame, item),
             Self::Accumulate(acc) => acc.advance(item),
+            Self::Predicate(predicate) => predicate.advance(item),
             _ => unreachable!("only composed cursors request source items"),
         }
     }
@@ -268,6 +273,7 @@ impl Adapter {
                                         | Self::Chain(_)
                                         | Self::Compress(_)
                                         | Self::Accumulate(_)
+                                        | Self::Predicate(_)
                                 ) =>
                             {
                                 Some(Rc::clone(state))
@@ -320,7 +326,8 @@ impl Adapter {
             | Self::Batched(_)
             | Self::Chain(_)
             | Self::Compress(_)
-            | Self::Accumulate(_) => self.next_composed(),
+            | Self::Accumulate(_)
+            | Self::Predicate(_) => self.next_composed(),
             Self::PathWalk(walk) => walk.next(),
         }
     }
