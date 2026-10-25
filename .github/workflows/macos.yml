@@ -51,6 +51,8 @@ jobs:
             --suites unittest_main differential io errno files bytes socket_tcp paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
           cat "$RUNNER_TEMP/imre-suites/errno.log"
+          cat "$RUNNER_TEMP/imre-suites/socket_tcp.log"
+          python3 tests/socket_tcp.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 0
           python3 tests/unittest_main.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --manifest benchmarks/cpython_stdlib/full/errno/UPSTREAM.json --upstream-source benchmarks/cpython_stdlib/full/errno/upstream/Lib/test/test_errno.py --opt-levels 3
 
       - name: Get the pinned CPython test files and bundled pip wheel

@@ -25,10 +25,25 @@ def child(command):
         proc.wait(timeout=TIMEOUT)
 
 
-def collect(proc):
-    out, err = proc.communicate(timeout=TIMEOUT)
-    assert proc.returncode == 0 and err == b"", (proc.returncode, out, err)
+def collect(proc, timeout=TIMEOUT):
+    out, err = proc.communicate(timeout=timeout)
+    assert proc.returncode == 0 and not err, (
+        f"socket child exited {proc.returncode}, stdout={out!r}\n{err.decode(errors='replace')}"
+    )
     return out
+
+
+def reference_operations(python, source, timeout=TIMEOUT):
+    bootstrap = (
+        "import faulthandler, runpy, sys\n"
+        "faulthandler.dump_traceback_later(float(sys.argv[1]), exit=True)\n"
+        "sys.argv = sys.argv[2:]\n"
+        "try:\n"
+        "    runpy.run_path(sys.argv[0], run_name='__main__')\n"
+        "finally:\n"
+        "    faulthandler.cancel_dump_traceback_later()\n"
+    )
+    return [python, "-E", "-c", bootstrap, str(timeout), source]
 
 
 def drain(peer):
@@ -38,7 +53,7 @@ def drain(peer):
     return data
 
 
-def observe(programs):
+def observe(programs, *, operations_timeout=TIMEOUT):
     with child(programs["listener"]) as proc:
         assert select.select([proc.stdout], [], [], TIMEOUT)[0], "listener did not report a port"
         port = proc.stdout.readline()
@@ -51,8 +66,9 @@ def observe(programs):
     assert echo == b"a\xff\x80Z\x00"
     assert listener == b"True\nb'\\x00'\nb'a\\xff\\x80Z'\nb''\n-1\n-1\n", listener
     with child(programs["operations"]) as proc:
-        operations = collect(proc)
-    assert operations == b"socket operations passed\n"
+        operations = collect(proc, operations_timeout)
+    option, done = operations.splitlines()
+    assert option.startswith(b"TCP_NODELAY 0 ") and done == b"socket operations passed", operations
     for mode in ("sendall", "reset"):
         with socket.socket() as listener_socket:
             listener_socket.bind(("127.0.0.1", 0))
@@ -80,7 +96,11 @@ def main():
     parser.add_argument("--opt-levels", nargs="+", default=["0", "3"])
     args = parser.parse_args()
     sources = {p.stem: p.resolve() for p in FIXTURES.glob("*.py")}
-    oracle = observe({name: [args.python, "-E", source] for name, source in sources.items()})
+    reference = {name: [args.python, "-E", source] for name, source in sources.items()}
+    reference["operations"] = reference_operations(args.python, sources["operations"])
+    # The child enforces TIMEOUT. Allow its traceback to reach the parent before cleanup.
+    oracle = observe(reference, operations_timeout=TIMEOUT + 2)
+    print("CPython:", oracle[2].splitlines()[0].decode(), flush=True)
     print("CPython: loopback, fd lifetime, short send, EAGAIN, sendall and reset passed", flush=True)
     with tempfile.TemporaryDirectory(prefix="imre-socket-") as directory:
         for opt in args.opt_levels:
@@ -91,7 +111,8 @@ def main():
                                 args.runtime.resolve(), "--clang", args.clang, "--opt-level", opt,
                                 "-o", binary], check=True, timeout=180)
                 programs[name] = [binary]
-            assert observe(programs) == oracle
+            observed = observe(programs)
+            assert observed == oracle, (observed, oracle)
             print(f"O{opt}: socket observations matched CPython", flush=True)
 
 

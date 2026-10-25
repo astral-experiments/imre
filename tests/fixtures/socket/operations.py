@@ -27,10 +27,14 @@ def main() -> None:
         assert listener.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR) != 0
         listener.bind(("127.0.0.1", 0))
         address = listener.getsockname()
-        # This port stays reserved while no socket is listening.
+        # Like CPython's test_connect, probe a released port. Darwin can silently
+        # drop a SYN to a socket that is still bound but has never listened.
+        with socket.socket() as reservation:
+            reservation.bind(("127.0.0.1", 0))
+            closed_address = reservation.getsockname()
         with socket.socket() as refused:
             try:
-                refused.connect(address)
+                refused.connect(closed_address)
             except ConnectionRefusedError as e:
                 assert e.errno == errno.ECONNREFUSED
             else:
@@ -64,8 +68,13 @@ def main() -> None:
                 assert peer == client.getsockname()
                 assert not os.get_inheritable(server.fileno())
                 assert not os.get_inheritable(client.fileno())
+                server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 0)
+                disabled = server.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY)
                 server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                assert server.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY) == 1
+                enabled = server.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY)
+                # Darwin returns the kernel flag mask when enabled.
+                assert disabled == 0 and enabled != 0
+                print(f"TCP_NODELAY {disabled} {enabled}")
                 client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
                 server.setblocking(False)
                 assert not clients[fd].getblocking()
