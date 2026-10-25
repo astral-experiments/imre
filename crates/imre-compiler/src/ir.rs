@@ -574,6 +574,9 @@ pub(crate) enum Builtin {
     },
     SysPlatform,
     OsName,
+    DocCaptureStart,
+    DocCaptureTake,
+    DocAscii,
     SystemExitNew {
         omit_none: bool,
     },
@@ -803,6 +806,8 @@ pub(crate) enum Builtin {
     CacheInsert(i64),
     CacheStat(u32),
     CacheClear,
+    /// Read the public maxsize (false) or typed (true) of a constructed cache.
+    CacheParameter(bool),
     CallableContext,
     HashStr,
     HashRecord,
@@ -1226,6 +1231,8 @@ pub(crate) enum LogOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     Open,
+    Unlink,
+    Remove,
     Seek,
     Pipe,
     Dup2,

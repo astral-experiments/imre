@@ -94,6 +94,15 @@ impl Checker<'_> {
                 };
                 return self.sys_no_args(call, "exception", result).map(Some);
             }
+            Some(Binding::Intrinsic(Intrinsic::SysJitPredicate(name))) => {
+                // Imre emits machine code before the program starts. No running
+                // frame has a JIT compiler, regardless of the child's PYTHON_JIT.
+                let result = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(false),
+                };
+                return self.sys_no_args(call, name, result).map(Some);
+            }
             _ => {}
         }
         let ast::Expr::Attribute(attribute) = &*call.func else {

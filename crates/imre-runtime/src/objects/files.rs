@@ -799,11 +799,58 @@ mod tests {
 
     use super::super::exceptions::{
         imre_error_pending, imre_error_set, imre_error_take, imre_exception_matches,
-        imre_exception_new,
+        imre_exception_message, imre_exception_new,
     };
     use super::super::{imre_object_release, imre_seq_append, imre_seq_new};
 
     struct Directory(PathBuf);
+
+    #[test]
+    fn unlink_uses_a_directory_descriptor_and_removes_only_the_named_link() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let directory = Directory::new();
+        let handle = File::open(&directory.0).unwrap();
+        let target = directory.0.join("preserved");
+        std::fs::write(&target, b"untouched").unwrap();
+        let fd = Int::small(i64::from(handle.as_raw_fd())).unwrap();
+        for name in ["é-link".as_bytes().to_vec(), b"raw-\xff-link".to_vec()] {
+            let link = directory.0.join(OsStr::from_bytes(&name));
+            let setup = std::os::unix::fs::symlink(&target, &link);
+            // APFS rejects non-UTF-8 directory entries with EILSEQ at creation.
+            // Compare unlink's error with the same filesystem rather than
+            // assuming that looking up such an entry also returns EILSEQ.
+            let expected_errno = setup.err().map(|error| {
+                assert_eq!(name, b"raw-\xff-link");
+                assert_eq!(error.raw_os_error(), Some(libc::EILSEQ));
+                std::fs::remove_file(&link)
+                    .unwrap_err()
+                    .raw_os_error()
+                    .unwrap()
+            });
+            // SAFETY: the bytes and descriptor stay rooted across unlinkat.
+            unsafe {
+                super::super::os::imre_os_unlink(std::ptr::from_ref(&name).cast(), 1, fd.0, 0)
+            };
+            if let Some(errno) = expected_errno {
+                assert_eq!(imre_error_pending(), 1);
+                // SAFETY: take transfers the exception owner; message returns its own string.
+                let message = unsafe {
+                    let error = Rc::from_raw(imre_error_take());
+                    Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)))
+                };
+                assert!(message.starts_with(&format!("[Errno {errno}] ")));
+                assert!(message.ends_with(": b'raw-\\xff-link'"));
+            } else {
+                assert_eq!(imre_error_pending(), 0);
+                assert_eq!(
+                    link.symlink_metadata().unwrap_err().kind(),
+                    io::ErrorKind::NotFound
+                );
+            }
+        }
+        assert_eq!(std::fs::read(target).unwrap(), b"untouched");
+    }
 
     impl Directory {
         fn new() -> Self {
