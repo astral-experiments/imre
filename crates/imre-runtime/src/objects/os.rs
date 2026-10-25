@@ -9,6 +9,8 @@ use std::ffi::CString;
 use std::io;
 use std::rc::Rc;
 
+pub(super) mod links;
+
 /// Query the same POSIX metadata for Path views, fresh predicates, and metadata copies.
 pub(super) fn metadata(
     path: impl AsRef<std::path::Path>,

@@ -1106,6 +1106,15 @@ pub(crate) enum PathQuery {
     CharDevice = 7,
 }
 
+/// Operations on a link's stored target name and its destination (POSIX link ABI).
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub(crate) enum PathLink {
+    Symlink = 0,
+    CheckSymlink = 1,
+    Hardlink = 2,
+}
+
 /// Native path operations keep their exact result types in the checked IR.
 #[derive(Clone, Copy)]
 pub(crate) enum PathOperation {
@@ -1142,6 +1151,8 @@ pub(crate) enum PathOperation {
     Query(PathQuery),
     ReadText,
     ReadBytes,
+    Readlink,
+    Link(PathLink),
     WriteText,
     WriteBytes,
     WriteTypeError,

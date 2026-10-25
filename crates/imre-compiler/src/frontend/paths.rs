@@ -497,7 +497,15 @@ impl Checker<'_> {
         }
         if matches!(
             name,
-            "mkdir" | "unlink" | "replace" | "resolve" | "with_name" | "with_stem" | "with_suffix"
+            "mkdir"
+                | "unlink"
+                | "replace"
+                | "resolve"
+                | "with_name"
+                | "with_stem"
+                | "with_suffix"
+                | "symlink_to"
+                | "hardlink_to"
         ) {
             return self.path_call(receiver, name, call);
         }
@@ -509,6 +517,7 @@ impl Checker<'_> {
             "as_posix" => (PathOperation::AsPosix, Type::Str, 0),
             "is_absolute" => (PathOperation::IsAbsolute, Type::Bool, 0),
             "read_bytes" => (PathOperation::ReadBytes, Type::Bytes, 0),
+            "readlink" => (PathOperation::Readlink, Type::Path, 0),
             "rmdir" => (PathOperation::Rmdir, Type::None, 0),
             _ => return Err(error(self.source, call, "unsupported native Path method")),
         };
@@ -663,6 +672,19 @@ impl Checker<'_> {
                 Type::Path,
                 vec![parameter("target", Type::Str, None)],
             ),
+            "symlink_to" => (
+                PathOperation::Link(ir::PathLink::Symlink),
+                Type::None,
+                vec![
+                    parameter("target", Type::Str, None),
+                    parameter("target_is_directory", Type::Bool, Some(boolean(false))),
+                ],
+            ),
+            "hardlink_to" => (
+                PathOperation::Link(ir::PathLink::Hardlink),
+                Type::None,
+                vec![parameter("target", Type::Str, None)],
+            ),
             "resolve" => (
                 PathOperation::Resolve,
                 Type::Path,
@@ -687,7 +709,13 @@ impl Checker<'_> {
         };
         let arguments =
             self.arguments_with(call, &params, Some(receiver), |checker, index, value| {
-                if name == "replace" {
+                if matches!(name, "symlink_to" | "hardlink_to") {
+                    if index == 0 {
+                        checker.fspath_argument(value)
+                    } else {
+                        checker.expr(value)
+                    }
+                } else if name == "replace" {
                     checker.path_argument(value)
                 } else {
                     checker.expr_expected(value, params[index].ty)
@@ -862,11 +890,24 @@ impl Checker<'_> {
             body.push(Statement::Assign(slot, value));
             clear.push(slot);
         }
-        let args = arguments
+        let mut args: Vec<_> = arguments
             .order
             .iter()
             .map(|&index| self.local(clear[index]))
             .collect();
+        if matches!(kind, PathOperation::Link(ir::PathLink::Symlink)) {
+            let flag = args.pop().unwrap();
+            if flag.ty != Type::Bool {
+                // POSIX ignores the flag, but Python first converts both names,
+                // then asks for its truth value. A NUL must not invoke __bool__.
+                body.push(Statement::Expr(operation(
+                    PathOperation::Link(ir::PathLink::CheckSymlink),
+                    Type::None,
+                    args.clone(),
+                )));
+                body.push(Statement::Expr(self.truth_value(flag)));
+            }
+        }
         Expr {
             ty: returns,
             kind: ExprKind::Scope {

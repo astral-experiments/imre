@@ -922,6 +922,52 @@ fn check_nul(path: &str) -> Result<()> {
     }
 }
 
+/// # Safety
+/// The caller roots an exact Path. Its spelling is retained if readlink fails;
+/// a successful call transfers a fresh Path containing the stored link target.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_readlink(path: *const Object) -> *const Object {
+    // SAFETY: read the canonical spelling from the rooted path before the syscall.
+    let name = unsafe { object(path).0.with(|s| Rc::clone(s.path_text())) };
+    let result =
+        super::os::links::readlink(super::exceptions::Filename::Str(name)).and_then(|target| {
+            let target = target.to_str().ok_or_else(|| {
+                Error::new(
+                    Kind::UnicodeDecodeError,
+                    "symlink target is not valid UTF-8",
+                )
+            })?;
+            Ok(new_path(normalize(target)))
+        });
+    finish(result, std::ptr::null())
+}
+
+/// # Safety
+/// The caller roots the destination Path and exact str or bytes target matching
+/// the tag. Both original spellings are retained by any resulting OS exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_link(
+    path: *const Object,
+    target: *const (),
+    bytes: u32,
+    kind: u32,
+) {
+    use super::exceptions::Filename;
+    // SAFETY: both inputs remain live and the tag describes target's allocation.
+    let (src, dst) = unsafe {
+        let target = if bytes == 0 {
+            Filename::Str(super::acquire_rc(target as usize))
+        } else {
+            Filename::Bytes(super::acquire_rc(target as usize))
+        };
+        (
+            target,
+            Filename::Str(object(path).0.with(|s| Rc::clone(s.path_text()))),
+        )
+    };
+    finish(super::os::links::link(src, dst, kind), ());
+}
+
 /// Match pathlib's retry order: create the leaf first, make missing parents with
 /// their default mode, then retry each child without creating its parents again.
 fn mkdir(path: &str, mode: u32, parents: bool, exist_ok: bool) -> io::Result<()> {

@@ -123,6 +123,8 @@ impl Builtin {
                     | PathOperation::AsPosix
                     | PathOperation::ReadText
                     | PathOperation::ReadBytes
+                    | PathOperation::Readlink
+                    | PathOperation::Link(_)
                     | PathOperation::Absolute
                     | PathOperation::WithName
                     | PathOperation::WithStem
@@ -848,6 +850,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_mkdir"
                 | "imre_path_unlink"
                 | "imre_path_rmdir"
+                | "imre_path_readlink"
+                | "imre_path_link"
                 | "imre_path_replace"
                 | "imre_path_absolute"
                 | "imre_path_with_name"

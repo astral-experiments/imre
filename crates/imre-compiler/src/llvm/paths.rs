@@ -149,6 +149,14 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
+            PathOperation::Link(kind) => {
+                let bytes = u32::from(args[1].value.ty == Type::Bytes);
+                self.checked_line(format!(
+                    "call void @imre_path_link(ptr {}, ptr {}, i32 {bytes}, i32 {})",
+                    args[0].value.operand, args[1].value.operand, kind as u32,
+                ));
+                none()
+            }
             PathOperation::Mkdir => {
                 let parents = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
                 let exist_ok =
@@ -275,6 +283,7 @@ impl Emitter<'_, '_> {
                     PathOperation::Suffixes => "imre_path_suffixes",
                     PathOperation::Parent => "imre_path_parent",
                     PathOperation::ReadBytes => "imre_path_read_bytes",
+                    PathOperation::Readlink => "imre_path_readlink",
                     PathOperation::ReadText if args.len() == 1 => "imre_path_read_text",
                     PathOperation::ReadText => "imre_path_read_text_options",
                     PathOperation::WriteText => "imre_path_write_text_options",
