@@ -12,7 +12,7 @@ if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
         RELEASE_ARTIFACTS=true
         FULL_ASAN=true ;;
       .github/workflows/*release*.yml|.github/scripts/select-macos-sdk.sh|\
-      dist-workspace.toml|pyproject.toml|uv.lock|scripts/release.sh|\
+      dist-workspace.toml|crates/*/dist.toml|pyproject.toml|uv.lock|scripts/release.sh|\
       scripts/bundle-linux-toolchain.py|scripts/prepare-shell-installer.py|\
       LICENSE-*|licenses/*|examples/conformance_report/upstream/LICENSE|\
       crates/imre-runtime-jemalloc/*|crates/*/build.rs|crates/imre-compiler/src/main.rs|\
