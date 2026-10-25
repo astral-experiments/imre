@@ -112,6 +112,20 @@ pub(super) fn compare(
 }
 
 impl Checker<'_> {
+    /// A checked object yields its actual string keys; arrays and untyped
+    /// roots expose JSON values until an element is projected to a Python type.
+    pub(super) fn json_iteration(&self, value: Expr) -> Expr {
+        let element = match value.ty {
+            Type::JsonObject => Type::Str,
+            Type::JsonRoot | Type::JsonValue => Type::JsonValue,
+            _ => return value,
+        };
+        Expr {
+            ty: self.types.list(element),
+            kind: ExprKind::Builtin(Builtin::JsonIter, vec![value]),
+        }
+    }
+
     /// Nested array projections may be shared by independent document views.
     /// Only the original root list exposes the existing mutable Python list.
     pub(super) fn json_mutation_receiver(

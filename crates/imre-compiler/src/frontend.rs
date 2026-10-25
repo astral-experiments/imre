@@ -2781,18 +2781,7 @@ impl<'a> Checker<'a> {
             }
         }
         let value = self.iteration_expression(expression, None)?;
-        let value = if matches!(
-            value.ty,
-            Type::JsonRoot | Type::JsonValue | Type::JsonObject
-        ) {
-            Expr {
-                ty: self.types.list(Type::JsonValue),
-                kind: ExprKind::Builtin(Builtin::JsonIter, vec![value]),
-            }
-        } else {
-            value
-        };
-        Ok((value, false))
+        Ok((self.json_iteration(value), false))
     }
 
     /// Checks an iterable in its current lexical scope, before target binding.
@@ -3060,6 +3049,11 @@ impl<'a> Checker<'a> {
         } = input
         else {
             unreachable!("range iteration returned above")
+        };
+        let iterable = if items {
+            iterable
+        } else {
+            self.json_iteration(iterable)
         };
         if matches!(iterable.ty, Type::TextIO | Type::BinaryIO | Type::CsvReader) {
             let input = if iterable.ty == Type::CsvReader {
