@@ -3,6 +3,7 @@ mod archives;
 mod copy;
 mod fastcopy;
 mod rmtree;
+mod streams;
 
 use std::borrow::Cow;
 use std::collections::HashSet;

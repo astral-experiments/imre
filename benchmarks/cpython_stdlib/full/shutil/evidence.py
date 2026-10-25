@@ -15,6 +15,7 @@ import archive_ops
 import fastcopy_ops
 import native_copy
 import native_rmtree
+import stream_ops
 import tree_ops
 import move_ops
 import which_cases
@@ -87,6 +88,9 @@ def run_level(args, module, reference, level, directory):
     move_work = directory / "move"
     move_work.mkdir()
     executions.update(move_ops.executors(module, tools, move_work, with_roles=True))
+    stream_work = directory / "streams"
+    stream_work.mkdir()
+    executions.update(stream_ops.executors(module, tools, stream_work, with_roles=True))
     archive_work = directory / "archives"
     archive_work.mkdir()
     archive_blockers = {}

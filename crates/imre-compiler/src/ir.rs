@@ -1518,6 +1518,7 @@ pub(crate) enum ProcessOperation {
     Which,
     RmTree,
     Copy(CopyOperation),
+    CopyFileObj,
     CopyTree(Type),
     Move(Type),
     DestInSrc,

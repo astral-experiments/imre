@@ -5,6 +5,49 @@ use super::*;
 mod registry;
 
 impl Checker<'_> {
+    pub(super) fn shutil_copyfileobj(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let params = [
+            ("fsrc", Type::BinaryIO, None),
+            ("fdst", Type::BinaryIO, None),
+            (
+                "length",
+                Type::Int,
+                Some(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Int("0".into()),
+                }),
+            ),
+        ]
+        .map(|(name, ty, default)| Parameter {
+            name: name.into(),
+            ty,
+            kind: ParameterKind::PositionalOrKeyword,
+            default,
+            sign_only: false,
+        });
+        let args = self.arguments_with(call, &params, None, |checker, i, expr| {
+            if i == 2 {
+                return checker.expr_expected(expr, Type::Int);
+            }
+            let v = checker.expr(expr)?;
+            if matches!(v.ty, Type::TextIO | Type::BinaryIO) {
+                Ok(v)
+            } else {
+                Err(error(
+                    checker.source,
+                    expr,
+                    "copyfileobj requires readable and writable streams",
+                ))
+            }
+        })?;
+        Ok(self.ordered_builtin(
+            Builtin::Process(ir::ProcessOperation::CopyFileObj),
+            Type::None,
+            args,
+        ))
+    }
+
     pub(super) fn shutil_archive_formats(
         &mut self,
         call: &ast::ExprCall,

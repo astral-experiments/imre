@@ -16,6 +16,37 @@ pub(super) struct Output {
 }
 
 impl Output {
+    pub(super) fn tell(&mut self) -> Result<u64> {
+        // BufferedWriter.tell includes pending bytes without flushing them.
+        let position = self
+            .raw
+            .get_mut()
+            .stream_position()
+            .map_err(super::errno_error)?;
+        position
+            .checked_add(self.raw.buffer().len() as u64)
+            .ok_or_else(|| Error::new(Kind::OverflowError, "file position too large"))
+    }
+
+    pub(super) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
+        fn seek_error(error: io::Error) -> Error {
+            if error.raw_os_error() == Some(libc::ESPIPE) {
+                Error::new(
+                    Kind::UnsupportedOperation,
+                    "File or stream is not seekable.",
+                )
+            } else {
+                super::errno_error(error)
+            }
+        }
+        // BufWriter::seek flushes before trying the raw descriptor. A Python
+        // BufferedWriter rejects an unseekable pipe with its buffer untouched.
+        if !self.raw.buffer().is_empty() {
+            self.raw.get_mut().stream_position().map_err(seek_error)?;
+        }
+        self.raw.seek(at).map_err(seek_error)
+    }
+
     pub(super) fn new(file: File, capacity: usize, binary: bool) -> Self {
         Self {
             line_buffering: !binary && file.is_terminal(),
@@ -269,6 +300,35 @@ impl Input {
         Ok(result)
     }
 
+    /// Count Unicode characters after universal newline decoding; keep any
+    /// remaining decoded characters for the next read on this same stream.
+    pub(super) fn read_text_size(&mut self, mut limit: usize) -> Result<Str> {
+        let mut result = Str::default();
+        while limit > 0 {
+            let available = &self.text.decoded[self.text.pos..];
+            if let Some((end, _)) = available.char_indices().nth(limit) {
+                result.push_str(&available[..end]);
+                self.text.pos += end;
+                break;
+            }
+            result.push_str(available);
+            limit -= available.chars().count();
+            self.text.pos = self.text.decoded.len();
+            if limit == 0 {
+                break;
+            }
+            let chunk = self.raw.fill_buf().map_err(os_error)?;
+            let length = chunk.len();
+            let decoded = self.text.decode(chunk);
+            self.raw.consume(length);
+            decoded?;
+            if length == 0 && self.text.decoded.is_empty() {
+                break;
+            }
+        }
+        Ok(result)
+    }
+
     pub(super) fn text_line(&mut self) -> Result<Str> {
         let mut line = std::mem::take(&mut self.text.line_scratch);
         line.clear();
@@ -376,5 +436,35 @@ impl TextBuffer {
         }
         self.decoded.push_str(text);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn an_unseekable_writer_keeps_pending_bytes_after_seek() {
+        let (sender, mut receiver) = UnixStream::pair().unwrap();
+        receiver.set_nonblocking(true).unwrap();
+        let mut output = Output::new(File::from(OwnedFd::from(sender)), 64, true);
+        output.write(b"pending").unwrap();
+        assert!(output.tell().unwrap_err().is_kind(Kind::OSError));
+        assert!(
+            output
+                .seek(SeekFrom::Start(0))
+                .unwrap_err()
+                .is_kind(Kind::UnsupportedOperation)
+        );
+        let mut bytes = [0; 7];
+        assert_eq!(
+            receiver.read(&mut bytes).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        output.flush().unwrap();
+        receiver.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"pending");
     }
 }

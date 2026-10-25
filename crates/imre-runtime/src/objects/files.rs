@@ -163,6 +163,14 @@ impl FileState {
         self.input()?.read_text()
     }
 
+    pub(super) fn read_text_size(&mut self, value: &Int) -> Result<Str> {
+        let size = super::bytes::native_size(value)?;
+        match usize::try_from(size) {
+            Ok(size) => self.input()?.read_text_size(size),
+            Err(_) => self.read(),
+        }
+    }
+
     pub(super) fn readline(&mut self) -> Result<Str> {
         if self.kind == FileKind::TextMemory {
             return self.text_memory()?.read(None, true);
@@ -189,7 +197,7 @@ impl FileState {
         Ok(file)
     }
 
-    fn read_size(&mut self, value: &Int) -> Result<Bytes> {
+    pub(super) fn read_size(&mut self, value: &Int) -> Result<Bytes> {
         // GzipFile checks its own closed state before forwarding the argument
         // to BufferedReader. A plain BufferedWriter validates a C int first.
         if self.kind == FileKind::Member {

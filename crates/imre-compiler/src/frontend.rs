@@ -6767,6 +6767,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::RandomChoice)) => return self.random_choice(call),
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
+            Some(Binding::Intrinsic(Intrinsic::CopyFileObj)) => {
+                return self.shutil_copyfileobj(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::MakeArchive)) => {
                 return self.shutil_archive(call, true);
             }

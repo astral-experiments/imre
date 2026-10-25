@@ -1,0 +1,101 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "optimization_levels": {
+    "0": {
+      "test.test_shutil.TestCopyFileObj.test_content": {
+        "status": "host_driven_native",
+        "native_calls": 1,
+        "fixture": "original open file descriptions shared by dup",
+        "start": [
+          0,
+          0
+        ],
+        "end": [
+          2097152,
+          2097152
+        ],
+        "both_open": true
+      },
+      "test.test_shutil.TestCopyFileObj.test_file_not_closed": {
+        "status": "host_driven_native",
+        "native_calls": 1,
+        "fixture": "original open file descriptions shared by dup",
+        "start": [
+          0,
+          0
+        ],
+        "end": [
+          2097152,
+          2097152
+        ],
+        "both_open": true
+      },
+      "test.test_shutil.TestCopyFileObj.test_file_offset": {
+        "status": "host_driven_native",
+        "native_calls": 1,
+        "fixture": "original open file descriptions shared by dup",
+        "start": [
+          0,
+          0
+        ],
+        "end": [
+          2097152,
+          2097152
+        ],
+        "both_open": true
+      },
+      "test.test_shutil.TestCopyFileObj.test_win_impl": {
+        "status": "reference_skip",
+        "reason": "Windows only"
+      }
+    },
+    "3": {
+      "test.test_shutil.TestCopyFileObj.test_content": {
+        "status": "host_driven_native",
+        "native_calls": 1,
+        "fixture": "original open file descriptions shared by dup",
+        "start": [
+          0,
+          0
+        ],
+        "end": [
+          2097152,
+          2097152
+        ],
+        "both_open": true
+      },
+      "test.test_shutil.TestCopyFileObj.test_file_not_closed": {
+        "status": "host_driven_native",
+        "native_calls": 1,
+        "fixture": "original open file descriptions shared by dup",
+        "start": [
+          0,
+          0
+        ],
+        "end": [
+          2097152,
+          2097152
+        ],
+        "both_open": true
+      },
+      "test.test_shutil.TestCopyFileObj.test_file_offset": {
+        "status": "host_driven_native",
+        "native_calls": 1,
+        "fixture": "original open file descriptions shared by dup",
+        "start": [
+          0,
+          0
+        ],
+        "end": [
+          2097152,
+          2097152
+        ],
+        "both_open": true
+      },
+      "test.test_shutil.TestCopyFileObj.test_win_impl": {
+        "status": "reference_skip",
+        "reason": "Windows only"
+      }
+    }
+  }
+}

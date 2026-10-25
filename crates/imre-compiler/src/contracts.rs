@@ -271,6 +271,7 @@ impl Builtin {
                 | ProcessOperation::IgnorePatterns
                 | ProcessOperation::TreeErrorArgs
                 | ProcessOperation::Copy(_)
+                | ProcessOperation::CopyFileObj
                 | ProcessOperation::MakeArchive
                 | ProcessOperation::UnpackArchive
                 | ProcessOperation::ArchiveFormats { .. }
