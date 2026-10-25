@@ -1,6 +1,7 @@
 """Native call recording for fixed-layout unittest.mock users."""
 
 from _imre_mock import is_call_list, mark_call_list
+from dataclasses import dataclass, field
 
 
 def _format_list(parts: list[str], pretty: bool) -> str:
@@ -72,8 +73,9 @@ class _PatchFactory:
 patch = _PatchFactory()
 
 
+@dataclass(repr=False)
 class _Arg:
-    text: str
+    text: str = field(compare=False)
     key: str
 
     def __init__(self, text: str, kind: str) -> None:
@@ -81,13 +83,10 @@ class _Arg:
         self.key = _key(text, kind)
 
 
+@dataclass(repr=False)
 class _Call:
     _args: list[_Arg]
     _kwargs: dict[str, _Arg]
-
-    def __init__(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
-        self._args = args
-        self._kwargs = kwargs
 
     def _format(self, name: str) -> str:
         parts: list[str] = []
@@ -109,17 +108,6 @@ class _Call:
         for value in values:
             parts.append(value._format("call"))
         return _format_list(parts, is_call_list(values))
-
-    def _matches(self, other: _Call) -> bool:
-        if len(self._args) != len(other._args) or len(self._kwargs) != len(other._kwargs):
-            return False
-        for i in range(len(self._args)):
-            if self._args[i].key != other._args[i].key:
-                return False
-        for key in self._kwargs:
-            if key not in other._kwargs or self._kwargs[key].key != other._kwargs[key].key:
-                return False
-        return True
 
 
 def _new_call_list() -> list[_Call]:
@@ -269,7 +257,7 @@ class Mock:
     def _assert_called_with(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
         expected = _Call(args, kwargs)
         observed = self._node.call_args
-        if observed is not None and expected._matches(observed):
+        if observed is not None and expected == observed:
             return
         actual = "not called." if observed is None else observed._format(self._name())
         raise AssertionError("expected call not found.\nExpected: " + expected._format(self._name()) + "\n  Actual: " + actual)
@@ -277,7 +265,7 @@ class Mock:
     def _assert_any_call(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
         expected = _Call(args, kwargs)
         for actual in self._node.call_args_list:
-            if expected._matches(actual):
+            if expected == actual:
                 return
         raise AssertionError(expected._format(self._name()) + " call not found")
 

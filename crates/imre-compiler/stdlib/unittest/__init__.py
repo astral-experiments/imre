@@ -173,13 +173,13 @@ class TestCase:
     def _bound_assertRaises(self) -> _BoundRaises:
         return _BoundRaises(self)
 
-    def assertTrue(self, expr: bool, msg: str | None = None) -> None:
+    def assertTrue(self, expr: object, msg: str | None = None) -> None:
         if not expr:
-            self.fail(self._formatMessage(msg, repr(expr) + " is not true"))
+            raise self.failureException(self._formatMessage(msg, repr(expr) + " is not true"))
 
-    def assertFalse(self, expr: bool, msg: str | None = None) -> None:
+    def assertFalse(self, expr: object, msg: str | None = None) -> None:
         if expr:
-            self.fail(self._formatMessage(msg, repr(expr) + " is not false"))
+            raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
 
     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
         if not a < b:
@@ -199,7 +199,7 @@ class TestCase:
 
     def _baseAssertEqual(self, first: int, second: int, msg: str | None = None) -> None:
         if first != second:
-            self.fail(self._formatMessage(msg, f"{first!r} != {second!r}"))
+            raise self.failureException(self._formatMessage(msg, f"{first!r} != {second!r}"))
 
     def _truncateMessage(self, message: str, diff: str) -> str:
         limit = self.maxDiff
@@ -225,6 +225,8 @@ class TestCase:
                 second += "\n"
             changes = list(difflib.ndiff(_kept_lines(first), _kept_lines(second)))
             standard = self._truncateMessage(standard, "\n" + "".join(changes))
+        else:
+            raise self.failureException(self._formatMessage(msg, standard))
         self.fail(self._formatMessage(msg, standard))
 
     def _list_difference(self, left: list[str], right: list[str], pretty1: list[str],
@@ -297,7 +299,7 @@ class TestCase:
 
     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
         if first == second:
-            self.fail(self._formatMessage(msg, f"{first!r} == {second!r}"))
+            raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
 
     def assertHasAttr(self, obj: ModuleType, name: str, msg: str | None = None) -> None:
         if not hasattr(obj, name):

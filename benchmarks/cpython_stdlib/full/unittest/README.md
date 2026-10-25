@@ -148,3 +148,8 @@ method hashes, and each native diagnostic. These are ordinary blockers.
 
 The subprocess and shutil owners retain their original suite evidence:
 an imported mock or an assertion control does not verify their product operations.
+
+The [default-fixture audit](DEFAULT_FIXTURE_AUDIT.md) records what happens when
+the shared entry attempts every original occurrence with the full CPython test
+package available. Each record identifies the native outcome or the first
+fixture or compiler blocker for that entry.
