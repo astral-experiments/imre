@@ -45,6 +45,7 @@ impl Emitter<'_, '_> {
                     "call i32 @imre_path_is_relative_to(ptr {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
+                self.check_error();
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {answer}, 0")),
