@@ -66,6 +66,7 @@ impl Builtin {
                 Contract::new(true, Unknown)
             }
             Self::ImportErrorReset => Contract::new(false, Unknown),
+            Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
@@ -650,6 +651,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_chr"
                 | "imre_json_index"
                 | "imre_exception_message"
+                | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
                 | "imre_json_iter"
                 | "imre_json_len"
