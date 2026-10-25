@@ -137,6 +137,11 @@ fn field(owner: Expr, slot: usize, ty: Type) -> Expr {
 }
 
 fn cache_table(types: &Types, params: &[Type], result: Type) -> Type {
+    if let [arg] = params
+        && types.is_len_argument(*arg)
+    {
+        return types.dict(types.len_key(), types.tuple(vec![*arg, result]));
+    }
     let key = match params {
         [] => Type::Int,
         [key] => *key,
@@ -167,8 +172,31 @@ fn build_wrapper(
         .map(|(i, &ty)| local(i + usize::from(context.is_some()), ty))
         .collect();
     let mut body = Vec::new();
+    let len_arg = match args.as_slice() {
+        [arg] if types.is_len_argument(arg.ty) => Some(arg.clone()),
+        _ => None,
+    };
+    if policy.capacity != 0 {
+        for arg in &args {
+            if types.is_len_argument(arg.ty) {
+                let message = field(arg.clone(), 1, Type::Str);
+                body.push(Statement::If(
+                    builtin(Builtin::Bool, Type::Bool, vec![message.clone()]),
+                    vec![Statement::Raise(Some(Expr {
+                        ty: Type::Exception,
+                        kind: ExprKind::Exception {
+                            kind: exception_kind("TypeError").unwrap(),
+                            message: Some(Box::new(message)),
+                        },
+                    }))],
+                    vec![],
+                ));
+            }
+        }
+    }
     let key = match args.as_slice() {
         [] => pipelines::integer(0),
+        [arg] if types.is_len_argument(arg.ty) => field(arg.clone(), 2, types.len_key()),
         [arg] => arg.clone(),
         _ => {
             let ty = types.tuple(parameters.to_vec());
@@ -184,7 +212,8 @@ fn build_wrapper(
             local(slot, ty)
         }
     };
-    let table = types.dict(key.ty, value);
+    let table = cache_table(types, parameters, value);
+    let stored = types.mapping(table).unwrap().1;
     let state_ty = table.cache_state();
     let state_slot = locals.len();
     let table_slot = state_slot + 1;
@@ -203,15 +232,17 @@ fn build_wrapper(
         vec![state(), key.clone()],
     );
     body.push(Statement::Assign(table_slot, cache()));
-    body.push(Statement::If(
-        probe,
-        vec![Statement::Return(builtin(
-            Builtin::DictGet,
-            value,
-            vec![local(table_slot, table), key.clone()],
-        ))],
-        vec![],
-    ));
+    let hit = builtin(
+        Builtin::DictGet,
+        stored,
+        vec![local(table_slot, table), key.clone()],
+    );
+    let hit = if len_arg.is_some() {
+        field(hit, 1, value)
+    } else {
+        hit
+    };
+    body.push(Statement::If(probe, vec![Statement::Return(hit)], vec![]));
     body.push(Statement::Clear(table_slot));
     body.push(Statement::Assign(
         result_slot,
@@ -226,19 +257,23 @@ fn build_wrapper(
             },
         },
     ));
+    // A cache using a normalized lookup key still owns the originally supplied object.
+    let entry = match len_arg {
+        Some(arg) => Expr {
+            ty: stored,
+            kind: ExprKind::Tuple(vec![arg, local(result_slot, value)]),
+        },
+        None => local(result_slot, value),
+    };
     if policy.capacity < 0 {
         // A callback can clear its own cache. Use the table installed after it returns.
         body.push(Statement::Assign(table_slot, cache()));
-        body.push(Statement::SetItem(
-            local(table_slot, table),
-            key,
-            local(result_slot, value),
-        ));
+        body.push(Statement::SetItem(local(table_slot, table), key, entry));
     } else if policy.capacity > 0 {
         body.push(Statement::Expr(builtin(
             Builtin::CacheInsert(policy.capacity),
             Type::None,
-            vec![state(), key, local(result_slot, value)],
+            vec![state(), key, entry],
         )));
     }
     body.push(Statement::Return(local(result_slot, value)));
@@ -347,7 +382,9 @@ impl Checker<'_> {
             )
         })?;
         if matches!(returns, Type::Coroutine(_))
-            || !params.iter().all(|&ty| self.types.hashable_key(ty))
+            || !params
+                .iter()
+                .all(|&ty| self.types.hashable_key(ty) || self.types.is_len_argument(ty))
         {
             return Err(error(
                 self.source,
@@ -373,6 +410,7 @@ impl Checker<'_> {
                 module: self.module,
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: self.graph.modules[self.module].error(
                     site,
                     "recursive indirect cache applications are unsupported",

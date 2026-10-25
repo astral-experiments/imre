@@ -11,8 +11,8 @@ use crate::contracts::{
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
-    Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType,
-    Module, RegexCapture, Statement, TUPLE_PROBE_ARITY, Type,
+    self, Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function,
+    InstanceType, Module, RegexCapture, Statement, TUPLE_PROBE_ARITY, Type,
 };
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
@@ -57,6 +57,7 @@ impl Type {
             Self::Str
             | Self::ForwardRef(_)
             | Self::AnnotationValue(_)
+            | Self::CmpKey(..)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -116,6 +117,8 @@ impl Type {
             | Self::CodecInfo
             | Self::Poll
             | Self::Socket
+            | Self::CodecWriterClass
+            | Self::CodecWriter
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -146,6 +149,7 @@ impl Type {
             Self::Str
             | Self::ForwardRef(_)
             | Self::AnnotationValue(_)
+            | Self::CmpKey(..)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -205,6 +209,8 @@ impl Type {
             | Self::CodecInfo
             | Self::Poll
             | Self::Socket
+            | Self::CodecWriterClass
+            | Self::CodecWriter
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -446,7 +452,8 @@ fn emit_program(
             emitter.next_value = 0;
             emitter.next_label = 0;
         }
-        let params = emitter.function(function, entry, &borrows[id])?;
+        let frame = module.source_frames.get(id).and_then(Option::as_ref);
+        let params = emitter.function(function, entry, frame, &borrows[id])?;
         bodies.push((params, std::mem::take(&mut emitter.code)));
     }
     emitter
@@ -837,6 +844,7 @@ impl Emitter<'_, '_> {
             | Type::AnnotationValue(_)
             | Type::VarTuple(_)
             | Type::ModuleSpec(_)
+            | Type::CmpKey(..)
             | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
@@ -888,6 +896,8 @@ impl Emitter<'_, '_> {
             | Type::CodecInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -1774,6 +1784,7 @@ impl Emitter<'_, '_> {
         &mut self,
         function: &Function,
         entry: bool,
+        frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
     ) -> Result<String, String> {
         self.entry_allocas.clear();
@@ -1921,6 +1932,22 @@ impl Emitter<'_, '_> {
         if entry && self.uses_sys_argv {
             self.line("call void @imre_args_init(i32 %argc, ptr %argv)");
         }
+        let leave_frame = match frame {
+            Some(ir::SourceFrame::Module(name)) => {
+                let name = self.pooled_literal(name.as_bytes(), Type::Str);
+                // The frame takes this reference, including on a rejected entry.
+                self.checked_line(format!(
+                    "call void @imre_named_frame_enter(ptr {})",
+                    name.operand
+                ));
+                Some("call void @imre_named_frame_leave()")
+            }
+            Some(ir::SourceFrame::Depth) => {
+                self.checked_line("call void @imre_recursion_enter()");
+                Some("call void @imre_recursion_leave()")
+            }
+            None => None,
+        };
         self.block(&function.body);
         if !self.terminated {
             self.jump(&self.return_exit.clone());
@@ -1930,6 +1957,9 @@ impl Emitter<'_, '_> {
             out.line(format!("call void @imre_object_release(ptr {frame})"));
         });
         self.cleanup(&cleanup_slots);
+        if let Some(leave) = leave_frame {
+            self.line(leave);
+        }
         if entry {
             if self.has_extensions {
                 self.line("call void @imre_extension_clear()");
@@ -1968,6 +1998,9 @@ impl Emitter<'_, '_> {
             ));
         });
         self.cleanup(&cleanup_slots);
+        if let Some(leave) = leave_frame {
+            self.line(leave);
+        }
         if entry {
             if self.has_extensions {
                 self.line("call void @imre_extension_clear()");
@@ -3434,6 +3467,7 @@ impl Emitter<'_, '_> {
             self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
         } else {
             match left.ty {
+                Type::CmpKey(..) => unreachable!("comparator keys use their callback"),
                 Type::ForwardRef(_) | Type::AnnotationValue(_) => {
                     let symbol = if matches!(left.ty, Type::ForwardRef(_)) {
                         "imre_forward_ref_equal"
@@ -3619,6 +3653,8 @@ impl Emitter<'_, '_> {
                 | Type::CodecInfo
                 | Type::Poll
                 | Type::Socket
+                | Type::CodecWriterClass
+                | Type::CodecWriter
                 | Type::Sha256
                 | Type::JsonDecoder
                 | Type::ZipFile
@@ -4906,6 +4942,20 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
+            Builtin::BuiltinsLen => {
+                let layout = self.output.global_ref("layout_callable".to_owned());
+                let value = Value {
+                    ty: returns,
+                    operand: self
+                        .checked_pointer(format!("call ptr @imre_builtins_len(ptr @{layout})")),
+                    small_integer: false,
+                };
+                self.owned(value)
+            }
+            Builtin::BuiltinsSetLen => {
+                self.void_call("imre_builtins_set_len", &[&args[0].value]);
+                none()
+            }
             Builtin::BuiltinsHasLast => {
                 let bit = self.instruction("call i32 @imre_builtins_has_last()");
                 Value {
@@ -4963,6 +5013,9 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::SysGetFrameModuleName => {
+                self.call("imre_sys_getframemodulename", returns, &[&args[0].value])
+            }
             Builtin::SysVersionInfo { implementation } => {
                 let root = if *implementation {
                     "sys_implementation_version"
@@ -5002,6 +5055,13 @@ impl Emitter<'_, '_> {
                     operand: self.instruction(format!("ptrtoint ptr {pointer} to i64")),
                     small_integer: false,
                 }
+            }
+            Builtin::SysGetRecursionLimit => {
+                self.call("imre_sys_getrecursionlimit", Type::Int, &[])
+            }
+            Builtin::SysSetRecursionLimit => {
+                self.void_call("imre_sys_setrecursionlimit", &[&args[0].value]);
+                none()
             }
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::SysIntern => {
@@ -5300,6 +5360,43 @@ impl Emitter<'_, '_> {
                 self.call("imre_codec_lookup", Type::CodecInfo, &[&args[0].value])
             }
             Builtin::CodecName => self.call("imre_codec_name", Type::Str, &[&args[0].value]),
+            Builtin::CodecWriter(op) => {
+                use crate::ir::WriterOperation::*;
+                let values = args.iter().map(|arg| &arg.value).collect::<Vec<_>>();
+                match op {
+                    Flush | Close | Reset => {
+                        let mode = match op {
+                            Flush => 0,
+                            Close => 1,
+                            _ => 2,
+                        };
+                        self.checked_line(format!(
+                            "call void @imre_codec_writer_control(ptr {}, i32 {mode})",
+                            args[0].value.operand
+                        ));
+                        none()
+                    }
+                    _ => {
+                        let name = match op {
+                            Class => "imre_codec_writer_class",
+                            New => "imre_codec_writer_new",
+                            Write => "imre_codec_writer_write",
+                            Encoding => "imre_codec_writer_encoding",
+                            SetEncoding => "imre_codec_writer_set_encoding",
+                            Stream => "imre_codec_writer_stream",
+                            Errors => "imre_codec_writer_errors",
+                            SetErrors => "imre_codec_writer_set_errors",
+                            Flush | Close | Reset => unreachable!(),
+                        };
+                        if returns == Type::None {
+                            self.void_call(name, &values);
+                            none()
+                        } else {
+                            self.call(name, returns, &values)
+                        }
+                    }
+                }
+            }
             Builtin::CodecEncode | Builtin::CodecDecode => self.call(
                 if matches!(builtin, Builtin::CodecEncode) {
                     "imre_codec_encode"
@@ -5505,6 +5602,9 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::BytesIo => self.call("imre_bytes_io", returns, &[&args[0].value]),
+            Builtin::BytesIoValue => {
+                self.call("imre_bytes_io_value", Type::Bytes, &[&args[0].value])
+            }
             Builtin::BinarySeek => self.call(
                 "imre_binary_seek",
                 returns,
@@ -7028,6 +7128,7 @@ impl Emitter<'_, '_> {
                     | Type::ForwardRef(_)
                     | Type::FunctionRef
                     | Type::AnnotationValue(_)
+                    | Type::CmpKey(..)
                     | Type::BuiltinClass
                     | Type::Class(_)
                     | Type::List(_)
@@ -7080,6 +7181,8 @@ impl Emitter<'_, '_> {
                     | Type::CodecInfo
                     | Type::Poll
                     | Type::Socket
+                    | Type::CodecWriterClass
+                    | Type::CodecWriter
                     | Type::Sha256
                     | Type::JsonDecoder
                     | Type::ZipFile
@@ -7312,6 +7415,7 @@ impl Emitter<'_, '_> {
             | Type::ForwardRef(_)
             | Type::FunctionRef
             | Type::AnnotationValue(_)
+            | Type::CmpKey(..)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -7370,6 +7474,8 @@ impl Emitter<'_, '_> {
             | Type::CodecInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -7415,6 +7521,7 @@ impl Emitter<'_, '_> {
             | Type::ForwardRef(_)
             | Type::FunctionRef
             | Type::AnnotationValue(_)
+            | Type::CmpKey(..)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -7473,6 +7580,8 @@ impl Emitter<'_, '_> {
             | Type::CodecInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -8058,6 +8167,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Class(_)
         | Type::VarTuple(_)
         | Type::Tuple(_)
+        | Type::CmpKey(..)
         | Type::Callable(_)
         | Type::ModuleSpec(_)
         | Type::CompletedProcess(..) => 6,
@@ -8111,6 +8221,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::CodecInfo
         | Type::Poll
         | Type::Socket
+        | Type::CodecWriterClass
+        | Type::CodecWriter
         | Type::Sha256
         | Type::JsonDecoder
         | Type::ZipFile
@@ -8577,6 +8689,15 @@ declare ptr @imre_codec_lookup(ptr)
 declare ptr @imre_codec_name(ptr)
 declare ptr @imre_codec_encode(ptr, ptr, ptr)
 declare ptr @imre_codec_decode(ptr, ptr, ptr)
+declare ptr @imre_codec_writer_class(ptr)
+declare ptr @imre_codec_writer_new(ptr, ptr, ptr)
+declare void @imre_codec_writer_write(ptr, ptr)
+declare void @imre_codec_writer_control(ptr, i32)
+declare ptr @imre_codec_writer_encoding(ptr)
+declare void @imre_codec_writer_set_encoding(ptr, ptr)
+declare ptr @imre_codec_writer_stream(ptr)
+declare ptr @imre_codec_writer_errors(ptr)
+declare void @imre_codec_writer_set_errors(ptr, ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()
 declare void @imre_sha256_update(ptr, ptr)
@@ -8584,6 +8705,7 @@ declare ptr @imre_sha256_digest(ptr)
 declare ptr @imre_sha256_hexdigest(ptr)
 declare ptr @imre_sha256_copy(ptr)
 declare ptr @imre_bytes_io(ptr)
+declare ptr @imre_bytes_io_value(ptr)
 declare ptr @imre_string_io(i64, i64)
 declare i64 @imre_string_io_newlines(ptr, ptr, ptr)
 declare i1 @imre_string_io_capable(ptr)
@@ -8975,6 +9097,8 @@ declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_builtins_last()
+declare ptr @imre_builtins_len(ptr)
+declare void @imre_builtins_set_len(ptr)
 declare i32 @imre_builtins_has_last()
 declare void @imre_builtins_set_last(i32, i64)
 declare void @imre_builtins_del_last()
@@ -8982,6 +9106,13 @@ declare void @imre_builtins_clear()
 declare void @imre_sys_displayhook(i32, i64)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
+declare void @imre_recursion_enter()
+declare void @imre_recursion_leave()
+declare void @imre_named_frame_enter(ptr)
+declare void @imre_named_frame_leave()
+declare i64 @imre_sys_getframemodulename(i64)
+declare i64 @imre_sys_getrecursionlimit()
+declare void @imre_sys_setrecursionlimit(i64)
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)

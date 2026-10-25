@@ -1313,6 +1313,7 @@ impl Checker<'_> {
                 },
                 calls: HashSet::from([constructor]),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: error(
                     self.source,
                     at,

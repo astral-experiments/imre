@@ -18,6 +18,63 @@ use std::sync::Arc;
 
 type Pipes = [Option<crate::ObjectOwner>; 3];
 
+#[derive(Default)]
+pub(super) struct ChildPipes {
+    pub(super) ends: [Option<Stdio>; 3],
+    pub(super) closed_descriptor: bool,
+    pub(super) devnull: Option<fs::File>,
+}
+
+impl ChildPipes {
+    /// Open all pipe handles before allocating their Python stream buffers.
+    fn open(modes: [u32; 3], descriptors: [RawFd; 3]) -> Result<(Self, [Option<OwnedFd>; 3])> {
+        let mut child = Self::default();
+        let mut parents = [None, None, None];
+        if modes.iter().any(|mode| matches!(mode, 1 | 2)) {
+            // Remember closed explicit descriptors before a new pipe can reuse their number.
+            child.closed_descriptor = descriptors.into_iter().any(|fd| {
+                // SAFETY: F_GETFD checks the integer without taking ownership.
+                fd >= 0 && unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0
+            });
+        }
+        for (i, mode) in modes.into_iter().enumerate() {
+            if mode == 1 {
+                let (read, write) = io::pipe().map_err(errno_error)?;
+                let (read, write): (OwnedFd, OwnedFd) = (read.into(), write.into());
+                let (parent, other) = if i == 0 { (write, read) } else { (read, write) };
+                parents[i] = Some(parent);
+                child.ends[i] = Some(Stdio::from(other));
+            } else if mode == 2 && child.devnull.is_none() {
+                child.devnull = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open("/dev/null")
+                        .map_err(errno_error)?,
+                );
+            }
+        }
+        Ok((child, parents))
+    }
+}
+
+/// Explicit descriptors and any handles already opened by Popen's constructor.
+pub(super) struct Redirects {
+    pub(super) fds: [RawFd; 3],
+    pub(super) oversized: bool,
+    pub(super) prepared: Option<ChildPipes>,
+}
+
+impl Default for Redirects {
+    fn default() -> Self {
+        Self {
+            fds: [-1; 3],
+            oversized: false,
+            prepared: None,
+        }
+    }
+}
+
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
     control: Arc<ChildControl>,
@@ -353,13 +410,14 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             _ => -1,
         };
     }
+    let (prepared, parents) = ChildPipes::open(modes, descriptors)?;
     // Python opens the parent-side pipe wrappers after it collects the file handles.
     let bufsize = if modes.contains(&1) {
         // SAFETY: the caller roots the buffer-size integer.
         let size = unsafe { Int::borrow(config.bufsize) };
         match c_int(&size) {
             Some(size) => size,
-            None => return Err(error_after_handles(&modes, false, c_int_overflow())),
+            None => return Err(c_int_overflow()),
         }
     } else {
         -1
@@ -413,33 +471,27 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             keep,
         })
     };
-    // SAFETY: the compiler supplies the same exact owners as subprocess.run.
-    let child = unsafe {
-        launch_error::spawn(
-            &args,
-            config,
-            streams,
-            descriptors,
-            oversized,
-            allow_spawn,
-            child,
-        )
-    };
-    child.map(|mut child| {
-        let text = streams & (1 << 16) != 0;
-        let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
-        let pipes = [
-            child.stdin.take().map(|fd| pipe(fd.into(), false)),
-            child.stdout.take().map(|fd| pipe(fd.into(), true)),
-            child.stderr.take().map(|fd| pipe(fd.into(), true)),
-        ];
-        Popen {
-            pipes,
-            args,
-            control: Arc::new(ChildControl::new(child)),
-            communication: Default::default(),
-            finalized: false,
+    let text = streams & (1 << 16) != 0;
+    let mut pipes: Pipes = [None, None, None];
+    for (i, parent) in parents.into_iter().enumerate() {
+        if let Some(fd) = parent {
+            pipes[i] = Some(FileState::pipe(fd.into(), i != 0, text, bufsize)?);
         }
+    }
+    let redirects = Redirects {
+        fds: descriptors,
+        oversized,
+        prepared: Some(prepared),
+    };
+    // SAFETY: the compiler supplies the same exact owners as subprocess.run.
+    let child =
+        unsafe { launch_error::spawn(&args, config, streams, redirects, allow_spawn, child) }?;
+    Ok(Popen {
+        pipes,
+        args,
+        control: Arc::new(ChildControl::new(child)),
+        communication: Default::default(),
+        finalized: false,
     })
 }
 

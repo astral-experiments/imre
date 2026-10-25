@@ -368,6 +368,8 @@ impl Builtin {
             | Self::CodecLookup
             | Self::CodecEncode
             | Self::CodecDecode
+            | Self::BytesIoValue
+            | Self::CodecWriter(_)
             | Self::HashNew
             | Self::DecodeSplitLines
             | Self::SplitLines
@@ -463,6 +465,7 @@ impl Builtin {
             | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
+            | Self::SysGetRecursionLimit
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
             | Self::IsBuiltinSubclass
@@ -580,12 +583,16 @@ impl Builtin {
             | Self::SortRestore
             | Self::StderrLine
             | Self::BuiltinsLast
+            | Self::BuiltinsLen
+            | Self::BuiltinsSetLen
             | Self::BuiltinsHasLast
             | Self::BuiltinsSetLast
             | Self::BuiltinsDeleteLast
             | Self::SysDisplayHook
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
+            | Self::SysGetFrameModuleName
+            | Self::SysSetRecursionLimit
             | Self::RaiseException
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
@@ -1040,6 +1047,10 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_codec_lookup"
                 | "imre_codec_encode"
                 | "imre_codec_decode"
+                | "imre_bytes_io_value"
+                | "imre_codec_writer_encoding"
+                | "imre_codec_writer_write"
+                | "imre_codec_writer_control"
                 | "imre_hash_new"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
@@ -1057,6 +1068,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_sys_displayhook"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
+                | "imre_sys_getframemodulename"
+                | "imre_sys_setrecursionlimit"
                 | "imre_path_as_posix"
                 | "imre_path_join"
                 | "imre_path_join_object"
