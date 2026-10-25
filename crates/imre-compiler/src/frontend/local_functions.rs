@@ -118,14 +118,25 @@ impl Checker<'_> {
 
     /// Only an unconditional definition in the enclosing function's suite can
     /// introduce a fixed call target. Reserve its spelling throughout the suite.
-    pub(super) fn collect_local_functions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
-        let mut in_suite = HashSet::new();
+    pub(super) fn collect_local_definitions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
+        self.collect_suite_definitions(stmts, true)
+    }
+
+    pub(super) fn collect_suite_definitions(
+        &mut self,
+        stmts: &[ast::Stmt],
+        include_classes: bool,
+    ) -> Result<(), String> {
+        let mut suite_functions = HashSet::new();
         for (index, statement) in stmts.iter().enumerate() {
-            let Some(function) = statement.as_function_def_stmt() else {
-                continue;
+            let name = match statement {
+                ast::Stmt::ClassDef(class) if include_classes => class.name.as_str(),
+                ast::Stmt::FunctionDef(function) => function.name.as_str(),
+                _ => continue,
             };
-            let name = function.name.as_str();
-            if !in_suite.insert(name.to_owned()) {
+            if let ast::Stmt::FunctionDef(function) = statement
+                && !suite_functions.insert(name)
+            {
                 let binding = self.local_functions.get_mut(name).unwrap();
                 binding.sites.push(function.range);
                 binding.value_read |= reads_function_value(&stmts[index + 1..], name);
@@ -136,13 +147,28 @@ impl Checker<'_> {
                 || self.graph.modules[self.module].bindings.contains_key(name)
                 || self.class_receiver.as_deref() == Some(name)
                 || self.local_functions.contains_key(name)
+                || self.local_classes.contains_key(name)
             {
                 return Err(error(
                     self.source,
-                    function,
-                    "local functions require a unique unshadowed name",
+                    statement,
+                    if statement.is_class_def_stmt() {
+                        "local classes require a unique unshadowed name"
+                    } else {
+                        "local functions require a unique unshadowed name"
+                    },
                 ));
             }
+            let Some(function) = statement.as_function_def_stmt() else {
+                self.local_classes.insert(
+                    name.to_owned(),
+                    local_classes::Binding {
+                        site: statement.range(),
+                        value: None,
+                    },
+                );
+                continue;
+            };
             self.local_functions.insert(
                 name.to_owned(),
                 Binding {

@@ -9,8 +9,8 @@
     "distinct_ids": 353,
     "counts": {
       "blocked": 178,
-      "failed": 17,
-      "host-driven-native-operation": 72,
+      "failed": 15,
+      "host-driven-native-operation": 74,
       "host-operation": 6,
       "mixed": 9,
       "native-body-host-fixture": 30,
@@ -1197,25 +1197,22 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
         },
-        "reason": "AssertionError: filter ('', ResourceWarning) did not catch any warning",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          }
+          "imre_revision": "c6a2c4b4d870e8ccbaa296f0fd18ea585e87d511",
+          "tested_tree": "d0785aeda2d2799bfdba1e2247d3ac09282fe19a",
+          "source": "active-children-linux.json",
+          "operation": "native parent: finalizer warned for actual child PID, retained original Popen in _active, reaped SIGKILL before the subsequent failed exec; fixture waitpid returned ECHILD",
+          "fixture": "unchanged CPython body, assertions, warning capture and teardown; two pipe closes, _active and _cleanup delegated to their native owner; literal Python data child ran on pinned CPython",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pass_fds",
@@ -2139,25 +2136,22 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
         },
-        "reason": "AssertionError: filter ('', ResourceWarning) did not catch any warning",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          }
+          "imre_revision": "c6a2c4b4d870e8ccbaa296f0fd18ea585e87d511",
+          "tested_tree": "d0785aeda2d2799bfdba1e2247d3ac09282fe19a",
+          "source": "active-children-linux.json",
+          "operation": "native parent: finalizer warned for actual child PID, retained original Popen in _active, original teardown waited on the retained child (exit 0) and _cleanup removed it",
+          "fixture": "unchanged CPython body, assertions, warning capture and teardown; two pipe closes, _active and _cleanup delegated to their native owner; literal Python data child ran on pinned CPython",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_bufsize_equal_one_binary_mode",
@@ -3827,24 +3821,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "OSError: [Errno 24] Too many open files",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 3,
-            "communicate": 3,
-            "streams": 3
-          }
+          "opt_level": 0,
+          "imre_revision": "12a645f666187b35ebfaa4c53ad152187bb356d7",
+          "tested_tree": "3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26",
+          "operation": "one native parent launched 15 three-pipe children and communicated with the original input; each child exited zero and the entire original descriptor table was unchanged after every wait",
+          "fixture": "unchanged CPython body, assertions and hooks; PollSelector in the native parent; 1011 original file descriptions, original numbers and CLOEXEC, ten free slots",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
+          "source": "pressure-replay-linux.json"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_nonexisting_with_pipes",
@@ -6527,24 +6520,23 @@
         "opt_level": 0,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "OSError: [Errno 24] Too many open files",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 3,
-            "communicate": 3,
-            "streams": 3
-          }
+          "opt_level": 0,
+          "imre_revision": "12a645f666187b35ebfaa4c53ad152187bb356d7",
+          "tested_tree": "3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26",
+          "operation": "one native parent launched 15 three-pipe children and communicated with the original input; each child exited zero and the entire original descriptor table was unchanged after every wait",
+          "fixture": "unchanged CPython body, assertions and hooks; SelectSelector in the native parent; 1011 original file descriptions, original numbers and CLOEXEC, ten free slots",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
+          "source": "pressure-replay-linux.json"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_nonexisting_with_pipes",
@@ -8551,8 +8543,8 @@
     "distinct_ids": 353,
     "counts": {
       "blocked": 178,
-      "failed": 17,
-      "host-driven-native-operation": 72,
+      "failed": 15,
+      "host-driven-native-operation": 74,
       "host-operation": 6,
       "mixed": 9,
       "native-body-host-fixture": 30,
@@ -9739,25 +9731,22 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
         },
-        "reason": "AssertionError: filter ('', ResourceWarning) did not catch any warning",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          }
+          "imre_revision": "c6a2c4b4d870e8ccbaa296f0fd18ea585e87d511",
+          "tested_tree": "d0785aeda2d2799bfdba1e2247d3ac09282fe19a",
+          "source": "active-children-linux.json",
+          "operation": "native parent: finalizer warned for actual child PID, retained original Popen in _active, reaped SIGKILL before the subsequent failed exec; fixture waitpid returned ECHILD",
+          "fixture": "unchanged CPython body, assertions, warning capture and teardown; two pipe closes, _active and _cleanup delegated to their native owner; literal Python data child ran on pinned CPython",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pass_fds",
@@ -10681,25 +10670,22 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
         },
-        "reason": "AssertionError: filter ('', ResourceWarning) did not catch any warning",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          }
+          "imre_revision": "c6a2c4b4d870e8ccbaa296f0fd18ea585e87d511",
+          "tested_tree": "d0785aeda2d2799bfdba1e2247d3ac09282fe19a",
+          "source": "active-children-linux.json",
+          "operation": "native parent: finalizer warned for actual child PID, retained original Popen in _active, original teardown waited on the retained child (exit 0) and _cleanup removed it",
+          "fixture": "unchanged CPython body, assertions, warning capture and teardown; two pipe closes, _active and _cleanup delegated to their native owner; literal Python data child ran on pinned CPython",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_bufsize_equal_one_binary_mode",
@@ -12369,24 +12355,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "OSError: [Errno 24] Too many open files",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 3,
-            "communicate": 3,
-            "streams": 3
-          }
+          "opt_level": 3,
+          "imre_revision": "12a645f666187b35ebfaa4c53ad152187bb356d7",
+          "tested_tree": "3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26",
+          "operation": "one native parent launched 15 three-pipe children and communicated with the original input; each child exited zero and the entire original descriptor table was unchanged after every wait",
+          "fixture": "unchanged CPython body, assertions and hooks; PollSelector in the native parent; 1011 original file descriptions, original numbers and CLOEXEC, ten free slots",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
+          "source": "pressure-replay-linux.json"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_nonexisting_with_pipes",
@@ -15069,24 +15054,23 @@
         "opt_level": 3,
         "fixture_variant": "ProcessTestCaseNoPoll",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "OSError: [Errno 24] Too many open files",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 3,
-            "communicate": 3,
-            "streams": 3
-          }
+          "opt_level": 3,
+          "imre_revision": "12a645f666187b35ebfaa4c53ad152187bb356d7",
+          "tested_tree": "3d7be7793cd60f833814e5fb0ebdb7e23d2f4c26",
+          "operation": "one native parent launched 15 three-pipe children and communicated with the original input; each child exited zero and the entire original descriptor table was unchanged after every wait",
+          "fixture": "unchanged CPython body, assertions and hooks; SelectSelector in the native parent; 1011 original file descriptions, original numbers and CLOEXEC, ten free slots",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
+          "source": "pressure-replay-linux.json"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_nonexisting_with_pipes",
