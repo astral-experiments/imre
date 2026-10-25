@@ -21,6 +21,22 @@ impl Emitter<'_, '_> {
     /// source preserves its absent zero word when transitioning into a union.
     pub(super) fn union_inject(&mut self, value: Value, returns: Type) -> Value {
         let source = self.module.types.payload(value.ty).unwrap_or(value.ty);
+        // Words 1 and 2 are not tagged live addresses. Reuse optional bool's
+        // encoding so widening bool | None preserves absence as well.
+        if source == Type::Bool {
+            self.forget(&value);
+            let operand = if value.ty == source {
+                let word = self.word(&value);
+                self.instruction(format!("add i64 {word}, 1"))
+            } else {
+                value.operand
+            };
+            return Value {
+                ty: returns,
+                operand,
+                small_integer: false,
+            };
+        }
         let tag = tag(source);
         let word = self.word(&value);
         let operand = if source == Type::Int {
@@ -52,6 +68,19 @@ impl Emitter<'_, '_> {
     /// Local flow proves the member before projection. An integer may need to
     /// recover its immediate representation; other owners transfer unchanged.
     pub(super) fn union_project(&mut self, value: Value, returns: Type) -> Value {
+        if returns == Type::Bool || self.module.types.payload(returns) == Some(Type::Bool) {
+            self.forget(&value);
+            let operand = if returns == Type::Bool {
+                self.instruction(format!("icmp eq i64 {}, 2", value.operand))
+            } else {
+                value.operand
+            };
+            return Value {
+                ty: returns,
+                operand,
+                small_integer: false,
+            };
+        }
         if matches!(
             self.module.types.payload(returns).unwrap_or(returns),
             Type::Union(_)
@@ -174,8 +203,13 @@ impl Emitter<'_, '_> {
                     let mut matched = None;
                     let bits = self.instruction(format!("and i64 {}, 7", value.operand));
                     for selected in members.into_iter().filter(|&ty| accepts_tag(ty)) {
-                        let found =
-                            self.instruction(format!("icmp eq i64 {bits}, {}", tag(selected)));
+                        let found = if selected == Type::Bool {
+                            // Exclude zero (None) and every tagged integer owner.
+                            let offset = self.instruction(format!("sub i64 {}, 1", value.operand));
+                            self.instruction(format!("icmp ult i64 {offset}, 2"))
+                        } else {
+                            self.instruction(format!("icmp eq i64 {bits}, {}", tag(selected)))
+                        };
                         let current = if matches!(
                             (class, selected),
                             (InstanceType::Exception(1..), Type::Exception)

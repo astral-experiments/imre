@@ -86,6 +86,8 @@ pub(crate) enum Type {
     PlainObject,
     /// An exact immutable method descriptor on the builtin str class.
     StrDescriptor(StrDescriptor),
+    /// A live namespace wrapper; the interned shape describes its string-keyed backing dict.
+    SimpleNamespace(usize),
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -223,6 +225,7 @@ impl std::fmt::Display for Type {
             Self::ClockTime => "datetime.time",
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
+            Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -309,19 +312,21 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
-    /// Process argument state is required only by an actual argv expression.
-    /// Merely importing sys emits no startup allocation or runtime query.
-    pub(crate) fn sys_argument_usage(&self) -> (bool, bool) {
+    /// Capture arguments, the original invocation, and source search paths only
+    /// for modules that use them; a bare import needs no runtime state.
+    pub(crate) fn startup_usage(&self) -> (bool, bool, bool) {
+        let mut linecache = false;
         let mut argv = false;
         let mut original = false;
         for function in self.functions.iter().chain([&self.entry]) {
             walk_expressions(&function.body, &mut |value| match value.kind {
                 ExprKind::Builtin(Builtin::SysArgv, _) => argv = true,
                 ExprKind::Builtin(Builtin::SysOrigArgv, _) => original = true,
+                ExprKind::Builtin(Builtin::Linecache(..), _) => linecache = true,
                 _ => {}
             });
         }
-        (argv || original, original)
+        (argv || original, original, linecache)
     }
 }
 
@@ -511,6 +516,36 @@ pub(crate) enum ZipField {
     IsDir,
 }
 
+/// The immutable attribute lists exported by functools and used as decorator defaults.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WrapperAttributes {
+    Assigned,
+    Updated,
+}
+
+impl WrapperAttributes {
+    pub(crate) fn names(self) -> &'static [&'static str] {
+        match self {
+            Self::Assigned => &[
+                "__module__",
+                "__name__",
+                "__qualname__",
+                "__doc__",
+                "__annotate__",
+                "__type_params__",
+            ],
+            Self::Updated => &["__dict__"],
+        }
+    }
+
+    pub(crate) fn root(self) -> &'static str {
+        match self {
+            Self::Assigned => "functools_wrapper_assignments",
+            Self::Updated => "functools_wrapper_updates",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub(crate) enum ArgparseOutput {
@@ -520,9 +555,22 @@ pub(crate) enum ArgparseOutput {
     File,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum LinecacheOperation {
+    Getline,
+    Getlines,
+    Update,
+    Clear,
+    Check,
+    Lazy,
+    Cache,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    Linecache(LinecacheOperation, Type, bool),
     Repeat,
+    WrapperAttributes(WrapperAttributes),
     CursorLengthHint,
     Progression {
         bounded: bool,
@@ -583,6 +631,9 @@ pub(crate) enum Builtin {
     },
     SysPlatform,
     OsName,
+    DocCaptureStart,
+    DocCaptureTake,
+    DocAscii,
     SystemExitNew {
         omit_none: bool,
     },
@@ -778,6 +829,7 @@ pub(crate) enum Builtin {
     SysOrigArgv,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
+        namespace: usize,
         children: Vec<usize>,
         process_argv: bool,
     },
@@ -811,6 +863,8 @@ pub(crate) enum Builtin {
     CacheInsert(i64),
     CacheStat(u32),
     CacheClear,
+    /// Read the public maxsize (false) or typed (true) of a constructed cache.
+    CacheParameter(bool),
     CallableContext,
     HashStr,
     HashRecord,
@@ -872,6 +926,10 @@ pub(crate) enum Builtin {
     FileFileno,
     DictGet,
     DictCopy,
+    NamespaceWrap,
+    NamespaceDict,
+    NamespaceGet,
+    NamespaceDelete,
     DeepCopy,
     RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
@@ -1028,6 +1086,9 @@ impl StrDescriptor {
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
+    IsSpace,
+    SplitLineEnds,
+    ExpandTabs,
     Lower,
     Capitalize,
     /// True splits from the right.
@@ -1100,6 +1161,7 @@ pub(crate) enum PathOperation {
     ContextExit,
     UnionText,
     Iterdir,
+    Walk,
     Glob {
         recursive: bool,
     },
@@ -1202,6 +1264,8 @@ pub(crate) enum LogOperation {
     FileConfig,
     Disabled,
     Propagate,
+    SetPropagate,
+    HasHandlers,
     Name,
     Level,
     Root,
@@ -1217,6 +1281,8 @@ pub(crate) enum LogOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     Open,
+    Unlink,
+    Remove,
     Seek,
     Pipe,
     Dup2,
@@ -1337,6 +1403,9 @@ pub(crate) enum ProcessOperation {
     Which,
     RmTree,
     Copy(CopyOperation),
+    CopyTree(Type),
+    IgnorePatterns,
+    TreeErrorArgs,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,
@@ -1352,6 +1421,7 @@ pub(crate) enum ProcessOperation {
 pub(crate) enum InstanceType {
     Exact(Type),
     ForwardRef,
+    SimpleNamespace,
     StrEnum,
     List,
     Dict,
@@ -1375,6 +1445,7 @@ impl InstanceType {
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
             Self::Tuple => matches!(ty, Type::Tuple(_)),
+            Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::Exception(_) => matches!(
                 ty,
                 Type::Exception

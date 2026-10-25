@@ -1,9 +1,9 @@
 //! POSIX descriptors are integers in the program's descriptor table. A call
 //! can observe a closed number or a number subsequently reused by the kernel.
 
-use super::exceptions::{Error, Kind, Result, finish};
-use super::files::errno_error;
-use super::{Bytes, Int, Str};
+use super::exceptions::{Error, Filename, Kind, Result, finish};
+use super::files::{errno_error, errno_with_filenames};
+use super::{Bytes, Int, Str, c_int};
 use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
@@ -24,6 +24,35 @@ descriptor_constants! {
     imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
 }
 
+/// Return a kernel path and the filesystem-protocol value to keep on OSError.
+///
+/// # Safety
+/// `value` is the rooted str, bytes or Path selected by `tag`.
+unsafe fn syscall_path(value: *const (), tag: u32, function: &str) -> Result<(CString, Filename)> {
+    let terminated = |bytes: &[u8]| {
+        CString::new(bytes).map_err(|_| {
+            Error::new(
+                Kind::ValueError,
+                format!("{function}: embedded null character in path"),
+            )
+        })
+    };
+    if tag == 1 {
+        // SAFETY: the caller roots this bytes handle through conversion.
+        let bytes: Rc<Bytes> = unsafe { super::acquire_rc(value as usize) };
+        return Ok((terminated(&bytes)?, Filename::Bytes(bytes)));
+    }
+    // SAFETY: exact str is borrowed; Path.__fspath__ supplies an owned str.
+    let text = unsafe {
+        match tag {
+            0 => super::acquire_rc::<Str>(value as usize),
+            2 => Rc::from_raw(super::paths::imre_path_text(value.cast())),
+            _ => unreachable!(),
+        }
+    };
+    Ok((terminated(text.as_bytes())?, Filename::Str(text)))
+}
+
 /// Open relative to an optional directory fd. Set close-on-exec atomically.
 ///
 /// # Safety
@@ -36,26 +65,14 @@ pub unsafe extern "C" fn imre_os_open(
     mode: usize,
     dir_fd: usize,
 ) -> usize {
-    // SAFETY: the caller's representation tag describes this rooted path.
-    let spelling: &[u8] = unsafe {
-        if bytes == 0 {
-            (&*path.cast::<Str>()).as_bytes()
-        } else {
-            &*path.cast::<Bytes>()
-        }
-    };
     finish(
         (|| {
-            let name = CString::new(spelling).map_err(|_| {
-                Error::new(Kind::ValueError, "open: embedded null character in path")
-            })?;
+            // SAFETY: the caller's representation tag describes this rooted path.
+            let (name, path) = unsafe { syscall_path(path, bytes, "open") }?;
             let flags = c_int(flags)? | libc::O_CLOEXEC;
             let mode = c_int(mode)?;
-            let dir_fd = if dir_fd == 0 {
-                libc::AT_FDCWD
-            } else {
-                c_int(dir_fd)?
-            };
+            // SAFETY: dir_fd is a rooted optional integer according to the ABI.
+            let dir_fd = unsafe { directory_fd(dir_fd) }?;
             loop {
                 // SAFETY: the path is terminated and the variadic mode is promoted to int.
                 let fd = unsafe { libc::openat(dir_fd, name.as_ptr(), flags, mode) };
@@ -64,19 +81,7 @@ pub unsafe extern "C" fn imre_os_open(
                 }
                 let error = io::Error::last_os_error();
                 if error.kind() != io::ErrorKind::Interrupted {
-                    // SAFETY: retain the same rooted input object, including raw byte paths.
-                    let filename = unsafe {
-                        if bytes == 0 {
-                            super::exceptions::Filename::Str(super::acquire_rc(path as usize))
-                        } else {
-                            super::exceptions::Filename::Bytes(super::acquire_rc(path as usize))
-                        }
-                    };
-                    return Err(super::files::errno_with_filenames(
-                        error,
-                        Some(filename),
-                        None,
-                    ));
+                    return Err(errno_with_filenames(error, Some(path), None));
                 }
             }
         })(),
@@ -84,17 +89,51 @@ pub unsafe extern "C" fn imre_os_open(
     )
 }
 
-// All C ints fit in the immediate representation. Heap integers cannot fit.
-pub(super) fn c_int(word: usize) -> Result<libc::c_int> {
-    (word & 1 != 0)
-        .then_some((word as i64) >> 1)
-        .and_then(|n| libc::c_int::try_from(n).ok())
-        .ok_or_else(|| {
+/// Remove the entry itself, using the raw spelling even for trailing slashes.
+/// Validate the path before converting the optional directory descriptor.
+///
+/// # Safety
+/// The caller roots the path for its static tag and the optional integer word.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_unlink(value: *const (), tag: u32, fd: usize, remove: u32) {
+    let result = (|| {
+        let function = if remove == 0 { "unlink" } else { "remove" };
+        // SAFETY: the path's owner stays live through the syscall and error rendering.
+        let (path, name) = unsafe { syscall_path(value, tag, function) }?;
+        // SAFETY: fd is a rooted optional integer.
+        let dir_fd = unsafe { directory_fd(fd) }?;
+        // SAFETY: the zero-terminated path is owned until unlinkat returns.
+        if unsafe { libc::unlinkat(dir_fd, path.as_ptr(), 0) } == -1 {
+            return Err(errno_with_filenames(
+                io::Error::last_os_error(),
+                Some(name),
+                None,
+            ));
+        }
+        Ok(())
+    })();
+    finish(result, ());
+}
+
+/// Convert a rooted optional directory descriptor after validating the path.
+unsafe fn directory_fd(fd: usize) -> Result<libc::c_int> {
+    Ok(if fd == 0 {
+        libc::AT_FDCWD
+    } else {
+        // SAFETY: a nonzero optional integer has the native tagged-int ABI.
+        let integer = unsafe { Int::borrow(fd) };
+        let n = integer.big();
+        n.to_i32().ok_or_else(|| {
             Error::new(
                 Kind::OverflowError,
-                "Python int too large to convert to C int",
+                if n.sign() == num_bigint::Sign::Minus {
+                    "fd is less than minimum"
+                } else {
+                    "fd is greater than maximum"
+                },
             )
-        })
+        })?
+    })
 }
 
 fn checked(ret: libc::c_int) -> Result<libc::c_int> {

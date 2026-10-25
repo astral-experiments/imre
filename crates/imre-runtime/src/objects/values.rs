@@ -6,6 +6,8 @@ use std::cmp::Ordering;
 use std::fmt::Write;
 use std::rc::Rc;
 
+use num_traits::ToPrimitive;
+
 use super::records::descriptor;
 use super::words::{NULLABLE, WordKind};
 use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
@@ -211,7 +213,14 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                         let (left, left_kind) = super::unions::member(left);
                         let (right, right_kind) = super::unions::member(right);
                         if left_kind != right_kind {
-                            Comparison::Done(false)
+                            let numbers = match (left_kind.base(), right_kind.base()) {
+                                (1, 2) => Some((left, right)),
+                                (2, 1) => Some((right, left)),
+                                _ => None,
+                            };
+                            Comparison::Done(numbers.is_some_and(|(flag, integer)| {
+                                Int::borrow(integer).big().to_usize() == Some(flag)
+                            }))
                         } else {
                             Comparison::Child {
                                 left,
@@ -323,6 +332,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         kind: left.kind,
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
+                }
+                (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
+                    object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)
                 }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
                     left.compare_entry(right, position)
@@ -440,6 +452,13 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         Storage::Dictionary(mapping) => {
                             format_entry(owner, mapping.repr_entry(output, position), &mut pending)
                         }
+                        Storage::SimpleNamespace(dict) => dict
+                            .0
+                            .with(|state| state.dictionary().namespace_repr_entry(output, position))
+                            .map(|(next, word, kind)| {
+                                pending.push(ReprTask::Object(owner, next));
+                                ReprTask::Word(word, kind)
+                            }),
                         Storage::Set(set) => {
                             format_entry(owner, set.repr_entry(output, position), &mut pending)
                         }
@@ -457,7 +476,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         Storage::PurePath(path) => {
                             output.push_str(path.class());
                             output.push('(');
-                            super::exceptions::push_string_repr(&storage.posix_spelling(), output);
+                            path.push_posix_repr(output);
                             output.push(')');
                             None
                         }

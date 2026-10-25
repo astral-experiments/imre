@@ -1,13 +1,7 @@
 //! Native memoization for module declarations and independently constructed wrappers.
 
 use super::*;
-
-#[derive(Clone, Copy)]
-pub(super) struct Policy {
-    // Negative means unbounded; the decorator normalizes negative sizes to zero.
-    capacity: i64,
-    typed: bool,
-}
+pub(super) use crate::types::CachePolicy as Policy;
 
 pub(super) fn policy(
     graph: &SourceGraph,
@@ -325,7 +319,6 @@ impl Checker<'_> {
             frame,
             table,
             capacity: policy.capacity,
-            typed: policy.typed,
         };
         let id = self.helpers.reserve();
         self.helpers.finish(
@@ -353,7 +346,7 @@ impl Checker<'_> {
             kind: ExprKind::Tuple(vec![callable, state]),
         };
         Ok(Some(Expr {
-            ty: self.types.cached_callable(layout),
+            ty: self.types.cached_callable(layout, id, policy),
             kind: ExprKind::Callable {
                 function: id,
                 receiver: Some(Box::new(frame)),
@@ -388,32 +381,54 @@ impl Checker<'_> {
         };
         if !matches!(
             attr.attr.as_str(),
-            "cache_info" | "cache_clear" | "__wrapped__"
+            "cache_info" | "cache_clear" | "cache_parameters" | "__wrapped__"
         ) {
             return Ok(None);
         }
         let name = attr.attr.as_str();
-        let (state, capacity) = if let Some(Binding::Definition(def)) = self.resolve(&attr.value)
-            && let Some(sig) = self.functions.get(&def)
-            && let Some(policy) = self.classes.cached.get(&sig.id)
-        {
-            if name == "__wrapped__" {
-                return Ok(None);
-            }
-            let params: Vec<_> = sig.params.iter().map(|p| p.ty).collect();
-            let table = cache_table(self.types, &params, sig.returns);
-            (
-                builtin(Builtin::ModuleCache(sig.id), table.cache_state(), vec![]),
-                policy.capacity,
-            )
+        let direct = match self.resolve(&attr.value) {
+            Some(Binding::Definition(def)) => self
+                .functions
+                .get(&def)
+                .filter(|sig| self.classes.cached.contains_key(&sig.id)),
+            _ => None,
+        };
+        let (wrapper, declaration) = if let Some(sig) = direct {
+            let params = sig.params.iter().map(|p| p.ty).collect();
+            (None, Some((sig.id, params, sig.returns)))
         } else {
             let wrapper = match receiver {
                 Some(v) => v.clone(),
                 None => self.expr(&attr.value)?,
             };
+            let declaration =
+                self.types
+                    .cache_declaration(wrapper.ty)
+                    .and_then(|(callable, id)| {
+                        let (params, result) = self.types.signature(callable)?;
+                        Some((id, params, result))
+                    });
+            (Some(wrapper), declaration)
+        };
+        let (state, capacity) = if let Some((id, params, result)) = declaration {
+            let policy = self.classes.cached[&id];
+            if name == "__wrapped__" {
+                return Ok(None);
+            }
+            if name == "cache_parameters" {
+                return self.cache_parameters(Some(policy), wrapper, call).map(Some);
+            }
+            let table = cache_table(self.types, &params, result);
+            let state = builtin(Builtin::ModuleCache(id), table.cache_state(), vec![]);
+            (after_receiver(wrapper, state), policy.capacity)
+        } else {
+            let wrapper = wrapper.expect("the cache control receiver was evaluated");
             let Some(layout) = self.types.cached_function(wrapper.ty) else {
                 return Ok(None);
             };
+            if name == "cache_parameters" {
+                return self.cache_parameters(None, Some(wrapper), call).map(Some);
+            }
             if name == "__wrapped__" {
                 return self
                     .invoke(call, context_field(wrapper, layout, 0, layout.callable))
@@ -452,19 +467,99 @@ impl Checker<'_> {
         }))
     }
 
-    fn cache_snapshot(&self, capacity: i64, stat: impl Fn(u32) -> Expr) -> Expr {
-        let size = if capacity < 0 {
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            }
+    /// Return a fresh ordered dictionary, preserving the Python types of both values.
+    fn cache_parameters(
+        &mut self,
+        declaration: Option<Policy>,
+        receiver: Option<Expr>,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        if !call.arguments.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "cache_parameters takes no arguments",
+            ));
+        }
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        let (size, typed) = if let Some(policy) = declaration {
+            body.extend(receiver.map(Statement::Expr));
+            let typed = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(policy.typed),
+            };
+            (
+                self.document_coerce(cache_size(policy.capacity), documents::ANY, call)?,
+                self.document_coerce(typed, documents::ANY, call)?,
+            )
         } else {
-            pipelines::integer(capacity)
+            let wrapper = receiver.expect("an applied cache has a native wrapper");
+            let ty = wrapper.ty;
+            let slot = self.hidden(ty);
+            body.push(Statement::Assign(slot, wrapper));
+            clear.push(slot);
+            let parameter = |typed| {
+                builtin(
+                    Builtin::CacheParameter(typed),
+                    documents::ANY,
+                    vec![local(slot, ty)],
+                )
+            };
+            (parameter(false), parameter(true))
         };
-        let fields = vec![stat(0), stat(1), size, stat(3)];
+        let entries = vec![
+            (unpacking::string("maxsize"), size),
+            (unpacking::string("typed"), typed),
+        ];
+        let result = Expr {
+            ty: self.types.dict(Type::Str, documents::ANY),
+            kind: ExprKind::Dict {
+                key: Type::Str,
+                value: documents::ANY,
+                entries,
+            },
+        };
+        Ok(Expr {
+            ty: result.ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(result),
+                clear,
+            },
+        })
+    }
+
+    fn cache_snapshot(&self, capacity: i64, stat: impl Fn(u32) -> Expr) -> Expr {
+        let fields = vec![stat(0), stat(1), cache_size(capacity), stat(3)];
         Expr {
             ty: self.types.tuple(fields.iter().map(|v| v.ty).collect()),
             kind: ExprKind::Tuple(fields),
         }
+    }
+}
+
+fn cache_size(capacity: i64) -> Expr {
+    if capacity < 0 {
+        Expr {
+            ty: Type::None,
+            kind: ExprKind::None,
+        }
+    } else {
+        pipelines::integer(capacity)
+    }
+}
+
+fn after_receiver(receiver: Option<Expr>, result: Expr) -> Expr {
+    match receiver {
+        Some(owner) => Expr {
+            ty: result.ty,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Expr(owner)],
+                value: Box::new(result),
+                clear: vec![],
+            },
+        },
+        None => result,
     }
 }
