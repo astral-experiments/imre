@@ -34,6 +34,13 @@ and calls its `debug()` method. CPython supplies the comparison transcript;
 it never evaluates an example for the native executable. A matching empty
 suite contributes zero test cases.
 
+CPython’s unchanged [skip sample](upstream/Lib/test/test_doctest/sample_doctest_skip.py)
+has six cases and nine examples. [The control](controls/skip.py) calls both
+`runTest()` and `debug()` on every case. Normal execution reports two passes,
+two intentional mismatches, and two `unittest.SkipTest` exceptions with the
+message `all examples were skipped`. Debug execution returns normally for the
+all-skipped cases. These controls add no IDs to the itertools or JSON suites.
+
 The [Linux execution report](execution-linux.json) was reproduced on repaired
 main `fce4734` with this doctest implementation. There,
 the complete native `json` case blocks on example 7 (`from io import
