@@ -65,6 +65,12 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 An immediate `map(int, source)` converts each item using the ordinary checked `int` conversion. Inputs may yield exact integers, floats, booleans, or strings. Conversion proceeds lazily as the enclosing consumer iterates; input expressions, iterator creation, the optional sum start, and conversion failures retain Python evaluation order. Mutable sources remain live and keep the existing dictionary/set mutation checks. User callbacks follow the exact callable contract below. A map cannot escape into storage, and user-defined iteration protocols remain unsupported.
 
+`itertools.repeat(object[, times])` retains the original object. Aliases, `iter(it)`,
+`next(it[, default])`, and ordinary loop and list consumers share its position.
+Omitting `times` repeats forever; a nonpositive integer exhausts immediately.
+`operator.length_hint(it[, default])` returns the remaining finite count or the
+default for an unbounded repeat. A finite repeat's repr shows the current count.
+
 `itertools.chain` accepts a fixed number of positional iterables with one exact
 element type. A loop, comprehension, or immediate consumer can use the chain.
 It evaluates source expressions left to right, then acquires each iterator on

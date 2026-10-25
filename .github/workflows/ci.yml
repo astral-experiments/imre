@@ -134,6 +134,15 @@ jobs:
           for suite in build_cache module_objects link_cache build_output; do
             env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/imre
           done
+      - name: Run complete itertools methods in native Imre
+        run: |
+          for opt in 0 3; do
+            python3 benchmarks/cpython_stdlib/full/itertools/native.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" --result "$RUNNER_TEMP/itertools-O$opt.json"
+            target/release/imre build benchmarks/cpython_stdlib/full/itertools/repeat.py --opt-level "$opt" -o "$RUNNER_TEMP/repeat"
+            "$RUNNER_TEMP/repeat" > "$RUNNER_TEMP/repeat.native"
+            python3 benchmarks/cpython_stdlib/full/itertools/repeat.py > "$RUNNER_TEMP/repeat.reference"
+            diff -u "$RUNNER_TEMP/repeat.reference" "$RUNNER_TEMP/repeat.native"
+          done
       - name: Run vendored CPython Counter methods in native Imre
         run: python3 benchmarks/cpython_stdlib/native_counter.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-counter.json"
       - name: Compare uv's upstream wheel checker with CPython
