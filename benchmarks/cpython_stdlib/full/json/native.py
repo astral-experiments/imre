@@ -26,6 +26,10 @@ def counts():
     methods.update({
         "test.test_json.test_decode.TestDecode.test_decoder_optimizations": 1,
         "test.test_json.test_fail.TestFail.test_failures": 34,
+        "test.test_json.test_fail.TestFail.test_truncated_input": 17,
+        "test.test_json.test_fail.TestFail.test_unexpected_data": 23,
+        "test.test_json.test_fail.TestFail.test_extra_data": 6,
+        "test.test_json.test_fail.TestFail.test_linecol": 4,
     })
     return methods
 
@@ -69,6 +73,26 @@ def binary_stream_controls(native):
                 raise AssertionError((data, str(e), expected)) from e
         else:
             raise AssertionError("native reader accepted invalid binary control")
+
+
+def error_controls(native):
+    def fields(e):
+        return str(e), e.msg, e.doc, e.pos, e.lineno, e.colno
+
+    for data in ('["🌗",\n "é" 1]', '["🌗",\n "é" 1]'.encode("utf-16")):
+        try:
+            json.loads(data)
+        except json.JSONDecodeError as e:
+            expected = fields(e)
+        else:
+            raise AssertionError("expected malformed control")
+        try:
+            native.loads(data)
+        except json.JSONDecodeError as e:
+            if fields(e) != expected:
+                raise AssertionError((fields(e), expected)) from e
+        else:
+            raise AssertionError("native reader accepted malformed control")
 
 
 def main():
@@ -119,7 +143,9 @@ def main():
             if {r["source"] for r in results.values()} != expected.keys():
                 raise RuntimeError("some selected upstream routines were not discovered")
             binary_stream_controls(Native(program, directory, ValueError))
-            report["levels"][level] = {"binary_stream_controls": 21, "tests": results}
+            error_controls(Native(program, directory, json.JSONDecodeError))
+            report["levels"][level] = {"binary_stream_controls": 21, "error_controls": 2,
+                                       "tests": results}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     return int(not ok)
 

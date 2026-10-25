@@ -1,11 +1,12 @@
 //! Format a failed stdlib JSON parse at Python's character offset. Serde owns
 //! the successful path. This cursor only distinguishes the tokens Python expected.
 
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use regex_automata::meta::Regex;
 
-use crate::{Error, Kind};
+use crate::{Error, Str};
 
 type Failure = (usize, &'static str);
 
@@ -125,7 +126,11 @@ impl Cursor<'_> {
 
 #[cold]
 /// The caller has checked the complete document's container depth.
-pub(super) fn decode_error(text: &str, fallback: serde_json::Error) -> Error {
+pub(super) fn decode_error(
+    text: &str,
+    fallback: serde_json::Error,
+    owner: impl FnOnce() -> Rc<Str>,
+) -> Error {
     let mut cursor = Cursor {
         source: text,
         pos: 0,
@@ -136,27 +141,39 @@ pub(super) fn decode_error(text: &str, fallback: serde_json::Error) -> Error {
         cursor.space();
         (cursor.pos < text.len()).then_some((cursor.pos, "Extra data"))
     };
-    match issue {
-        Some((at, message)) => error_at(text, at, message),
-        None => Error::new(Kind::JsonDecodeError, fallback.to_string()),
-    }
+    let fallback_message;
+    let (at, msg) = if let Some(issue) = issue {
+        issue
+    } else {
+        // Serde can reject a syntactically valid string outside Imre's Unicode
+        // domain. Its column is byte-based and one-indexed, unlike Python's pos.
+        let line_start = text
+            .split_inclusive('\n')
+            .take(fallback.line().saturating_sub(1))
+            .map(str::len)
+            .sum::<usize>();
+        let at = text.floor_char_boundary(
+            (line_start + fallback.column().saturating_sub(1)).min(text.len()),
+        );
+        fallback_message = fallback.to_string();
+        let msg = fallback_message
+            .rsplit_once(" at line ")
+            .map_or(fallback_message.as_str(), |(msg, _)| msg);
+        (at, msg)
+    };
+    at_error(owner(), at, msg)
 }
 
 #[cold]
-pub(super) fn error_at(text: &str, at: usize, message: &str) -> Error {
-    let prefix = &text[..at];
-    let line = 1 + memchr::memchr_iter(b'\n', prefix.as_bytes()).count();
-    let column = 1 + prefix
+pub(super) fn at_error(doc: Rc<Str>, at: usize, msg: &str) -> Error {
+    let prefix = &doc[..at];
+    let lineno = 1 + memchr::memchr_iter(b'\n', prefix.as_bytes()).count();
+    let colno = 1 + prefix
         .rsplit('\n')
         .next()
         .unwrap_or_default()
         .chars()
         .count();
-    Error::new(
-        Kind::JsonDecodeError,
-        format!(
-            "{message}: line {line} column {column} (char {})",
-            prefix.chars().count()
-        ),
-    )
+    let pos = prefix.chars().count();
+    Error::json_decode(msg, doc, pos, lineno, colno)
 }

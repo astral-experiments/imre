@@ -174,7 +174,8 @@ yields keys in insertion order. Select a value into a concrete scalar or
 `dict[str, Any]` at a checked boundary. The latter is a read-only JSON view,
 with literal-key `.get()`, scalar or empty-list defaults, and nested iteration.
 Original array roots keep their mutable list identity. Malformed JSON raises
-`json.JSONDecodeError`, and nesting is limited to 128 containers. Strings use
+`json.JSONDecodeError`, with the original decoded `doc`, short `msg`, character
+offset `pos`, and one-based `lineno` and `colno`. Nesting is limited to 128 containers. Strings use
 Unicode scalar values. Integers retain their exact precision. The standard
 reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
