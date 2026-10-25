@@ -1493,6 +1493,7 @@ pub(crate) enum ProcessOperation {
     PopenStatus {
         poll: bool,
     },
+    PopenSetStatus,
     PopenWait,
     PopenCommunicate {
         text: bool,

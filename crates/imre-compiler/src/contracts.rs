@@ -217,7 +217,9 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
-                ProcessOperation::DescriptorConstant(_) => Contract::new(false, PreservesLists),
+                ProcessOperation::DescriptorConstant(_) | ProcessOperation::PopenSetStatus => {
+                    Contract::new(false, PreservesLists)
+                }
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
                 | ProcessOperation::Gather { .. }
