@@ -1,6 +1,23 @@
 //! Closed, representation-checked IR. Lowering preserves owned results and may
 //! borrow rooted locals for the duration of operator and call evaluation.
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SysEncoding {
+    Default,
+    Filesystem,
+    FilesystemErrors,
+}
+
+impl SysEncoding {
+    pub(crate) fn method(self) -> &'static str {
+        match self {
+            Self::Default => "getdefaultencoding",
+            Self::Filesystem => "getfilesystemencoding",
+            Self::FilesystemErrors => "getfilesystemencodeerrors",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
     Document(DocumentShape),
@@ -661,6 +678,7 @@ pub(crate) enum Builtin {
     },
     SysPlatform,
     SysStreamEncoding,
+    SysEncoding(SysEncoding),
     SysStdoutErrors,
     SysVersionInfo {
         implementation: bool,

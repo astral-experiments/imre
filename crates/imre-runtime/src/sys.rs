@@ -2,8 +2,10 @@
 mod intern;
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initialize_io};
 use crate::objects::{Codec, errno_error};
+pub(crate) use intern::canonical;
 use std::io::{self, Write};
 mod encoding;
+mod encoding_names;
 
 pub(super) fn initialize_encoding(isolated: bool, utf8: Option<bool>) {
     encoding::settings(isolated, utf8);

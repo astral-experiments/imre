@@ -7,9 +7,18 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+const CODEC_NAMES: [&str; 4] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig"];
+
 thread_local! {
     static REGISTRY: RefCell<HashMap<String, Rc<Object>>> = RefCell::default();
-    static NAMES: [Rc<Str>; 4] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig"].map(|s| Rc::new(Str::new(s)));
+    static NAMES: [Rc<Str>; 4] = CODEC_NAMES.map(|name| {
+        // CodecInfo's ASCII identifier is interned; its hyphenated names are not.
+        if name == "ascii" {
+            crate::sys::canonical(name)
+        } else {
+            Rc::new(Str::const_new(name))
+        }
+    });
 }
 
 /// Collapse non-ASCII-alphanumeric separators, retaining dots in codec names.
@@ -127,6 +136,10 @@ impl Codec {
     /// Return the retained canonical name shared with registry entries.
     pub(crate) fn name_owner(self) -> Rc<Str> {
         NAMES.with(|names| names[self.index()].clone())
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        CODEC_NAMES[self.index()]
     }
 
     pub(crate) fn lookup(value: &str) -> Result<Self> {

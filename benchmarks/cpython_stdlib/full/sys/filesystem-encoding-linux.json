@@ -1,0 +1,626 @@
+{
+  "source_sha256": "b787ce84d6d15a605fd2e37733ca504a828623010b52f9e507128890b683b581",
+  "additional_upstream_occurrences": 0,
+  "levels": {
+    "0": [
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONCOERCECLOCALE": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nTrue\nFalse\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "1"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "POSIX",
+          "PYTHONCOERCECLOCALE": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "POSIX",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nTrue\nFalse\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "POSIX",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "1"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C.UTF-8",
+          "PYTHONCOERCECLOCALE": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C.UTF-8",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C.UTF-8",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "1"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "utf-8:strict"
+        },
+        "flags": [],
+        "argument": "surrogateescape",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nFalse\nTrue\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": ":ignore"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nTrue\nFalse\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_CTYPE": "C",
+          "LANG": "C.UTF-8",
+          "PYTHONUTF8": "0",
+          "PYTHONCOERCECLOCALE": "0"
+        },
+        "flags": [],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LANG": "C",
+          "PYTHONUTF8": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C.UTF-8",
+          "LC_CTYPE": "C",
+          "PYTHONUTF8": "0"
+        },
+        "flags": [],
+        "argument": "surrogateescape",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nFalse\nFalse\nTrue\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "command",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "command",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "1",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [
+          "-X",
+          "utf8=0"
+        ],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "command",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [
+          "-X",
+          "utf8"
+        ],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "command",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [
+          "-I"
+        ],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "command",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "1",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [
+          "-I",
+          "-X",
+          "utf8=0"
+        ],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "en_US.ISO-8859-1",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "ascii:ignore"
+        },
+        "flags": [],
+        "argument": "iso8859-1",
+        "returncode": 0,
+        "stdout": "utf-8\niso8859-1\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "en_US.ISO-8859-1",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": ""
+        },
+        "flags": [],
+        "argument": "iso8859-1",
+        "returncode": 0,
+        "stdout": "utf-8\niso8859-1\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "en_US.ISO-8859-1",
+          "PYTHONUTF8": "1",
+          "PYTHONIOENCODING": "latin1"
+        },
+        "flags": [],
+        "argument": "iso8859-1",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      }
+    ],
+    "3": [
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONCOERCECLOCALE": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nTrue\nFalse\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "1"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "POSIX",
+          "PYTHONCOERCECLOCALE": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "POSIX",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nTrue\nFalse\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "POSIX",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "1"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C.UTF-8",
+          "PYTHONCOERCECLOCALE": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C.UTF-8",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C.UTF-8",
+          "PYTHONCOERCECLOCALE": "0",
+          "PYTHONUTF8": "1"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "utf-8:strict"
+        },
+        "flags": [],
+        "argument": "surrogateescape",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nFalse\nTrue\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": ":ignore"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nTrue\nFalse\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_CTYPE": "C",
+          "LANG": "C.UTF-8",
+          "PYTHONUTF8": "0",
+          "PYTHONCOERCECLOCALE": "0"
+        },
+        "flags": [],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LANG": "C",
+          "PYTHONUTF8": "0"
+        },
+        "flags": [],
+        "argument": "utf-8",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "C.UTF-8",
+          "LC_CTYPE": "C",
+          "PYTHONUTF8": "0"
+        },
+        "flags": [],
+        "argument": "surrogateescape",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nFalse\nFalse\nTrue\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "command",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "command",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "1",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [
+          "-X",
+          "utf8=0"
+        ],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "command",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [
+          "-X",
+          "utf8"
+        ],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "command",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [
+          "-I"
+        ],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "command",
+        "environment": {
+          "LC_ALL": "C",
+          "PYTHONUTF8": "1",
+          "PYTHONIOENCODING": "latin1:ignore"
+        },
+        "flags": [
+          "-I",
+          "-X",
+          "utf8=0"
+        ],
+        "argument": "ascii",
+        "returncode": 0,
+        "stdout": "utf-8\nascii\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nTrue\nFalse\nTrue\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "en_US.ISO-8859-1",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": "ascii:ignore"
+        },
+        "flags": [],
+        "argument": "iso8859-1",
+        "returncode": 0,
+        "stdout": "utf-8\niso8859-1\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "en_US.ISO-8859-1",
+          "PYTHONUTF8": "0",
+          "PYTHONIOENCODING": ""
+        },
+        "flags": [],
+        "argument": "iso8859-1",
+        "returncode": 0,
+        "stdout": "utf-8\niso8859-1\nsurrogateescape\nTrue\nTrue\nTrue\nFalse\nTrue\nTrue\nTrue\nFalse\nFalse\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      },
+      {
+        "mode": "executable",
+        "environment": {
+          "LC_ALL": "en_US.ISO-8859-1",
+          "PYTHONUTF8": "1",
+          "PYTHONIOENCODING": "latin1"
+        },
+        "flags": [],
+        "argument": "iso8859-1",
+        "returncode": 0,
+        "stdout": "utf-8\nutf-8\nsurrogateescape\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nFalse\nTrue\nargument\n1\nargument\n2\nsys.getfilesystemencodeerrors() takes no arguments (2 given)\nargument\n3\nsys.getfilesystemencoding() takes no keyword arguments\nargument\n4\nsys.getdefaultencoding() takes no arguments (1 given)\n",
+        "stderr": ""
+      }
+    ]
+  }
+}

@@ -497,6 +497,7 @@ impl Builtin {
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::SysStreamEncoding
+            | Self::SysEncoding(_)
             | Self::SysStdoutErrors
             | Self::OsName
             | Self::SysOrigArgv
@@ -889,6 +890,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_builtins_last"
                 | "imre_builtins_del_last"
                 | "imre_sys_displayhook"
+                | "imre_sys_filesystem_encoding"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
                 | "imre_path_as_posix"
