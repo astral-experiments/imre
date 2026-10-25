@@ -152,6 +152,7 @@ pub(crate) enum Intrinsic {
     AddLevelName,
     LevelNamesMapping,
     HandlerRename,
+    HandlerLock,
     HandlerLookup,
     PrintActiveException,
     HandlerLevelType,
@@ -982,7 +983,7 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
-    /// Mark the precise call where lowering raises Python's missing-argument TypeError.
+    /// Mark the precise call whose behavior for missing arguments is handled by native lowering.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::MissingArgument(call));
@@ -1004,6 +1005,12 @@ impl SourceGraph {
     pub(crate) fn checked_repeated_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::RepeatedKeyword(keyword));
+    }
+
+    /// An optional handler lock either enters the captured lock or raises TypeError on None.
+    pub(crate) fn checked_optional_lock_context(&self, module: ModuleId, expr: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::OptionalLockContext(expr));
     }
 
     pub(crate) fn checked_keywords(
@@ -1878,6 +1885,7 @@ impl<'a> Loader<'a> {
                     for alias in &import.names {
                         let method = match alias.name.as_str() {
                             "_rename_handler" => Intrinsic::HandlerRename,
+                            "_Lock" => Intrinsic::HandlerLock,
                             "_lookup_handler" => Intrinsic::HandlerLookup,
                             "_print_active_exception" => Intrinsic::PrintActiveException,
                             "_Level" => Intrinsic::HandlerLevelType,
