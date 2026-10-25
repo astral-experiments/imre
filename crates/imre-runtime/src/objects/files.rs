@@ -279,7 +279,7 @@ fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
         message.push_str(": ");
         super::exceptions::push_string_repr(path, &mut message);
     }
-    Error::new(os_error_kind(error.kind()), message)
+    Error::from_errno(os_error_kind(error.kind()), errno, &description, message)
 }
 
 /// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.
