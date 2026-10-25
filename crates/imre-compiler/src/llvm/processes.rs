@@ -332,6 +332,27 @@ impl Emitter<'_, '_> {
                 self.checked_line(instruction);
                 none()
             }
+            ProcessOperation::ShellOutput { status } => {
+                let tuple = status.then(|| self.record(returns));
+                let status_slot = tuple.as_ref().map_or("null", |v| v.operand.as_str());
+                let kind = representation_kind(args[0].value.ty, &self.module.types);
+                let output = self.checked_instruction(format!(
+                    "call ptr @imre_subprocess_shell_output(ptr {}, i32 {kind}, i64 {}, i64 {}, ptr {status_slot})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand
+                ));
+                if let Some(tuple) = tuple {
+                    let slot = self
+                        .instruction(format!("getelementptr i64, ptr {}, i64 1", tuple.operand));
+                    self.line(format!("store ptr {output}, ptr {slot}"));
+                    tuple
+                } else {
+                    self.owned(Value {
+                        ty: returns,
+                        operand: output,
+                        small_integer: false,
+                    })
+                }
+            }
             ProcessOperation::Popen { streams }
             | ProcessOperation::Call { streams, .. }
             | ProcessOperation::CheckOutput { streams, .. }
