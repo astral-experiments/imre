@@ -68,7 +68,9 @@ exercise the non-string constructor argument and invalid class targets of
 fixtures ran on CPython. Reproduce with `run_annotationlib.py --forward-refs`
 and the same toolchain options as for `TestFormat`. This run used the
 ForwardRef implementation at `69f7e15` and the unittest assertion context at
-`87e5d20` (local integration `20c7de7`). These are supplemental annotation
+`87e5d20` (local integration `20c7de7`). The report reproduced byte for byte at
+`178166df` with the merged unittest assertion context (`1f4a7ed1`).
+These are supplemental annotation
 tests, separate from the 325 functools and four free-threaded occurrences.
 
 The native declaration evaluator can now represent an unknown bare name on a

@@ -80,21 +80,27 @@ pub(super) fn compare(
         error(
             source,
             node,
-            "readonly JSON comparisons require == or != with a literal string",
+            "JSON comparisons require == or != with another parsed value or a literal string",
         )
     };
     let [left, right]: [Expr; 2] = values.try_into().map_err(|_| invalid())?;
     let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = ops else {
         return Err(invalid());
     };
-    let (value, literal) = if matches!(left.kind, ExprKind::Str(_)) {
-        (right, left)
+    let result = if matches!(left.kind, ExprKind::Str(_)) {
+        select(right, Type::Bool, None, Some(left))
     } else if matches!(right.kind, ExprKind::Str(_)) {
-        (left, right)
+        select(left, Type::Bool, None, Some(right))
     } else {
-        return Err(invalid());
+        let parsed = |ty| matches!(ty, Type::JsonRoot | Type::JsonObject | Type::JsonValue);
+        if !parsed(left.ty) || !parsed(right.ty) {
+            return Err(invalid());
+        }
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::JsonEqual, vec![left, right]),
+        }
     };
-    let result = select(value, Type::Bool, None, Some(literal));
     Ok(if *op == ast::CmpOp::Eq {
         result
     } else {
