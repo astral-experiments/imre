@@ -3,11 +3,12 @@
 //! this nonreentrant operation. Each result record owns its key and lists.
 
 use super::*;
+use crate::StrOwner;
 use crate::objects::records::{RecordDescriptor, allocate_record};
 use crate::objects::{Words, stdlib::shared_prefix};
 
 struct Row<const N: usize> {
-    key: Rc<Str>,
+    key: StrOwner,
     // Zero means absent in the initial table. Existing list handles cannot be
     // invalidated by a sealed default insertion, even when input maps alias.
     values: [usize; N],
@@ -127,5 +128,5 @@ unsafe fn gather<const N: usize>(
             }
         }
     }
-    Some(Rc::into_raw(result.into_object()))
+    Some(crate::ObjectOwner::into_raw(result.into_object()))
 }

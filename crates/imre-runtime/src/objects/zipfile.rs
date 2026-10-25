@@ -1,13 +1,14 @@
 //! Read-only ZIP archives, their ordered central-directory metadata, and
 //! independent member handles. Closing drops the archive's source owner only.
 
+use crate::ObjectOwner;
+use crate::StrOwner;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fmt::Write;
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish, string_repr};
-use super::{Bytes, Int, Object, Storage, StorageCell, Str, Words, acquire_rc, files, object};
+use super::{Bytes, Int, Object, Storage, StorageCell, Str, Words, files, object};
 
 mod directory;
 mod member;
@@ -16,8 +17,8 @@ pub(in crate::objects) use member::Member;
 use source::Source;
 
 pub(super) struct Info {
-    filename: Rc<Str>,
-    original: Rc<Str>,
+    filename: StrOwner,
+    original: StrOwner,
     method: u16,
     flags: u16,
     crc: u32,
@@ -105,11 +106,11 @@ impl Info {
 }
 
 impl Object {
-    fn zip_info(&self) -> Rc<Info> {
+    fn zip_info(&self) -> crate::Shared<Info> {
         // SAFETY: all callers supply an exact ZipInfo with a live owner.
         unsafe {
             self.0.with(|storage| match storage {
-                Storage::ZipInfo(info) => Rc::clone(info),
+                Storage::ZipInfo(info) => crate::Shared::clone(info),
                 _ => unreachable!(),
             })
         }
@@ -118,13 +119,17 @@ impl Object {
 
 pub(super) struct Archive {
     source: Option<Source>,
-    filename: Option<Rc<Str>>,
-    filelist: Rc<Object>,
-    by_name: HashMap<Rc<Str>, Rc<Object>>,
+    filename: Option<StrOwner>,
+    filelist: ObjectOwner,
+    by_name: HashMap<StrOwner, ObjectOwner>,
+}
+
+fn store(storage: Storage) -> Result<ObjectOwner> {
+    ObjectOwner::try_new(Object(StorageCell::new(storage))).map_err(|_| Error::allocation())
 }
 
 impl Archive {
-    fn open(source: Source, filename: Option<Rc<Str>>) -> Result<Self> {
+    fn open(source: Source, filename: Option<StrOwner>) -> Result<Self> {
         let entries = source.directory()?;
         let mut list = Words::new(5);
         let mut by_name = HashMap::new();
@@ -136,19 +141,20 @@ impl Archive {
             .map_err(|_| Error::allocation())?;
         for entry in entries {
             let name = entry.filename.clone();
-            let object = Rc::new(Object(StorageCell::new(Storage::ZipInfo(Rc::new(entry)))));
+            let info = crate::Shared::try_new(entry).map_err(|_| Error::allocation())?;
+            let object = store(Storage::ZipInfo(info))?;
             by_name.insert(name, object.clone());
-            list.values.push(Rc::into_raw(object) as usize);
+            list.values.push(ObjectOwner::into_raw(object) as usize);
         }
         Ok(Self {
             source: Some(source),
             filename,
-            filelist: list.into_object(),
+            filelist: store(list.into_storage())?,
             by_name,
         })
     }
 
-    fn get(&self, name: &Str) -> Result<&Rc<Object>> {
+    fn get(&self, name: &Str) -> Result<&ObjectOwner> {
         self.by_name.get(name).ok_or_else(|| {
             Error::string_key(
                 format!(
@@ -160,7 +166,7 @@ impl Archive {
         })
     }
 
-    fn namelist(&self) -> Result<Rc<Object>> {
+    fn namelist(&self) -> Result<ObjectOwner> {
         let mut names = Words::new(3);
         self.for_infos(|list| {
             names
@@ -172,11 +178,11 @@ impl Archive {
                 let info = unsafe { object(info as *const Object) }.zip_info();
                 names
                     .values
-                    .push(Rc::into_raw(info.filename.clone()) as usize);
+                    .push(StrOwner::into_raw(info.filename.clone()) as usize);
             }
             Ok(())
         })?;
-        Ok(names.into_object())
+        store(names.into_storage())
     }
 
     fn for_infos<T>(&self, f: impl FnOnce(&[usize]) -> T) -> T {
@@ -210,7 +216,7 @@ impl Archive {
         }
     }
 
-    fn test(&self) -> Result<Option<Rc<Str>>> {
+    fn test(&self) -> Result<Option<StrOwner>> {
         self.for_infos(|list| {
             for &word in list {
                 // SAFETY: the filelist owns every entry throughout iteration.
@@ -234,10 +240,10 @@ impl Archive {
 
 fn opened(result: Result<Archive>) -> *const Object {
     finish(
-        result.map(|a| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ZipFile(
-                Box::new(a),
-            )))))
+        result.and_then(|archive| {
+            let archive =
+                allocator_api2::boxed::Box::try_new(archive).map_err(|_| Error::allocation())?;
+            store(Storage::ZipFile(archive)).map(ObjectOwner::into_raw)
         }),
         std::ptr::null(),
     )
@@ -260,11 +266,11 @@ unsafe fn with_archive<T>(archive: *const Object, f: impl FnOnce(&Archive) -> T)
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_zip_open(path: *const Str) -> *const Object {
     // SAFETY: the path is a live string owner for the entire open operation.
-    let path: Rc<Str> = unsafe { acquire_rc(path as usize) };
-    opened(
-        files::open_file(&path, 0)
-            .and_then(|(file, _)| Archive::open(Source::Owned(Rc::new(file)), Some(path))),
-    )
+    let path: StrOwner = unsafe { StrOwner::acquire_word(path as usize) };
+    opened(files::open_file(&path, 0).and_then(|(file, _)| {
+        let file = crate::Shared::try_new(file).map_err(|_| Error::allocation())?;
+        Archive::open(Source::Owned(file), Some(path))
+    }))
 }
 
 /// Open a caller-supplied binary stream; closing the archive never closes it.
@@ -274,7 +280,7 @@ pub unsafe extern "C" fn imre_zip_open(path: *const Str) -> *const Object {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_zip_open_file(file: *const Object) -> *const Object {
     // SAFETY: a caller-supplied BinaryIO transfers a new owner to the archive.
-    let file: Rc<Object> = unsafe { acquire_rc(file as usize) };
+    let file: ObjectOwner = unsafe { ObjectOwner::acquire_word(file as usize) };
     // SAFETY: our new file owner keeps the sealed state live while its name is cloned.
     let name = unsafe { file.0.with(|s| s.file().name.clone()) };
     opened(Archive::open(Source::Borrowed(file), name))
@@ -288,7 +294,7 @@ pub unsafe extern "C" fn imre_zip_open_file(file: *const Object) -> *const Objec
 pub unsafe extern "C" fn imre_zip_namelist(archive: *const Object) -> *const Object {
     // SAFETY: with_archive holds the rooted archive during list construction.
     let result = unsafe { with_archive(archive, Archive::namelist) };
-    finish(result.map(Rc::into_raw), std::ptr::null())
+    finish(result.map(ObjectOwner::into_raw), std::ptr::null())
 }
 
 /// Return the archive's shared list of metadata in directory order.
@@ -298,7 +304,7 @@ pub unsafe extern "C" fn imre_zip_namelist(archive: *const Object) -> *const Obj
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_zip_infolist(archive: *const Object) -> *const Object {
     // SAFETY: the archive owns the filelist and we transfer another owner.
-    unsafe { with_archive(archive, |a| Rc::into_raw(a.filelist.clone())) }
+    unsafe { with_archive(archive, |a| ObjectOwner::into_raw(a.filelist.clone())) }
 }
 
 /// Look up the last entry of a given name, preserving all duplicates in infolist.
@@ -313,7 +319,8 @@ pub unsafe extern "C" fn imre_zip_getinfo(
     // SAFETY: the caller roots the exact archive and key for this operation.
     let result = unsafe {
         with_archive(archive, |a| {
-            a.get(&*name).map(|entry| Rc::into_raw(entry.clone()))
+            a.get(&*name)
+                .map(|entry| ObjectOwner::into_raw(entry.clone()))
         })
     };
     finish(result, std::ptr::null())
@@ -328,7 +335,9 @@ pub unsafe extern "C" fn imre_zip_filename(archive: *const Object) -> *const Str
     // SAFETY: the caller supplies an archive that stays live for the metadata query.
     unsafe {
         with_archive(archive, |a| {
-            a.filename.clone().map_or(std::ptr::null(), Rc::into_raw)
+            a.filename
+                .clone()
+                .map_or(std::ptr::null(), StrOwner::into_raw)
         })
     }
 }
@@ -346,7 +355,7 @@ pub unsafe extern "C" fn imre_zip_member(
     // SAFETY: the caller roots the exact archive and key for this operation.
     let result = unsafe { with_archive(archive, |a| a.member(key, is_info)) };
     finish(
-        result.map(|m| Rc::into_raw(files::FileState::member(m))),
+        result.map(|m| ObjectOwner::into_raw(files::FileState::member(m))),
         std::ptr::null(),
     )
 }
@@ -364,7 +373,10 @@ pub unsafe extern "C" fn imre_zip_read(
     let result =
         // SAFETY: the caller supplies an archive that stays live for the metadata query.
         unsafe { with_archive(archive, |a| a.member(key, is_info)) }.and_then(|mut m| m.read(None));
-    finish(result.map(|b| Rc::into_raw(Rc::new(b))), std::ptr::null())
+    finish(
+        result.map(|b| crate::BytesOwner::into_raw(crate::BytesOwner::new(b))),
+        std::ptr::null(),
+    )
 }
 
 /// Return the first member with a BadZipFile error, or None for a healthy archive.
@@ -376,7 +388,7 @@ pub unsafe extern "C" fn imre_zip_test(archive: *const Object) -> *const Str {
     // SAFETY: the caller roots the exact archive and key for this operation.
     let result = unsafe { with_archive(archive, Archive::test) };
     finish(
-        result.map(|n| n.map_or(std::ptr::null(), Rc::into_raw)),
+        result.map(|n| n.map_or(std::ptr::null(), StrOwner::into_raw)),
         std::ptr::null(),
     )
 }
@@ -405,7 +417,7 @@ pub unsafe extern "C" fn imre_zip_close(archive: *const Object) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_zip_info_name(info: *const Object) -> *const Str {
     // SAFETY: the caller roots the metadata throughout string acquisition.
-    Rc::into_raw(unsafe { object(info) }.zip_info().filename.clone())
+    StrOwner::into_raw(unsafe { object(info) }.zip_info().filename.clone())
 }
 
 macro_rules! info_integer {
