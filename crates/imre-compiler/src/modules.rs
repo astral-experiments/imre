@@ -274,6 +274,14 @@ pub(crate) enum Intrinsic {
     Unquote,
 }
 
+impl Intrinsic {
+    /// Resolve the actual public export, including when the caller imported it under an alias.
+    pub(crate) fn exported_by(self, module: &str, name: &str) -> bool {
+        IntrinsicModule::named(module).and_then(|m| m.symbol(name))
+            == Some(Binding::Intrinsic(self))
+    }
+}
+
 impl IntrinsicModule {
     fn named(name: &str) -> Option<Self> {
         match name {
@@ -567,7 +575,7 @@ pub(crate) struct SourceModule {
     pub(crate) path: PathBuf,
     pub(crate) name: String,
     pub(crate) source: String,
-    bundled: bool,
+    pub(crate) bundled: bool,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,

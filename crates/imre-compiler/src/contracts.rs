@@ -359,6 +359,7 @@ impl Builtin {
             | Self::StringListNonempty
             | Self::Str
             | Self::NominalIdentity
+            | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
             | Self::StrEnumName
             | Self::StrEnumValue

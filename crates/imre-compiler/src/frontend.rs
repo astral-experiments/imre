@@ -67,6 +67,7 @@ mod timed_handlers;
 mod truthiness;
 mod unbound_locals;
 mod unions;
+mod unittest;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -350,7 +351,7 @@ const RESERVED: &[&str] = &[
     "__file__",
 ];
 
-/// These numbers are the sealed exception categories in the runtime ABI.
+/// Indices are runtime ABI categories. Empty entries belong to imported modules.
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
     match name {
         "NotImplementedError" => return Some(37),
@@ -3772,6 +3773,11 @@ impl<'a> Checker<'a> {
         } else {
             self.expr(&item.context_expr)?
         };
+        if let Type::Class(class) = manager.ty
+            && self.unittest_context(class)
+        {
+            return self.assert_raises_scope(item, remaining, body, class, manager);
+        }
         if manager.ty == Type::GeneratorContext {
             return self.generator_scope(item, remaining, body, manager);
         }
