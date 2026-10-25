@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use super::super::exceptions::{Error, Filename, Kind, replace_pending, swap_active, take_pending};
-use super::super::files::{close_file, errno_with_filenames};
+use super::super::files::{close_file, errno_error, errno_with_filenames};
 use super::super::tempdirs::scan_entries;
 use super::super::{Object, Str, acquire_rc, paths};
 use super::Int;
@@ -67,6 +67,12 @@ fn parent_fd(parent: &Parent) -> BorrowedFd<'_> {
     parent.as_deref().map_or(CWD, AsFd::as_fd)
 }
 
+/// Visits using the descriptor precede its Close on the stack.
+fn close_directory(fd: Rc<OwnedFd>) -> io::Result<()> {
+    let fd = Rc::try_unwrap(fd).expect("all child references have been released");
+    close_file(File::from(fd))
+}
+
 impl<F, E> Walk<'_, F>
 where
     F: FnMut(Operation, &Path, Error) -> std::result::Result<(), E>,
@@ -98,19 +104,13 @@ where
         }
     }
 
-    fn close(&mut self, fd: Rc<OwnedFd>, path: &Path) -> std::result::Result<(), E> {
-        // Visits which use this descriptor precede its Close on the stack.
-        let fd = Rc::try_unwrap(fd).expect("all child references have been released");
-        match close_file(File::from(fd)) {
-            Ok(()) => Ok(()),
-            Err(e) => self.io_error(Operation::Close, path, e, false),
-        }
-    }
-
     fn step(&mut self, step: Step) -> std::result::Result<(), E> {
         let entry = match step {
             Step::Visit(entry) => entry,
-            Step::Close(fd, path) => return self.close(fd, &path),
+            Step::Close(fd, path) => {
+                return close_directory(fd)
+                    .or_else(|e| self.io_error(Operation::Close, &path, e, false));
+            }
             Step::Rmdir(entry) => {
                 return match unlinkat(
                     parent_fd(&entry.parent),
@@ -202,8 +202,12 @@ where
                 // A handler may raise. Do not remove any more entries, but
                 // close every held directory, reporting close failures in order.
                 while let Some(step) = self.stack.pop() {
-                    if let Step::Close(fd, path) = step {
-                        self.close(fd, &path)?;
+                    if let Step::Close(fd, path) = step
+                        && let Err(error) = close_directory(fd)
+                    {
+                        // The finally block calls onexc with the original close
+                        // error. Only a normal traversal step assigns filename.
+                        (self.onexc)(Operation::Close, &path, errno_error(error))?;
                     }
                 }
                 return Err(error);
