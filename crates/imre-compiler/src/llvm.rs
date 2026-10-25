@@ -85,6 +85,7 @@ impl Type {
             | Self::NativeModule
             | Self::ModuleNamespace
             | Self::ModuleMember
+            | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
             | Self::TimedFileHandler
@@ -142,6 +143,7 @@ impl Type {
             | Self::NativeModule
             | Self::ModuleNamespace
             | Self::ModuleMember
+            | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
             | Self::TimedFileHandler
@@ -730,6 +732,7 @@ impl Emitter<'_, '_> {
             | Type::NativeModule
             | Type::ModuleNamespace
             | Type::ModuleMember
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
@@ -3352,6 +3355,7 @@ impl Emitter<'_, '_> {
                 | Type::NativeModule
                 | Type::ModuleNamespace
                 | Type::ModuleMember
+                | Type::LogFormatter
                 | Type::LogRecord
                 | Type::Logger
                 | Type::RegexPattern
@@ -3723,6 +3727,42 @@ impl Emitter<'_, '_> {
                     self.call(name, returns, &values)
                 }
             }
+            Builtin::Formatter(operation) => {
+                use crate::ir::FormatterOperation::*;
+                if *operation == New {
+                    let defaults = self.word(&args[4].value);
+                    let operand=self.checked_instruction(format!("call ptr @imre_formatter_new(i64 {}, i64 {}, ptr {}, i1 {}, i64 {defaults})",args[0].value.operand,args[1].value.operand,args[2].value.operand,args[3].value.operand));
+                    self.owned(Value {
+                        ty: returns,
+                        operand,
+                        small_integer: false,
+                    })
+                } else {
+                    let name = match operation {
+                        Stack => "imre_formatter_stack",
+                        New => unreachable!(),
+                        Text => "imre_formatter_text",
+                        Date => "imre_formatter_date",
+                        UsesTime => "imre_formatter_uses_time",
+                        Format => "imre_formatter_format",
+                        Message => "imre_formatter_message",
+                        Time => "imre_formatter_time",
+                        SetUtc => "imre_formatter_utc",
+                        SetDate => "imre_formatter_set_date",
+                        DefaultTime => "imre_formatter_default_time",
+                        DefaultMsec => "imre_formatter_default_msec",
+                        SetDefaultTime => "imre_formatter_set_default_time",
+                        SetDefaultMsec => "imre_formatter_set_default_msec",
+                    };
+                    let operands: Vec<_> = args.iter().map(|a| &a.value).collect();
+                    if returns == Type::None {
+                        self.void_call(name, &operands);
+                        none()
+                    } else {
+                        self.call(name, returns, &operands)
+                    }
+                }
+            }
             Builtin::LogRecord(operation) => {
                 use crate::ir::LogRecordOperation::*;
                 match operation {
@@ -3884,6 +3924,15 @@ impl Emitter<'_, '_> {
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::PosixPath(operation) => self.posix_path_builtin(*operation, &args, returns),
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
+            Builtin::TimeSleep => {
+                self.void_call("imre_time_sleep", &[&args[0].value]);
+                none()
+            }
+            Builtin::PercentInteger => self.call(
+                "imre_str_percent_int",
+                Type::Str,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::WallTime => self.call("imre_wall_time", Type::Float, &[]),
             Builtin::JsonEmptyObject => self.call("imre_json_empty_object", returns, &[]),
             Builtin::Document(operation) => {
@@ -5398,6 +5447,7 @@ impl Emitter<'_, '_> {
                     | Type::NativeModule
                     | Type::ModuleNamespace
                     | Type::ModuleMember
+                    | Type::LogFormatter
                     | Type::LogRecord
                     | Type::Logger
                     | Type::TimedFileHandler
@@ -5643,6 +5693,7 @@ impl Emitter<'_, '_> {
             | Type::NativeModule
             | Type::ModuleNamespace
             | Type::ModuleMember
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
@@ -5714,6 +5765,7 @@ impl Emitter<'_, '_> {
             | Type::NativeModule
             | Type::ModuleNamespace
             | Type::ModuleMember
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
@@ -6298,6 +6350,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::NativeModule
         | Type::ModuleNamespace
         | Type::ModuleMember
+        | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
         | Type::TimedFileHandler
@@ -6452,6 +6505,8 @@ declare void @imre_async_loop_signal(ptr, i64, ptr)
 declare void @imre_async_loop_close(ptr)
 declare i32 @imre_async_cancel(ptr)
 declare double @imre_wall_time()
+declare void @imre_time_sleep(double)
+declare ptr @imre_str_percent_int(ptr,i64)
 declare ptr @imre_async_group()
 declare void @imre_async_group_enter(ptr)
 declare ptr @imre_async_create_task(ptr, ptr)
@@ -6472,8 +6527,8 @@ declare i64 @imre_document(i32, i64, i64, i64)
 declare i64 @imre_string_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
 declare i64 @imre_projected_hash(ptr)
-declare ptr @imre_popen_pipes(ptr, ptr, ptr, i32, i64, i1 zeroext)
-declare i64 @imre_subprocess_call(ptr, ptr, ptr, i32, i64, i1 zeroext, i32, i64, i1 zeroext)
+declare ptr @imre_popen_command(ptr, i32, ptr, ptr, i32, i64, i1 zeroext)
+declare i64 @imre_call_command(ptr, i32, ptr, ptr, i32, i64, i1 zeroext, i32, i64, i1 zeroext)
 declare ptr @imre_popen_pipe(ptr, i32)
 declare i64 @imre_file_fileno(ptr)
 declare i64 @imre_popen_pid(ptr)
@@ -6917,6 +6972,20 @@ declare double @imre_log_file_compute_float(ptr, double)
 declare ptr @imre_log_file_deletions(ptr)
 declare i1 @imre_log_file_should_roll(ptr)
 declare void @imre_log_file_roll(ptr)
+declare ptr @imre_formatter_new(i64,i64,ptr,i1,i64)
+declare ptr @imre_formatter_stack(ptr,ptr)
+declare ptr @imre_formatter_text(ptr)
+declare i64 @imre_formatter_date(ptr)
+declare ptr @imre_formatter_default_time(ptr)
+declare i64 @imre_formatter_default_msec(ptr)
+declare i1 @imre_formatter_uses_time(ptr)
+declare ptr @imre_formatter_format(ptr,ptr)
+declare ptr @imre_formatter_message(ptr,ptr)
+declare ptr @imre_formatter_time(ptr,ptr,i64)
+declare void @imre_formatter_utc(ptr,i1)
+declare void @imre_formatter_set_date(ptr,i64)
+declare void @imre_formatter_set_default_time(ptr,ptr)
+declare void @imre_formatter_set_default_msec(ptr,i64)
 declare i1 @imre_logrecord_flag(i64)
 declare void @imre_logrecord_set_flag(i64,i1)
 declare ptr @imre_logrecord_new(i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32)

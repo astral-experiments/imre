@@ -35,12 +35,23 @@ METHODS = {
         "test_communicate_repeated_call_after_stdout_close": "communicate:timeout communicate",
         "test_kill": "stdout.read_size kill communicate wait",
         "test_kill_dead": "stdout.read_size kill communicate",
+        "test_shell_sequence": "Popen stdout.read exit",
+        "test_shell_string": "Popen stdout.read exit",
+        "test_args_string": "Popen wait returncode",
         "test_run_abort": "wait returncode",
         "test_terminate": "stdout.read_size terminate communicate wait",
         "test_terminate_dead": "stdout.read_size terminate communicate",
     },
     "ProcessTestCase": {
         "test_invalid_cmd": "Popen:ValueError Popen:ValueError",
+        "test_executable": "Popen wait returncode",
+        "test_bytes_executable": "Popen wait returncode",
+        "test_executable_takes_precedence": "Popen Popen:FileNotFoundError wait returncode",
+        "test_executable_replaces_shell": "Popen wait returncode",
+        "test_bytes_executable_replaces_shell": "Popen wait returncode",
+        "test_cwd_with_relative_executable": "Popen stdout.read wait returncode",
+        "test_executable_with_cwd": "Popen stdout.read wait returncode",
+        "test_executable_without_cwd": "Popen stdout.read wait returncode",
         "test_communicate": "communicate stdout.close stderr.close stdin.close",
         "test_communicate_epipe": "communicate",
         "test_communicate_epipe_only_stdin": "communicate wait",
@@ -76,8 +87,25 @@ class Unsupported(Exception):
     """A transport limitation must not satisfy upstream's expected API exceptions."""
 
 
-def source(options):
+def source(options, layout):
     keywords = dict(options)
+    if layout == "list[str]":
+        command = "argv: list[str] = []\nfor argument in sys.argv[4:]:\n    argv.append(Path(argument).read_bytes().decode())"
+    else:
+        kind, items = layout
+        values = []
+        for position, member in enumerate(items, 4):
+            raw = f"Path(sys.argv[{position}]).read_bytes()"
+            values.append(raw if member == "bytes" else f"Path({raw}.decode())" if member == "path" else f"{raw}.decode()")
+        value = ("(" + ", ".join(values) + ("," if len(values) == 1 else "") + ")" if kind == "tuple" else
+                 "[" + ", ".join(values) + "]" if kind == "list" else values[0])
+        command = "argv = " + value
+    if keywords.get("env") == "child_env":
+        command += """
+child_env: dict[str, str] = {}
+for i in range(int((payload.parent / "env-count").read_text())):
+    child_env[(payload.parent / ("key-" + str(i))).read_bytes().decode()] = (payload.parent / ("val-" + str(i))).read_bytes().decode()
+"""
     text = keywords.get("text") == "True" or keywords.get("encoding", "None") != "None"
     opts = "".join(f", {key}={value}" for key, value in options)
     lines = []
@@ -121,9 +149,7 @@ def send(reply: TextIO, message: str) -> None:
     reply.flush()
 
 payload = Path(sys.argv[3])
-argv: list[str] = []
-for argument in sys.argv[4:]:
-    argv.append(Path(argument).read_bytes().decode())
+{command}
 with open(sys.argv[1]) as channel, open(sys.argv[2], "w") as reply:
     try:
         p = subprocess.Popen(argv{opts})
@@ -186,9 +212,13 @@ class Stream:
 class Remote:
     def __init__(self, harness, argv, options):
         self.harness, self.argv = harness, argv
-        names = {"stdout", "stderr", "stdin", "text", "encoding", "close_fds", "cwd", "bufsize"}
-        if not isinstance(argv, (list, tuple)) or not all(type(v) is str for v in argv):
-            raise Unsupported("Popen transport requires a string argv sequence")
+        names = {"stdout", "stderr", "stdin", "text", "encoding", "close_fds", "cwd", "bufsize", "shell", "executable", "env"}
+        elements = argv if type(argv) in (list, tuple) else (argv,)
+        members = tuple("str" if type(v) is str else "bytes" if type(v) is bytes else "path" if isinstance(v, Path) else None for v in elements)
+        if None in members:
+            raise Unsupported("Popen representation for this custom argument is not available")
+        layout = "list[str]" if type(argv) is list and all(m=="str" for m in members) else (
+            "tuple" if type(argv) is tuple else "list" if type(argv) is list else "scalar", members)
         if unknown := set(options) - names:
             raise Unsupported("Popen options: " + ", ".join(sorted(unknown)))
         keywords = {}
@@ -197,18 +227,42 @@ class Remote:
                 if val not in (None, PIPE, DEVNULL, STDOUT):
                     raise Unsupported("stream transport does not admit external descriptors yet")
                 keywords[key] = {None: "None", PIPE: "subprocess.PIPE", DEVNULL: "subprocess.DEVNULL", STDOUT: "subprocess.STDOUT"}[val]
+            elif key == "env" and val is not None:
+                if type(val) is not dict or any(type(k) is not str or type(v) is not str for k,v in val.items()):
+                    raise Unsupported("environment representation requires a dict[str, str]")
+                keywords[key] = "child_env"
+            elif key in ("cwd", "executable") and val is not None:
+                if type(val) is str:
+                    keywords[key] = f'(payload.parent / "{key}").read_bytes().decode()'
+                elif type(val) is bytes:
+                    keywords[key] = f'(payload.parent / "{key}").read_bytes()'
+                elif isinstance(val, Path):
+                    keywords[key] = f'Path((payload.parent / "{key}").read_bytes().decode())'
+                else:
+                    raise Unsupported("custom path-like protocol needs a native __fspath__ invocation")
             else:
+                if val is not None and type(val) not in (str,int,bool):
+                    raise Unsupported("unsupported option representation: " + key)
                 keywords[key] = repr(val)
         self.text = bool(options.get("text") or options.get("encoding"))
-        binary = harness.actor(tuple(sorted(keywords.items())))
+        binary = harness.actor(tuple(sorted(keywords.items())), layout)
         self.folder = tempfile.TemporaryDirectory(dir=harness.work)
         self.file = Path(self.folder.name, "payload")
         # The host exec API rejects NUL before a native parent could inspect it.
         # Pass original argument bytes through files; the native launch validates them.
         arguments = []
-        for position, argument in enumerate(argv):
+        for key in ("cwd", "executable"):
+            if options.get(key) is not None:
+                (self.file.parent / key).write_bytes(os.fsencode(options[key]))
+        if options.get("env") is not None:
+            env = options["env"]
+            (self.file.parent / "env-count").write_text(str(len(env)))
+            for i, (key, value) in enumerate(env.items()):
+                (self.file.parent / f"key-{i}").write_bytes(key.encode())
+                (self.file.parent / f"val-{i}").write_bytes(value.encode())
+        for position, argument in enumerate(elements):
             path = Path(self.folder.name, str(position))
-            path.write_bytes(argument.encode())
+            path.write_bytes(os.fsencode(argument))
             arguments.append(path)
         control, cmd = os.pipe()
         reply, response = os.pipe()
@@ -325,8 +379,8 @@ class Harness:
         self.parents, self.calls, self.mixed = [], [], []
 
     @cache
-    def actor(self, keywords):
-        code = source(keywords)
+    def actor(self, keywords, layout):
+        code = source(keywords, layout)
         # Workers share only complete artifacts within this invocation and opt level.
         directory = Path(getattr(self.args, "actors", None) or self.work)
         stem = hashlib.sha256(code.encode()).hexdigest()[:24]

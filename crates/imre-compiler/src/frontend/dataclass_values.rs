@@ -39,6 +39,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::NativeModule
         | Type::ModuleNamespace
         | Type::ModuleMember
+        | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
         | Type::TimedFileHandler
@@ -136,6 +137,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
         Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Sha256
             | Type::RegexPattern

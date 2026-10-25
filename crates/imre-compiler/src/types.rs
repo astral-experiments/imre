@@ -21,6 +21,7 @@ enum Shape {
     Callable(Vec<Type>, Type),
     Awaitable(Type),
     DirectoryContext(Type),
+    ProcessArgs(Type),
     Optional(Type),
     Union(Vec<Type>),
 }
@@ -80,6 +81,7 @@ impl Types {
                 matches!(storage.shapes.get(id), Some(Shape::DirectoryContext(_)))
             }
             Type::AsyncProcess(bits) => bits <= 3,
+            Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
             Type::Int
             | Type::Float
             | Type::Bool
@@ -98,7 +100,6 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
-            | Type::Popen(..)
             | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::TaskGroup
@@ -108,6 +109,7 @@ impl Types {
             | Type::NativeModule
             | Type::ModuleNamespace
             | Type::ModuleMember
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
@@ -141,6 +143,7 @@ impl Types {
                 | Shape::Counter(ty)
                 | Shape::Awaitable(ty)
                 | Shape::DirectoryContext(ty)
+                | Shape::ProcessArgs(ty)
                 | Shape::Optional(ty) => vec![*ty],
                 Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => vec![*key, *value],
                 Shape::Tuple(fields) | Shape::Union(fields) => fields.clone(),
@@ -161,6 +164,7 @@ impl Types {
                 | Type::Coroutine(child_id)
                 | Type::Task(child_id)
                 | Type::DirectoryContext(child_id)
+                | Type::Popen(_, _, child_id)
                 | Type::Union(child_id) = child
                     && child_id >= id
                 {
@@ -434,6 +438,7 @@ impl Types {
             | Type::AsyncProcess(_)
             | Type::NativeModule
             | Type::ModuleNamespace
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
@@ -500,6 +505,17 @@ impl Types {
 
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
+    }
+
+    pub(crate) fn process_args(&self, command: Type) -> usize {
+        self.intern(Shape::ProcessArgs(command))
+    }
+
+    pub(crate) fn command_type(&self, id: usize) -> Type {
+        let Shape::ProcessArgs(command) = self.0.borrow().shapes[id] else {
+            unreachable!("Popen carries its original command type")
+        };
+        command
     }
 
     pub(crate) fn directory_context(&self, result: Type) -> Type {
@@ -814,7 +830,7 @@ impl TypeDescription<'_> {
                 self.write_str(", ")?;
                 self.write_type(*value)?;
             }
-            Shape::DirectoryContext(_) | Shape::Awaitable(_) => {
+            Shape::DirectoryContext(_) | Shape::ProcessArgs(_) | Shape::Awaitable(_) => {
                 unreachable!("handled by the nominal type spelling")
             }
             Shape::Optional(element) => {

@@ -137,6 +137,9 @@ impl Initialization {
                 module: checker.module,
                 statement: index,
             };
+            if checker.graph.unused_literal_global(definition) {
+                continue;
+            }
             match statement {
                 ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {
                     available.insert(definition);

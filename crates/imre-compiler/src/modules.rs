@@ -121,6 +121,8 @@ pub(crate) enum Intrinsic {
     LevelMap { names: bool },
     LogRecord,
     MakeLogRecord,
+    LogFormatter,
+    ClockConverter(bool),
     LogRecordFlag(u8),
     BasicConfig,
     LogLevel(i64),
@@ -153,6 +155,7 @@ pub(crate) enum Intrinsic {
     NullContext,
     SignalNumber(i64),
     WallTime,
+    TimeSleep,
     PatchSet,
     Awaitable,
     TypeVar,
@@ -349,6 +352,9 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
+            (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
+            (Self::Time, "localtime") => Intrinsic::ClockConverter(false),
             (Self::Logging, "LogRecord") => Intrinsic::LogRecord,
             (Self::Logging, "logThreads") => Intrinsic::LogRecordFlag(1),
             (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
@@ -377,6 +383,7 @@ impl IntrinsicModule {
             (Self::Asyncio, "Semaphore") => Intrinsic::Semaphore,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
+            (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal, "SIGINT") => Intrinsic::SignalNumber(2),
             (Self::Signal, "SIGTERM") => Intrinsic::SignalNumber(15),
@@ -684,6 +691,12 @@ impl SourceGraph {
         self.reachable
             .as_ref()
             .is_none_or(|r| r.inherited_class_method(class, name))
+    }
+
+    pub(crate) fn unused_literal_global(&self, definition: DefinitionId) -> bool {
+        self.reachable
+            .as_ref()
+            .is_some_and(|r| r.unused_literals.contains(&definition))
     }
 
     pub(crate) fn includes_method(&self, module: ModuleId, method: &ast::StmtFunctionDef) -> bool {
