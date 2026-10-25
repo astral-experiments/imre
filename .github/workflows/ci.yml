@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events, adapter-tools]
         required: true
 permissions:
   contents: read
@@ -154,6 +154,10 @@ jobs:
               fi
               PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/null_handler.py "${tools[@]}" --result "$results/null-handler.json"
               ;;
+            adapter-tools)
+              tar -czf "$results/toolchain.tgz" -C "$PWD/target/debug" imre libimre_runtime.a
+              (cd target/debug && sha256sum imre libimre_runtime.a) > "$results/toolchain.sha256"
+              ;;
             record-attributes|adapter-events)
               fixture=tests/fixtures/files/logging_record_attributes.py
               if [[ "$AUDIT" == adapter-events ]]; then fixture=tests/fixtures/files/logging_adapter_events.py; fi
@@ -225,7 +229,15 @@ jobs:
               print('LOGGING-JSON-GZIP:', part)
           PYTHON
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: (success() || failure()) && inputs.audit != 'logging'
+        if: (success() || failure()) && inputs.audit != 'logging' && inputs.audit != 'adapter-tools'
         with:
           name: logging-${{ inputs.audit }}-${{ inputs.source }}
           path: ${{ runner.temp }}/logging-results
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: success() && inputs.audit == 'adapter-tools'
+        with:
+          name: logging-tools-${{ inputs.source }}
+          path: ${{ runner.temp }}/logging-results
+          retention-days: 1
+          compression-level: 0
