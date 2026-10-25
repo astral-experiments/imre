@@ -23,6 +23,8 @@ does not add an occurrence to this total.
 Run [measure.py](measure.py) with a pinned CPython and explicit Imre artifacts
 to reproduce the ledger. The [run instructions](runs/03c8d84fa4c1/README.md) show the arguments.
 
+The [docs stack rerun](runs/3da09720e93c/verified-defaults.json) matched all seven original controls and 28 native executions. Its [source and artifact hashes](runs/3da09720e93c/source.json) identify the compiled source and the separate [table check](runs/3da09720e93c/independent-82d6826-table.json).
+
 | Suite | IDs |
 | --- | ---: |
 | test_collections (containers, ABCs and doctests) | 116 |
