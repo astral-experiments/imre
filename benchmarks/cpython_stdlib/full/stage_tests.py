@@ -17,7 +17,7 @@ def verified_sources():
     shared = HERE.parent / "UPSTREAM.json"
     pin = json.loads(shared.read_bytes())["commit"]
     # OS originally pinned its three companion suites in separate manifests.
-    manifests = [shared, *sorted(HERE.glob("*/UPSTREAM.json")),
+    manifests = [shared, *sorted(HERE.glob("*/UPSTREAM.json")), *sorted(HERE.glob("*/FREE_THREADING.json")),
                  *(HERE / "os" / f"{name}.json" for name in ("genericpath", "os", "posix"))]
     seen = {}
     for manifest in manifests:

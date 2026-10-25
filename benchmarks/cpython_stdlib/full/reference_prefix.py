@@ -28,7 +28,8 @@ def main():
         parser.error("the disposable prefix must be empty")
     lib = prefix / sys.platlibdir
     count = stage(lib)
-    version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    suffix = "t" if sysconfig.get_config_var("Py_GIL_DISABLED") else ""
+    version = f"python{sys.version_info.major}.{sys.version_info.minor}{suffix}"
     stdlib = lib / version
     (lib / "Lib").rename(stdlib)  # Keep Tools beside the stdlib as test.support expects.
     # Leave the caller's Python installation untouched, including when a child

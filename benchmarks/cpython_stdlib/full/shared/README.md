@@ -29,3 +29,13 @@ The prefix combines the supplied reference interpreter and its standard library 
 The runner verifies the installed fixtures again and uses the resource options from each module's ledger. It records original JUnit XML, runner output and a per-module `summary.json` in the result directory. Pass module names after `--output "$results"` for a smaller run. On Linux, run as a regular user with ordinary process and file permissions: some upstream tests exercise ptrace and permission changes.
 
 Two subprocess tests that skip in the reference source build run and pass in the installed prefix. Their original decorator checks `sysconfig.is_python_build()` (reason: `need an installed Python. See #7774`). Those two passes are reported by name. Any other outcome difference makes the command fail.
+
+Reference ledgers named `reference-free-threading-linux.json` were captured on a free-threaded 3.14.5 build with the GIL disabled. Re-run those ledgers separately with the same configuration; package-level skips recorded on the ordinary build stay in its ledger. Both result files name their configuration.
+
+```sh
+free_prefix=$(mktemp -d)
+"$CPYTHON_FREETHREADED" -I -B benchmarks/cpython_stdlib/full/reference_prefix.py "$free_prefix"
+"$free_prefix/bin/python3.14t" -I -B benchmarks/cpython_stdlib/full/run_staged_reference.py --output "$(mktemp -d)"
+```
+
+The [Linux installed run](installed-linux.json) records 7,294 ordinary-build occurrences (6,701 passes and 593 original skips) plus four free-threaded passes. Across both configurations there were no failures, extra skips or missing occurrences. These are CPython reference results; native coverage is recorded separately by each module.

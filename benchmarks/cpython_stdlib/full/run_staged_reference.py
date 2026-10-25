@@ -13,7 +13,7 @@ import unittest
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from discover_staged import early_skips, suite_names, suite_owners
+from discover_staged import configuration, early_skips, reference_files, suite_names, suite_owners
 from reference_report import checked_reference
 from stage_tests import verify_prefix
 sys.path.insert(0, str(HERE.parent))
@@ -26,7 +26,7 @@ INSTALLED_ONLY = {f"test.test_subprocess.{cls}.test_executable_without_cwd"
 
 
 def run_group(mod, primary, pin, out):
-    refs = sorted((HERE / mod).glob(f"reference*-{sys.platform}.json"))
+    refs = reference_files(HERE / mod)
     expected = defaultdict(list)
     for ref in refs:
         _, entries = checked_reference(ref, pin, sys.platform)
@@ -99,7 +99,8 @@ def main():
         result = results[mod] = run_group(mod, wave[mod], release["commit"], out)
         print(f"{mod}: {result['outcomes']}; {len(result['differences'])} unexpected differences", flush=True)
     (out / "summary.json").write_text(json.dumps({"cpython_commit": release["commit"],
-        "platform": sys.platform, "interpreter": "CPython", "verified_fixture_files": count,
+        "platform": sys.platform, "interpreter": "CPython", "configuration": configuration(),
+        "verified_fixture_files": count,
         "modules": results}, indent=2) + "\n")
     return int(any(r["exit"] or r["differences"] for r in results.values()))
 

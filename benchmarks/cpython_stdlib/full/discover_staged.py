@@ -5,6 +5,7 @@ import importlib
 import json
 from pathlib import Path
 import sys
+import sysconfig
 import tomllib
 import unittest
 
@@ -18,13 +19,37 @@ from suite_inventory import cases, load_suite
 def suite_names(mod, default, refs):
     manifest = HERE / mod / "UPSTREAM.json"
     metadata = json.loads(manifest.read_bytes()) if manifest.exists() else {}
-    return (metadata.get("modules") or [n for p in refs if (n := json.loads(p.read_bytes()).get("module"))]
-            or [metadata.get("module", "test." + default)])
+    names = []
+    for path in refs:
+        name = json.loads(path.read_bytes()).get("module")
+        names.extend([name] if name else metadata.get("modules") or [metadata.get("module", "test." + default)])
+    return list(dict.fromkeys(names))
+
+
+def configuration():
+    if not sysconfig.get_config_var("Py_GIL_DISABLED"):
+        return "gil"
+    if sys._is_gil_enabled():
+        raise ValueError("free-threaded reference ledgers require the GIL to be disabled")
+    return "free-threaded"
+
+
+def free_threaded_reference(ref):
+    return ref.name == f"reference-free-threading-{sys.platform}.json"
+
+
+def reference_files(directory):
+    free = configuration() == "free-threaded"
+    return [ref for ref in sorted(directory.glob(f"reference*-{sys.platform}.json"))
+            if free_threaded_reference(ref) == free]
 
 
 def suite_owners():
-    owners = tomllib.loads((HERE / "scope.toml").read_text())["wave_one"]
+    # Ordinary package-level GIL skips remain in their original regular ledger.
+    owners = tomllib.loads((HERE / "scope.toml").read_text())["wave_one"] if configuration() == "gil" else {}
     for ref in sorted(HERE.glob(f"*/reference*-{sys.platform}.json")):
+        if free_threaded_reference(ref) != (configuration() == "free-threaded"):
+            continue
         owners.setdefault(ref.parent.name, "test_" + ref.parent.name)
     return owners
 
@@ -61,7 +86,7 @@ def main():
     total = skipped = 0
     for mod in modules:
         entries = []
-        refs = sorted((HERE / mod).glob(f"reference*-{sys.platform}.json"))
+        refs = reference_files(HERE / mod)
         for ref in refs:
             _, results = checked_reference(ref, release["commit"], sys.platform)
             entries.extend(results)
