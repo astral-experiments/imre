@@ -390,7 +390,11 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
                 let Some(position) = iterator.upgrade() else {
                     return false;
                 };
-                position.set(self.entries[..position.get()].iter().flatten().count());
+                // After clear, a cursor can still be past the end of a smaller
+                // replacement table. Remove only vacant slots before its index.
+                let original = position.get();
+                let prefix = original.min(self.entries.len());
+                position.set(original - prefix + self.entries[..prefix].iter().flatten().count());
                 true
             }),
             // Eviction leaves only empty slots before the private cache cursor.
@@ -700,6 +704,24 @@ pub(super) struct Set {
 }
 
 impl Mapping {
+    /// Copies entries in insertion order, retains immutable keys, and lets the
+    /// caller choose whether each value is shared or copied through a memo.
+    pub(super) fn copy_values(
+        &self,
+        mut value_copy: impl FnMut(OwnedWord) -> Result<OwnedWord, Error>,
+    ) -> Result<Self, Error> {
+        let mut copy = Self::new(self.tables.key_kind(), self.value_kind.raw());
+        copy.missing = self.missing;
+        let mut position = 0;
+        while let Some((next, key, value)) = self.tables.next(position) {
+            // SAFETY: the source mapping roots this value of the exact kind.
+            let value = value_copy(unsafe { self.value_kind.acquire(value) })?;
+            copy.insert(key, value)?;
+            position = next;
+        }
+        Ok(copy)
+    }
+
     /// Borrows entries in Python insertion order. The caller must keep the
     /// enclosing storage borrow live and cannot mutate or invoke user code.
     pub(super) fn string_entries(&self) -> impl Iterator<Item = (&Str, usize)> {
@@ -972,6 +994,20 @@ impl Mapping {
         }
     }
 
+    /// Detach entries and cached values before releasing any key or value. A
+    /// live cursor keeps its numeric position if the dictionary is refilled.
+    fn take_contents(&mut self) -> Self {
+        let mut empty = Self::new(self.tables.key_kind(), self.value_kind.raw());
+        empty.missing = self.missing;
+        let cursors = table!(&mut self.tables, table => {
+            std::mem::replace(&mut table.cursors, Cursors::Iterators(Vec::new()))
+        });
+        if matches!(cursors, Cursors::Iterators(_)) {
+            table!(&mut empty.tables, table => table.cursors = cursors);
+        }
+        std::mem::replace(self, empty)
+    }
+
     /// Updates only an already-built cache. Other dictionary representations
     /// neither allocate a cache nor reinterpret their keys as strings.
     ///
@@ -991,6 +1027,13 @@ impl Mapping {
 }
 
 impl Set {
+    /// Deep-copy admission proves each set member is unchanged by deepcopy.
+    pub(super) fn copy_keys(&self) -> Result<Self, Error> {
+        let mut tables = Tables::new(self.tables.key_kind());
+        self.tables.copy_keys(&mut tables)?;
+        Ok(Self { tables })
+    }
+
     /// # Safety
     /// Both sets remain rooted and immutable for the entire comparison.
     pub(super) unsafe fn equal(&self, other: &Self) -> bool {
@@ -1203,91 +1246,55 @@ impl Storage {
     }
 }
 
-struct FunctionCache {
+pub(super) struct FunctionCache {
     table: Rc<Object>,
     hits: usize,
     misses: usize,
 }
 
-thread_local! {
-    static FUNCTION_CACHES: std::cell::RefCell<std::collections::HashMap<usize, FunctionCache>> =
-        std::cell::RefCell::default();
-}
+impl FunctionCache {
+    fn new(key: u32, value: u32) -> Self {
+        Self {
+            // SAFETY: imre_dict_new returns an independent strong owner.
+            table: unsafe { Rc::from_raw(imre_dict_new(key, value)) },
+            hits: 0,
+            misses: 0,
+        }
+    }
 
-/// Each statically decorated function has one typed dictionary. The wrapper
-/// inserts only after a successful call and reacquires the table after user code.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_function_cache(id: usize, key: u32, value: u32) -> *const Object {
-    FUNCTION_CACHES.with_borrow_mut(|caches| {
-        Rc::into_raw(
-            caches
-                .entry(id)
-                .or_insert_with(|| FunctionCache {
-                    // SAFETY: imre_dict_new returns an independent strong owner.
-                    table: unsafe { Rc::from_raw(imre_dict_new(key, value)) },
-                    hits: 0,
-                    misses: 0,
-                })
-                .table
-                .clone(),
-        )
-    })
-}
-
-/// Count every lookup before entering user code. A bounded hit moves its entry
-/// to the back of the private dictionary; keys cannot execute Python code here.
-///
-/// # Safety
-/// The wrapper roots a key of this cache's exact immutable key kind.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_function_cache_probe(id: usize, key: usize, capacity: i64) -> bool {
-    let result = FUNCTION_CACHES.with_borrow_mut(|caches| {
-        let cache = caches.get_mut(&id).expect("cache initialized for lookup");
+    unsafe fn probe(&mut self, key: usize, capacity: i64) -> Result<bool, Error> {
         let hit = match capacity {
             0 => false,
             // SAFETY: the wrapper preserves this key's owner and layout.
             -1 => unsafe {
-                cache
-                    .table
+                self.table
                     .0
                     .with(|s| s.dictionary().tables.lookup(key).is_some())
             },
             // SAFETY: only the private insertion order changes; no user code can run.
             _ => unsafe {
-                cache.table.0.with_mut(
+                self.table.0.with_mut(
                     |s| table!(&mut s.dictionary_mut().tables, table => table.promote(key)),
                 )?
             },
         };
         if hit {
-            cache.hits += 1
+            self.hits += 1
         } else {
-            cache.misses += 1
+            self.misses += 1
         }
         Ok(hit)
-    });
-    crate::finish(result, false)
-}
+    }
 
-/// Keep the most recently used entries. A reentrant call may already have
-/// inserted this key. Evicted owners drop after both registry and table borrows.
-///
-/// # Safety
-/// The caller roots an exact key and result matching the initialized cache.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_function_cache_insert(
-    id: usize,
-    key: usize,
-    word: usize,
-    capacity: usize,
-) {
-    let evicted = FUNCTION_CACHES.with_borrow_mut(|caches| {
-        let cache = caches
-            .get_mut(&id)
-            .expect("cache initialized for insertion");
+    unsafe fn insert(
+        &mut self,
+        key: usize,
+        word: usize,
+        capacity: usize,
+    ) -> Result<Option<(OwnedWord, OwnedWord)>, Error> {
         // SAFETY: the caller roots both exact operands; displaced owners escape the borrow.
         unsafe {
-            cache.table.0.with_mut(|s| {
+            self.table.0.with_mut(|s| {
                 let mapping = s.dictionary_mut();
                 if mapping.tables.lookup(key).is_some() {
                     return Ok(None);
@@ -1308,34 +1315,124 @@ pub unsafe extern "C" fn imre_function_cache_insert(
                 Ok(Some((key, OwnedWord::from_owned(word, mapping.value_kind))))
             })
         }
-    });
-    drop(crate::finish(evicted, None));
-}
+    }
 
-/// Return hits, misses, or the current number of entries. An unused cache is empty.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_function_cache_stat(id: usize, field: u32) -> usize {
-    let value = FUNCTION_CACHES.with_borrow(|caches| {
-        caches.get(&id).map_or(0, |cache| match field {
-            0 => cache.hits,
-            1 => cache.misses,
+    fn stat(&self, field: u32) -> usize {
+        match field {
+            0 => self.hits,
+            1 => self.misses,
             // SAFETY: the registry roots this private table and no callbacks occur.
             3 => unsafe {
-                cache
-                    .table
+                self.table
                     .0
                     .with(|storage| storage.dictionary().tables.len())
             },
             _ => unreachable!("invalid cache statistic"),
-        })
-    });
-    Int::from_usize(value).into_raw()
+        }
+    }
 }
 
-/// Reset counters and release cached results outside the registry borrow.
+thread_local! {
+    static FUNCTION_CACHES: std::cell::RefCell<std::collections::HashMap<usize, Rc<Object>>> =
+        std::cell::RefCell::default();
+}
+
+/// Module decorators live for the program; dynamic ones own this same state directly.
 #[unsafe(no_mangle)]
-pub extern "C" fn imre_function_cache_clear(id: usize) {
-    drop(FUNCTION_CACHES.with_borrow_mut(|caches| caches.remove(&id)));
+pub extern "C" fn imre_module_cache(id: usize, key: u32, value: u32) -> *const Object {
+    FUNCTION_CACHES.with_borrow_mut(|caches| {
+        let cache = caches.entry(id).or_insert_with(|| {
+            // SAFETY: creation transfers an independent strong reference to the registry.
+            unsafe { Rc::from_raw(imre_cache_new(key, value)) }
+        });
+        Rc::into_raw(cache.clone())
+    })
+}
+
+/// Each application of a decorator owns its own counters, table and recency order.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_cache_new(key: u32, value: u32) -> *const Object {
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::FunctionCache(
+        Box::new(FunctionCache::new(key, value)),
+    )))))
+}
+
+impl Storage {
+    fn cache(&self) -> &FunctionCache {
+        match self {
+            Self::FunctionCache(cache) => cache,
+            _ => unreachable!("expected a private function cache"),
+        }
+    }
+
+    fn cache_mut(&mut self) -> &mut FunctionCache {
+        match self {
+            Self::FunctionCache(cache) => cache,
+            _ => unreachable!("expected a private function cache"),
+        }
+    }
+}
+
+/// # Safety
+/// The caller roots a live private cache state for this read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_cache_table(state: *const Object) -> *const Object {
+    // SAFETY: an independent table owner leaves the borrow.
+    Rc::into_raw(unsafe { object(state).0.with(|s| s.cache().table.clone()) })
+}
+
+/// # Safety
+/// Both the private state and its exact key are rooted through the lookup.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_cache_probe(state: *const Object, key: usize, capacity: i64) -> bool {
+    // SAFETY: lookup preserves both owners and does not invoke user code.
+    crate::finish(
+        unsafe {
+            object(state)
+                .0
+                .with_mut(|s| s.cache_mut().probe(key, capacity))
+        },
+        false,
+    )
+}
+
+/// # Safety
+/// State, key and value are live and have the kinds passed to the constructor.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_cache_insert(
+    state: *const Object,
+    key: usize,
+    word: usize,
+    capacity: usize,
+) {
+    // SAFETY: eviction transfers owners out of the storage borrow.
+    let evicted = unsafe {
+        object(state)
+            .0
+            .with_mut(|s| s.cache_mut().insert(key, word, capacity))
+    };
+    drop(crate::finish(evicted, None));
+}
+
+/// # Safety
+/// The caller roots a private cache; field is hits, misses or current size.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_cache_stat(state: *const Object, field: u32) -> usize {
+    // SAFETY: this read returns a plain count.
+    Int::from_usize(unsafe { object(state).0.with(|s| s.cache().stat(field)) }).into_raw()
+}
+
+/// # Safety
+/// The state belongs to a wrapper with the specified key and value kinds.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_cache_clear(state: *const Object, key: u32, value: u32) {
+    let empty = FunctionCache::new(key, value);
+    // SAFETY: displaced entries drop after the new state is installed and the borrow ends.
+    drop(unsafe {
+        object(state)
+            .0
+            .with_mut(|s| std::mem::replace(s.cache_mut(), empty))
+    });
 }
 
 /// Creates a dictionary with concrete scalar keys and one shared value descriptor.
@@ -1356,17 +1453,9 @@ pub unsafe extern "C" fn imre_dict_copy(value: *const Object) -> *const Object {
     // SAFETY: the source owns every copied word; insertion in the fresh table
     // hashes only closed immutable keys and cannot reenter the source.
     let result = unsafe {
-        object(value).0.with(|storage| {
-            let source = storage.dictionary();
-            let mut copy = Mapping::new(source.tables.key_kind(), source.value_kind.raw());
-            copy.missing = source.missing;
-            let mut position = 0;
-            while let Some((next, key, value)) = source.tables.next(position) {
-                copy.insert(key, source.value_kind.acquire(value))?;
-                position = next;
-            }
-            Ok(copy)
-        })
+        object(value)
+            .0
+            .with(|storage| storage.dictionary().copy_values(Ok))
     };
     super::exceptions::finish(
         result.map(|copy| {
@@ -1808,6 +1897,21 @@ pub unsafe extern "C" fn imre_dict_delete(value: *const Object, key: usize) {
     }
     drop(old);
 }
+
+/// # Safety
+/// The caller roots an exact dictionary owner throughout the mutation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_clear(value: *const Object) {
+    // SAFETY: all stored words transfer to the detached table. Destruction
+    // happens after the exclusive storage borrow ends.
+    let previous = unsafe {
+        object(value)
+            .0
+            .with_mut(|s| s.dictionary_mut().take_contents())
+    };
+    drop(previous);
+}
+
 /// # Safety
 /// Root a dictionary. Mode0 yields keys, mode1 items. Release the internal
 /// iterator on every loop exit and never store it in a user container.

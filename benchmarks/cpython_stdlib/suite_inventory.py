@@ -46,6 +46,8 @@ def id_counts(names):
 
 def reference_results(xml, expected):
     rows = ET.parse(xml).findall(".//testcase")
+    if unnamed := sum(not row.get("name") for row in rows):
+        raise ValueError(f"{unnamed} unnamed <testcase> entries cannot be matched to upstream IDs")
     seen = id_counts(row.attrib["name"] for row in rows)
     if seen != expected:
         raise ValueError(f"reference IDs differ: missing={dict(expected - seen)}, "

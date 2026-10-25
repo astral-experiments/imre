@@ -115,7 +115,7 @@ pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Ex
                 if checker.resolve(&call.func).is_none()
                     && matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
             || matches!(&*call.func, ast::Expr::Attribute(attribute)
-                if matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob")))
+                if matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob" | "walk")))
 }
 
 pub(super) fn integer(value: i64) -> Expr {
@@ -299,14 +299,18 @@ impl Checker<'_> {
             return Ok(Some(Iteration::Prepared(input)));
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob")
+            && matches!(
+                attribute.attr.as_str(),
+                "iterdir" | "glob" | "rglob" | "walk"
+            )
             && self.class_reference(&attribute.value).is_none()
         {
             let receiver = self.expr(&attribute.value)?;
             if receiver.ty == Type::Path {
                 let iterator = self.path_iterator(receiver, call, attribute.attr.as_str())?;
+                let item = self.types.cursor_element(iterator.ty).unwrap();
                 return Ok(Some(Iteration::Prepared(
-                    self.prepare_cursor(iterator, Type::Path),
+                    self.prepare_cursor(iterator, item),
                 )));
             }
             if let Type::Class(class) = receiver.ty {
@@ -365,7 +369,7 @@ impl Checker<'_> {
                             paths::operation(ir::PathOperation::Text, Type::Str, vec![item])
                         }
                         Type::Str => item,
-                        Type::Class(_) | Type::CompletedProcess(_) => {
+                        Type::Class(_) | Type::CompletedProcess(..) => {
                             self.record_text(item, call)?
                         }
                         Type::Int | Type::Bool | Type::Float | Type::None | Type::Bytes => Expr {

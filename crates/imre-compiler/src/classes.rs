@@ -14,7 +14,10 @@ mod exceptions;
 mod inheritance;
 mod record_hash;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
+pub(crate) use exceptions::explicit_message_initializer;
 pub(crate) use inheritance::super_init;
+
+pub(crate) const EXCEPTION_ARGS_SLOT: &str = "<exception arguments>";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MethodKind {
@@ -123,14 +126,25 @@ impl Classes {
         for def in &resolved.layouts {
             let c = &mut definitions[ids[def]];
             // This ABI slot is not a Python identifier, constructor parameter,
-            // dataclass comparison field, or repr field. Zero means no argument.
+            // dataclass comparison field, or repr field. The frontend gives
+            // the tuple slot its native exception field type during layout.
+            let module = &graph.modules[def.module];
+            let tuple_args = c.methods.iter().filter(|m| matches!(m.name.as_str(), "__init__" | "__post_init__"))
+                .flat_map(|m| &m.body).any(|stmt| matches!(stmt, ast::Stmt::Expr(e)
+                    if matches!(&*e.value, ast::Expr::Call(call) if explicit_message_initializer(module, call).is_some()
+                        || super_init(call) && call.arguments.args.len() != 1)));
             let annotation = ruff_python_parser::parse_expression("str | None")
                 .expect("static annotation")
                 .expr()
                 .clone();
             c.fields.push(Field {
                 module: def.module,
-                name: "<exception message>".into(),
+                name: if tuple_args {
+                    EXCEPTION_ARGS_SLOT
+                } else {
+                    "<exception message>"
+                }
+                .into(),
                 annotation,
                 default: None,
                 kw_only: false,
@@ -385,12 +399,14 @@ fn collect_class(
                         "StrEnum methods cannot override member metadata or special behavior",
                     ));
                 }
+                let unary_protocol = matches!(
+                    name,
+                    "__str__" | "__bool__" | "__iter__" | "__copy__" | "__fspath__"
+                ) || (mapping && name == "__len__");
                 if name.starts_with("__")
-                    && !matches!(
-                        name,
-                        "__init__" | "__str__" | "__bool__" | "__iter__" | "__copy__"
-                    )
-                    && !(mapping && matches!(name, "__getitem__" | "__len__" | "__contains__"))
+                    && name != "__init__"
+                    && !unary_protocol
+                    && !(mapping && matches!(name, "__getitem__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())
                     && !(name == "__repr__" && exception_layout)
                 {
@@ -427,18 +443,10 @@ fn collect_class(
                 {
                     return Err(module.error(method, "a property getter must take only self"));
                 }
-                if matches!(
-                    name,
-                    "__str__"
-                        | "__repr__"
-                        | "__post_init__"
-                        | "__bool__"
-                        | "__iter__"
-                        | "__copy__"
-                        | "__len__"
-                ) && (kind != MethodKind::Instance
-                    || method.parameters.len() != 1
-                    || first.is_none_or(|parameter| parameter.default.is_some()))
+                if (unary_protocol || matches!(name, "__repr__" | "__post_init__"))
+                    && (kind != MethodKind::Instance
+                        || method.parameters.len() != 1
+                        || first.is_none_or(|parameter| parameter.default.is_some()))
                 {
                     return Err(module.error(
                         method,
@@ -570,6 +578,7 @@ fn collect_class(
             } else {
                 inherited_fields
             },
+            exception_layout,
         )?;
     }
     let mut bases = Vec::new();
@@ -707,6 +716,7 @@ fn check_initializer(
     initializer: &ast::StmtFunctionDef,
     fields: &[Field],
     inherited: &[Field],
+    exception_layout: bool,
 ) -> Result<(), String> {
     let receiver = initializer
         .parameters
@@ -721,7 +731,28 @@ fn check_initializer(
         .collect::<HashSet<_>>();
     let mut initialized = HashSet::new();
     let mut called_super = false;
+    let mut called_exception_base = false;
     for statement in &initializer.body {
+        if exception_layout
+            && let ast::Stmt::Expr(stmt) = statement
+            && let ast::Expr::Call(call) = &*stmt.value
+            && let Some((_, args)) = explicit_message_initializer(module, call)
+        {
+            let mut use_self = SelfUse(receiver, None, &initialized);
+            for arg in args {
+                use_self.visit_expr(arg);
+            }
+            if let Some(expr) = use_self.1 {
+                return Err(module.error(
+                    expr,
+                    "the incomplete instance cannot escape during construction",
+                ));
+            }
+            // Calling BaseException directly bypasses any user base initializer.
+            // Its ordinary fields still have to be initialized by this method.
+            called_exception_base = true;
+            continue;
+        }
         let assignment = match statement {
             ast::Stmt::Assign(assignment) => assignment,
             ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {
@@ -820,7 +851,7 @@ fn check_initializer(
             }
         }
     }
-    if !inherited.is_empty() && !called_super {
+    if !inherited.is_empty() && !called_super && !called_exception_base {
         return Err(module.error(initializer, "an explicit subclass initializer must call super().__init__ to initialize inherited fields"));
     }
     let missing = fields

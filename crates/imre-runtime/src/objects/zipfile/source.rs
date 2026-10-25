@@ -16,6 +16,19 @@ pub(super) enum Source {
 }
 
 impl Source {
+    /// A member offset is relative to the adjusted archive origin and may be negative.
+    pub(super) fn header_offset(&self, offset: i128) -> Result<u64> {
+        match self {
+            Self::Owned(file) => (&**file)
+                .seek(SeekFrom::Start(files::disk_offset(offset)?))
+                .map_err(files::errno_error),
+            Self::Borrowed(object) => {
+                // SAFETY: the archive retains the binary stream during validation.
+                unsafe { object.0.with_mut(|s| s.file_mut().absolute_offset(offset)) }
+            }
+        }
+    }
+
     pub(super) fn directory(&self) -> Result<Vec<Info>> {
         match self {
             Self::Owned(file) => directory::entries(&mut &**file),
