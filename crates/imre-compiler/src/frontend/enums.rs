@@ -165,9 +165,9 @@ impl Checker<'_> {
         if types
             .iter()
             .any(|ty| matches!(ty, Type::PlainObject | Type::StrDescriptor(_)))
-            && types == [left.ty, right.ty]
+            && (types == [left.ty, right.ty] || types[0] == types[1])
         {
-            if left.ty == right.ty {
+            if types[0] == types[1] {
                 return Ok(Self::identity_result(
                     vec![left, right],
                     op == ast::CmpOp::IsNot,

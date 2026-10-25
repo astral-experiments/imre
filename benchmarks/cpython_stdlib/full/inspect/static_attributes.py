@@ -29,6 +29,22 @@ def omitted(default=inspect._sentinel) -> bool:
     return default is sentinel
 
 
+def possible_default(mark: bool, present: bool):
+    if not present:
+        return None
+    return sentinel if mark else object()
+
+
+def optional_default(mark: bool, present: bool) -> None:
+    value = possible_default(mark, present)
+    print(value is sentinel)
+    try:
+        result = getattr_static(1, "missing", value)
+        print(result is value)
+    except AttributeError as error:
+        print(repr(error))
+
+
 def annotated(value: str) -> bool:
     return bool(value)
 
@@ -44,6 +60,9 @@ def run() -> None:
     print(omitted())
     print(omitted(first))
     print(omitted(sentinel))
+    optional_default(False, False)
+    optional_default(False, True)
+    optional_default(True, True)
     print(getattr_static(row, "value", change(row)))
     print(getattr_static(default=change(row), obj=receiver(row), attr="value"))
     print(getattr_static(row, "missing", first) is first)

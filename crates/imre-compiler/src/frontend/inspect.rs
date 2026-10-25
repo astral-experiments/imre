@@ -95,7 +95,7 @@ fn class_has_name(base: &crate::classes::Class, name: &str) -> bool {
         })
 }
 
-fn missing(name: &str, default: Option<Expr>) -> Expr {
+fn missing(types: &Types, name: &str, default: Option<Expr>) -> Expr {
     let error = Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {
@@ -109,7 +109,9 @@ fn missing(name: &str, default: Option<Expr>) -> Expr {
     };
     let (body, value) = match default {
         None => return raise,
-        Some(value) if value.ty == Type::PlainObject => {
+        Some(value) if types.payload(value.ty).unwrap_or(value.ty) == Type::PlainObject => {
+            // The optional representation preserves an object's identity word;
+            // its None tag cannot equal the sentinel's pointer.
             let is_sentinel = Checker::identity_result(vec![value.clone(), sentinel()], false);
             (
                 vec![Statement::If(
@@ -301,7 +303,7 @@ impl Checker<'_> {
             ));
         }
         let value = match receiver.ty {
-            Type::PlainObject => missing(&name, default),
+            Type::PlainObject => missing(self.types, &name, default),
             Type::Str | Type::StrLiteral(_) if ir::StrDescriptor::named(&name).is_some() => {
                 descriptor(ir::StrDescriptor::named(&name).unwrap())
             }
@@ -313,7 +315,7 @@ impl Checker<'_> {
                         "this builtin descriptor has no native static value",
                     ));
                 }
-                missing(&name, default)
+                missing(self.types, &name, default)
             }
             Type::Class(class) => {
                 let declaration = &self.classes.declarations.definitions[class];
@@ -353,7 +355,7 @@ impl Checker<'_> {
                             "this class attribute has no native static value",
                         ));
                     }
-                    missing(&name, default)
+                    missing(self.types, &name, default)
                 }
             }
             _ => {
