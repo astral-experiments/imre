@@ -5367,7 +5367,9 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
-            Some(Binding::Intrinsic(Intrinsic::LengthHint)) => return self.cursor_length_hint(call),
+            Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
+                return self.cursor_length_hint(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
