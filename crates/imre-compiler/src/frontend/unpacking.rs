@@ -264,34 +264,8 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
                     }));
                 }
-                if let Type::Class(class) = receiver.ty
-                    && !self.classes.declarations.definitions[class]
-                        .dataclass
-                        .as_ref()
-                        .is_some_and(|options| options.frozen)
-                    && let Some(setter) = self.classes.setters[class].get(attribute.attr.as_str())
-                {
-                    let expected = if let Some(inference) = self.inference {
-                        inference.learn_parameter(setter.id, 1, value.ty);
-                        inference.parameter(setter.id, 1).unwrap()
-                    } else {
-                        setter.params[1].ty
-                    };
-                    let value = self.coerce(value, expected, target)?;
-                    self.calls.insert(setter.id);
-                    // Assignment roots the RHS before evaluating the target. The method
-                    // receives them in the opposite order: (self, value).
-                    return Ok(Statement::Expr(Expr {
-                        ty: setter.returns,
-                        kind: ExprKind::Call(
-                            setter.id,
-                            ir::CallArgs {
-                                values: vec![value, receiver],
-                                order: vec![1, 0],
-                                exhaustive_enum_match: false,
-                            },
-                        ),
-                    }));
+                if let Some(class) = self.writable_property(receiver.ty, attribute) {
+                    return self.set_property(class, attribute, receiver, value);
                 }
                 let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
                 let value = self.coerce(value, ty, target)?;

@@ -32,7 +32,8 @@ class Target:
 def source(root):
     verify_files(root, {LOGGING: BLOB})
     raw = (root / LOGGING).read_bytes()
-    cls, = [n for n in ast.parse(raw).body if isinstance(n, ast.ClassDef) and n.name == "LoggerAdapter"]
+    cls, = [n for n in ast.parse(raw).body
+            if isinstance(n, ast.ClassDef) and n.name == "LoggerAdapter"]
     get, put = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "manager"]
     assert [ast.unparse(n.decorator_list[0]) for n in (get, put)] == ["property", "manager.setter"]
     accessors = b"".join(raw.splitlines(keepends=True)[get.decorator_list[0].lineno - 1:put.end_lineno])
@@ -75,26 +76,31 @@ def main():
         work = Path(tmp)
         ref = work / "reference.py"
         ref.write_bytes(entry)
-        def observe(command):
-            p = subprocess.run(command, cwd=work, capture_output=True, check=True, timeout=30)
-            if p.stderr:
-                raise AssertionError(p.stderr)
-            return p.stdout.decode().splitlines()
-        expected = observe([sys.executable, "-I", "-B", ref])
+        expected = observe([sys.executable, "-I", "-B", ref], work)
         assert expected == ["True"] * 5
         levels = {}
         for level in (0, 3):
             tool = Toolchain(args.imre, args.runtime, args.clang, level)
-            actual = observe([tool.build(entry, work)])
+            actual = observe([tool.build(entry, work)], work)
             if actual != expected:
                 raise AssertionError((level, expected, actual))
             levels[str(level)] = actual
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
-    args.result.write_text(json.dumps({"cpython_commit": manifest["commit"], "blob": BLOB,
-        "source": LOGGING, "method": "LoggerAdapter.manager getter and setter", "sha256": digest,
-        "fixture": "Typed native holder and two native adapter layers; no LoggerTest fixture",
-        "logging_occurrences": 0, "levels": levels}, indent=2) + "\n")
-    print("LoggerAdapter.manager: original getter and setter preserve five identity checks at O0 and O3; zero test IDs")
+    report = {
+        "cpython_commit": manifest["commit"], "blob": BLOB, "source": LOGGING,
+        "method": "LoggerAdapter.manager getter and setter", "sha256": digest,
+        "fixture": "Typed native holder and two native adapter layers; no LoggerAdapterTest fixture",
+        "logging_occurrences": 0, "levels": levels,
+    }
+    args.result.write_text(json.dumps(report, indent=2) + "\n")
+    print("LoggerAdapter.manager: five identity checks matched at O0 and O3; zero test IDs")
+
+
+def observe(command, work):
+    child = subprocess.run(command, cwd=work, capture_output=True, check=True, timeout=30)
+    if child.stderr:
+        raise AssertionError(child.stderr)
+    return child.stdout.decode().splitlines()
 
 
 if __name__ == "__main__":
