@@ -7,6 +7,7 @@ pub(super) enum ParameterKind {
     PositionalOnly,
     PositionalOrKeyword,
     KeywordOnly,
+    KeywordRest,
 }
 
 #[derive(Clone)]
@@ -245,6 +246,29 @@ impl Checker<'_> {
         })
     }
 
+    /// A keyword-rest dictionary is packed after all arguments have evaluated.
+    /// Retain the supplied values in source order even for constructors and local calls.
+    pub(super) fn held_arguments(
+        &mut self,
+        call: &ast::ExprCall,
+        params: &[Parameter],
+        receiver: Option<Expr>,
+        scope: &mut ArgumentScope,
+    ) -> Result<ir::CallArgs, String> {
+        if !params.iter().any(|p| p.kind == ParameterKind::KeywordRest) {
+            return self.arguments(call, params, receiver);
+        }
+        self.bind_supplied(
+            call,
+            params,
+            receiver,
+            Some(scope),
+            |checker, index, argument| {
+                argument.checked(checker, params[index].ty, params[index].sign_only)
+            },
+        )
+    }
+
     /// Discovery and final checking share binding, defaults, and evaluation order.
     /// Only the source of the parameter's concrete type differs between passes.
     pub(super) fn arguments_with(
@@ -281,6 +305,10 @@ impl Checker<'_> {
             });
             order[0] = 0;
         }
+        let rest = params
+            .iter()
+            .position(|p| p.kind == ParameterKind::KeywordRest);
+        let mut extra = Vec::new();
         let mut positional = 0;
         for arg in &call.arguments.args {
             let mut bind = |checker: &mut Self,
@@ -289,7 +317,12 @@ impl Checker<'_> {
              -> Result<(), String> {
                 params
                     .get(positional)
-                    .filter(|parameter| parameter.kind != ParameterKind::KeywordOnly)
+                    .filter(|parameter| {
+                        matches!(
+                            parameter.kind,
+                            ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
+                        )
+                    })
                     .ok_or_else(|| error(checker.source, arg, "too many positional arguments"))?;
                 order[positional + offset] = values.len();
                 let value = check(checker, positional, input)?;
@@ -324,16 +357,38 @@ impl Checker<'_> {
                     )
                 })?
                 .as_str();
-            let index = params
+            let fixed = params
                 .iter()
-                .position(|parameter| parameter.name == name)
-                .ok_or_else(|| {
-                    error(
-                        self.source,
-                        keyword,
-                        &format!("unexpected keyword argument {name:?}"),
-                    )
-                })?;
+                .position(|p| p.name == name && p.kind != ParameterKind::KeywordRest);
+            if let Some(index) = rest
+                && fixed.is_none_or(|i| params[i].kind == ParameterKind::PositionalOnly)
+            {
+                let (_, element) = self
+                    .types
+                    .mapping(params[index].ty)
+                    .expect("typed keyword rest");
+                let value = self.expr_expected(&keyword.value, element)?;
+                let value = if let Some(scope) = scope.as_deref_mut() {
+                    scope.hold(self, value)
+                } else {
+                    value
+                };
+                extra.push((
+                    Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(name.into()),
+                    },
+                    value,
+                ));
+                continue;
+            }
+            let index = fixed.ok_or_else(|| {
+                error(
+                    self.source,
+                    keyword,
+                    &format!("unexpected keyword argument {name:?}"),
+                )
+            })?;
             let parameter = &params[index];
             if parameter.kind == ParameterKind::PositionalOnly {
                 return Err(error(
@@ -355,6 +410,21 @@ impl Checker<'_> {
                 scope.hold(self, value)
             } else {
                 value
+            });
+        }
+        if let Some(index) = rest {
+            let (key, value) = self
+                .types
+                .mapping(params[index].ty)
+                .expect("typed keyword rest");
+            order[index + offset] = values.len();
+            values.push(Expr {
+                ty: params[index].ty,
+                kind: ExprKind::Dict {
+                    key,
+                    value,
+                    entries: extra,
+                },
             });
         }
         for (index, parameter) in params.iter().enumerate() {
