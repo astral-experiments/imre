@@ -184,10 +184,20 @@ def select(toolchain, work, source, module):
             original()
         if len(calls) != 1 or [child["PYTHON_JIT"] for child in children] != ["0", "1"]:
             raise AssertionError((calls, children))
-        return {"execution": "host-driven-native", "body": "CPython; both child sources: Imre",
+        return {"execution": "mixed", "body": "CPython; both child sources: Imre",
                 "assertions": "Imre in each child; CPython checks child status",
                 "fixture_execution": "CPython unittest hooks and original assert_python_ok",
-                "calls": calls, "children": children}
+                "calls": calls, "children": children,
+                "observation": {
+                    "roles": roles(body="cpython", assertions="mixed", operation="imre", fixture="cpython"),
+                    "evidence": {
+                        "operation": "native sys._jit.is_available() in the parent query and the native predicate in both children",
+                        "fixture": "original CPython unittest lifecycle, assert_python_ok, environment and pipes",
+                        "assertions": "both original child assert statements execute in Imre; CPython asserts each exit status",
+                        "method_sha256": pinned_methods[type(case).__name__, case._testMethodName],
+                        "native_calls": len(calls) + len(children), "children": children, "opt_level": toolchain.level,
+                    },
+                }}
 
     for method in ("test_jit_is_available", "test_jit_is_enabled"):
         executions[f"{MODULE}.TestSysJIT.{method}"] = jit_case

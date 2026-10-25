@@ -51,7 +51,7 @@
     },
     "test.test_sys.TestSysJIT.test_jit_is_available": {
       "status": "pass",
-      "execution": "host-driven-native",
+      "execution": "mixed",
       "body": "CPython; both child sources: Imre",
       "assertions": "Imre in each child; CPython checks child status",
       "fixture_execution": "CPython unittest hooks and original assert_python_ok",
@@ -71,7 +71,7 @@
     },
     "test.test_sys.TestSysJIT.test_jit_is_enabled": {
       "status": "pass",
-      "execution": "host-driven-native",
+      "execution": "mixed",
       "body": "CPython; both child sources: Imre",
       "assertions": "Imre in each child; CPython checks child status",
       "fixture_execution": "CPython unittest hooks and original assert_python_ok",
