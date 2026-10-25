@@ -3,6 +3,99 @@
 use super::*;
 
 impl Checker<'_> {
+    /// Capture ordinary fields and expanded elements in source order. Keeping
+    /// each reference also preserves identity if a later field mutates it.
+    pub(super) fn expanded_tuple(
+        &mut self,
+        tuple: &ast::ExprTuple,
+        expected: Option<&[Type]>,
+    ) -> Result<Expr, String> {
+        let mut scope = calls::ArgumentScope::default();
+        let mut values = Vec::new();
+        for entry in &tuple.elts {
+            if let ast::Expr::Starred(star) = entry {
+                let width = self
+                    .graph
+                    .session
+                    .tuple_spread_width(self.module, star.start())
+                    .ok_or_else(|| error(self.source, star, "tuple spread has no fixed width"))?;
+                // A literal is private until the display finishes. Its fields
+                // can be captured directly, even when their native types differ.
+                if let Some(items) = match &*star.value {
+                    ast::Expr::Tuple(t) => Some(&t.elts),
+                    ast::Expr::List(l) => Some(&l.elts),
+                    _ => None,
+                } {
+                    for item in items {
+                        let field = match expected.and_then(|fields| fields.get(values.len())) {
+                            Some(&ty) => self.expr_expected(item, ty)?,
+                            None => self.expr(item)?,
+                        };
+                        values.push(scope.hold(self, field));
+                    }
+                    continue;
+                }
+                let source = self.expr(&star.value)?;
+                let source = scope.hold(self, source);
+                let fields = self.types.fields(source.ty);
+                let element = self.types.element(source.ty);
+                if fields.as_ref().is_some_and(|f| f.len() != width)
+                    || fields.is_none() && element.is_none()
+                {
+                    return Err(error(
+                        self.source,
+                        star,
+                        "tuple spread requires a fixed tuple or list",
+                    ));
+                }
+                for i in 0..width {
+                    let field = if let Some(fields) = &fields {
+                        Expr {
+                            ty: fields[i],
+                            kind: ExprKind::Field(Box::new(source.clone()), i),
+                        }
+                    } else {
+                        Expr {
+                            ty: element.unwrap(),
+                            kind: ExprKind::Builtin(
+                                Builtin::ListGet,
+                                vec![
+                                    source.clone(),
+                                    Expr {
+                                        ty: Type::Int,
+                                        kind: ExprKind::Int(i.to_string()),
+                                    },
+                                ],
+                            ),
+                        }
+                    };
+                    let field = match expected.and_then(|fields| fields.get(values.len())) {
+                        Some(&ty) => self.coerce(field, ty, star)?,
+                        None => field,
+                    };
+                    values.push(scope.hold(self, field));
+                }
+            } else {
+                let value = match expected.and_then(|fields| fields.get(values.len())) {
+                    Some(&ty) => self.expr_expected(entry, ty)?,
+                    None => self.expr(entry)?,
+                };
+                values.push(scope.hold(self, value));
+            }
+        }
+        if expected.is_some_and(|fields| fields.len() != values.len()) {
+            return Err(error(
+                self.source,
+                tuple,
+                "tuple literal has the wrong number of fields",
+            ));
+        }
+        Ok(scope.finish(Expr {
+            ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
+            kind: ExprKind::Tuple(values),
+        }))
+    }
+
     /// The right operand may mutate or rebind the left before either list is copied.
     pub(super) fn concat_lists(
         &mut self,

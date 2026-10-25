@@ -3,8 +3,10 @@
 #[cfg(test)]
 mod incremental_tests;
 mod inferred_shapes;
+mod tuple_displays;
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -49,6 +51,7 @@ struct Database {
 pub(crate) struct Session {
     db: Database,
     files: Vec<File>,
+    tuple_spreads: Vec<HashMap<TextSize, usize>>,
     rules: Arc<RuleSelection>,
     root: PathBuf,
     extension_roots: Vec<PathBuf>,
@@ -171,6 +174,7 @@ impl Session {
         Ok(Self {
             db,
             files: Vec::new(),
+            tuple_spreads: Vec::new(),
             rules: Arc::new(rules),
             root: PathBuf::from(root),
             extension_roots: extension_roots.to_vec(),
@@ -199,25 +203,27 @@ impl Session {
         if let Some(error) = limits.error {
             return Err(format!("{path}: {error}"));
         }
-        // ty materializes every field of a starred tuple display before lowering.
-        // Imre supports starred assignment targets and list displays.
-        if parsed
+        let spreads = if parsed
             .tokens()
             .iter()
             .any(|token| token.kind() == TokenKind::Star)
-            && ruff_python_ast::helpers::any_over_body(&parsed.syntax().body, |expr| {
-                matches!(expr, Expr::Tuple(tuple) if tuple.ctx == ruff_python_ast::ExprContext::Load
-                    && tuple.elts.iter().any(|elt| matches!(elt, Expr::Starred(_))))
-            })
         {
-            return Err(format!(
-                "{path}: Imre: starred elements in tuple displays are unsupported"
-            ));
-        }
+            tuple_displays::check(&parsed.syntax().body).map_err(|(node, reason)| {
+                format!("{path}: {}", crate::frontend::error(source, node, reason))
+            })?
+        } else {
+            HashMap::new()
+        };
         inferred_shapes::check(&parsed.syntax().body, parsed.tokens().len())
             .map_err(|error| format!("{path}: {error}"))?;
         self.files.push(file);
+        self.tuple_spreads.push(spreads);
         Ok(parsed)
+    }
+
+    /// Width proved before ty expands the display's field types.
+    pub(crate) fn tuple_spread_width(&self, module: usize, start: TextSize) -> Option<usize> {
+        self.tuple_spreads.get(module)?.get(&start).copied()
     }
 
     fn write_file(&self, path: &str, source: &str) -> Result<File, String> {
