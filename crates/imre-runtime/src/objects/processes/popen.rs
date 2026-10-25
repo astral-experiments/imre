@@ -14,6 +14,37 @@ use std::sync::Arc;
 
 type Pipes = [Option<Rc<Object>>; 3];
 
+#[derive(Default)]
+pub(super) struct ChildPipes {
+    pub(super) ends: [Option<Stdio>; 3],
+    pub(super) closed_descriptor: bool,
+}
+
+impl ChildPipes {
+    /// Open all pipe handles before allocating their Python stream buffers.
+    fn open(modes: [u32; 3], descriptors: [RawFd; 3]) -> Result<(Self, [Option<OwnedFd>; 3])> {
+        let mut child = Self::default();
+        let mut parents = [None, None, None];
+        if modes.contains(&1) {
+            // Remember closed explicit descriptors before a new pipe can reuse their number.
+            child.closed_descriptor = descriptors.into_iter().any(|fd| {
+                // SAFETY: F_GETFD checks the integer without taking ownership.
+                fd >= 0 && unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0
+            });
+        }
+        for (i, mode) in modes.into_iter().enumerate() {
+            if mode == 1 {
+                let (read, write) = io::pipe().map_err(errno_error)?;
+                let (read, write): (OwnedFd, OwnedFd) = (read.into(), write.into());
+                let (parent, other) = if i == 0 { (write, read) } else { (read, write) };
+                parents[i] = Some(parent);
+                child.ends[i] = Some(Stdio::from(other));
+            }
+        }
+        Ok((child, parents))
+    }
+}
+
 thread_local! {
     // Like subprocess._active: dropping the last handle neither kills a live
     // child nor blocks. A subsequent launch collects its status and pipes.
@@ -265,6 +296,7 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
         };
     }
     // Python opens the parent-side pipe wrappers after it collects the file handles.
+    let (child_pipes, parents) = ChildPipes::open(modes, descriptors)?;
     let bufsize = if modes.contains(&1) {
         // SAFETY: the caller roots the buffer-size integer.
         let size = unsafe { Int::borrow(config.bufsize) };
@@ -272,22 +304,22 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
     } else {
         -1
     };
-    // SAFETY: the compiler supplies the same exact owners as subprocess.run.
-    let child = unsafe { launch_error::spawn(&args, config, streams, descriptors, oversized) };
-    child.map(|mut child| {
-        let text = streams & (1 << 16) != 0;
-        let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
-        let pipes = [
-            child.stdin.take().map(|fd| pipe(fd.into(), false)),
-            child.stdout.take().map(|fd| pipe(fd.into(), true)),
-            child.stderr.take().map(|fd| pipe(fd.into(), true)),
-        ];
-        Popen {
-            pipes,
-            args,
-            control: Arc::new(ChildControl::new(child)),
-            communication: Default::default(),
+    let text = streams & (1 << 16) != 0;
+    let mut pipes = [None, None, None];
+    for (i, parent) in parents.into_iter().enumerate() {
+        if let Some(fd) = parent {
+            pipes[i] = Some(FileState::pipe(fd.into(), i != 0, text, bufsize)?);
         }
+    }
+    // SAFETY: the compiler supplies the same exact owners as subprocess.run.
+    let child = unsafe {
+        launch_error::spawn(&args, config, streams, descriptors, oversized, child_pipes)
+    }?;
+    Ok(Popen {
+        pipes,
+        args,
+        control: Arc::new(ChildControl::new(child)),
+        communication: Default::default(),
     })
 }
 

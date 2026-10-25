@@ -531,7 +531,7 @@ impl Launch {
     }
 
     fn spawn(self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
-        self.spawn_tagged(cwd, streams, [-1; 3])
+        self.spawn_tagged(cwd, streams, [-1; 3], Default::default())
             .map_err(|err| launch_error::decode(err).1)
     }
 
@@ -540,6 +540,7 @@ impl Launch {
         cwd: Option<&CString>,
         streams: u32,
         descriptors: [RawFd; 3],
+        mut pipes: popen::ChildPipes,
     ) -> io::Result<Child> {
         // STDOUT in the stdin slot reaches child descriptor setup as fd -2.
         if (streams >> 12) & 15 == 5 {
@@ -547,6 +548,9 @@ impl Launch {
         }
         // Check the original descriptor table before duplicating anything. A
         // duplicate for stdout must not make a closed stderr descriptor valid.
+        if pipes.closed_descriptor {
+            return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
         for fd in descriptors.into_iter().filter(|&fd| fd >= 0) {
             // SAFETY: fcntl validates the supplied integer even when it is closed.
             if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
@@ -582,10 +586,14 @@ impl Launch {
             .unwrap_or_else(|| &self.argv.strings[0]);
         let mut command = Command::new(OsStr::from_bytes(program.as_bytes()));
         let stderr = (streams >> 4) & 15;
+        let mut stream = |i: usize, mode: u32| match pipes.ends[i].take() {
+            Some(pipe) => Ok(pipe),
+            None => output(mode, descriptors[i]),
+        };
         command
-            .stdin(output((streams >> 12) & 15, descriptors[0])?)
-            .stdout(output(streams & 15, descriptors[1])?)
-            .stderr(output(stderr, descriptors[2])?);
+            .stdin(stream(0, (streams >> 12) & 15)?)
+            .stdout(stream(1, streams & 15)?)
+            .stderr(stream(2, stderr)?);
         let cwd = cwd.cloned();
         // SAFETY: this private closure contains only owned immutable native data;
         // exec_child performs no allocation, locking, callback, or language drop.
@@ -1163,7 +1171,7 @@ unsafe fn spawn_list(
     let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
     // SAFETY: the original configuration remains rooted while spawn reports any error.
-    unsafe { launch_error::spawn(&cmd, &config, streams, [-1; 3], false) }
+    unsafe { launch_error::spawn(&cmd, &config, streams, [-1; 3], false, Default::default()) }
 }
 
 /// # Safety

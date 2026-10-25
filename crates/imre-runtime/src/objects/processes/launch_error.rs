@@ -115,6 +115,7 @@ pub(super) unsafe fn spawn(
     streams: u32,
     fds: [RawFd; 3],
     oversized_fd: bool,
+    pipes: popen::ChildPipes,
 ) -> Result<Child> {
     // SAFETY: the caller roots the command until both launch APIs finish validation.
     let fork_overflow = oversized_fd
@@ -139,7 +140,7 @@ pub(super) unsafe fn spawn(
         return Err(c_int_overflow());
     }
     launch
-        .spawn_tagged(cwd.as_ref(), streams, fds)
+        .spawn_tagged(cwd.as_ref(), streams, fds, pipes)
         .map_err(|err| {
             let (site, err) = decode(err);
             // SAFETY: failure does not release the original command or its arguments.

@@ -119,7 +119,12 @@ impl FileState {
         Ok(())
     }
 
-    pub(super) fn pipe(file: std::fs::File, read: bool, text: bool, bufsize: i32) -> Rc<Object> {
+    pub(super) fn pipe(
+        file: std::fs::File,
+        read: bool,
+        text: bool,
+        bufsize: i32,
+    ) -> Result<Rc<Object>> {
         let fd = file.as_raw_fd();
         // Popen treats line buffering as a TextIOWrapper option and uses the
         // default binary buffer underneath. Binary mode also falls back to default.
@@ -129,10 +134,10 @@ impl FileState {
             bufsize as usize
         };
         let stream = if read {
-            Stream::Read(Input::pipe(file, !text, capacity))
+            Stream::Read(Input::pipe(file, !text, capacity)?)
         } else {
             crate::initialize_io();
-            Stream::Write(Output::pipe(file, capacity, text && bufsize == 1))
+            Stream::Write(Output::pipe(file, capacity, text && bufsize == 1)?)
         };
         let kind = if text {
             FileKind::Text
@@ -141,12 +146,14 @@ impl FileState {
         } else {
             FileKind::BinaryWrite
         };
-        Rc::new(Object(StorageCell::new(Storage::File(Box::new(Self {
-            fd: Some(fd),
-            name: None,
-            stream: Some(stream),
-            kind,
-        })))))
+        Ok(Rc::new(Object(StorageCell::new(Storage::File(Box::new(
+            Self {
+                fd: Some(fd),
+                name: None,
+                stream: Some(stream),
+                kind,
+            },
+        ))))))
     }
 
     fn stream(&mut self) -> Result<&mut Stream> {
@@ -458,7 +465,7 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
             }
             Stream::Read(input)
         }
-        _ => Stream::Write(Output::new(file, capacity, binary)),
+        _ => Stream::Write(Output::new(file, capacity, binary)?),
     };
     Ok(FileState {
         fd: Some(fd),
@@ -903,7 +910,7 @@ mod tests {
         Rc::new(Object(StorageCell::new(Storage::File(Box::new(
             FileState {
                 fd: Some(file.as_raw_fd()),
-                stream: Some(Stream::Write(Output::new(file, 8192, false))),
+                stream: Some(Stream::Write(Output::new(file, 8192, false).ok().unwrap())),
                 kind: FileKind::Text,
                 name: None,
             },
