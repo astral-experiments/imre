@@ -2418,7 +2418,7 @@ impl Emitter<'_, '_> {
                 }
                 set
             }
-            ExprKind::Tuple(values) => self.tuple(expression.ty, values),
+            ExprKind::Tuple(values) => self.tuple(expression.ty, values, None),
             ExprKind::Present(expression_value) => {
                 let value = self.operand(expression_value);
                 let value = self.own_operand(value);
@@ -4652,6 +4652,17 @@ impl Emitter<'_, '_> {
             },
             Builtin::NewPlainObject => self.call("imre_plain_object_new", returns, &[]),
             Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
+            Builtin::WrapperAttributes(fields) => {
+                let names = fields
+                    .names()
+                    .iter()
+                    .map(|name| Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str((*name).to_owned()),
+                    })
+                    .collect::<Vec<_>>();
+                self.tuple(returns, &names, Some(fields.root()))
+            }
             Builtin::HashAvailable => self.call("imre_hash_algorithms_available", returns, &[]),
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
             Builtin::Sha256Update => {
