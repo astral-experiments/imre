@@ -258,6 +258,16 @@ impl Checker<'_> {
                 if receiver.ty == Type::LogFormatter {
                     return self.formatter_set(receiver, attribute, value);
                 }
+                if let Type::SimpleNamespace(id) = receiver.ty {
+                    let name = self.namespace_attr_name(attribute)?;
+                    let item = self.types.mapping(Type::Dict(id)).unwrap().1;
+                    let value = self.coerce(value, item, target)?;
+                    return Ok(Statement::SetItem(
+                        super::namespaces::backing(receiver, id),
+                        name,
+                        value,
+                    ));
+                }
                 if receiver.ty == Type::LogRecord {
                     let value = self.check_record_value(value, target)?;
                     return Ok(Statement::Expr(logging_records::op(
