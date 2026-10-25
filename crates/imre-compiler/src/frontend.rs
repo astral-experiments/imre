@@ -4936,6 +4936,10 @@ impl<'a> Checker<'a> {
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
+                    if let Some(order) = counter::comparison(self.types, ty, right, op) {
+                        ops.push(order);
+                        continue;
+                    }
                     let numeric = matches!(ty, Type::Int | Type::Float)
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
@@ -5675,7 +5679,13 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
                 });
             }
-            Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call),
+            Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
+            Some(Binding::Intrinsic(Intrinsic::SubprocessCall)) => {
+                return self.popen(call, Some(false));
+            }
+            Some(Binding::Intrinsic(Intrinsic::SubprocessCheckCall)) => {
+                return self.popen(call, Some(true));
+            }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::CopyFile)) => return self.shutil_copyfile(call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
