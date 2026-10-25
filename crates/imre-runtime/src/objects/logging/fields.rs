@@ -15,7 +15,7 @@ impl Fields {
         Self::Inline(
             fields
                 .into_iter()
-                .map(|(key, value)| (key.into(), value))
+                .map(|(key, value)| (key.into(), original(value)))
                 .collect(),
         )
     }
@@ -48,19 +48,7 @@ impl Fields {
     }
 
     pub(super) fn insert(&mut self, key: String, value: OwnedWord) -> Result<()> {
-        // A record dictionary stores views; copying it retains each original Python value.
-        let value = if value.kind.raw() == 5 {
-            // SAFETY: kind five owns a live object throughout this storage inspection.
-            unsafe {
-                (&*(value.word as *const Object)).0.with(|s| match s {
-                    Storage::ValueView(v) => Some(v.clone()),
-                    _ => None,
-                })
-            }
-            .unwrap_or(value)
-        } else {
-            value
-        };
+        let value = original(value);
         match self {
             Self::Inline(fields) => {
                 if let Some((_, v)) = fields.iter_mut().find(|(k, _)| *k == key) {
@@ -88,6 +76,22 @@ impl Fields {
             unreachable!()
         };
         Ok(dict.clone())
+    }
+}
+
+/// Retain the Python value, including when it came from another record dictionary.
+fn original(value: OwnedWord) -> OwnedWord {
+    if value.kind.raw() == 5 {
+        // SAFETY: kind five roots the source through this immutable storage inspection.
+        unsafe {
+            (&*(value.word as *const Object)).0.with(|s| match s {
+                Storage::ValueView(v) => Some(v.clone()),
+                _ => None,
+            })
+        }
+        .unwrap_or(value)
+    } else {
+        value
     }
 }
 

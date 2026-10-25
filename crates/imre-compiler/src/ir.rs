@@ -1326,6 +1326,8 @@ pub(crate) enum LogRecordOperation {
     New,
     AddExtra,
     Dictionary,
+    HasAttr,
+    FieldView,
     Put,
     Update,
     Read,
