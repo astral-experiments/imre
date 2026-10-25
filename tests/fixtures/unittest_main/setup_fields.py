@@ -22,6 +22,31 @@ class Interrupted(Reader):
         self.payload = broken_payload()
 
 
+class Partial(Reader):
+    def setUp(self):
+        self.payload = Payload(99)
+        raise ValueError("after assignment")
+
+
+class LabelReader(unittest.TestCase):
+    def read_label(self) -> str:
+        return self.label
+
+
+class WithDefault(LabelReader):
+    label = "class default"
+
+    def setUp(self):
+        self.label = "instance value"
+
+    def own_label(self) -> str:
+        return self.label
+
+
+class OtherDefault(LabelReader):
+    label = "other default"
+
+
 class Ready(Reader):
     def setUp(self):
         self.payload = Payload(45)
@@ -110,6 +135,21 @@ def outside_runner() -> None:
         direct.payload = broken_payload()
     except ValueError:
         print(direct.read())
+    partial = Partial()
+    try:
+        partial.setUp()
+    except ValueError:
+        print(partial.read())
+    first = WithDefault()
+    fresh = WithDefault()
+    print(first.read_label())
+    print(first.own_label())
+    print(OtherDefault().read_label())
+    first.setUp()
+    print(first.read_label())
+    print(first.own_label())
+    print(fresh.read_label())
+    print(WithDefault.label)
 
 
 if __name__ == "__main__":

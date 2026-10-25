@@ -5820,6 +5820,9 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::TextClosed, vec![receiver]),
                     });
                 }
+                if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
+                    return self.read_setup_field(receiver, attribute, field);
+                }
                 if let Type::Class(class) = receiver.ty
                     && (self.classes.methods[class].contains_key(attribute.attr.as_str())
                         || matches!(
@@ -5833,9 +5836,6 @@ impl<'a> Checker<'a> {
                         ))
                 {
                     return self.class_attribute(attribute, class, Some(receiver), None);
-                }
-                if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
-                    return Ok(self.read_setup_field(receiver, attribute.attr.as_str(), field));
                 }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 if let Some(name) = attribute.value.as_name_expr()

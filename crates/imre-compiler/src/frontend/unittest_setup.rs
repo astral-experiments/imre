@@ -213,29 +213,44 @@ impl Checker<'_> {
         self.classes.setup_fields.get(id)?.get(name).copied()
     }
 
-    pub(super) fn read_setup_field(&mut self, receiver: Expr, name: &str, field: Field) -> Expr {
+    pub(super) fn read_setup_field(
+        &mut self,
+        receiver: Expr,
+        attribute: &ast::ExprAttribute,
+        field: Field,
+    ) -> Result<Expr, String> {
         let Type::Class(class) = receiver.ty else {
             unreachable!()
         };
+        let name = attribute.attr.as_str();
         let object = self.hidden(receiver.ty);
+        let result = self.hidden(field.ty);
         let local = self.local(object);
         let load = |index, ty| Expr {
             ty,
             kind: ExprKind::Field(Box::new(local.clone()), index),
         };
-        let absent = |id: usize| {
-            Statement::Raise(Some(Expr {
+        let absent = |checker: &mut Self, id: usize| -> Result<Statement, String> {
+            let definition = &checker.classes.declarations.definitions[id];
+            if definition.static_bindings.contains_key(name) {
+                let default = checker.class_attribute(attribute, id, None, None)?;
+                return Ok(Statement::Assign(
+                    result,
+                    checker.coerce(default, field.ty, attribute)?,
+                ));
+            }
+            Ok(Statement::Raise(Some(Expr {
                 ty: Type::Exception,
                 kind: ExprKind::Exception {
                     kind: exception_kind("AttributeError").unwrap(),
                     message: Some(Box::new(unpacking::string(format!(
                         "'{}' object has no attribute '{name}'",
-                        self.classes.declarations.definitions[id].name
+                        definition.name
                     )))),
                 },
-            }))
+            })))
         };
-        let mut missing = absent(class);
+        let mut missing = absent(self, class)?;
         for child in self.classes.concrete_layouts(class) {
             if child != class {
                 missing = Statement::If(
@@ -243,22 +258,26 @@ impl Checker<'_> {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::ExactRecord(child), vec![local.clone()]),
                     },
-                    vec![absent(child)],
+                    vec![absent(self, child)?],
                     vec![missing],
                 );
             }
         }
-        Expr {
+        Ok(Expr {
             ty: field.ty,
             kind: ExprKind::Scope {
                 body: vec![
                     Statement::Assign(object, receiver),
-                    Statement::If(load(field.ready, Type::Bool), vec![], vec![missing]),
+                    Statement::If(
+                        load(field.ready, Type::Bool),
+                        vec![Statement::Assign(result, load(field.value, field.ty))],
+                        vec![missing],
+                    ),
                 ],
-                value: Box::new(load(field.value, field.ty)),
-                clear: vec![object],
+                value: Box::new(self.local(result)),
+                clear: vec![object, result],
             },
-        }
+        })
     }
 
     pub(super) fn store_setup_field(
