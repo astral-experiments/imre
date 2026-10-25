@@ -321,6 +321,7 @@ impl Builtin {
             | Self::KeyUnion
             | Self::KeySet
             | Self::KeyIntersection
+            | Self::KeyDifference
             | Self::ExactRecord(_)
             | Self::RecordView
             | Self::ListAllI32
