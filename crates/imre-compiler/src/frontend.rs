@@ -5763,7 +5763,7 @@ impl<'a> Checker<'a> {
                 let list = Self::enum_text(self.expr(&subscript.value)?);
                 if self.mapping_class(list.ty).is_some() {
                     let key = self.expr(&subscript.slice)?;
-                    return self.mapping_primitive(list, "__getitem__", &[key], expression);
+                    return self.record_primitive(list, "__getitem__", &[key], expression);
                 }
                 if list.ty == Type::BuiltinClass {
                     // Python evaluates type arguments before invoking __class_getitem__.
