@@ -907,15 +907,14 @@ mod tests {
     fn buffer_allocation_failure_is_distinct_from_os_enomem() {
         Error::memory_error().raise();
         let empty = imre_error_take();
+        // SAFETY: releasing the taken handle makes the reserved slot available again.
+        unsafe { imre_object_release(empty) };
         os_error(io::Error::from(io::ErrorKind::OutOfMemory)).raise();
         let error = imre_error_take();
-        // A failed reservation must use the preallocated, argument-free exception.
+        // A failed reservation reuses the available, argument-free exception.
         assert_eq!(error, empty);
-        // SAFETY: each take transferred one owner of the same exception.
-        unsafe {
-            imre_object_release(error);
-            imre_object_release(empty);
-        }
+        // SAFETY: the second take transferred one owner.
+        unsafe { imre_object_release(error) };
         os_error(io::Error::from_raw_os_error(libc::ENOMEM)).raise();
         take_error(Kind::OSError);
     }

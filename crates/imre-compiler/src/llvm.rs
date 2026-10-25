@@ -85,6 +85,7 @@ impl Type {
             | Self::Path
             | Self::PurePath(_)
             | Self::ModuleSpec(_)
+            | Self::SysImplementation
             | Self::CompletedProcess(..)
             | Self::EventLoop
             | Self::Coroutine(_)
@@ -178,6 +179,7 @@ impl Type {
             | Self::Path
             | Self::PurePath(_)
             | Self::ModuleSpec(_)
+            | Self::SysImplementation
             | Self::CompletedProcess(..)
             | Self::EventLoop
             | Self::Coroutine(_)
@@ -847,6 +849,7 @@ impl Emitter<'_, '_> {
             | Type::VarTuple(_)
             | Type::ModuleSpec(_)
             | Type::CmpKey(..)
+            | Type::SysImplementation
             | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
@@ -3677,6 +3680,7 @@ impl Emitter<'_, '_> {
                 | Type::TextIO
                 | Type::StringIO
                 | Type::HandlerLock
+                | Type::SysImplementation
                 | Type::CompletedProcess(..)
                 | Type::SourceModule
                 | Type::BinaryIO => self.instruction(format!(
@@ -4084,6 +4088,15 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ClassNamePart { module } => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @imre_class_name_part(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*module)
+                )),
+                small_integer: false,
+            },
             Builtin::StaticFunction(_)
             | Builtin::AnnotationMember(_)
             | Builtin::BoxAnnotation(_)
@@ -4811,6 +4824,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::SortByKeys
+            | Builtin::SortByComparator
             | Builtin::SortDetach
             | Builtin::ListExtendUnhinted
             | Builtin::SortRestore
@@ -5017,6 +5031,11 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::SysImplementation => self.tuple(
+                returns,
+                &crate::version::implementation_values(&self.module.types),
+                Some("sys_implementation"),
+            ),
             Builtin::SysGetFrameModuleName => {
                 self.call("imre_sys_getframemodulename", returns, &[&args[0].value])
             }
@@ -6475,6 +6494,14 @@ impl Emitter<'_, '_> {
                     }
                     Op::Set(prefix) => {
                         let word = self.word(&args[0].value);
+                        if !prefix {
+                            // Aliases and namespace repr read this slot; importlib reads the runtime setting.
+                            self.set_field(
+                                &args[1].value,
+                                crate::version::CACHE_TAG_FIELD,
+                                &args[0].value,
+                            );
+                        }
                         self.line(format!(
                             "call void @imre_cache_config_set(i32 {}, i64 {word})",
                             u32::from(prefix)
@@ -7214,6 +7241,7 @@ impl Emitter<'_, '_> {
                     | Type::SourceModule
                     | Type::BinaryIO
                     | Type::ModuleSpec(_)
+                    | Type::SysImplementation
                     | Type::CompletedProcess(..)
                     | Type::Tuple(_)
                     | Type::VarTuple(_)
@@ -7506,6 +7534,7 @@ impl Emitter<'_, '_> {
             | Type::JsonObject
             | Type::RegexMatch
             | Type::ModuleSpec(_)
+            | Type::SysImplementation
             | Type::CompletedProcess(..)
             | Type::VarTuple(_)
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
@@ -7613,6 +7642,7 @@ impl Emitter<'_, '_> {
             | Type::JsonObject
             | Type::RegexMatch
             | Type::ModuleSpec(_)
+            | Type::SysImplementation
             | Type::CompletedProcess(..)
             | Type::VarTuple(_)
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
@@ -8185,6 +8215,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::CmpKey(..)
         | Type::Callable(_)
         | Type::ModuleSpec(_)
+        | Type::SysImplementation
         | Type::CompletedProcess(..) => 6,
         Type::List(_)
         | Type::Dict(_)
@@ -8262,6 +8293,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
 
 fn record_name(ty: Type) -> String {
     match ty {
+        Type::SysImplementation => "sys_implementation_record".to_owned(),
         Type::Class(id) => format!("class_{id}"),
         Type::Tuple(id) => format!("tuple_{id}"),
         Type::ModuleSpec(id) => format!("module_spec_{id}"),
@@ -8302,14 +8334,17 @@ fn record_layouts(module: &Module, output: &mut Output) {
         .iter()
         .enumerate()
         .map(|(id, fields)| (Type::Class(id), fields.clone()));
+    let mut implementation = false;
     let mut captures = std::collections::BTreeSet::from([(crate::ir::ProcessCapture::TEXT, None)]);
     for function in module.functions.iter().chain([&module.entry]) {
         for ty in function.locals.iter().chain([&function.returns]) {
+            implementation |= *ty == Type::SysImplementation;
             if let Type::CompletedProcess(c, cmd) = ty {
                 captures.insert((*c, *cmd));
             }
         }
         crate::ir::walk_expressions(&function.body, &mut |value| {
+            implementation |= value.ty == Type::SysImplementation;
             if let Type::CompletedProcess(c, cmd) = value.ty {
                 captures.insert((c, cmd));
             }
@@ -8326,10 +8361,17 @@ fn record_layouts(module: &Module, output: &mut Output) {
             ],
         )
     });
+    let implementation = implementation.then(|| {
+        (
+            Type::SysImplementation,
+            crate::version::implementation_fields(&module.types),
+        )
+    });
     for (ty, fields) in classes
         .chain(module.types.tuples())
         .chain(module.types.module_spec_layouts())
         .chain(processes)
+        .chain(implementation)
     {
         let name = record_name(ty);
         let storage = fields
@@ -8448,6 +8490,10 @@ declare i64 @imre_popen_identity(ptr)
 declare ptr @imre_popen_args(ptr)
 declare ptr @imre_popen_control(ptr)
 declare i64 @imre_child_status(ptr, i1 zeroext)
+declare i64 @imre_popen_status(ptr, i1 zeroext)
+declare void @imre_popen_set_poll(ptr, ptr, i1 zeroext)
+declare void @imre_popen_del_poll(ptr)
+declare zeroext i1 @imre_popen_signal_override(ptr, i64)
 declare void @imre_child_set_status(ptr, i64)
 declare ptr @imre_popen_communicate(ptr, ptr, i1 zeroext, i32, i64, ptr)
 declare i64 @imre_child_wait(ptr, i32, i64, ptr)
@@ -9080,6 +9126,7 @@ declare void @imre_list_extend_unhinted(ptr, i32)
 declare ptr @imre_sort_detach(ptr, i32)
 declare void @imre_sort_restore(ptr, i32, ptr, i32)
 declare void @imre_sort_by_keys(ptr, i32, ptr, i32, i32)
+declare void @imre_sort_by_comparator(ptr, i32, ptr, ptr, i32, i32, i32)
 declare ptr @imre_str_join(ptr, ptr)
 declare ptr @imre_join_buffer_new(ptr)
 declare i32 @imre_join_buffer_append(ptr, ptr)
@@ -9341,6 +9388,7 @@ declare void @imre_str_enum_table(ptr, i64)
 declare i64 @imre_enum_lookup(ptr, i64, i64)
 declare ptr @imre_enum_string(i64)
 declare i32 @imre_str_equal(ptr, ptr)
+declare ptr @imre_class_name_part(ptr, i32)
 declare i32 @imre_optional_int_equal(i64, i64)
 declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)

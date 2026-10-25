@@ -1339,7 +1339,7 @@ fn signature(
             .unwrap_or(module);
         let source = origin.map_or(source, |id| &graph.modules[id].source);
         let sequence = parameter.annotation().is_some_and(|value|
-            matches!(value, ast::Expr::Subscript(subscript) if graph.resolve(module, &subscript.value) == Some(Binding::Intrinsic(Intrinsic::Sequence))));
+            matches!(value, ast::Expr::Subscript(subscript) if annotations::sequence_annotation(graph.resolve(module, &subscript.value))));
         let empty_sequence = sequence
             && matches!(parameter.default.as_deref(), Some(ast::Expr::Tuple(tuple)) if tuple.elts.is_empty());
         let wrapper_default =
@@ -1375,8 +1375,7 @@ fn signature(
                 })
                 .map(|value| {
                     if let ast::Expr::Subscript(sequence) = value
-                        && graph.resolve(module, &sequence.value)
-                            == Some(Binding::Intrinsic(Intrinsic::Sequence))
+                        && annotations::sequence_annotation(graph.resolve(module, &sequence.value))
                     {
                         sequences::check_reads(
                             function,
@@ -1551,8 +1550,7 @@ fn signature(
         })
         .map(|value| {
             if let ast::Expr::Subscript(subscript) = value
-                && graph.resolve(module, &subscript.value)
-                    == Some(Binding::Intrinsic(Intrinsic::Sequence))
+                && annotations::sequence_annotation(graph.resolve(module, &subscript.value))
             {
                 annotation_in_class(&subscript.slice, graph, module, classes, types, owner)
                     .map(|element| types.list(element))
@@ -4468,6 +4466,16 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if matches!(receiver.ty, Type::Popen(..)) && attr.attr.as_str() == "poll" {
+                            statements.push(Statement::Expr(Expr {
+                                ty: Type::None,
+                                kind: ExprKind::Builtin(
+                                    Builtin::Process(ir::ProcessOperation::PopenDeletePoll),
+                                    vec![receiver],
+                                ),
+                            }));
+                            continue;
+                        }
                         if let Some(class) =
                             self.mutable_instance_data(receiver.ty, attr.attr.as_str())
                         {
@@ -5574,6 +5582,9 @@ impl<'a> Checker<'a> {
             return Ok(typing::dummy());
         }
 
+        if let Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) = self.resolve(expression) {
+            return Ok(annotations::class_value(name));
+        }
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
                 self.resolve(&attr.value)
@@ -5804,6 +5815,12 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
+                Intrinsic::SysImplementation => {
+                    return Ok(Expr {
+                        ty: Type::SysImplementation,
+                        kind: ExprKind::Builtin(Builtin::SysImplementation, vec![]),
+                    });
+                }
                 Intrinsic::SysVersionInfo => return Ok(self.sys_version_info(false)),
                 Intrinsic::SysThreadInfo => return Ok(self.sys_thread_info()),
                 Intrinsic::SysHexversion => {
@@ -7002,24 +7019,40 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(self.cmp_key_obj(receiver, frame, bound));
                 }
-                if receiver.ty == Type::BuiltinClass {
-                    match attribute.attr.as_str() {
-                        "__name__" | "__qualname__" => return Ok(annotations::type_name(receiver)),
-                        "__module__" => {
-                            return Ok(Expr {
-                                ty: Type::Str,
-                                kind: ExprKind::Scope {
-                                    body: vec![Statement::Expr(receiver)],
-                                    value: Box::new(unpacking::string("builtins")),
-                                    clear: vec![],
-                                },
-                            });
-                        }
-                        _ => {}
-                    }
+                if receiver.ty == Type::BuiltinClass
+                    && matches!(
+                        attribute.attr.as_str(),
+                        "__name__" | "__qualname__" | "__module__"
+                    )
+                {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::ClassNamePart {
+                                module: attribute.attr.as_str() == "__module__",
+                            },
+                            vec![receiver],
+                        ),
+                    });
                 }
                 if let Type::StrDescriptor(method) = receiver.ty {
                     return self.descriptor_attribute(receiver, method, attribute);
+                }
+                if receiver.ty == Type::SysImplementation {
+                    let index = crate::version::IMPLEMENTATION
+                        .iter()
+                        .position(|&name| name == attribute.attr.as_str())
+                        .ok_or_else(|| {
+                            error(
+                                self.source,
+                                attribute,
+                                "unknown sys.implementation attribute",
+                            )
+                        })?;
+                    return Ok(Expr {
+                        ty: crate::version::implementation_fields(self.types)[index],
+                        kind: ExprKind::Field(Box::new(receiver), index),
+                    });
                 }
                 if let Some(declaration) = self.types.tuple_metadata(receiver.ty) {
                     if self.types.is_stat_result(receiver.ty) {
@@ -9183,16 +9216,21 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1
-            && ((args[0].ty.is_path() && matches!(name.id.as_str(), "str" | "print"))
+            && (((args[0].ty.is_path() || self.types.payload(args[0].ty) == Some(Type::Str))
+                && matches!(name.id.as_str(), "str" | "print"))
                 || (args[0].ty == Type::PathInfo
                     && matches!(name.id.as_str(), "str" | "repr" | "print")))
         {
-            let op = if args[0].ty == Type::PathInfo {
-                ir::PathOperation::InfoRepr
+            let text = if self.types.payload(args[0].ty) == Some(Type::Str) {
+                self.optional_text(args.into_iter().next().unwrap())
             } else {
-                ir::PathOperation::Text
+                let op = if args[0].ty == Type::PathInfo {
+                    ir::PathOperation::InfoRepr
+                } else {
+                    ir::PathOperation::Text
+                };
+                paths::operation(op, Type::Str, args)
             };
-            let text = paths::operation(op, Type::Str, args);
             return Ok(if name.id != "print" {
                 text
             } else {
@@ -9386,6 +9424,16 @@ impl<'a> Checker<'a> {
                 rendered
             });
         }
+        if name.id == "hasattr"
+            && let [receiver, key] = args.as_slice()
+            && receiver.ty == Type::SysImplementation
+            && self.resolve(&call.func).is_none()
+            && !self.names.contains_key("hasattr")
+        {
+            self.reject_builtin_keywords(call)?;
+            let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
+            return Ok(self.implementation_hasattr(receiver.clone(), key));
+        }
         if matches!(name.id.as_str(), "getattr" | "hasattr" | "vars")
             && args.first().is_some_and(|arg| arg.ty == Type::NativeModule)
             && self.resolve(&call.func).is_none()
@@ -9420,6 +9468,7 @@ impl<'a> Checker<'a> {
                 && (matches!(
                     args[0].ty,
                     Type::Class(_)
+                        | Type::SysImplementation
                         | Type::CompletedProcess(..)
                         | Type::Context
                         | Type::ContextMissing

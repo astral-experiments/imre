@@ -804,7 +804,13 @@ impl Error {
     fn into_object(self) -> crate::ObjectOwner {
         match self.payload {
             Some(Payload::Empty) if self.kind == Kind::MemoryError && self.cause.is_none() => {
-                MEMORY_ERROR.with_borrow(crate::ObjectOwner::clone)
+                MEMORY_ERRORS.with(|errors| {
+                    let slot = errors[..MEMORY_ERROR_RESERVE]
+                        .iter()
+                        .find(|error| crate::ObjectOwner::strong_count(&error.borrow()) == 1)
+                        .unwrap_or(&errors[MEMORY_ERROR_RESERVE]);
+                    slot.borrow().clone()
+                })
             }
             Some(payload) => exception_with_cause(self.kind, payload, self.cause),
             None => SEQUENCE_ALLOCATION_ERROR.with_borrow(crate::ObjectOwner::clone),
@@ -839,9 +845,13 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
     result.unwrap_or_else(|error| error.returning(sentinel))
 }
 
+// CPython reserves sixteen distinct errors and uses one last-resort instance
+// while all sixteen are still observable by callers.
+const MEMORY_ERROR_RESERVE: usize = 16;
+
 thread_local! {
-    static MEMORY_ERROR: RefCell<crate::ObjectOwner> =
-        RefCell::new(new_exception(Kind::MemoryError, Payload::Empty));
+    static MEMORY_ERRORS: [RefCell<crate::ObjectOwner>; MEMORY_ERROR_RESERVE + 1] =
+        std::array::from_fn(|_| RefCell::new(new_exception(Kind::MemoryError, Payload::Empty)));
     static RECORD_ALLOCATION_ERROR: RefCell<crate::ObjectOwner> = RefCell::new(new_exception(
         Kind::MemoryError, StrOwner::new(Str::new("record allocation failed")),
     ));
@@ -861,7 +871,7 @@ thread_local! {
 /// Prepare allocation errors and exception state before generated code starts.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_record_error_init() {
-    MEMORY_ERROR.with(|_| ());
+    MEMORY_ERRORS.with(|_| ());
     RECORD_ALLOCATION_ERROR.with(|_| ());
     SEQUENCE_ALLOCATION_ERROR.with(|_| ());
     PENDING.with(|_| ());
@@ -969,14 +979,10 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
     }
     PENDING.with_borrow(|slot| {
         let Some(pending) = slot.as_ref() else { return };
-        if let Some(template) = [
-            &RECORD_ALLOCATION_ERROR,
-            &SEQUENCE_ALLOCATION_ERROR,
-            &MEMORY_ERROR,
-        ]
-        .into_iter()
-        .find(|template| template.with_borrow(|cached| crate::ObjectOwner::ptr_eq(cached, pending)))
-        {
+        let rotate = |template: &RefCell<crate::ObjectOwner>| {
+            if !crate::ObjectOwner::ptr_eq(&template.borrow(), pending) {
+                return false;
+            }
             // Move the spare into the cache. Existing aliases keep the exact pending
             // exception and its traceback, including an alias saved before a re-raise.
             // SAFETY: the cached allocation error has an immutable message payload.
@@ -989,7 +995,11 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
                     .0
                     .with_mut(|storage| *storage = Storage::Exception(pristine))
             };
-            template.set(frame);
+            template.replace(frame.clone());
+            true
+        };
+        if !RECORD_ALLOCATION_ERROR.with(rotate) && !SEQUENCE_ALLOCATION_ERROR.with(rotate) {
+            MEMORY_ERRORS.with(|errors| errors.iter().any(rotate));
         }
         // SAFETY: attaching preallocated roots preserves the live exception identity.
         unsafe {

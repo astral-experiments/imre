@@ -109,6 +109,19 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                 field_metadata(output, name, layout.into_iter()),
             )
         }
+        Type::SysImplementation => (
+            0,
+            2,
+            "namespace",
+            "namespace",
+            field_metadata(
+                output,
+                name,
+                crate::version::IMPLEMENTATION
+                    .iter()
+                    .map(|field| (*field, 2)),
+            ),
+        ),
         Type::CompletedProcess(capture, _) => {
             let layout = [
                 ("args", true),

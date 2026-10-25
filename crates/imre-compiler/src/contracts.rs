@@ -273,6 +273,10 @@ impl Builtin {
                 | ProcessOperation::GeneratorNext
                 | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire
+                | ProcessOperation::PopenSetPoll { .. }
+                | ProcessOperation::PopenDeletePoll
+                | ProcessOperation::PopenStatus { poll: true }
+                | ProcessOperation::PopenSignal
                 | ProcessOperation::ShellOutput { .. }
                 | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
@@ -287,11 +291,10 @@ impl Builtin {
                 | ProcessOperation::PopenIdentity
                 | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
-                | ProcessOperation::PopenStatus { .. }
+                | ProcessOperation::PopenStatus { poll: false }
                 | ProcessOperation::PopenExit
                 | ProcessOperation::PopenCommunicate { .. }
                 | ProcessOperation::PopenWait
-                | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }
                 | ProcessOperation::IndirectCoroutine { .. }
@@ -509,6 +512,7 @@ impl Builtin {
             | Self::StaticFunction(_)
             | Self::NewForwardRef
             | Self::ClassNameView
+            | Self::ClassNamePart { .. }
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
@@ -523,6 +527,7 @@ impl Builtin {
             Self::Append | Self::JoinBufferAppend | Self::SortByKeys => {
                 Contract::new(true, PreservesOwners)
             }
+            Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)
@@ -598,6 +603,7 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::SysImplementation
             | Self::ExceptionFieldIdentity { .. }
             | Self::SysThreadInfo
             | Self::SysThreadText { .. }

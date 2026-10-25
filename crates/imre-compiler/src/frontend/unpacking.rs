@@ -285,10 +285,10 @@ impl Checker<'_> {
                         ),
                     }));
                 }
-                if let Some(prefix) = self.cache_config(target) {
+                if self.cache_config(target) == Some(true) {
                     let value = self.coerce(value, self.types.optional(Type::Str), target)?;
                     return Ok(Statement::Expr(cache_paths::op(
-                        ir::CachePathOperation::Set(prefix),
+                        ir::CachePathOperation::Set(true),
                         Type::None,
                         vec![value],
                     )));
@@ -334,12 +334,46 @@ impl Checker<'_> {
                     return self.store_class_data(class, attribute, value);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::SysImplementation && attribute.attr.as_str() == "cache_tag" {
+                    let value = self.coerce(value, self.types.optional(Type::Str), target)?;
+                    return Ok(Statement::Expr(cache_paths::op(
+                        ir::CachePathOperation::Set(false),
+                        Type::None,
+                        vec![value, receiver],
+                    )));
+                }
                 if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "returncode"
                 {
                     let value = self.coerce(value, self.types.optional(Type::Int), target)?;
                     return Ok(Statement::Expr(builtin(
                         Type::None,
                         Builtin::Process(ir::ProcessOperation::PopenSetStatus),
+                        vec![value, receiver],
+                    )));
+                }
+                if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "poll" {
+                    let Some((params, returns)) = self.types.signature(value.ty) else {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "Popen.poll needs a zero-argument callable",
+                        ));
+                    };
+                    if !params.is_empty()
+                        || !(matches!(returns, Type::None | Type::Int)
+                            || returns == self.types.optional(Type::Int))
+                    {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "Popen.poll needs a zero-argument callable returning int or None",
+                        ));
+                    }
+                    return Ok(Statement::Expr(builtin(
+                        Type::None,
+                        Builtin::Process(ir::ProcessOperation::PopenSetPoll {
+                            returns_none: returns == Type::None,
+                        }),
                         vec![value, receiver],
                     )));
                 }
