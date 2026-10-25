@@ -146,6 +146,9 @@ impl Checker<'_> {
         op: ast::CmpOp,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if let Some(value) = self.context_missing_test(left, right, op == ast::CmpOp::IsNot)? {
+            return Ok(value);
+        }
         let left = self.expr(left)?;
         let right = self.expr(right)?;
         if left.ty == Type::SourceModule && right.ty == Type::SourceModule {
@@ -235,6 +238,17 @@ impl Checker<'_> {
             } else {
                 same
             });
+        }
+        if [left.ty, right.ty].iter().all(|t| {
+            matches!(
+                t,
+                Type::FunctionRef | Type::Callable(_) | Type::OverloadStub
+            )
+        }) {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
         }
         // A comparison with a bool singleton only observes whether the other
         // operand is that same singleton; integer object identity is irrelevant.
@@ -428,13 +442,23 @@ impl Checker<'_> {
                 )
             })
             || types == [Type::Str; 2]
+            || types.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::Context | Type::ContextVar(_) | Type::ContextToken(_)
+                )
+            })
+            || (types.contains(&Type::ContextMissing)
+                && types
+                    .iter()
+                    .all(|ty| matches!(ty, Type::ContextMissing | Type::ObjectValue)))
             || types == [Type::LogRecord; 2]
             || types.iter().all(|ty| matches!(ty, Type::Cursor(_)))
             || types == [Type::Path; 2]
             || (types.iter().all(|ty| matches!(ty, Type::Tuple(_)))
                 && types
                     .iter()
-                    .any(|ty| self.types.library_tuple_fields(*ty).is_some()))
+                    .any(|ty| self.types.tuple_metadata(*ty).is_some()))
             || types == [Type::Logger; 2]
             || types
                 .iter()

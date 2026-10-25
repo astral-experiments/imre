@@ -7,7 +7,6 @@ use super::words::{OwnedWord, WordKind};
 use super::{MAX_LIST_LEN, Object, Storage, Words, object};
 use overrides::Overrides;
 use std::cell::OnceCell;
-use std::rc::Rc;
 
 pub(super) fn float_key(word: usize) -> usize {
     let value = f64::from_bits(word as u64);
@@ -354,7 +353,7 @@ impl Rows {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_struct_list_new(layout: *const RecordDescriptor) -> *const Object {
     // SAFETY: generated descriptors have program lifetime.
-    Rc::into_raw(Words::from_rows(Rows::new(unsafe { &*layout })).into_object())
+    crate::ObjectOwner::into_raw(Words::from_rows(Rows::new(unsafe { &*layout })).into_object())
 }
 
 /// # Safety
@@ -685,15 +684,15 @@ mod tests {
                     1,
                     1,
                     0,
-                    Rc::as_ptr(&rows) as usize,
+                    crate::ObjectOwner::as_ptr(&rows) as usize,
                     &list,
                 );
                 assert!(result.is_null());
                 let error = imre_error_take();
                 assert!(!error.is_null());
-                let error = Rc::from_raw(error);
+                let error = crate::ObjectOwner::from_raw(error);
                 assert_eq!(
-                    imre_exception_matches(Rc::as_ptr(&error), expected as u32),
+                    imre_exception_matches(crate::ObjectOwner::as_ptr(&error), expected as u32),
                     1
                 );
                 rows.0
@@ -712,13 +711,19 @@ mod tests {
         ok(repeated.rows_mut().unwrap().set(0, &[2, 1]));
         let list = repeated.into_object();
         let empty = Words::new(6).into_object();
-        let ptr = Rc::as_ptr(&list);
+        let ptr = crate::ObjectOwner::as_ptr(&list);
         // SAFETY: the list and the ordinary empty sequence are rooted; mode 4
         // is a sequence object, and the stop is a tagged integer.
         let cursor = unsafe {
-            assert_eq!(values::imre_sequence_equal(ptr, Rc::as_ptr(&empty)), 0);
-            assert_eq!(values::imre_sequence_equal(Rc::as_ptr(&empty), ptr), 0);
-            Rc::from_raw(itertools::imre_islice(
+            assert_eq!(
+                values::imre_sequence_equal(ptr, crate::ObjectOwner::as_ptr(&empty)),
+                0
+            );
+            assert_eq!(
+                values::imre_sequence_equal(crate::ObjectOwner::as_ptr(&empty), ptr),
+                0
+            );
+            crate::ObjectOwner::from_raw(itertools::imre_islice(
                 4,
                 ptr as usize,
                 0,

@@ -475,9 +475,13 @@ fn collect_class(
                     name,
                     "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
                 ) || (mapping && name == "__len__");
+                let selector_context = module.is_bundled("selectors")
+                    && node.name.as_str() == "PollSelector"
+                    && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
                     && !matches!(name, "__init__" | "__fspath__")
                     && !unary_protocol
+                    && !selector_context
                     && !(mapping && matches!(name, "__getitem__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())
                 {
@@ -562,7 +566,11 @@ fn collect_class(
                     }
                     initializer = Some(methods.len());
                 }
-                methods.push(method.clone());
+                let mut method = method.clone();
+                if forwarder.is_some() {
+                    exception_forwarders::mangle_fields(node.name.as_str(), &mut method);
+                }
+                methods.push(method);
                 method_kinds.push(kind);
                 class_bindings.insert(name.to_owned());
             }

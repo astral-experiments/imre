@@ -1,8 +1,26 @@
 //! Whole-file text conversion uses the same descriptor, buffering, and close path as binary I/O.
 
-use super::super::codecs::{Codec, option_error};
+pub(in crate::objects) use super::super::codecs::Codec;
+use super::super::codecs::option_error;
 use super::{Error, Int, Kind, Object, Result, Str, finish, object, with_path_file};
 use crate::StrOwner;
+
+impl Codec {
+    /// Decode a complete text stream, applying universal newlines when requested.
+    pub(in crate::objects) fn decode_stream(
+        self,
+        data: &[u8],
+        errors: Option<&str>,
+        universal: bool,
+    ) -> Result<String> {
+        let text = self.decode(data, errors)?;
+        Ok(if universal && text.contains('\r') {
+            universal_newlines(text)
+        } else {
+            text
+        })
+    }
+}
 
 /// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.
 fn universal_newlines(text: String) -> String {
@@ -81,13 +99,11 @@ pub(super) fn read(
     with_path_file(path, 0, true, |file| {
         let codec = options(encoding, newline)?;
         let data = file.input()?.read_bytes(None)?;
-        let text = codec.decode(&data, errors)?;
-        let text = if newline.is_none() && text.contains('\r') {
-            universal_newlines(text)
-        } else {
-            text
-        };
-        Ok(Str::from(text))
+        Ok(Str::from(codec.decode_stream(
+            &data,
+            errors,
+            newline.is_none(),
+        )?))
     })
 }
 

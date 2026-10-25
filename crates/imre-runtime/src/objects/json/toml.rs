@@ -134,7 +134,7 @@ fn convert(
                         .values
                         .push(convert(value.get_ref(), child, allocation)?.into_word());
                 }
-                Rc::into_raw(result.into_object()) as usize
+                crate::ObjectOwner::into_raw(result.into_object()) as usize
             }
         }
         (DICTIONARY, DeValue::Table(values)) => {
@@ -153,9 +153,9 @@ fn convert(
                     "parser rejected duplicate keys"
                 );
             }
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
-                crate::objects::mappings::TableOwner::new(result),
-            ))))) as usize
+            crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                Storage::Dictionary(crate::objects::mappings::TableOwner::new(result)),
+            )))) as usize
         }
         (RECORD, DeValue::Table(values)) => {
             let fields = schema.fields();
@@ -165,8 +165,13 @@ fn convert(
             let owner = unsafe { OwnedWord::from_owned(pointer as usize, schema.storage()) };
             for (index, field) in fields.iter().enumerate() {
                 let value = if let Some(value) = values.get(field.name()) {
-                    convert(value.get_ref(), field.schema(), allocation)
-                        .map_err(|error| format!("field {:?}: {error}", field.name()))?
+                    convert(value.get_ref(), field.schema(), allocation).map_err(|error| {
+                        if allocation.is_some() {
+                            error
+                        } else {
+                            format!("field {:?}: {error}", field.name())
+                        }
+                    })?
                 } else {
                     field
                         .missing::<serde_json::Error>(allocation)
@@ -307,18 +312,19 @@ pub unsafe extern "C" fn imre_toml_keys(text: *const Str) -> *const Object {
     .map_err(|error: String| Error::new(Kind::TomlDecodeError, error));
     let result = table.and_then(|table| {
         // SAFETY: this is one fresh set owner.
-        let keys = unsafe { Rc::from_raw(super::super::mappings::imre_set_new(3)) };
+        let keys = unsafe { crate::ObjectOwner::from_raw(super::super::mappings::imre_set_new(3)) };
         for (name, _) in table {
-            let string = StrOwner::new(Str::new(name.get_ref()));
+            let text = Str::try_new(name.get_ref()).map_err(|_| Error::allocation())?;
+            let string = StrOwner::try_new(text).map_err(|_| Error::allocation())?;
             // SAFETY: the set has string key storage and insertion retains the rooted key.
             unsafe {
                 super::super::mappings::set_add(
-                    Rc::as_ptr(&keys),
+                    crate::ObjectOwner::as_ptr(&keys),
                     StrOwner::as_ptr(&string) as usize,
                 )
             }?;
         }
-        Ok(Rc::into_raw(keys))
+        Ok(crate::ObjectOwner::into_raw(keys))
     });
     finish(result, std::ptr::null())
 }

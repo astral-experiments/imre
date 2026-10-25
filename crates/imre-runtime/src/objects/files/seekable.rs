@@ -1,11 +1,11 @@
 //! Positioned binary I/O on ordinary files, in-memory files, and ZIP members.
 
-use super::super::{acquire_rc, c_int, zipfile::Member};
+use super::super::{c_int, zipfile::Member};
 use super::*;
 use num_traits::ToPrimitive;
 
 pub(super) struct Memory {
-    data: Rc<Bytes>,
+    data: crate::BytesOwner,
     position: u64,
 }
 
@@ -39,10 +39,10 @@ impl Memory {
         let end = start
             .checked_add(bytes.len())
             .ok_or_else(Error::allocation)?;
-        if Rc::get_mut(&mut self.data).is_none() {
-            self.data = Rc::new(copied(&self.data)?);
+        if crate::BytesOwner::get_mut(&mut self.data).is_none() {
+            self.data = crate::BytesOwner::new(copied(&self.data)?);
         }
-        let data = Rc::get_mut(&mut self.data).unwrap();
+        let data = crate::BytesOwner::get_mut(&mut self.data).unwrap();
         if end > data.len() {
             data.try_reserve(end - data.len())
                 .map_err(|_| Error::allocation())?;
@@ -69,7 +69,7 @@ impl Memory {
 
 impl FileState {
     /// Expose the entire buffer without advancing the cursor. Later writes detach shared bytes.
-    fn memory_value(&mut self) -> Result<Rc<Bytes>> {
+    fn memory_value(&mut self) -> Result<crate::BytesOwner> {
         if self.kind != FileKind::Memory {
             return Err(Error::new(
                 Kind::AttributeError,
@@ -85,7 +85,7 @@ impl FileState {
         Ok(memory.data.clone())
     }
 
-    pub(in crate::objects) fn memory(data: Rc<Bytes>) -> Rc<Object> {
+    pub(in crate::objects) fn memory(data: crate::BytesOwner) -> crate::ObjectOwner {
         Self {
             fd: None,
             raw: false,
@@ -96,7 +96,7 @@ impl FileState {
         .into_object()
     }
 
-    pub(in crate::objects) fn member(member: Member) -> Rc<Object> {
+    pub(in crate::objects) fn member(member: Member) -> crate::ObjectOwner {
         Self {
             fd: None,
             raw: false,
@@ -107,8 +107,8 @@ impl FileState {
         .into_object()
     }
 
-    pub(super) fn into_object(self) -> Rc<Object> {
-        Rc::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
+    pub(super) fn into_object(self) -> crate::ObjectOwner {
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
     }
 
     pub(super) fn check_member(&mut self, message: &'static str) -> Result<()> {
@@ -234,7 +234,7 @@ pub(in crate::objects) fn disk_offset(offset: i128) -> Result<u64> {
 pub unsafe extern "C" fn imre_bytes_io_value(stream: *const Object) -> *const Bytes {
     // SAFETY: there is no callback during the checked, cursor-preserving buffer read.
     let bytes = unsafe { object(stream).0.with_mut(|s| s.file_mut().memory_value()) };
-    finish(bytes.map(Rc::into_raw), std::ptr::null())
+    finish(bytes.map(crate::BytesOwner::into_raw), std::ptr::null())
 }
 
 /// Construct a BytesIO, sharing its immutable initial bytes until the first write.
@@ -244,12 +244,12 @@ pub unsafe extern "C" fn imre_bytes_io_value(stream: *const Object) -> *const By
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_io(initial: *const Bytes) -> *const Object {
     let data = if initial.is_null() {
-        Rc::new(Vec::new())
+        crate::BytesOwner::new(Vec::new())
     } else {
         // SAFETY: the caller keeps the bytes owner live throughout construction.
-        unsafe { acquire_rc(initial as usize) }
+        unsafe { crate::acquire_bytes(initial as usize) }
     };
-    Rc::into_raw(FileState::memory(data))
+    crate::ObjectOwner::into_raw(FileState::memory(data))
 }
 
 /// Reposition the cursor using Python's signed offset and integer whence.

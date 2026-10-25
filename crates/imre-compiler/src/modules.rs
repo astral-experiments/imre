@@ -58,6 +58,7 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    ContextVars,
     Importlib,
     ImportlibMachinery,
     ImportlibUtil,
@@ -138,9 +139,18 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    Context,
+    ContextVar,
+    ContextToken,
+    CopyContext,
     ModuleSpec,
     CachePath { reverse: bool },
     GetAnnotations,
+    Overload,
+    GetOverloads,
+    OverloadRegistry,
+    OverloadDummy,
+    ClearOverloads,
     ForwardRef,
     AnnotationTypeRepr,
     AnnotationFormat(i64),
@@ -195,6 +205,7 @@ pub(crate) enum Intrinsic {
     FunctionCache,
     CacheInfo,
     LruCache,
+    SingleDispatch,
     CachedProperty,
     NewType,
     Partial,
@@ -209,6 +220,7 @@ pub(crate) enum Intrinsic {
     Pipe,
     Devnull,
     CheckOutput,
+    ShellOutput { status: bool },
     NullContext,
     IntConstant(i64),
     WallTime,
@@ -415,6 +427,7 @@ impl IntrinsicModule {
             "datetime" => Some(Self::Datetime),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
+            "contextvars" => Some(Self::ContextVars),
             "inspect" => Some(Self::Inspect),
             "linecache" => Some(Self::Linecache),
             "contextlib" => Some(Self::Contextlib),
@@ -436,7 +449,7 @@ impl IntrinsicModule {
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
             "difflib" => Some(Self::Difflib),
-            "select" => Some(Self::Select),
+            "select" if cfg!(any(target_os = "linux", target_os = "macos")) => Some(Self::Select),
             "_imre_doctest" => Some(Self::DoctestRuntime),
             "_imre_mock" => Some(Self::MockRuntime),
             "pathlib" => Some(Self::Pathlib),
@@ -561,6 +574,10 @@ impl IntrinsicModule {
             (Self::Abc, "abstractmethod") => Intrinsic::AbstractMethod,
             (Self::Asyncio, "create_subprocess_exec") => Intrinsic::CreateSubprocessExec,
             (Self::Asyncio, "run") => Intrinsic::RunLoop,
+            (Self::ContextVars, "Context") => Intrinsic::Context,
+            (Self::ContextVars, "ContextVar") => Intrinsic::ContextVar,
+            (Self::ContextVars, "Token") => Intrinsic::ContextToken,
+            (Self::ContextVars, "copy_context") => Intrinsic::CopyContext,
             (Self::Asyncio, "new_event_loop") => Intrinsic::NewLoop,
             (Self::Asyncio, "set_event_loop") => Intrinsic::SetLoop,
             (Self::Asyncio, "ensure_future") => Intrinsic::EnsureTask,
@@ -598,6 +615,11 @@ impl IntrinsicModule {
             }
             (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
             (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
+            (Self::Typing, "overload") => Intrinsic::Overload,
+            (Self::Typing, "get_overloads") => Intrinsic::GetOverloads,
+            (Self::Typing, "_overload_registry") => Intrinsic::OverloadRegistry,
+            (Self::Typing, "_overload_dummy") => Intrinsic::OverloadDummy,
+            (Self::Typing, "clear_overloads") => Intrinsic::ClearOverloads,
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
@@ -609,6 +631,7 @@ impl IntrinsicModule {
                 Intrinsic::WrapperAttributes(WrapperAttributes::Updated)
             }
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
+            (Self::Functools, "singledispatch") => Intrinsic::SingleDispatch,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
                     normcase: name == "fnmatch",
@@ -634,6 +657,8 @@ impl IntrinsicModule {
             (Self::Subprocess, "PIPE") => Intrinsic::Pipe,
             (Self::Subprocess, "DEVNULL") => Intrinsic::Devnull,
             (Self::Subprocess, "check_output") => Intrinsic::CheckOutput,
+            (Self::Subprocess, "getoutput") => Intrinsic::ShellOutput { status: false },
+            (Self::Subprocess, "getstatusoutput") => Intrinsic::ShellOutput { status: true },
             (Self::Typing, "TYPE_CHECKING") => Intrinsic::TypeChecking,
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
@@ -903,6 +928,8 @@ pub(crate) struct SourceModule {
     /// Only an executed explicit submodule import populates the bare importlib namespace.
     importlib_children: HashMap<&'static str, TextSize>,
     pub(crate) aliases: Vec<TypeAlias>,
+    /// Decorated declarations register their original function at module initialization.
+    pub(crate) overloads: HashSet<usize>,
     pub(crate) type_guards: Vec<usize>,
     /// Fixed pattern declarations in the entry module precede ordinary executable statements.
     pub(crate) entry_globals: Vec<usize>,
@@ -953,6 +980,10 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    pub(crate) fn checked_diagnostic_count(&self, module: ModuleId) -> usize {
+        self.checked_diagnostics.borrow()[module].len()
+    }
+
     pub(crate) fn is_unittest_main(&self, id: DefinitionId) -> bool {
         let owner = &self.modules[id.module];
         owner.bundled
@@ -1081,6 +1112,12 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
+    /// A checked runtime overload can legally stand alone: calling the dummy raises.
+    pub(crate) fn runtime_overload(&self, module: ModuleId, name: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::RuntimeOverload(name));
+    }
+
     /// Mark the precise call whose behavior for missing arguments is handled by native lowering.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
@@ -1091,6 +1128,12 @@ impl SourceGraph {
     pub(crate) fn checked_excess_argument(&self, module: ModuleId, argument: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::ExcessArgument(argument));
+    }
+
+    /// Native lowering accepts an inert body at this exact return annotation.
+    pub(crate) fn checked_inert_return(&self, module: ModuleId, annotation: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::InertReturn(annotation));
     }
 
     /// The native positional-only binder already raises at this exact keyword.
@@ -1219,7 +1262,7 @@ impl SourceGraph {
         (skipped, overloads)
     }
 
-    /// Entry segments initialize class and module globals and validate platform imports in order.
+    /// Entry segments preserve globals, platform import checks, and definition-time effects.
     pub(crate) fn initializers(
         &self,
         class_globals: bool,
@@ -1231,6 +1274,7 @@ impl SourceGraph {
                 *id != self.entry
                     || class_globals
                     || !module.entry_globals.is_empty()
+                    || !module.overloads.is_empty()
                     || (!segment.is_empty()
                         && errno_import(&module.parsed.syntax().body[segment.end - 1]).is_some())
             })
@@ -1481,6 +1525,15 @@ fn textwrap_implementation(name: &str) -> Option<&'static str> {
 
 /// Resolve the public definitions compiled from Python alongside sealed native operations.
 fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
+    if module == IntrinsicModule::Selectors
+        && matches!(
+            name,
+            "PollSelector" | "DefaultSelector" | "SelectorKey" | "EVENT_READ" | "EVENT_WRITE"
+        )
+        && let Some(source) = modules.iter().find(|source| source.is_bundled("selectors"))
+    {
+        return source.export(name);
+    }
     module.symbol(name).or_else(|| {
         let implementation = match module {
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
@@ -1616,6 +1669,7 @@ impl<'a> Loader<'a> {
             type_bindings: HashMap::new(),
             importlib_children: HashMap::new(),
             aliases: Vec::new(),
+            overloads: HashSet::new(),
             type_guards: Vec::new(),
             entry_globals: Vec::new(),
             executable: Vec::new(),
@@ -1772,15 +1826,26 @@ impl<'a> Loader<'a> {
                             "definitions must precede executable module statements",
                         ));
                     }
-                    self.bind(
-                        id,
-                        function.name.as_str(),
-                        Binding::Definition(DefinitionId {
-                            module: id,
-                            statement: index,
-                        }),
-                        statement,
-                    )?;
+                    let name = function.name.as_str();
+                    let current = Binding::Definition(DefinitionId {
+                        module: id,
+                        statement: index,
+                    });
+                    let decorated = matches!(function.decorator_list.as_slice(), [d]
+                        if resolve_binding(&self.modules, id, &d.expression) == Some(Binding::Intrinsic(Intrinsic::Overload)));
+                    let continues = matches!(self.modules[id].bindings.get(name), Some(Binding::Definition(previous))
+                        if previous.module == id && previous.statement + 1 == index && self.modules[id].overloads.contains(&previous.statement));
+                    if continues {
+                        // Nothing can observe the intermediate name between these
+                        // consecutive definitions. Intervening statements still go
+                        // through the ordinary static rebind rejection.
+                        self.modules[id].bindings.insert(name.into(), current);
+                    } else {
+                        self.bind(id, name, current, statement)?;
+                    }
+                    if decorated {
+                        self.modules[id].overloads.insert(index);
+                    }
                 }
                 ast::Stmt::ClassDef(class) => {
                     class_data_prefix |= class
@@ -2138,6 +2203,11 @@ impl<'a> Loader<'a> {
         if module.is_some() {
             self.reject_stdlib_shadow(name)?;
         }
+        if module == Some(IntrinsicModule::Selectors)
+            && cfg!(any(target_os = "linux", target_os = "macos"))
+        {
+            self.load_module(name)?;
+        }
         let needs_textwrap = |implementation| {
             matches!(module, Some(IntrinsicModule::Textwrap))
                 && imports.is_none_or(|names| {
@@ -2243,6 +2313,9 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            "selectors" if cfg!(any(target_os = "linux", target_os = "macos")) => {
+                Some(("selectors.py", include_str!("../stdlib/selectors.py")))
+            }
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "string" => Some((
                 "string/__init__.py",

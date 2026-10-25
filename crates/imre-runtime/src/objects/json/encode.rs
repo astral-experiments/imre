@@ -1117,9 +1117,12 @@ mod tests {
                 result.err().unwrap().raise();
                 // SAFETY: raising publishes one owned native exception.
                 unsafe {
-                    let error = Rc::from_raw(imre_error_take());
+                    let error = crate::ObjectOwner::from_raw(imre_error_take());
                     assert_eq!(
-                        imre_exception_matches(Rc::as_ptr(&error), Kind::ValueError as u32),
+                        imre_exception_matches(
+                            crate::ObjectOwner::as_ptr(&error),
+                            Kind::ValueError as u32
+                        ),
                         1
                     );
                 }

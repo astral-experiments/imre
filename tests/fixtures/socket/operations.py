@@ -21,7 +21,58 @@ def accept_into(listener: socket.socket, clients: dict[int, socket.socket]) -> t
     return fd, addr
 
 
+def duplicated_connection() -> None:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        with socket.socket() as original:
+            original.connect(listener.getsockname())
+            peer, _ = listener.accept()
+            with peer:
+                original.set_inheritable(inheritable=True)
+                assert os.get_inheritable(original.fileno())
+                try:
+                    original.set_inheritable(1 << 80)
+                except OverflowError:
+                    assert original.get_inheritable()
+                else:
+                    raise AssertionError("accepted an overflowing descriptor flag")
+                original.setblocking(False)
+                # dup reapplies the Python socket's mode even after a raw fd change.
+                os.set_blocking(original.fileno(), True)
+                with original.dup() as copy:
+                    assert copy.fileno() != original.fileno()
+                    assert not copy.get_inheritable() and original.get_inheritable()
+                    assert not copy.getblocking() and not os.get_blocking(original.fileno())
+                    os.set_inheritable(copy.fileno(), True)
+                    assert copy.get_inheritable()
+                    copy.set_inheritable(False)
+                    assert not os.get_inheritable(copy.fileno())
+                    original.close()
+                    try:
+                        original.dup()
+                    except OSError as exc:
+                        assert exc.errno == errno.EBADF
+                    else:
+                        raise AssertionError("duplicated a closed socket")
+                    copy.sendall(b"!")
+                    assert peer.recv(1) == b"!"
+                try:
+                    copy.get_inheritable()
+                except OSError as exc:
+                    assert exc.errno == errno.EBADF
+                else:
+                    raise AssertionError("read cached flags after close")
+                try:
+                    copy.set_inheritable(True)
+                except OSError as exc:
+                    assert exc.errno == errno.EBADF
+                else:
+                    raise AssertionError("changed flags on a closed socket")
+
+
 def main() -> None:
+    duplicated_connection()
     with socket.socket() as listener:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         assert listener.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR) != 0

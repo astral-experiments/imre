@@ -42,6 +42,10 @@ pub(super) struct Storage {
     fields: HashMap<usize, Vec<Type>>,
 }
 impl Storage {
+    pub(super) fn binding_count(&self) -> usize {
+        self.cells.len() + self.shadows.len()
+    }
+
     pub(super) fn extend_layouts(&mut self, layouts: &mut [Vec<Type>]) {
         for (c, f) in self.fields.drain() {
             layouts[c].extend(f);

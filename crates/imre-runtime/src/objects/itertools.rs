@@ -76,10 +76,9 @@ pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *
     };
     // SAFETY: the kind describes the caller's rooted argument.
     let value = unsafe { WordKind::new(kind).acquire(value) };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Repeat(Repeat {
-        value,
-        remaining,
-    })))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::Repeat(Repeat { value, remaining }),
+    ))))
 }
 
 mod sources;
@@ -97,8 +96,8 @@ pub(super) enum Adapter {
     Format(format_cursors::Cursor),
 }
 
-pub(super) fn adapter(state: Adapter) -> Rc<Object> {
-    Rc::new(Object(StorageCell::new(Storage::IteratorAdapter(Rc::new(
+pub(super) fn adapter(state: Adapter) -> crate::ObjectOwner {
+    crate::ObjectOwner::new(Object(StorageCell::new(Storage::IteratorAdapter(Rc::new(
         state,
     )))))
 }
@@ -115,7 +114,7 @@ fn next_item(source: &Object) -> Result<Option<OwnedWord>, Error> {
 type ItemResult = Result<Option<OwnedWord>, Error>;
 
 enum Advance {
-    Pull(Rc<Object>),
+    Pull(crate::ObjectOwner),
     Return(ItemResult),
 }
 
@@ -123,7 +122,7 @@ impl Drop for Adapter {
     fn drop(&mut self) {
         let mut source = self.take_source();
         while let Some(cursor) = source {
-            let Ok(cursor) = Rc::try_unwrap(cursor) else {
+            let Ok(cursor) = crate::ObjectOwner::try_unwrap(cursor) else {
                 break;
             };
             let Storage::IteratorAdapter(state) = cursor.0.into_inner() else {
@@ -139,7 +138,7 @@ impl Drop for Adapter {
 }
 
 impl Adapter {
-    fn take_source(&mut self) -> Option<Rc<Object>> {
+    fn take_source(&mut self) -> Option<crate::ObjectOwner> {
         match self {
             Self::Tee(fork) => fork.take_source(),
             Self::Slice(slice) => slice.source.get_mut().take(),
@@ -262,7 +261,7 @@ impl Adapter {
 }
 
 pub(super) struct Slice {
-    source: RefCell<Option<Rc<Object>>>,
+    source: RefCell<Option<crate::ObjectOwner>>,
     position: Cell<usize>,
     next_index: Cell<usize>,
     stop: Option<usize>,
@@ -290,7 +289,7 @@ impl Slice {
             self.source.take();
         }
         match self.source.borrow().as_ref() {
-            Some(source) => Advance::Pull(Rc::clone(source)),
+            Some(source) => Advance::Pull(crate::ObjectOwner::clone(source)),
             None => Advance::Return(Ok(None)),
         }
     }
@@ -331,7 +330,7 @@ pub unsafe extern "C" fn imre_islice(
     }
     // SAFETY: the caller roots the exact source through validation and acquisition.
     let source = unsafe { sources::acquire(mode, source) };
-    Rc::into_raw(adapter(Adapter::Slice(Slice {
+    crate::ObjectOwner::into_raw(adapter(Adapter::Slice(Slice {
         source: RefCell::new(Some(source)),
         position: Cell::new(0),
         next_index: Cell::new(start as usize),
@@ -341,7 +340,7 @@ pub unsafe extern "C" fn imre_islice(
 }
 
 pub(super) struct Cycle {
-    source: RefCell<Option<Rc<Object>>>,
+    source: RefCell<Option<crate::ObjectOwner>>,
     saved: RefCell<Vec<OwnedWord>>,
     index: Cell<usize>,
 }
@@ -364,7 +363,7 @@ impl Cycle {
             None => {}
         }
         if let Some(source) = self.source.borrow().as_ref() {
-            return Advance::Pull(Rc::clone(source));
+            return Advance::Pull(crate::ObjectOwner::clone(source));
         }
         let saved = self.saved.borrow();
         let index = self.index.get();
@@ -386,7 +385,7 @@ impl Cycle {
 pub unsafe extern "C" fn imre_cycle(mode: u32, source: usize) -> *const Object {
     // SAFETY: the caller provides the exact representation until acquisition completes.
     let source = unsafe { sources::acquire(mode, source) };
-    Rc::into_raw(adapter(Adapter::Cycle(Cycle {
+    crate::ObjectOwner::into_raw(adapter(Adapter::Cycle(Cycle {
         source: RefCell::new(Some(source)),
         saved: RefCell::new(Vec::new()),
         index: Cell::new(0),
@@ -399,7 +398,7 @@ pub unsafe extern "C" fn imre_cycle(mode: u32, source: usize) -> *const Object {
 pub unsafe extern "C" fn imre_float_count(start: f64, kind: u32, step: usize) -> *const Object {
     // SAFETY: conversion of an integer step happens at pull time, while its owner is live.
     let step = unsafe { WordKind::new(kind).acquire(step) };
-    Rc::into_raw(adapter(Adapter::FloatCount {
+    crate::ObjectOwner::into_raw(adapter(Adapter::FloatCount {
         current: Cell::new(start),
         step,
     }))
@@ -414,12 +413,12 @@ mod tests {
         // SAFETY: both immediate integers are rooted canonical integer words.
         let leaf = unsafe { imre_repeat(2, Int::small(11).unwrap().0, Int::small(1).unwrap().0) };
         // SAFETY: the constructor transferred its owner.
-        let mut cursor = unsafe { Rc::from_raw(leaf) };
+        let mut cursor = unsafe { crate::ObjectOwner::from_raw(leaf) };
         for _ in 0..32_768 {
             // SAFETY: mode zero acquires the live iterator cursor.
-            let next = unsafe { imre_cycle(0, Rc::as_ptr(&cursor) as usize) };
+            let next = unsafe { imre_cycle(0, crate::ObjectOwner::as_ptr(&cursor) as usize) };
             // SAFETY: the constructor transferred a new owner.
-            cursor = unsafe { Rc::from_raw(next) };
+            cursor = unsafe { crate::ObjectOwner::from_raw(next) };
         }
         let Ok(Some((item, None))) = mappings::pull(&cursor) else {
             panic!("expected the repeated integer");
@@ -437,11 +436,11 @@ mod tests {
             }))
         };
         let shared = cycle(None);
-        let mut cursor = Rc::clone(&shared);
+        let mut cursor = crate::ObjectOwner::clone(&shared);
         for _ in 0..65_536 {
             cursor = cycle(Some(cursor));
         }
         drop(cursor);
-        assert_eq!(Rc::strong_count(&shared), 1);
+        assert_eq!(crate::ObjectOwner::strong_count(&shared), 1);
     }
 }

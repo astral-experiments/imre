@@ -5,7 +5,6 @@ use crate::StrOwner;
 use std::borrow::Cow;
 use std::collections::{HashSet, TryReserveError};
 use std::io::{self, Write};
-use std::rc::Rc;
 
 use serde::Deserialize;
 
@@ -738,7 +737,10 @@ pub unsafe extern "C" fn imre_argparse_text(
     if let Some(error) = exceptions::take_pending() {
         // SAFETY: the pending exception stays rooted for the kind check.
         if unsafe {
-            exceptions::imre_exception_matches(Rc::as_ptr(&error), exceptions::Kind::OSError as u32)
+            exceptions::imre_exception_matches(
+                crate::ObjectOwner::as_ptr(&error),
+                exceptions::Kind::OSError as u32,
+            )
         } == 0
         {
             exceptions::replace_pending(Some(error));
@@ -892,7 +894,7 @@ pub unsafe extern "C" fn imre_argparse_parse(
         pair.cast::<*mut usize>().write(result);
         pair.add(1)
             .cast::<*const Object>()
-            .write(Rc::into_raw(extras.into_object()));
+            .write(crate::ObjectOwner::into_raw(extras.into_object()));
         pair
     }
 }
