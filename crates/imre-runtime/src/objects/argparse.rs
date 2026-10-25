@@ -41,10 +41,22 @@ enum Kind {
     Str,
     Path,
     Bool,
+    Class,
+}
+
+#[derive(Deserialize, Copy, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum Action {
+    Store,
+    StoreConst,
+    StoreTrue,
+    StoreFalse,
+    Count,
 }
 
 #[derive(Deserialize)]
 struct OptionSpec {
+    action: Action,
     flag: String,
     dest: String,
     positional: bool,
@@ -437,7 +449,7 @@ impl Parser {
                             break;
                         }
                         if let Some((slot, option)) = option
-                            && option.kind != Kind::Bool
+                            && option.takes_value()
                         {
                             take = Some((
                                 slot,
@@ -465,8 +477,12 @@ impl Parser {
                                 ),
                             ));
                         }
-                        if let Some((slot, _)) = option {
-                            values[slot] = Some(Bound::Bool(true));
+                        if let Some((slot, option)) = option {
+                            values[slot] = Some(
+                                option
+                                    .flag_value(values[slot].take())
+                                    .map_err(|e| Stop::Error(self, e))?,
+                            );
                         } else {
                             clustered_help = true;
                         }
@@ -484,7 +500,7 @@ impl Parser {
             };
             let option = &self.options[slot];
             let taken = if let Some(value) = explicit {
-                if option.kind == Kind::Bool {
+                if !option.takes_value() {
                     return Err(Stop::Error(
                         self,
                         format!(
@@ -505,8 +521,13 @@ impl Parser {
                     ));
                 }
                 vec![value]
-            } else if option.kind == Kind::Bool {
-                Vec::new()
+            } else if !option.takes_value() {
+                values[slot] = Some(
+                    option
+                        .flag_value(values[slot].take())
+                        .map_err(|e| Stop::Error(self, e))?,
+                );
+                continue;
             } else {
                 let start = index;
                 let (min, max) = option.nargs.bounds();
@@ -596,6 +617,10 @@ impl Parser {
 }
 
 impl OptionSpec {
+    fn takes_value(&self) -> bool {
+        self.action == Action::Store
+    }
+
     fn flags(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.flag.as_str()).chain(self.aliases.iter().map(String::as_str))
     }

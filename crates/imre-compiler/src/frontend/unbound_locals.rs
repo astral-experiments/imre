@@ -6,10 +6,11 @@ use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_stm
 /// Only ordinary one-name stores participate. Other binding forms keep the
 /// existing definite-assignment requirement; we must never miss a write or a
 /// deletion that could change the value observed by a guarded load.
-pub(super) fn candidates(statements: &[ast::Stmt]) -> HashSet<String> {
+pub(super) fn candidates(statements: &[ast::Stmt], interactive: bool) -> HashSet<String> {
     #[derive(Default)]
     struct Scan {
         inside: bool,
+        interactive: bool,
         guarded: HashSet<String>,
         other: HashSet<String>,
     }
@@ -17,6 +18,10 @@ pub(super) fn candidates(statements: &[ast::Stmt]) -> HashSet<String> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
             match stmt {
                 ast::Stmt::Assign(s) if matches!(s.targets.as_slice(), [ast::Expr::Name(_)]) => {
+                    if self.interactive && self.inside {
+                        self.guarded
+                            .insert(s.targets[0].as_name_expr().unwrap().id.to_string());
+                    }
                     self.visit_expr(&s.value);
                 }
                 ast::Stmt::AnnAssign(s)
@@ -70,7 +75,10 @@ pub(super) fn candidates(statements: &[ast::Stmt]) -> HashSet<String> {
             walk_except_handler(self, handler);
         }
     }
-    let mut scan = Scan::default();
+    let mut scan = Scan {
+        interactive,
+        ..Scan::default()
+    };
     scan.visit_body(statements);
     scan.guarded.retain(|n| !scan.other.contains(n));
     scan.guarded
@@ -94,15 +102,23 @@ pub(super) fn assigned(target: &ast::Stmt) -> Option<&str> {
 impl Checker<'_> {
     pub(super) fn checked_bound_read(&self, slot: usize, flag: usize, name: &str) -> Expr {
         let value = self.read_local(slot);
+        let (kind, message) = if self.interactive_names {
+            ("NameError", format!("name '{name}' is not defined"))
+        } else {
+            (
+                "UnboundLocalError",
+                format!(
+                    "cannot access local variable '{name}' where it is not associated with a value"
+                ),
+            )
+        };
         let failure = Statement::Raise(Some(Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
-                kind: exception_kind("UnboundLocalError").unwrap(),
+                kind: exception_kind(kind).unwrap(),
                 message: Some(Box::new(Expr {
                     ty: Type::Str,
-                    kind: ExprKind::Str(format!(
-                        "cannot access local variable '{name}' where it is not associated with a value"
-                    )),
+                    kind: ExprKind::Str(message),
                 })),
             },
         }));
