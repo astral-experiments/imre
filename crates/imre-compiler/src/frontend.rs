@@ -1116,7 +1116,7 @@ fn signature(
             })
             .unwrap_or(module);
         let sequence = parameter.annotation().is_some_and(|value|
-            matches!(value, ast::Expr::Subscript(subscript) if graph.resolve(module, &subscript.value) == Some(Binding::Intrinsic(Intrinsic::Sequence))));
+            matches!(value, ast::Expr::Subscript(subscript) if annotations::sequence_annotation(graph.resolve(module, &subscript.value))));
         let empty_sequence = sequence
             && matches!(parameter.default.as_deref(), Some(ast::Expr::Tuple(tuple)) if tuple.elts.is_empty());
         let wrapper_default =
@@ -1152,8 +1152,7 @@ fn signature(
                 })
                 .map(|value| {
                     if let ast::Expr::Subscript(sequence) = value
-                        && graph.resolve(module, &sequence.value)
-                            == Some(Binding::Intrinsic(Intrinsic::Sequence))
+                        && annotations::sequence_annotation(graph.resolve(module, &sequence.value))
                     {
                         sequences::check_reads(
                             function,
@@ -1248,8 +1247,7 @@ fn signature(
         })
         .map(|value| {
             if let ast::Expr::Subscript(subscript) = value
-                && graph.resolve(module, &subscript.value)
-                    == Some(Binding::Intrinsic(Intrinsic::Sequence))
+                && annotations::sequence_annotation(graph.resolve(module, &subscript.value))
             {
                 annotation_in_class(&subscript.slice, graph, module, classes, types, owner)
                     .map(|element| types.list(element))
@@ -4688,6 +4686,9 @@ impl<'a> Checker<'a> {
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) = self.resolve(expression) {
+            return Ok(annotations::class_value(name));
+        }
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
                 self.resolve(&attr.value)
@@ -5569,21 +5570,21 @@ impl<'a> Checker<'a> {
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return Ok(wrapped);
                 }
-                if receiver.ty == Type::BuiltinClass {
-                    match attribute.attr.as_str() {
-                        "__name__" | "__qualname__" => return Ok(annotations::type_name(receiver)),
-                        "__module__" => {
-                            return Ok(Expr {
-                                ty: Type::Str,
-                                kind: ExprKind::Scope {
-                                    body: vec![Statement::Expr(receiver)],
-                                    value: Box::new(unpacking::string("builtins")),
-                                    clear: vec![],
-                                },
-                            });
-                        }
-                        _ => {}
-                    }
+                if receiver.ty == Type::BuiltinClass
+                    && matches!(
+                        attribute.attr.as_str(),
+                        "__name__" | "__qualname__" | "__module__"
+                    )
+                {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::ClassNamePart {
+                                module: attribute.attr.as_str() == "__module__",
+                            },
+                            vec![receiver],
+                        ),
+                    });
                 }
                 if let Type::StrDescriptor(method) = receiver.ty {
                     return self.descriptor_attribute(receiver, method, attribute);
@@ -6484,6 +6485,11 @@ impl<'a> Checker<'a> {
         }
         if let Some(kind) = self.exception_category(&call.func) {
             return self.simple_exception(call, kind);
+        }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "issubclass" && !self.names.contains_key("issubclass") && self.resolve(&call.func).is_none())
+            && let Some(result) = self.nominal_issubclass(call)?
+        {
+            return Ok(result);
         }
         if let Some(binding) = self.resolve(&call.func) {
             let Binding::Definition(definition) = binding else {
