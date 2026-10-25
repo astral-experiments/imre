@@ -300,6 +300,8 @@ impl Builtin {
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
             | Self::DictDelete
+            | Self::DictPop
+            | Self::DictTryPop(_)
             | Self::DictGatherBytesInt
             | Self::DictGatherStrInt
             | Self::FileReadline
@@ -688,6 +690,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
                 | "imre_dict_delete"
+                | "imre_dict_pop"
                 | "imre_mapping_iter_next"
                 | "imre_exception_raise"
                 | "imre_exception_reraise"

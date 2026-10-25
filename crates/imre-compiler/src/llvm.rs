@@ -4633,25 +4633,49 @@ impl Emitter<'_, '_> {
                 Type::ListInt,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::DictGetDefault => {
+            Builtin::DictGetDefault | Builtin::DictPop => {
                 let key = self.key_word(&args[1].value);
-                let default = self.word(&args[2].value);
-                let word = self.instruction(format!(
-                    "call i64 @imre_dict_get_default(ptr {}, i64 {key}, i64 {default})",
-                    args[0].value.operand
-                ));
+                let default = args.get(2).map(|arg| self.word(&arg.value));
+                let receiver = &args[0].value.operand;
+                let word = if matches!(builtin, Builtin::DictPop) {
+                    let required = u8::from(default.is_none());
+                    let default = default.as_deref().unwrap_or("0");
+                    self.checked_instruction(format!(
+                        "call i64 @imre_dict_pop(ptr {receiver}, i64 {key}, i64 {default}, i32 {required})"
+                    ))
+                } else {
+                    let default = default.unwrap();
+                    self.instruction(format!(
+                        "call i64 @imre_dict_get_default(ptr {receiver}, i64 {key}, i64 {default})"
+                    ))
+                };
                 if self
                     .module
                     .types
                     .may_own_file(returns, &self.module.class_fields, true)
                 {
-                    // get() captures its result before dropping the default
+                    // The method captures its result before dropping the default
                     // argument and then the temporary receiver.
                     args.reverse();
                 }
                 self.unpack_word(word, returns)
             }
-            Builtin::DictTryGet(stored) => self.dict_try_get(*stored, &args, returns),
+            Builtin::DictTryGet(stored) | Builtin::DictTryPop(stored) => {
+                let op = if matches!(builtin, Builtin::DictTryPop(_)) {
+                    "pop"
+                } else {
+                    "get"
+                };
+                let value = self.dict_try_lookup(op, *stored, &args, returns);
+                if self
+                    .module
+                    .types
+                    .may_own_file(returns, &self.module.class_fields, true)
+                {
+                    args.reverse();
+                }
+                value
+            }
             Builtin::DictContains | Builtin::SetContains => {
                 let key = self.key_word(&args[0].value);
                 let family = if matches!(builtin, Builtin::SetContains) {
@@ -4935,10 +4959,16 @@ impl Emitter<'_, '_> {
     /// existing optional/None storage stays flattened. Defaults were evaluated
     /// eagerly, and the missing edge acquires its own owner before argument
     /// cleanup can release the supplied fallback.
-    fn dict_try_get(&mut self, stored: Type, args: &[Operand], returns: Type) -> Value {
+    fn dict_try_lookup(
+        &mut self,
+        op: &str,
+        stored: Type,
+        args: &[Operand],
+        returns: Type,
+    ) -> Value {
         let key = self.key_word(&args[1].value);
         let byte = self.instruction(format!(
-            "call i32 @imre_dict_try_get(ptr {}, i64 {key}, ptr %mapping_key_word)",
+            "call i32 @imre_dict_try_{op}(ptr {}, i64 {key}, ptr %mapping_key_word)",
             args[0].value.operand
         ));
         let found = self.instruction(format!("icmp ne i32 {byte}, 0"));
@@ -6106,6 +6136,8 @@ declare i64 @imre_dict_get(ptr, i64)
 declare ptr @imre_dict_gather_str_int(ptr, ptr)
 declare ptr @imre_dict_gather_bytes_int(ptr, ptr)
 declare i32 @imre_dict_try_get(ptr, i64, ptr)
+declare i32 @imre_dict_try_pop(ptr, i64, ptr)
+declare i64 @imre_dict_pop(ptr, i64, i64, i32)
 declare i64 @imre_dict_get_default(ptr, i64, i64)
 declare void @imre_dict_set(ptr, i64, i64)
 declare void @imre_dict_delete(ptr, i64)

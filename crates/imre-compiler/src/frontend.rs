@@ -5766,36 +5766,55 @@ impl<'a> Checker<'a> {
                     *view = true;
                     return Ok(receiver);
                 }
-                if attribute.attr.as_str() != "get" || !(1..=2).contains(&call.arguments.args.len())
+                let pop = attribute.attr.as_str() == "pop";
+                if (!pop && attribute.attr.as_str() != "get")
+                    || !(1..=2).contains(&call.arguments.args.len())
                 {
                     return Err(error(
                         self.source,
                         call,
-                        "supported dictionary methods are get(key[, default]), loop-head items(), and keys() in a key union",
+                        "supported dictionary methods are get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
                     ));
                 }
                 let key = self.expr_expected(&call.arguments.args[0], key_type)?;
-                if call.arguments.args.len() == 1
+                if !pop
+                    && call.arguments.args.len() == 1
                     && let Some(capture) = self.projected_group(&receiver, &key)
                 {
                     return Ok(capture);
                 }
                 let mut args = vec![receiver, key];
                 let optional = self.types.optional(value_type);
+                let optional_lookup = || {
+                    if pop {
+                        Builtin::DictTryPop(value_type)
+                    } else {
+                        Builtin::DictTryGet(value_type)
+                    }
+                };
+                let with_default = || {
+                    if pop {
+                        Builtin::DictPop
+                    } else {
+                        Builtin::DictGetDefault
+                    }
+                };
                 let (builtin, ty) = if let Some(default) = call.arguments.args.get(1) {
                     let default = self.expr_expected(default, optional)?;
                     if optional == value_type {
                         args.push(default);
-                        (Builtin::DictGetDefault, value_type)
+                        (with_default(), value_type)
                     } else if let ExprKind::Present(default) = default.kind {
                         args.push(*default);
-                        (Builtin::DictGetDefault, value_type)
+                        (with_default(), value_type)
                     } else {
                         args.push(default);
-                        (Builtin::DictTryGet(value_type), optional)
+                        (optional_lookup(), optional)
                     }
+                } else if pop {
+                    (Builtin::DictPop, value_type)
                 } else {
-                    (Builtin::DictTryGet(value_type), optional)
+                    (optional_lookup(), optional)
                 };
                 return Ok(Expr {
                     ty,
