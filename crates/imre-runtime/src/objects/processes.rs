@@ -416,6 +416,7 @@ impl PathSearch {
 
 struct Launch {
     argv: CStrings,
+    executable: Option<CString>,
     env: Option<CStrings>,
     search: Option<PathSearch>,
     descriptors: Descriptors,
@@ -424,8 +425,16 @@ struct Launch {
 impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
     fn new(argv: Vec<CString>, env: Option<StringPairs>) -> Result<Self> {
+        Self::with_executable(argv, env, None)
+    }
+
+    fn with_executable(
+        argv: Vec<CString>,
+        env: Option<StringPairs>,
+        executable: Option<CString>,
+    ) -> Result<Self> {
         popen::cleanup();
-        let program = &argv[0];
+        let program = executable.as_ref().unwrap_or_else(|| &argv[0]);
         let search = if program.as_bytes().contains(&b'/') {
             None
         } else {
@@ -443,6 +452,7 @@ impl Launch {
         let env = env.map(CStrings::from_environment).transpose()?;
         Ok(Self {
             argv: CStrings::new(argv)?,
+            executable,
             env,
             search,
             descriptors: Descriptors::prepare().map_err(os_error)?,
@@ -492,7 +502,10 @@ impl Launch {
                 saved_error = Some(last_error);
             }
         };
-        let program = &self.argv.strings[0];
+        let program = self
+            .executable
+            .as_ref()
+            .unwrap_or_else(|| &self.argv.strings[0]);
         if let Some(search) = &mut self.search {
             search.visit(program, attempt);
         } else {
@@ -516,7 +529,11 @@ impl Launch {
                 _ => fail("SystemError", "invalid subprocess stream mode"),
             })
         }
-        let mut command = Command::new(OsStr::from_bytes(self.argv.strings[0].as_bytes()));
+        let program = self
+            .executable
+            .as_ref()
+            .unwrap_or_else(|| &self.argv.strings[0]);
+        let mut command = Command::new(OsStr::from_bytes(program.as_bytes()));
         let stderr = (streams >> 4) & 15;
         command
             .stdin(output((streams >> 12) & 15)?)
@@ -1179,27 +1196,39 @@ unsafe fn prepare_process(
     env: *const Object,
 ) -> Result<(Launch, Option<CString>)> {
     // SAFETY: existing run and asynchronous ABIs accept an exact list.
-    unsafe { prepare_command(&WordKind::new(5).acquire(args as usize), cwd, env) }
+    let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0, true);
+    // SAFETY: the legacy arguments have their original word representations.
+    unsafe { prepare_command(&WordKind::new(5).acquire(args as usize), &config) }
 }
 
 /// # Safety
 /// The exact optional directory and environment stay rooted across conversion.
 unsafe fn prepare_command(
     cmd: &OwnedWord,
-    cwd: *const Str,
-    env: *const Object,
+    config: &popen::LaunchConfig,
 ) -> Result<(Launch, Option<CString>)> {
     // SAFETY: the caller roots the exact argv, optional directory and environment.
     unsafe {
         // Python selects args[0], validates every environment name, then
         // converts native strings. Preserve that order for mixed failures.
-        if argv::empty(cmd) {
+        if config.shell
+            && cmd.kind.raw() == 5
+            && object(cmd.word as *const Object)
+                .0
+                .with(|s| matches!(s, Storage::Path { .. } | Storage::PurePath(_)))
+        {
+            return Err(Error::new(
+                Kind::TypeError,
+                "path-like args is not allowed when shell is true",
+            ));
+        }
+        if !config.shell && config.executable.is_null() && argv::empty(cmd) {
             return Err(Error::new(Kind::IndexError, "list index out of range"));
         }
-        let env = if env.is_null() {
+        let env = if config.env.is_null() {
             None
         } else {
-            Some(object(env).0.with(|storage| {
+            Some(object(config.env).0.with(|storage| {
                 let Storage::Dictionary(mapping) = storage else {
                     fail("SystemError", "expected an environment dictionary");
                 };
@@ -1215,11 +1244,23 @@ unsafe fn prepare_command(
                 "illegal environment variable name",
             ));
         }
-        let argv = argv::copy(cmd)?;
-        let cwd = (!cwd.is_null())
-            .then(|| cstring((&*cwd).as_bytes()))
-            .transpose()?;
-        Ok((Launch::new(argv, env)?, cwd))
+        let executable = argv::optional_path(config.executable, config.executable_kind)?;
+        let mut argv = argv::copy(cmd)?;
+        if config.shell {
+            let default = if cfg!(target_os = "android") {
+                c"/system/bin/sh"
+            } else {
+                c"/bin/sh"
+            };
+            let shell = executable
+                .as_deref()
+                .filter(|p| !p.to_bytes().is_empty())
+                .unwrap_or(default);
+            argv.try_reserve(2).map_err(|_| Error::allocation())?;
+            argv.splice(..0, [shell.to_owned(), c"-c".to_owned()]);
+        }
+        let cwd = argv::optional_path(config.cwd, config.cwd_kind)?;
+        Ok((Launch::with_executable(argv, env, executable)?, cwd))
     }
 }
 

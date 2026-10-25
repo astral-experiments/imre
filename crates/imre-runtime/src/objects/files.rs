@@ -273,13 +273,17 @@ impl FileState {
 /// Decodes a complete text stream strictly before normalizing CRLF and lone CR.
 /// File reads and captured subprocess streams share these text-mode semantics.
 pub(super) fn decode_utf8_text(bytes: Vec<u8>) -> Result<Str> {
+    decode_text(bytes, false)
+}
+
+fn decode_text(bytes: Vec<u8>, preserve_newlines: bool) -> Result<Str> {
     let text = String::from_utf8(bytes).map_err(|error| {
         Error::new(
             Kind::UnicodeDecodeError,
             format!("invalid UTF-8 at byte {}", error.utf8_error().valid_up_to()),
         )
     })?;
-    if !text.contains('\r') {
+    if preserve_newlines || !text.contains('\r') {
         return Ok(Str::from(text));
     }
     let mut normalized = Str::with_capacity(text.len());
@@ -368,7 +372,7 @@ pub(super) fn errno_with_paths(error: io::Error, paths: impl FnOnce(&mut String)
 /// Returns an owned Object or null with a pending error.
 ///
 /// # Safety
-/// `path` must be a rooted string. `mode` must be compiler-validated as 0 through 3.
+/// `path` must be rooted. Mode 4 reads universal newlines without translating them.
 /// Like other fallible entries, pending state must be clear on entry.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_open(path: *const Str, mode: u32) -> *const Object {
@@ -419,7 +423,13 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
     let fd = file.as_raw_fd();
     let stream = match mode {
-        0 => Stream::Read(Input::new(file, gzip, binary, capacity)),
+        0 | 4 => {
+            let mut input = Input::new(file, gzip, binary, capacity);
+            if mode == 4 {
+                input.preserve_newlines();
+            }
+            Stream::Read(input)
+        }
         _ => Stream::Write(Output::new(file, capacity, binary)),
     };
     Ok(FileState {
@@ -442,7 +452,7 @@ pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
     }
     let file = match mode {
-        0 => OpenOptions::new().read(true).open(path),
+        0 | 4 => OpenOptions::new().read(true).open(path),
         1 => OpenOptions::new()
             .write(true)
             .create(true)

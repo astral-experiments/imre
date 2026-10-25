@@ -44,6 +44,7 @@ mod logging_formatters;
 mod logging_records;
 mod matching;
 mod module_values;
+mod namedtuples;
 mod native_generators;
 mod os;
 mod partials;
@@ -68,6 +69,7 @@ mod timed_handlers;
 mod truthiness;
 mod unbound_locals;
 mod unions;
+mod unittest;
 mod unpacking;
 mod zip_sums;
 mod zipfile;
@@ -352,7 +354,7 @@ const RESERVED: &[&str] = &[
     "__file__",
 ];
 
-/// These numbers are the sealed exception categories in the runtime ABI.
+/// Indices are runtime ABI categories. Empty entries belong to imported modules.
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
     match name {
         "NotImplementedError" => return Some(37),
@@ -431,6 +433,7 @@ pub(crate) fn lower_with_owners(
     graph: &SourceGraph,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
     let types = Types::default();
+    namedtuples::collect(graph, &types)?;
     let mut classes = ClassInfo::new(graph, &types)?;
     dataclass_values::validate(&classes, graph, &types)?;
     let mut signatures = HashMap::new();
@@ -660,6 +663,14 @@ pub(crate) fn lower_with_owners(
                     .map(|value| (value, signature.returns)),
             );
         for (annotation, ty) in annotated {
+            if let Some(definition) = namedtuples::annotation(graph, *module, annotation, &types)
+                && types.namedtuple_definition(ty) != Some(definition)
+            {
+                return Err(graph.modules[*module].error(
+                    annotation,
+                    "inferred value must be an instance of the annotated namedtuple",
+                ));
+            }
             if graph.resolve(*module, annotation)
                 == Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                 && !matches!(ty, Type::Class(id) if classes.parsers.namespace(id))
@@ -1052,6 +1063,7 @@ fn signature(
                 .filter(|value| {
                     graph.resolve(module, value)
                         != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+                        && namedtuples::annotation(graph, module, value, types).is_none()
                 })
                 .map(|value| {
                     if let ast::Expr::Subscript(sequence) = value
@@ -1128,6 +1140,7 @@ fn signature(
         .as_deref()
         .filter(|value| {
             graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+                && namedtuples::annotation(graph, module, value, types).is_none()
         })
         .map(|value| {
             if let ast::Expr::Subscript(subscript) = value
@@ -1184,7 +1197,7 @@ fn recursive_call_root(graph: &[HashSet<usize>]) -> Option<usize> {
     None
 }
 
-fn error(source: &str, node: &impl Ranged, message: &str) -> String {
+pub(crate) fn error(source: &str, node: &impl Ranged, message: &str) -> String {
     let offset = usize::from(node.start());
     let prefix = &source[..offset];
     let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
@@ -2278,6 +2291,14 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Tuple(tuple) if self.types.fields(concrete).is_some() => {
                 let fields = self.types.fields(concrete).unwrap();
+                if tuple
+                    .elts
+                    .iter()
+                    .any(|v| matches!(v, ast::Expr::Starred(_)))
+                {
+                    let value = self.expanded_tuple(tuple, Some(&fields))?;
+                    return self.coerce(value, expected, expression);
+                }
                 if tuple.elts.len() != fields.len() {
                     return Err(error(
                         self.source,
@@ -2327,18 +2348,23 @@ impl<'a> Checker<'a> {
     /// reach literals before the branches join. Only optional promotion can
     /// widen a result; unrelated concrete storage types never share a value.
     fn conditional(&mut self, value: &ast::ExprIf, expected: Option<Type>) -> Result<Expr, String> {
-        fn empty_display(arm: &ast::Expr) -> bool {
+        fn empty_display(checker: &Checker<'_>, arm: &ast::Expr) -> bool {
             matches!(arm, ast::Expr::Dict(d) if d.items.is_empty())
                 || matches!(arm, ast::Expr::List(l) if l.elts.is_empty())
+                || matches!(arm, ast::Expr::Call(c) if c.arguments.args.is_empty()
+                    && c.arguments.keywords.is_empty()
+                    && matches!(&*c.func, ast::Expr::Name(n) if n.id == "set"
+                        && !checker.names.contains_key(n.id.as_str()) && checker.resolve(&c.func).is_none()))
         }
         // An empty display obtains its invariant element type from its sibling
         // when no surrounding annotation supplied one.
         let mut sibling = None;
         self.conditional_with(
             value,
-            expected.is_none() && empty_display(&value.body),
+            expected.is_none() && empty_display(self, &value.body),
             |checker, arm| {
-                let context = expected.or_else(|| empty_display(arm).then_some(sibling).flatten());
+                let context =
+                    expected.or_else(|| empty_display(checker, arm).then_some(sibling).flatten());
                 let checked = if let Some(ty) = context {
                     checker.expr_expected(arm, ty)?
                 } else {
@@ -3472,6 +3498,10 @@ impl<'a> Checker<'a> {
                     let right = self.expr(&assign.value)?;
                     let value = if self.types.is_counter(left.ty) {
                         self.counter_math(assign.op, left, right, true, statement)?
+                    } else if assign.op == ast::Operator::Div
+                        && (left.ty.is_path() || right.ty.is_path())
+                    {
+                        self.path_join(left, right, statement)?
                     } else {
                         self.binary_expr(assign.op, left, right, statement)?
                     };
@@ -3774,6 +3804,11 @@ impl<'a> Checker<'a> {
         } else {
             self.expr(&item.context_expr)?
         };
+        if let Type::Class(class) = manager.ty
+            && self.unittest_context(class)
+        {
+            return self.assert_raises_scope(item, remaining, body, class, manager);
+        }
         if manager.ty == Type::GeneratorContext {
             return self.generator_scope(item, remaining, body, manager);
         }
@@ -3856,7 +3891,7 @@ impl<'a> Checker<'a> {
     /// Class-form raises construct a new instance, just like an explicit call.
     fn simple_exception(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
         if self.is_import_error(kind) {
-            return self.import_error(call, kind);
+            return self.import_error(call, kind, None);
         }
         if kind == 32 {
             return self.system_exit(call, false);
@@ -4320,6 +4355,64 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn binary_operation(&mut self, binary: &ast::ExprBinOp) -> Result<Expr, String> {
+        let (mut left, mut right) = if matches!(
+            binary.op,
+            ast::Operator::BitOr | ast::Operator::BitAnd | ast::Operator::Sub
+        ) {
+            let (left, left_key) = self.union_operand(&binary.left)?;
+            let (right, right_key) = self.union_operand(&binary.right)?;
+            if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
+                self.expect(left_key, right_key, binary)?;
+                return Ok(Expr {
+                    ty: self.types.set(left_key),
+                    kind: ExprKind::Builtin(
+                        match binary.op {
+                            ast::Operator::Sub => Builtin::KeyDifference,
+                            ast::Operator::BitAnd => Builtin::KeyIntersection,
+                            _ => Builtin::KeyUnion,
+                        },
+                        vec![left, right],
+                    ),
+                });
+            }
+            (left, right)
+        } else {
+            (self.expr(&binary.left)?, self.expr(&binary.right)?)
+        };
+        if binary.op == ast::Operator::Add
+            && left.ty == Type::JsonValue
+            && right.ty == Type::JsonValue
+        {
+            return Ok(json::add(left, right));
+        }
+        if binary.op == ast::Operator::Add
+            && matches!(left.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
+            && matches!(right.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
+        {
+            left = Self::string_value(left);
+            right = Self::string_value(right);
+        }
+        if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
+            return self.path_join(left, right, binary);
+        }
+        if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
+            if matches!(&left.kind, ExprKind::List(items) if items.is_empty())
+                && self.types.element(right.ty).is_some()
+            {
+                left.ty = right.ty;
+            } else if matches!(&right.kind, ExprKind::List(items) if items.is_empty()) {
+                right.ty = left.ty;
+            }
+            self.expect(left.ty, right.ty, binary)?;
+            return self.concat_lists(left, right, binary);
+        }
+        if self.types.is_counter(left.ty) && self.types.is_counter(right.ty) {
+            return self.counter_math(binary.op, left, right, false, binary);
+        }
+        self.binary_expr(binary.op, left, right, binary)
+    }
+
     fn binary_expr(
         &self,
         op: ast::Operator,
@@ -4421,71 +4514,13 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        // Chained methods and binary operands recurse through expr(). Keep the
-        // large general expression frame off those paths in debug builds.
+        // Calls and binary operators recursively check their operands. Keep
+        // the large general expression frame off both paths in debug builds.
         match expression {
             ast::Expr::Call(call) => self.call(call),
-            ast::Expr::BinOp(binary) => self.binary_expression(binary),
+            ast::Expr::BinOp(binary) => self.binary_operation(binary),
             _ => self.non_call_expr(expression),
         }
-    }
-
-    fn binary_expression(&mut self, binary: &ast::ExprBinOp) -> Result<Expr, String> {
-        let (mut left, mut right) = if matches!(
-            binary.op,
-            ast::Operator::BitOr | ast::Operator::BitAnd | ast::Operator::Sub
-        ) {
-            let (left, left_key) = self.union_operand(&binary.left)?;
-            let (right, right_key) = self.union_operand(&binary.right)?;
-            if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
-                self.expect(left_key, right_key, binary)?;
-                return Ok(Expr {
-                    ty: self.types.set(left_key),
-                    kind: ExprKind::Builtin(
-                        match binary.op {
-                            ast::Operator::Sub => Builtin::KeyDifference,
-                            ast::Operator::BitAnd => Builtin::KeyIntersection,
-                            _ => Builtin::KeyUnion,
-                        },
-                        vec![left, right],
-                    ),
-                });
-            }
-            (left, right)
-        } else {
-            (self.expr(&binary.left)?, self.expr(&binary.right)?)
-        };
-        if binary.op == ast::Operator::Add
-            && left.ty == Type::JsonValue
-            && right.ty == Type::JsonValue
-        {
-            return Ok(json::add(left, right));
-        }
-        if binary.op == ast::Operator::Add
-            && matches!(left.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
-            && matches!(right.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
-        {
-            left = Self::string_value(left);
-            right = Self::string_value(right);
-        }
-        if binary.op == ast::Operator::Div && (left.ty.is_path() || right.ty.is_path()) {
-            return self.path_join(left, right, binary);
-        }
-        if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
-            if matches!(&left.kind, ExprKind::List(items) if items.is_empty())
-                && self.types.element(right.ty).is_some()
-            {
-                left.ty = right.ty;
-            } else if matches!(&right.kind, ExprKind::List(items) if items.is_empty()) {
-                right.ty = left.ty;
-            }
-            self.expect(left.ty, right.ty, binary)?;
-            return self.concat_lists(left, right, binary);
-        }
-        if self.types.is_counter(left.ty) && self.types.is_counter(right.ty) {
-            return self.counter_math(binary.op, left, right, false, binary);
-        }
-        self.binary_expr(binary.op, left, right, binary)
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
@@ -4735,6 +4770,13 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Set(set) => return self.set_literal(set, None),
             ast::Expr::Tuple(tuple) => {
+                if tuple
+                    .elts
+                    .iter()
+                    .any(|v| matches!(v, ast::Expr::Starred(_)))
+                {
+                    return self.expanded_tuple(tuple, None);
+                }
                 let values = tuple
                     .elts
                     .iter()
@@ -5040,8 +5082,11 @@ impl<'a> Checker<'a> {
                         && matches!(right, Type::Int | Type::Float);
                     let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
                         && matches!((ty, right), (Type::Class(_), Type::Class(_)));
+                    let tuples = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                        && matches!((ty, right), (Type::Tuple(_), Type::Tuple(_)))
+                        && self.types.fields(ty) == self.types.fields(right);
                     let paths = ty.is_path() && right.is_path();
-                    if !numeric && !records && !paths {
+                    if !numeric && !records && !paths && !tuples {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
@@ -5232,6 +5277,12 @@ impl<'a> Checker<'a> {
                 })?;
                 let index = self.expr(&subscript.slice)?;
                 self.expect(Type::Int, index.ty, expression)?;
+                if let ExprKind::Field(tuple, _) = &list.kind
+                    && self.types.fields(tuple.ty).is_some()
+                {
+                    self.graph
+                        .checked_tuple_list_read(self.module, subscript.range());
+                }
                 (
                     element,
                     ExprKind::Builtin(Builtin::ListGet, vec![list, index]),
@@ -5259,6 +5310,11 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if let Some(Binding::Definition(definition)) = self.resolve(&attribute.value)
+                    && let Some(declaration) = self.types.namedtuple(definition)
+                {
+                    return self.namedtuple_class_attribute(attribute, &declaration);
+                }
                 if attribute.attr.as_str() == "join"
                     && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
                     && !self.names.contains_key("str")
@@ -5301,6 +5357,9 @@ impl<'a> Checker<'a> {
                         }
                         _ => {}
                     }
+                }
+                if let Some(definition) = self.types.namedtuple_definition(receiver.ty) {
+                    return self.namedtuple_instance_attribute(attribute, receiver, definition);
                 }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
                     return Ok(self.string_join_value(Some(receiver), attribute));
@@ -5640,6 +5699,11 @@ impl<'a> Checker<'a> {
         key_view: Option<&mut bool>,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
+        if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
+            && let Some(declaration) = self.types.namedtuple(definition)
+        {
+            return self.namedtuple_call(definition, &declaration, call);
+        }
         if crate::classes::super_init(call) {
             return self.call_super_initializer(call);
         }
@@ -5695,6 +5759,9 @@ impl<'a> Checker<'a> {
             && call.arguments.keywords.is_empty()
         {
             let (source, key) = self.union_operand(input)?;
+            if let Some(element) = self.types.cursor_element(source.ty) {
+                return self.collect_cursor_set(source, element, input);
+            }
             let key = key.ok_or_else(|| {
                 error(
                     self.source,
@@ -5867,7 +5934,7 @@ impl<'a> Checker<'a> {
                 return self.popen(call, Some(true));
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
-            Some(Binding::Intrinsic(Intrinsic::CopyFile)) => return self.shutil_copyfile(call),
+            Some(Binding::Intrinsic(Intrinsic::Copy(op))) => return self.shutil_copy(op, call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;
                 let [path] = call.arguments.args.as_ref() else {
@@ -6071,6 +6138,27 @@ impl<'a> Checker<'a> {
             return self.invoke(call, callable);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
+            if attribute.attr.as_str() == "count"
+                && let ast::Expr::Attribute(parts) = &*attribute.value
+                && parts.attr.as_str() == "parts"
+                && let Ok(path) = self.expr(&parts.value)
+                && path.ty.is_path()
+            {
+                self.reject_builtin_keywords(call)?;
+                let [component] = call.arguments.args.as_ref() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "parts.count expects one component",
+                    ));
+                };
+                let component = self.expr_expected(component, Type::Str)?;
+                return Ok(paths::operation(
+                    ir::PathOperation::CountPart,
+                    Type::Int,
+                    vec![path, component],
+                ));
+            }
             if let Some(class) = self.class_reference(&attribute.value) {
                 if let Some(e) = self.exception_alias_call(call, attribute, class, None)? {
                     return Ok(e);
@@ -6082,11 +6170,7 @@ impl<'a> Checker<'a> {
                 None => self.expr(&attribute.value)?,
             };
             if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
-                let replacement = self.import_error(call, 41)?;
-                return Ok(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::ImportErrorReset, vec![receiver, replacement]),
-                });
+                return self.import_error(call, 41, Some(receiver));
             }
             if matches!(receiver.ty, Type::NamedException(_))
                 && matches!(attribute.attr.as_str(), "__init__" | "__post_init__")
@@ -6947,7 +7031,7 @@ impl<'a> Checker<'a> {
             }
         };
         let path = self.path_argument(path)?;
-        let (ty, builtin) = match (gzip, mode) {
+        let (ty, mut builtin) = match (gzip, mode) {
             (true, "rt") => (Type::TextIO, Builtin::GzipOpen),
             (true, "rb") => (Type::BinaryIO, Builtin::GzipOpen),
             (true, _) => {
@@ -6967,13 +7051,61 @@ impl<'a> Checker<'a> {
         };
         if ty == Type::BinaryIO {
             self.reject_builtin_keywords(call)?;
-        } else if gzip || !call.arguments.keywords.is_empty() {
+        } else if gzip {
             self.utf8_encoding(call)?;
+        } else {
+            let (mut encoding, mut newline) = (false, false);
+            for keyword in &call.arguments.keywords {
+                match keyword.arg.as_deref() {
+                    Some("encoding") if !encoding => {
+                        self.utf8_encoding_keyword(keyword)?;
+                        encoding = true;
+                    }
+                    Some("newline") if !newline => {
+                        builtin = self.text_newline(&keyword.value, builtin)?;
+                        newline = true;
+                    }
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            keyword,
+                            "unexpected or repeated text open keyword",
+                        ));
+                    }
+                }
+            }
         }
         Ok(Expr {
             ty,
             kind: ExprKind::Builtin(builtin, vec![path]),
         })
+    }
+
+    /// POSIX writers already preserve newlines. Readers must retain CR and
+    /// CRLF while still recognizing each as a physical line terminator.
+    fn text_newline(&self, value: &ast::Expr, builtin: Builtin) -> Result<Builtin, String> {
+        if !matches!(builtin, Builtin::TextOpen(_)) {
+            return Err(error(
+                self.source,
+                value,
+                "binary open does not accept newline",
+            ));
+        }
+        match value {
+            ast::Expr::NoneLiteral(_) => Ok(builtin),
+            ast::Expr::StringLiteral(s) if s.value.to_str().is_empty() => {
+                Ok(if matches!(builtin, Builtin::TextOpen(0)) {
+                    Builtin::TextOpen(4)
+                } else {
+                    builtin
+                })
+            }
+            _ => Err(error(
+                self.source,
+                value,
+                "expected newline=None or an empty literal string",
+            )),
+        }
     }
 
     /// Validate an explicit encoding for native text I/O.
