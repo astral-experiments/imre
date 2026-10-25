@@ -812,7 +812,10 @@ impl Checker<'_> {
         expected: Option<Type>,
     ) -> Result<Expr, String> {
         if attribute.attr.starts_with("__")
-            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+            && !matches!(
+                attribute.attr.as_str(),
+                "__str__" | "__post_init__" | "__copy__"
+            )
         {
             return Err(error(
                 self.source,
@@ -896,7 +899,10 @@ impl Checker<'_> {
             ));
         }
         if attribute.attr.starts_with("__")
-            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+            && !matches!(
+                attribute.attr.as_str(),
+                "__str__" | "__post_init__" | "__copy__"
+            )
         {
             return Err(error(
                 self.source,
