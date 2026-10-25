@@ -61,6 +61,7 @@ impl Type {
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
+            | Self::Deque(_)
             | Self::StringKeys
             | Self::Iterator
             | Self::Cursor(_)
@@ -126,6 +127,7 @@ impl Type {
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
+            | Self::Deque(_)
             | Self::StringKeys
             | Self::Iterator
             | Self::Cursor(_)
@@ -725,6 +727,7 @@ impl Emitter<'_, '_> {
             Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
+            | Type::Deque(_)
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -3293,6 +3296,7 @@ impl Emitter<'_, '_> {
                 | Type::List(_)
                 | Type::Dict(_)
                 | Type::Set(_)
+                | Type::Deque(_)
                 | Type::SimpleNamespace(_) => {
                     let operation = if left.ty.is_path() {
                         "path"
@@ -5185,6 +5189,7 @@ impl Emitter<'_, '_> {
                             Type::ListInt => "imre_list_len",
                             Type::List(_) => "imre_seq_len_fast",
                             Type::Dict(_) => "imre_dict_len",
+                            Type::Deque(_) => "imre_deque_len",
                             Type::Set(_) | Type::StringKeys => "imre_set_len",
                             _ => unreachable!("len input was checked"),
                         },
@@ -5508,6 +5513,56 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::DequeNew => {
+                let element = self.module.types.deque_element(returns).unwrap();
+                let limit = self.word(&args[0].value);
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_deque_new(i32 {}, i64 {limit})",
+                        representation_kind(element, &self.module.types)
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::DequeAppend { left, extending } => {
+                let word = self.word(&args[1].value);
+                self.checked_line(format!(
+                    "call void @imre_deque_append(ptr {}, i64 {word}, i32 {}, i32 {})",
+                    args[0].value.operand,
+                    u8::from(*left),
+                    u8::from(*extending)
+                ));
+                none()
+            }
+            Builtin::DequeExtendSource => self.call(
+                "imre_deque_extend_source",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::DequeCopy => self.call("imre_deque_copy", returns, &[&args[0].value]),
+            Builtin::DequePop { left } => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_deque_pop(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u8::from(*left)
+                ));
+                self.unpack_word(word, returns)
+            }
+            Builtin::DequeClear => {
+                self.void_call("imre_deque_clear", &[&args[0].value]);
+                none()
+            }
+            Builtin::DequeMaxlen => self.call("imre_deque_maxlen", returns, &[&args[0].value]),
+            Builtin::DequeIter { reverse } => Value {
+                ty: Type::Iterator,
+                operand: self.instruction(format!(
+                    "call ptr @imre_deque_iter(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u8::from(*reverse)
+                )),
+                small_integer: false,
+            },
             Builtin::CounterNew => {
                 let (key, _) = self.module.types.mapping(returns).unwrap();
                 Value {
@@ -5862,6 +5917,7 @@ impl Emitter<'_, '_> {
                     | Type::List(_)
                     | Type::Dict(_)
                     | Type::Set(_)
+                    | Type::Deque(_)
                     | Type::StringKeys
                     | Type::Iterator
                     | Type::Cursor(_)
@@ -6114,6 +6170,7 @@ impl Emitter<'_, '_> {
             | Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
+            | Type::Deque(_)
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -6193,6 +6250,7 @@ impl Emitter<'_, '_> {
             | Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
+            | Type::Deque(_)
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -6786,6 +6844,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
+        | Type::Deque(_)
         | Type::StringKeys
         | Type::Iterator
         | Type::Cursor(_)
@@ -7368,6 +7427,15 @@ declare ptr @imre_dict_fromkeys_target(ptr, ptr)
 declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
+declare ptr @imre_deque_new(i32, i64)
+declare void @imre_deque_append(ptr, i64, i32, i32)
+declare ptr @imre_deque_extend_source(ptr, ptr)
+declare ptr @imre_deque_copy(ptr)
+declare i64 @imre_deque_pop(ptr, i32)
+declare void @imre_deque_clear(ptr)
+declare i64 @imre_deque_len(ptr)
+declare i64 @imre_deque_maxlen(ptr)
+declare ptr @imre_deque_iter(ptr, i32)
 declare ptr @imre_counter_new(i32)
 declare void @imre_counter_update(ptr, ptr)
 declare ptr @imre_counter_math(ptr, ptr, i32, i32)
