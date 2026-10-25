@@ -1643,7 +1643,7 @@ struct Checker<'a> {
     class: Option<usize>,
     class_receiver: Option<String>,
     iterator_source: Option<TextRange>,
-    super_initializer: Option<usize>,
+    super_initializer: Option<records::BaseInitializer>,
     initializing: bool,
 }
 
