@@ -22,7 +22,7 @@ operation. CPython runs the fixtures, original bodies, assertions, and other
 Formatter behavior. The child executable supplies the first key, actual iterator
 rows and exact exceptions. The host replays those values on the corresponding
 pulls. Corrupting each of the two builtin results fails its original assertion.
-See [the per-test operation counts](evidence-linux.json). This gate also compiles
+See [the per-test operation counts](cursor-operations-linux.json). This gate also compiles
 the unmodified public `Formatter.parse` method natively with a fixture driver.
 
 The ordinary and reachable full-suite loaders for `test.test_str` now stop
