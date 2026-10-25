@@ -165,6 +165,91 @@ impl Checker<'_> {
         })
     }
 
+    /// Bind splitlines/isspace after evaluating the receiver; an explicit
+    /// keepends uses Python truth, including its fallible source-class protocol.
+    pub(super) fn line_method(
+        &mut self,
+        receiver: Expr,
+        name: &str,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let split = name == "splitlines";
+        let returns = if split {
+            self.types.list(Type::Str)
+        } else {
+            Type::Bool
+        };
+        let args = &call.arguments;
+        let count = args.args.len() + args.keywords.len();
+        if count == 0 {
+            let kind = if split {
+                // Preserve the existing bytes.decode().splitlines() path and
+                // direct-iteration fusion for the no-argument method.
+                match receiver.kind {
+                    ExprKind::Builtin(Builtin::Decode, bytes) => {
+                        ExprKind::Builtin(Builtin::DecodeSplitLines, bytes)
+                    }
+                    _ => ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
+                }
+            } else {
+                ExprKind::Builtin(Builtin::Text(TextOperation::IsSpace), vec![receiver])
+            };
+            return Ok(Expr { ty: returns, kind });
+        }
+        if split && count == 1 {
+            let flag = match (args.args.as_ref(), args.keywords.as_ref()) {
+                ([flag], []) => Some(flag),
+                ([], [kw]) if kw.arg.as_deref() == Some("keepends") => Some(&kw.value),
+                _ => None,
+            };
+            if let Some(flag) = flag {
+                let value = self.expr(flag)?;
+                let keep = self.truth_value(value);
+                return Ok(Expr {
+                    ty: returns,
+                    kind: ExprKind::Builtin(
+                        Builtin::Text(TextOperation::SplitLineEnds),
+                        vec![receiver, keep],
+                    ),
+                });
+            }
+        }
+        // Invalid signatures are checked after evaluating all operands, but do
+        // not truth-test the would-be option.
+        let mut values = vec![receiver];
+        for arg in &args.args {
+            values.push(self.expr(arg)?);
+        }
+        for kw in &args.keywords {
+            values.push(self.expr(&kw.value)?);
+        }
+        let message = if !split && !args.keywords.is_empty() {
+            "str.isspace() takes no keyword arguments".to_owned()
+        } else if !split {
+            format!("str.isspace() takes no arguments ({count} given)")
+        } else if count > 1 {
+            let qualifier = if args.args.is_empty() { "keyword " } else { "" };
+            format!("splitlines() takes at most 1 {qualifier}argument ({count} given)")
+        } else {
+            format!(
+                "splitlines() got an unexpected keyword argument '{}'",
+                args.keywords[0].arg.as_deref().unwrap()
+            )
+        };
+        values.push(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(message))),
+            },
+        });
+        Ok(Expr {
+            ty: returns,
+            kind: ExprKind::Builtin(Builtin::RaiseException, values),
+        })
+    }
+
     /// Checks the bounded native signatures while retaining source evaluation order.
     pub(super) fn text_method(
         &mut self,

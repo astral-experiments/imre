@@ -1126,13 +1126,47 @@ pub unsafe extern "C" fn imre_str_splitlines(value: *const Str) -> *const Object
     )
 }
 
+/// Valid UTF-8 lines use the same offsets as the no-argument and fused paths.
+/// Evaluate the source-language flag before entering either collector.
+///
+/// # Safety
+/// The immutable receiver stays rooted throughout the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_splitlines_options(
+    value: *const Str,
+    keep: u32,
+) -> *const Object {
+    if keep == 0 {
+        // SAFETY: this is the existing splitter on the same rooted handle.
+        return unsafe { imre_str_splitlines(value) };
+    }
+    // SAFETY: temporarily view the caller’s rooted owner without taking it.
+    let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
+    finish(
+        collect_lines(&value, true, |range| owned_line(&value, range)),
+        std::ptr::null(),
+    )
+}
+
 fn split_lines(
     value: &str,
     own: impl Fn(std::ops::Range<usize>) -> Rc<Str>,
 ) -> Result<*const Object, Error> {
+    collect_lines(value, false, own)
+}
+
+fn collect_lines(
+    value: &str,
+    keep: bool,
+    own: impl Fn(std::ops::Range<usize>) -> Rc<Str>,
+) -> Result<*const Object, Error> {
     let mut offsets = LineOffsets::new(value);
     let mut result = Words::new(3);
-    while let Some(range) = offsets.next(value) {
+    while let Some(mut range) = offsets.next(value) {
+        if keep {
+            // The scanner has already consumed the complete boundary, including CRLF.
+            range.end = offsets.start;
+        }
         result
             .values
             .try_reserve(1)
