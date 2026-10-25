@@ -24,7 +24,9 @@ def digest(path):
 def expected(n, passes, layout):
     cycle = [i * i + (i + 1) * (i + 1) for i in range(1024)]
     blocks, tail = divmod(n, len(cycle))
-    total = n * 25 if layout == "shared" else blocks * sum(cycle) + sum(cycle[:tail])
+    total = blocks * sum(cycle) + sum(cycle[:tail]) if layout == "distinct" else n * 25
+    if layout == "replace":
+        total += 100 - 25
     total *= passes * (passes + 1) // 2
     if total >= 2**53:
         raise ValueError("choose sizes and passes with an exact binary64 checksum")
@@ -56,13 +58,14 @@ def run(command, n, passes, layout, oracle, env):
         if proc.stderr:
             raise RuntimeError(proc.stderr)
         peak_kib = int(memory.read())
-        length, checksum, build, scan = proc.stdout.splitlines()
+        length, checksum, build, write, scan = proc.stdout.splitlines()
     if int(length) != n or float(checksum) != oracle:
         raise ValueError(
             f"incorrect result: {length}, {checksum}, expected {n}, {oracle}"
         )
     return {
         "build_ms": 1000 * float(build),
+        "first_write_ms": 1000 * float(write),
         "scan_ms": 1000 * float(scan),
         "peak_kib": peak_kib,
     }
@@ -172,9 +175,10 @@ def main():
             commands["CPython " + variant] = [python, path]
 
         os.sched_setaffinity(0, {args.cpu})
-        # Repeating one reference is the control case where packing need not save space.
+        # The replacement workload measures the first write that changes a repeated value.
         workloads = [(n, "distinct") for n in args.sizes] + [
-            (max(args.sizes), "shared")
+            (max(args.sizes), "shared"),
+            (max(args.sizes), "replace"),
         ]
         for n, layout in workloads:
             oracle = expected(n, args.passes, layout)

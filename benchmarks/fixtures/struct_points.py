@@ -27,10 +27,14 @@ def scan(rows: list[Point], scale: float) -> float:
     return total
 
 
-def main(n: int, passes: int, shared: bool) -> None:
+def main(n: int, passes: int, layout: str) -> None:
     t0 = time()
-    rows = [Point(3.0, 4.0)] * n if shared else build(n)
+    rows = build(n) if layout == "distinct" else [Point(3.0, 4.0)] * n
     t1 = time()
+    start_scan = t1
+    if layout == "replace":
+        rows[n // 2] = Point(6.0, 8.0)
+        start_scan = time()
     result = 0.0
     for i in range(passes):
         result += scan(rows, float(i + 1))
@@ -38,7 +42,8 @@ def main(n: int, passes: int, shared: bool) -> None:
     print(len(rows))
     print(result)
     print(t1 - t0)
-    print(t2 - t1)
+    print(start_scan - t1)
+    print(t2 - start_scan)
 
 
-main(int(argv[1]), int(argv[2]), argv[3] == "shared")
+main(int(argv[1]), int(argv[2]), argv[3])

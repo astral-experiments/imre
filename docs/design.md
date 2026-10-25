@@ -144,9 +144,14 @@ explored dedicated declaration syntax; Imre keeps existing Python syntax and opt
 different *identity and storage* rules through the decorator. [PEP 585](https://peps.python.org/pep-0585/#objects-created-with-bare-types-and-parameterized-types-are-exactly-the-same)
 explains why ordinary CPython erases the element argument when creating a list.
 The compatibility module therefore implements value behavior, while the Imre compiler uses
-the checked element type to select contiguous storage. A fast direct scan needs no boxes.
+the checked element type to select native row storage. Repeating a singleton list stores
+one owned immutable record and a count. A read-only scan snapshots the data pointer
+and an index mask once: dense rows use their ordinary index; every repeated index
+selects row zero. A different write reserves and fills dense rows before replacing
+the shared representation. A direct scan of either layout needs no per-row boxes.
 When a value escapes it gets an owned snapshot; legacy word-based consumers can request a
-boxed view, which is discarded on mutation. The list handle itself is never replaced.
+boxed view, which is discarded on mutation. A repeated list supplies that view with pointers
+to the same record. The list handle itself is never replaced.
 
 Ordinary floats use LLVM `double` values and double fields; homogeneous containers carry their raw binary64 bits under one shared descriptor. They need no reference ownership. LLVM receives no fast-math permission. Mixed arithmetic explicitly checks integer conversion, while mixed comparisons compare an exact truncated-float integer and fractional sign. Integer true division scales the arbitrary-precision ratio and rounds once to nearest-even, including subnormals, instead of converting both operands independently. Optional floats own nullable `Rc<f64>` payloads so signed zero and every NaN bit pattern remain distinct from None.
 

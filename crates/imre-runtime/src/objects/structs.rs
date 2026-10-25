@@ -1,7 +1,8 @@
-//! Contiguous scalar payloads for a homogeneous list of immutable value structs.
+//! Scalar struct lists: dense rows, or one immutable record for a repeated singleton.
 use super::exceptions::{Error, Result};
 use super::records::{RecordDescriptor, allocate_record};
 use super::sequences::SliceIndices;
+use super::words::{OwnedWord, WordKind};
 use super::{MAX_LIST_LEN, Object, Storage, Words, object};
 use std::cell::OnceCell;
 use std::rc::Rc;
@@ -17,12 +18,26 @@ pub(super) fn float_key(word: usize) -> usize {
     }
 }
 
+enum RowStorage {
+    Packed(Vec<usize>),
+    // Every logical slot reads this one immutable, independently owned record.
+    Repeated(OwnedWord),
+}
+
 pub(super) struct Rows {
     layout: &'static RecordDescriptor,
-    data: Vec<usize>,
-    // Some legacy generic consumers require rooted record words for an entire traversal.
-    // Normal indexing, mutation, iteration and scans do not create this view.
+    len: usize,
+    storage: RowStorage,
+    // Legacy consumers that require a rooted word array may request a boxed view.
     boxed: OnceCell<Words>,
+}
+
+/// Fill the already reserved suffix by doubling a nonempty initialized pattern.
+fn tile(words: &mut Vec<usize>, target: usize) {
+    debug_assert!(!words.is_empty() && target <= words.capacity());
+    while words.len() < target {
+        words.extend_from_within(..words.len().min(target - words.len()));
+    }
 }
 
 impl Rows {
@@ -30,57 +45,81 @@ impl Rows {
         assert!(layout.is_value_struct() && layout.length != 0);
         Self {
             layout,
-            data: Vec::new(),
+            len: 0,
+            storage: RowStorage::Packed(Vec::new()),
             boxed: OnceCell::new(),
         }
     }
 
     pub(super) fn len(&self) -> usize {
-        self.data.len() / self.layout.length
+        self.len
     }
 
     pub(super) fn layout(&self) -> &RecordDescriptor {
         self.layout
     }
 
+    fn repeated(&self) -> bool {
+        matches!(self.storage, RowStorage::Repeated(_))
+    }
+
+    /// Repeated lists expose only one physical row, regardless of logical length.
+    fn words(&self) -> &[usize] {
+        match &self.storage {
+            RowStorage::Packed(words) => words,
+            // SAFETY: the stored owner roots one initialized record of this layout.
+            RowStorage::Repeated(word) => unsafe { self.payload(word.word as *const usize) },
+        }
+    }
+
     pub(super) fn swap(&mut self, a: usize, b: usize) {
-        self.boxed.take();
-        let width = self.layout.length;
-        for i in 0..width {
-            self.data.swap(a * width + i, b * width + i);
+        if let RowStorage::Packed(words) = &mut self.storage {
+            self.boxed.take();
+            let width = self.layout.length;
+            for i in 0..width {
+                words.swap(a * width + i, b * width + i);
+            }
         }
     }
 
     pub(super) fn row(&self, at: usize) -> &[usize] {
-        let start = at * self.layout.length;
-        &self.data[start..start + self.layout.length]
+        debug_assert!(at < self.len);
+        let start = if self.repeated() {
+            0
+        } else {
+            at * self.layout.length
+        };
+        &self.words()[start..start + self.layout.length]
     }
 
-    fn box_row(&self, at: usize) -> Result<usize> {
-        // SAFETY: the descriptor is static, all fields are plain scalars and the new record owns sufficient space.
+    fn owned_row(&self, at: usize) -> Result<OwnedWord> {
+        if let RowStorage::Repeated(word) = &self.storage {
+            return Ok(word.clone());
+        }
+        // SAFETY: the new allocation owns room for the exact initialized scalar row.
         unsafe {
             let record = allocate_record(self.layout);
             if record.is_null() {
                 return Err(Error::allocation());
             }
             record.copy_from_nonoverlapping(self.row(at).as_ptr(), self.layout.length);
-            Ok(record as usize)
+            Ok(OwnedWord::from_owned(record as usize, WordKind::new(6)))
         }
     }
 
     pub(super) fn get(&self, at: usize) -> Result<usize> {
-        if at >= self.len() {
+        if at >= self.len {
             return Err(Error::index());
         }
-        self.box_row(at)
+        Ok(self.owned_row(at)?.into_word())
     }
 
     pub(super) fn boxed(&self) -> &Words {
         self.boxed.get_or_init(|| {
             let mut out = Words::new(6);
-            out.values.reserve(self.len());
-            for at in 0..self.len() {
-                out.values.push(self.box_row(at).unwrap_or_else(|_| {
+            out.values.reserve(self.len);
+            for at in 0..self.len {
+                out.values.push(self.get(at).unwrap_or_else(|_| {
                     super::fail("MemoryError", "struct view allocation failed")
                 }));
             }
@@ -94,83 +133,115 @@ impl Rows {
         self.boxed.take().unwrap()
     }
 
-    fn reserve(&mut self, count: usize) -> Result<()> {
-        if self
-            .len()
-            .checked_add(count)
-            .is_none_or(|n| n > MAX_LIST_LEN)
-        {
-            return Err(Error::allocation());
+    /// Preserve the same representable size limit in both layouts, without
+    /// reserving the hypothetical dense buffer just to repeat a single value.
+    fn word_count(&self, len: usize) -> Result<usize> {
+        len.checked_mul(self.layout.length)
+            .filter(|&words| words <= MAX_LIST_LEN)
+            .ok_or_else(Error::allocation)
+    }
+
+    /// Reserve before replacing shared storage, so a failed write leaves the list intact.
+    fn writable(&mut self, len: usize) -> Result<&mut Vec<usize>> {
+        let target = self.word_count(len)?;
+        if self.repeated() {
+            let mut words = Vec::new();
+            words
+                .try_reserve_exact(target)
+                .map_err(|_| Error::allocation())?;
+            words.extend_from_slice(self.words());
+            tile(&mut words, self.len * self.layout.length);
+            self.storage = RowStorage::Packed(words);
         }
-        self.data
-            .try_reserve(
-                count
-                    .checked_mul(self.layout.length)
-                    .ok_or_else(Error::allocation)?,
-            )
-            .map_err(|_| Error::allocation())
+        let RowStorage::Packed(words) = &mut self.storage else {
+            unreachable!()
+        };
+        words
+            .try_reserve(target - words.len())
+            .map_err(|_| Error::allocation())?;
+        Ok(words)
     }
 
     pub(super) fn append(&mut self, row: &[usize]) -> Result<()> {
         debug_assert_eq!(row.len(), self.layout.length);
-        self.reserve(1)?;
-        self.data.extend_from_slice(row);
+        if self.repeated() && self.words() == row {
+            self.word_count(self.len + 1)?;
+        } else {
+            self.writable(self.len + 1)?.extend_from_slice(row);
+        }
+        self.len += 1;
         self.boxed.take();
         Ok(())
     }
 
     pub(super) fn set(&mut self, at: usize, row: &[usize]) -> Result<()> {
-        if at >= self.len() {
+        if at >= self.len {
             return Err(Error::index());
         }
-        let start = at * self.layout.length;
-        self.data[start..start + self.layout.length].copy_from_slice(row);
+        // Equal structs may contain observably different signed zeros or NaN bits.
+        if self.repeated() && self.words() == row {
+            return Ok(());
+        }
+        let width = self.layout.length;
+        self.writable(self.len)?[at * width..(at + 1) * width].copy_from_slice(row);
         self.boxed.take();
         Ok(())
     }
 
     pub(super) fn pop(&mut self) -> Result<usize> {
-        let at = self
-            .len()
+        let last = self
+            .len
             .checked_sub(1)
             .ok_or_else(|| Error::new(super::Kind::IndexError, "pop from empty list"))?;
-        let result = self.box_row(at)?;
+        let result = self.owned_row(last)?;
+        self.len = last;
+        if let RowStorage::Packed(words) = &mut self.storage {
+            words.truncate(last * self.layout.length);
+        } else if last == 0 {
+            self.storage = RowStorage::Packed(Vec::new());
+        }
         self.boxed.take();
-        self.data.truncate(at * self.layout.length);
-        Ok(result)
+        Ok(result.into_word())
     }
 
     pub(super) fn clear(&mut self) {
-        self.boxed.take();
-        self.data = Vec::new();
+        *self = Self::new(self.layout);
     }
 
-    pub(super) fn slice(&self, indices: SliceIndices) -> Result<Words> {
+    fn single_value(&self, len: usize) -> Result<Words> {
         let mut out = Self::new(self.layout);
-        out.reserve(indices.len())?;
-        for i in indices {
-            out.data.extend_from_slice(self.row(i));
+        if len != 0 {
+            out.storage = RowStorage::Repeated(self.owned_row(0)?);
+            out.len = len;
         }
         Ok(Words::from_rows(out))
     }
 
-    pub(super) fn repeat(&self, count: usize) -> Result<Words> {
-        let mut out = Self::new(self.layout);
-        out.reserve(
-            self.len()
-                .checked_mul(count)
-                .ok_or_else(Error::allocation)?,
-        )?;
-        if count != 0 && !self.data.is_empty() {
-            // The checked reservation above covers every word. Double an initialized
-            // prefix so even [one_point] * n takes only logarithmically many copies.
-            let target = self.data.len() * count;
-            out.data.extend_from_slice(&self.data);
-            while out.data.len() < target {
-                let copy = out.data.len().min(target - out.data.len());
-                out.data.extend_from_within(..copy);
-            }
+    pub(super) fn slice(&self, indices: SliceIndices) -> Result<Words> {
+        let len = indices.len();
+        if self.repeated() {
+            return self.single_value(len);
         }
+        let mut out = Self::new(self.layout);
+        let words = out.writable(len)?;
+        for i in indices {
+            words.extend_from_slice(self.row(i));
+        }
+        out.len = len;
+        Ok(Words::from_rows(out))
+    }
+
+    pub(super) fn repeat(&self, count: usize) -> Result<Words> {
+        let len = self.len.checked_mul(count).ok_or_else(Error::allocation)?;
+        let target = self.word_count(len)?;
+        if len == 0 || self.len == 1 || self.repeated() {
+            return self.single_value(len);
+        }
+        let mut out = Self::new(self.layout);
+        let words = out.writable(len)?;
+        words.extend_from_slice(self.words());
+        tile(words, target);
+        out.len = len;
         Ok(Words::from_rows(out))
     }
 
@@ -224,16 +295,24 @@ pub unsafe extern "C" fn imre_struct_append(
 }
 
 /// # Safety
-/// A proven read-only view keeps the list owner and storage unchanged through
-/// its final use. Null denotes an ordinary record-pointer list; indices remain checked by the caller.
+/// A proven read-only loop keeps the list and storage unchanged. index_mask
+/// accepts one native word: zero selects row zero for repetitions; all ones
+/// preserves the index for packed rows. Null denotes ordinary record pointers.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_struct_data_readonly(list: *const Object) -> *const usize {
-    // SAFETY: only the raw buffer pointer escapes, with the lifetime stated above.
+pub unsafe extern "C" fn imre_struct_read_view(
+    list: *const Object,
+    index_mask: *mut usize,
+) -> *const usize {
+    // SAFETY: generated code roots the list and supplies writable, disjoint mask storage.
     unsafe {
         object(list).0.with(|s| {
-            s.sequence_storage()
-                .rows()
-                .map_or(std::ptr::null(), |r| r.data.as_ptr())
+            let rows = s.sequence_storage().rows();
+            *index_mask = if rows.is_some_and(Rows::repeated) {
+                0
+            } else {
+                usize::MAX
+            };
+            rows.map_or(std::ptr::null(), |r| r.words().as_ptr())
         })
     }
 }
@@ -293,13 +372,25 @@ impl Rows {
     }
 
     pub(super) fn equal(&self, other: &Self) -> bool {
-        std::ptr::eq(self.layout, other.layout)
-            && self.data.len() == other.data.len()
-            && self
-                .data
-                .chunks_exact(self.layout.length)
-                .zip(other.data.chunks_exact(self.layout.length))
+        if !std::ptr::eq(self.layout, other.layout) || self.len != other.len {
+            return false;
+        }
+        let width = self.layout.length;
+        if self.repeated() {
+            other
+                .words()
+                .chunks_exact(width)
+                .all(|row| self.equal_row(self.words(), row))
+        } else if other.repeated() {
+            self.words()
+                .chunks_exact(width)
+                .all(|row| self.equal_row(row, other.words()))
+        } else {
+            self.words()
+                .chunks_exact(width)
+                .zip(other.words().chunks_exact(width))
                 .all(|(a, b)| self.equal_row(a, b))
+        }
     }
 }
 
@@ -316,7 +407,7 @@ pub unsafe extern "C" fn imre_struct_list_contains(
             if let Some(rows) = s.sequence_storage().rows() {
                 let needle = rows.payload(needle);
                 u32::from(
-                    rows.data
+                    rows.words()
                         .chunks_exact(rows.layout.length)
                         .any(|row| rows.equal_row(row, needle)),
                 )
@@ -350,4 +441,59 @@ pub unsafe extern "C" fn imre_struct_row_checked(list: *const Object, at: usize)
         })
     };
     super::finish(row, std::ptr::null())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objects::records::RecordSemantics;
+
+    // The tests need the field kinds and struct flag, but never format a record.
+    const POINT: &RecordDescriptor = &RecordDescriptor {
+        length: 2,
+        kinds: [7, 1].as_ptr(),
+        semantics: &RecordSemantics {
+            kind: 0,
+            flags: 8,
+            name: std::ptr::null(),
+            name_len: 0,
+            qualified_name: std::ptr::null(),
+            qualified_name_len: 0,
+            fields: std::ptr::null(),
+        },
+    };
+
+    fn ok<T>(result: Result<T>) -> T {
+        result.unwrap_or_else(|_| panic!("unexpected struct list error"))
+    }
+
+    #[test]
+    fn repeated_slots_share_one_record_until_a_bit_changes() {
+        let minus = [(-0.0_f64).to_bits() as usize, 1];
+        let plus = [0, 1];
+        let mut original = Rows::new(POINT);
+        assert!(original.append(&minus).is_ok());
+        let mut list = ok(original.repeat(4096));
+        let rows = list.rows_mut().unwrap();
+        let saved = ok(rows.owned_row(12));
+        assert_eq!(rows.words().len(), 2);
+        assert!(rows.boxed().values.iter().all(|&word| word == saved.word));
+        assert_eq!(ok(rows.owned_row(99)).word, saved.word);
+        assert!(rows.repeat(usize::MAX).is_err());
+        assert!(rows.append(&minus).is_ok());
+        assert!(rows.set(1000, &minus).is_ok());
+        assert!(rows.repeated());
+        let copy = ok(rows.repeat(1));
+        assert!(rows.set(4097, &plus).is_err());
+        assert!(rows.repeated());
+        assert!(rows.set(1000, &plus).is_ok());
+        assert_eq!(rows.words().len(), 4097 * 2);
+        assert_eq!(rows.row(999), minus);
+        assert_eq!(rows.row(1000), plus);
+        assert_eq!(rows.row(1001), minus);
+        assert_eq!(copy.rows().unwrap().row(1000), minus);
+        // The box captured before mutation remains independently rooted.
+        // SAFETY: saved owns one initialized two-word POINT.
+        assert_eq!(unsafe { *(saved.word as *const usize) }, minus[0]);
+    }
 }

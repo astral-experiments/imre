@@ -1036,9 +1036,13 @@ keys and set membership agree with that equality. Structs do not expose instance
 use `==`, never `is`, `id()` or a weak reference. `p is None` on an optional value
 is supported. The enclosing list still has normal identity and mutation semantics.
 
-Imre stores the scalar fields of consecutive elements of `list[Point]` contiguously.
+Imre normally stores the scalar fields of consecutive elements of `list[Point]` contiguously.
 Each field occupies an eight-byte slot; the example uses 16 bytes per element.
 There is no record header, pointer, or reference count per element in that buffer.
+For `[p] * n`, Imre can store one immutable point and the logical length. Reads,
+slices, and pops need no dense buffer. Replacing a slot or appending a point with
+different field bits materializes the packed buffer in O(n) time. This includes
+changing `-0.0` to `+0.0`: reading the field preserves its sign.
 A point taken out of the list remains valid after replacement, growth or clearing.
 The compiler can project fields directly or copy them to a stack temporary; uses that
 need an independently owned record can allocate one. This layout is private to Imre.

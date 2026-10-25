@@ -211,12 +211,18 @@ struct Operand {
     ownership: Ownership,
 }
 
+#[derive(Clone)]
+enum ListBuffer {
+    Words(String),
+    Struct { data: String, index_mask: String },
+}
+
 /// Loop-private views of unchanged incoming lists; no field owns a reference.
 #[derive(Clone)]
 struct LengthSnapshot {
     receiver: Value,
     length: Value,
-    data: Option<String>,
+    data: Option<ListBuffer>,
 }
 
 /// Finally routing chooses the eventual transfer before it reaches either
@@ -1072,20 +1078,22 @@ impl Emitter<'_, '_> {
         };
         let snapshot = self.length_roots[slot]
             .and_then(|root| self.length_snapshots[root].clone().map(|view| (root, view)))
-            .filter(|(_, view)| view.data.is_some());
-        let Some((root, view)) = snapshot else {
+            .and_then(|(root, view)| match view.data {
+                Some(ListBuffer::Words(data)) => Some((root, data, view.receiver)),
+                _ => None,
+            });
+        let Some((root, data, snapshot_receiver)) = snapshot else {
             return self.instruction(format!(
                 "call i64 @{helper}(ptr {}, i64 {index})",
                 receiver.operand
             ));
         };
-        let data = view.data.unwrap();
         if root == slot {
             return self.load_list_word(&data, index);
         }
         let same = self.instruction(format!(
             "icmp eq ptr {}, {}",
-            receiver.operand, view.receiver.operand
+            receiver.operand, snapshot_receiver.operand
         ));
         let (cached, fallback, end) = (self.label(), self.label(), self.label());
         self.branch(&same, &cached, &fallback);
@@ -1209,23 +1217,32 @@ impl Emitter<'_, '_> {
             if data_needed {
                 let snapshot = self.length_snapshots[root].as_ref().unwrap();
                 if snapshot.data.is_none() {
-                    let helper = match snapshot.receiver.ty {
-                        Type::ListInt => "imre_list_data_readonly",
-                        ty if self
+                    let receiver = snapshot.receiver.clone();
+                    let data =
+                        if self
                             .module
                             .types
-                            .element(ty)
-                            .is_some_and(|t| self.module.types.is_value_struct(t)) =>
+                            .element(receiver.ty)
+                            .is_some_and(|t| self.module.types.is_value_struct(t))
                         {
-                            "imre_struct_data_readonly"
-                        }
-                        Type::List(_) => "imre_seq_data_readonly_fast",
-                        _ => unreachable!("only exact lists have buffer snapshots"),
-                    };
-                    let data = self.instruction(format!(
-                        "call ptr @{helper}(ptr {})",
-                        snapshot.receiver.operand
-                    ));
+                            let mask = self.entry_alloca("i64");
+                            let data = self.instruction(format!(
+                                "call ptr @imre_struct_read_view(ptr {}, ptr {mask})",
+                                receiver.operand
+                            ));
+                            let index_mask = self.instruction(format!("load i64, ptr {mask}"));
+                            ListBuffer::Struct { data, index_mask }
+                        } else {
+                            let helper = match receiver.ty {
+                                Type::ListInt => "imre_list_data_readonly",
+                                Type::List(_) => "imre_seq_data_readonly_fast",
+                                _ => unreachable!("only exact lists have buffer snapshots"),
+                            };
+                            ListBuffer::Words(self.instruction(format!(
+                                "call ptr @{helper}(ptr {})",
+                                receiver.operand
+                            )))
+                        };
                     self.length_snapshots[root].as_mut().unwrap().data = Some(data);
                 }
             }
@@ -7603,7 +7620,7 @@ declare ptr @imre_value_repr(i64, i32)
 declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
 declare ptr @imre_struct_list_new(ptr)
-declare ptr @imre_struct_data_readonly(ptr) nounwind
+declare ptr @imre_struct_read_view(ptr, ptr) nounwind
 declare ptr @imre_struct_row(ptr, i64) nounwind
 declare ptr @imre_struct_row_checked(ptr, i64)
 declare i32 @imre_struct_append(ptr, ptr, ptr)

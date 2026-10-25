@@ -6,7 +6,7 @@ The [Rust, CPython and Imre comparison](runtime-suite.md) covers six workloads w
 
 [Packed struct lists vs frozen dataclasses](results/2026-10-25-struct-points.md) measures
 construction, repeated scans, and peak process memory on Imre and CPython. It includes
-both independently constructed points and a list created by repeating one point.
+independently constructed points, a list created by repeating one point, and the first indexed write that changes a repeated value.
 The [harness](struct_points.py) checks every sample against an independent checksum.
 
 ## Route planner
