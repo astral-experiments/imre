@@ -83,6 +83,16 @@ with io.BytesIO(path.read_bytes()) as mem:
     print(mem.seek(-3, 2))
     print(repr(mem.read()))
     print(mem.tell())
+with io.BytesIO(path.read_bytes()) as source:
+    with ZipFile(source) as archive:
+        with archive.open(archive.infolist()[0]) as member:
+            member.MIN_READ_SIZE = 2
+            source.close()
+            for _ in range(2):
+                try:
+                    print(repr(member.read(1)))
+                except ValueError:
+                    print("closed source " + str(member.tell()))
 '''
 
 
