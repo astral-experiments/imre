@@ -1,0 +1,33 @@
+{
+  "compiler_revision": "b4949da4c06a0f4b14a010aadbf982a60caec7ef",
+  "source_sha256": "61ff7f1cdf55f8fa09540368ee8250590dab5e1e9d01c651925671f8dea9f4d0",
+  "imre_sha256": "0086c7070f0be4d0fe955396cccd5726526d98e61741ab70f2fbb29e580165cb",
+  "runtime_sha256": "c6bdde838f52c13fb4d468b22bc6766ca99598cba11dff7820bc6ba9937aefab",
+  "reference": "True\nTrue\nTrue\n[11, 13]\n[2, 3]\n[]\nTrue\nTrue\n[8]\n[2, 3, 1]\nconversion did not reach the factory\n[9]\nFalse\nTrue\n2\n5\nTrue\nFalse\nTrue\n[]\nTrue\nFalse\ndescriptor '__missing__' for 'collections.defaultdict' objects doesn't apply to a 'dict' object\n2\nTrue\n['first']\nTrue\n'name'\nTrue\n",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\nTrue\n[11, 13]\n[2, 3]\n[]\nTrue\nTrue\n[8]\n[2, 3, 1]\nconversion did not reach the factory\n[9]\nFalse\nTrue\n2\n5\nTrue\nFalse\nTrue\n[]\nTrue\nFalse\ndescriptor '__missing__' for 'collections.defaultdict' objects doesn't apply to a 'dict' object\n2\nTrue\n['first']\nTrue\n'name'\nTrue\n",
+      "stderr": ""
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\nTrue\n[11, 13]\n[2, 3]\n[]\nTrue\nTrue\n[8]\n[2, 3, 1]\nconversion did not reach the factory\n[9]\nFalse\nTrue\n2\n5\nTrue\nFalse\nTrue\n[]\nTrue\nFalse\ndescriptor '__missing__' for 'collections.defaultdict' objects doesn't apply to a 'dict' object\n2\nTrue\n['first']\nTrue\n'name'\nTrue\n",
+      "stderr": ""
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\nTrue\n[11, 13]\n[2, 3]\n[]\nTrue\nTrue\n[8]\n[2, 3, 1]\nconversion did not reach the factory\n[9]\nFalse\nTrue\n2\n5\nTrue\nFalse\nTrue\n[]\nTrue\nFalse\ndescriptor '__missing__' for 'collections.defaultdict' objects doesn't apply to a 'dict' object\n2\nTrue\n['first']\nTrue\n'name'\nTrue\n",
+      "stderr": ""
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "True\nTrue\nTrue\n[11, 13]\n[2, 3]\n[]\nTrue\nTrue\n[8]\n[2, 3, 1]\nconversion did not reach the factory\n[9]\nFalse\nTrue\n2\n5\nTrue\nFalse\nTrue\n[]\nTrue\nFalse\ndescriptor '__missing__' for 'collections.defaultdict' objects doesn't apply to a 'dict' object\n2\nTrue\n['first']\nTrue\n'name'\nTrue\n",
+      "stderr": ""
+    }
+  }
+}

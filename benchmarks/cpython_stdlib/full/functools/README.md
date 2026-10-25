@@ -85,8 +85,10 @@ statistics and clearing run in Imre.
 `cache-linux.json` records every cache ID at each optimization level, including
 partial operation counts for blocked methods. The native cache currently accepts
 fixed positional key layouts; the transport supports exact integers and strings.
-The observed snapshot is an immutable native tuple. Its named fields are supplied
-by the host until Imre supports the public CacheInfo type.
+The driver transports four values from a native cache snapshot and supplies
+named-field reads on the host. Its mixed classifications reflect that fixture.
+An Imre program can read the fields on the actual immutable `CacheInfo` tuple;
+the standalone cache_info.py control verifies this separately from the table.
 
 ```sh
 python3.14 benchmarks/cpython_stdlib/full/functools/run_cache.py \

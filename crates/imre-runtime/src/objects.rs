@@ -32,6 +32,7 @@ mod json;
 mod linecache;
 mod logging;
 mod mappings;
+mod module_specs;
 mod namespaces;
 mod os;
 mod paths;
@@ -202,7 +203,15 @@ pub unsafe extern "C" fn imre_object_retain(value: *const Object) {
 pub unsafe extern "C" fn imre_object_release(value: *const Object) {
     if !value.is_null() {
         // SAFETY: the caller transfers one live strong reference.
-        unsafe { Rc::decrement_strong_count(value) };
+        release_object_owner(unsafe { Rc::from_raw(value) });
+    }
+}
+
+/// Give a live Popen's final language owner to subprocess._active before its
+/// allocation is destroyed. All other object owners follow the usual Rc drop.
+fn release_object_owner(owner: Rc<Object>) {
+    if Rc::strong_count(&owner) == 1 {
+        processes::retain_live_owner(&owner);
     }
 }
 

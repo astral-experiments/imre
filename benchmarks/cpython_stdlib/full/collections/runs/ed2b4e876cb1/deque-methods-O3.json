@@ -1,0 +1,448 @@
+{
+  "compiler_revision": "ed2b4e876cb15c374f5eff2e8d9dc354e4ed7c8f",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "opt_level": 3,
+  "class": "test.test_deque.TestBasic",
+  "methods": {
+    "test.test_deque.TestBasic.test_add": {
+      "source": "Lib/test/test_deque.py:193",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:197:26",
+      "reason": "Imre: arithmetic requires int or float operands"
+    },
+    "test.test_deque.TestBasic.test_basics": {
+      "source": "Lib/test/test_deque.py:32",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:47:9",
+      "reason": "Imre: supported list methods are append(value), extend(iterable), pop(), and clear()"
+    },
+    "test.test_deque.TestBasic.test_big_queue_popleft": {
+      "source": "Lib/test/test_deque.py:567",
+      "variant": "test.test_deque.TestBasic",
+      "result": "ran-pending-operation-audit",
+      "execution": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "2444de4de4b94aa6624fb438bf98dea295400946c94080758acf165a93a276bb",
+          "observation": {
+            "roles": {
+              "body": "imre",
+              "assertions": "imre",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "evidence": {
+              "operation": "Construct, append, and pop at opposite or matching deque ends",
+              "fixture": "CPython module/class/instance hooks; native instance in child",
+              "opt_level": 3,
+              "method_sha256": "2444de4de4b94aa6624fb438bf98dea295400946c94080758acf165a93a276bb"
+            }
+          }
+        }
+      ]
+    },
+    "test.test_deque.TestBasic.test_big_queue_popright": {
+      "source": "Lib/test/test_deque.py:578",
+      "variant": "test.test_deque.TestBasic",
+      "result": "ran-pending-operation-audit",
+      "execution": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "a6333b8bf8dd8d234721074503ab8ddb5972b154886d033822b8528a92bbdb6d",
+          "observation": {
+            "roles": {
+              "body": "imre",
+              "assertions": "imre",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "evidence": {
+              "operation": "Construct, append, and pop at opposite or matching deque ends",
+              "fixture": "CPython module/class/instance hooks; native instance in child",
+              "opt_level": 3,
+              "method_sha256": "a6333b8bf8dd8d234721074503ab8ddb5972b154886d033822b8528a92bbdb6d"
+            }
+          }
+        }
+      ]
+    },
+    "test.test_deque.TestBasic.test_big_stack_left": {
+      "source": "Lib/test/test_deque.py:599",
+      "variant": "test.test_deque.TestBasic",
+      "result": "ran-pending-operation-audit",
+      "execution": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "6f33da74e18c655bbe5b445d95470f54ed92035c4830a60acb5d65fb1cf466d3",
+          "observation": {
+            "roles": {
+              "body": "imre",
+              "assertions": "imre",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "evidence": {
+              "operation": "Construct, append, and pop at opposite or matching deque ends",
+              "fixture": "CPython module/class/instance hooks; native instance in child",
+              "opt_level": 3,
+              "method_sha256": "6f33da74e18c655bbe5b445d95470f54ed92035c4830a60acb5d65fb1cf466d3"
+            }
+          }
+        }
+      ]
+    },
+    "test.test_deque.TestBasic.test_big_stack_right": {
+      "source": "Lib/test/test_deque.py:588",
+      "variant": "test.test_deque.TestBasic",
+      "result": "ran-pending-operation-audit",
+      "execution": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "0d78d80cd99bb60f47c6a618643bbf2af34b58d17e8015eabc0596a2afae74ea",
+          "observation": {
+            "roles": {
+              "body": "imre",
+              "assertions": "imre",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "evidence": {
+              "operation": "Construct, append, and pop at opposite or matching deque ends",
+              "fixture": "CPython module/class/instance hooks; native instance in child",
+              "opt_level": 3,
+              "method_sha256": "0d78d80cd99bb60f47c6a618643bbf2af34b58d17e8015eabc0596a2afae74ea"
+            }
+          }
+        }
+      ]
+    },
+    "test.test_deque.TestBasic.test_clear": {
+      "source": "Lib/test/test_deque.py:497",
+      "variant": "test.test_deque.TestBasic",
+      "result": "ran-pending-operation-audit",
+      "execution": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "1b85276a6291dfd65920d2ff9edf5040fe9cd0caad03136af5a6cd0119db4375"
+        }
+      ]
+    },
+    "test.test_deque.TestBasic.test_comparisons": {
+      "source": "Lib/test/test_deque.py:132",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:135:49",
+      "reason": "Imre: expected deque[str], got deque[int]; annotations are enforced contracts"
+    },
+    "test.test_deque.TestBasic.test_container_iterator": {
+      "source": "Lib/test/test_deque.py:729",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:2:1",
+      "reason": "Imre: standard-library imports and shadowing are unsupported: \"gc\""
+    },
+    "test.test_deque.TestBasic.test_contains": {
+      "source": "Lib/test/test_deque.py:149",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:154:29",
+      "reason": "Imre: membership requires a concrete dictionary or set"
+    },
+    "test.test_deque.TestBasic.test_contains_count_index_stop_crashes": {
+      "source": "Lib/test/test_deque.py:169",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:170:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_deque.TestBasic.test_copy": {
+      "source": "Lib/test/test_deque.py:684",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:3:1",
+      "reason": "Imre: standard-library imports and shadowing are unsupported: \"random\""
+    },
+    "test.test_deque.TestBasic.test_copy_method": {
+      "source": "Lib/test/test_deque.py:702",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:706:9",
+      "reason": "Imre: unsupported list element type for unittest equality"
+    },
+    "test.test_deque.TestBasic.test_count": {
+      "source": "Lib/test/test_deque.py:99",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:101:17",
+      "reason": "Imre: expected str, got list[str]; annotations are enforced contracts"
+    },
+    "test.test_deque.TestBasic.test_deepcopy": {
+      "source": "Lib/test/test_deque.py:675",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:678:27",
+      "reason": "Imre: deepcopy requires a closed container graph with atomic keys and supported leaf types"
+    },
+    "test.test_deque.TestBasic.test_delitem": {
+      "source": "Lib/test/test_deque.py:397",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:2:1",
+      "reason": "Imre: standard-library imports and shadowing are unsupported: \"random\""
+    },
+    "test.test_deque.TestBasic.test_extend": {
+      "source": "Lib/test/test_deque.py:185",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:187:38",
+      "reason": "Imre: assertRaises needs a fixed native method receiver"
+    },
+    "test.test_deque.TestBasic.test_extendleft": {
+      "source": "Lib/test/test_deque.py:220",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:222:38",
+      "reason": "Imre: assertRaises needs a fixed native method receiver"
+    },
+    "test.test_deque.TestBasic.test_gc_doesnt_blowup": {
+      "source": "Lib/test/test_deque.py:720",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:2:1",
+      "reason": "Imre: standard-library imports and shadowing are unsupported: \"gc\""
+    },
+    "test.test_deque.TestBasic.test_getitem": {
+      "source": "Lib/test/test_deque.py:232",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:2:1",
+      "reason": "Imre: standard-library imports and shadowing are unsupported: \"random\""
+    },
+    "test.test_deque.TestBasic.test_hash": {
+      "source": "Lib/test/test_deque.py:541",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:542:9",
+      "reason": "Imre: hash requires a string or a known frozen hash projection"
+    },
+    "test.test_deque.TestBasic.test_iadd": {
+      "source": "Lib/test/test_deque.py:213",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:215:9",
+      "reason": "Imre: arithmetic requires int or float operands"
+    },
+    "test.test_deque.TestBasic.test_imul": {
+      "source": "Lib/test/test_deque.py:328",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:331:13",
+      "reason": "Imre: arithmetic requires int or float operands"
+    },
+    "test.test_deque.TestBasic.test_index": {
+      "source": "Lib/test/test_deque.py:252",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:257:34",
+      "reason": "Imre: unsupported deque method or arguments"
+    },
+    "test.test_deque.TestBasic.test_index_bug_24913": {
+      "source": "Lib/test/test_deque.py:298",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:301:17",
+      "reason": "Imre: unsupported deque method or arguments"
+    },
+    "test.test_deque.TestBasic.test_init": {
+      "source": "Lib/test/test_deque.py:537",
+      "variant": "test.test_deque.TestBasic",
+      "result": "ran-pending-operation-audit",
+      "execution": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "6560ae7e13f5af3f2c203640d90fff37cecb81fa0e7e64527d06cec67318750d"
+        }
+      ]
+    },
+    "test.test_deque.TestBasic.test_insert": {
+      "source": "Lib/test/test_deque.py:303",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:309:13",
+      "reason": "Imre: unsupported deque method or arguments"
+    },
+    "test.test_deque.TestBasic.test_insert_bug_26194": {
+      "source": "Lib/test/test_deque.py:313",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:317:13",
+      "reason": "Imre: unsupported deque method or arguments"
+    },
+    "test.test_deque.TestBasic.test_iterator_pickle": {
+      "source": "Lib/test/test_deque.py:634",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:2:1",
+      "reason": "Imre: standard-library imports and shadowing are unsupported: \"pickle\""
+    },
+    "test.test_deque.TestBasic.test_len": {
+      "source": "Lib/test/test_deque.py:476",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:483:39",
+      "reason": "Imre: assertRaises needs a fixed native method receiver"
+    },
+    "test.test_deque.TestBasic.test_long_steadystate_queue_popleft": {
+      "source": "Lib/test/test_deque.py:544",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:3:1",
+      "reason": "Imre: imports must precede executable module statements"
+    },
+    "test.test_deque.TestBasic.test_long_steadystate_queue_popright": {
+      "source": "Lib/test/test_deque.py:555",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:3:1",
+      "reason": "Imre: imports must precede executable module statements"
+    },
+    "test.test_deque.TestBasic.test_maxlen": {
+      "source": "Lib/test/test_deque.py:51",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:59:26",
+      "reason": "Imre: expected int, got deque[int]; annotations are enforced contracts"
+    },
+    "test.test_deque.TestBasic.test_maxlen_attribute": {
+      "source": "Lib/test/test_deque.py:89",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:90:26",
+      "reason": "Imre: expected int, got int | None; annotations are enforced contracts"
+    },
+    "test.test_deque.TestBasic.test_maxlen_zero": {
+      "source": "Lib/test/test_deque.py:74",
+      "variant": "test.test_deque.TestBasic",
+      "result": "ran-pending-operation-audit",
+      "execution": [
+        {
+          "execution": "native-body",
+          "body": "Imre",
+          "assertions": "Imre",
+          "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "0507ae1db4e0badd7c2ab3444f57c6eb8ab1c94eafedde4a1b8d48fe0128d6b5"
+        }
+      ]
+    },
+    "test.test_deque.TestBasic.test_mul": {
+      "source": "Lib/test/test_deque.py:359",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:361:26",
+      "reason": "Imre: arithmetic requires int or float operands"
+    },
+    "test.test_deque.TestBasic.test_pickle": {
+      "source": "Lib/test/test_deque.py:616",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:2:1",
+      "reason": "Imre: standard-library imports and shadowing are unsupported: \"pickle\""
+    },
+    "test.test_deque.TestBasic.test_pickle_recursive": {
+      "source": "Lib/test/test_deque.py:625",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:2:1",
+      "reason": "Imre: standard-library imports and shadowing are unsupported: \"pickle\""
+    },
+    "test.test_deque.TestBasic.test_remove": {
+      "source": "Lib/test/test_deque.py:506",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:508:9",
+      "reason": "Imre: unsupported deque method or arguments"
+    },
+    "test.test_deque.TestBasic.test_repr": {
+      "source": "Lib/test/test_deque.py:530",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:532:13",
+      "reason": "Imre: unknown function or unsupported builtin arguments"
+    },
+    "test.test_deque.TestBasic.test_reverse": {
+      "source": "Lib/test/test_deque.py:411",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:2:1",
+      "reason": "Imre: standard-library imports and shadowing are unsupported: \"random\""
+    },
+    "test.test_deque.TestBasic.test_reversed": {
+      "source": "Lib/test/test_deque.py:711",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:712:27",
+      "reason": "Imre: iterator values require an immediate for, comprehension, list, sum, any, or all consumer"
+    },
+    "test.test_deque.TestBasic.test_reversed_new": {
+      "source": "Lib/test/test_deque.py:715",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:716:22",
+      "reason": "Imre: iterator values require an immediate for, comprehension, list, sum, any, or all consumer"
+    },
+    "test.test_deque.TestBasic.test_rotate": {
+      "source": "Lib/test/test_deque.py:423",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "fixture:3:1",
+      "reason": "Imre: imports must precede executable module statements"
+    },
+    "test.test_deque.TestBasic.test_roundtrip_iter_init": {
+      "source": "Lib/test/test_deque.py:610",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:613:29",
+      "reason": "Imre: unknown function or unsupported builtin arguments"
+    },
+    "test.test_deque.TestBasic.test_setitem": {
+      "source": "Lib/test/test_deque.py:385",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:389:13",
+      "reason": "Imre: indexed assignment requires a mutable typed list or dictionary"
+    },
+    "test.test_deque.TestBasic.test_sizeof": {
+      "source": "Lib/test/test_deque.py:748",
+      "variant": "test.test_deque.TestBasic",
+      "result": "fixture-blocked",
+      "reason": "TestBasic.test_sizeof needs its upstream method decorator"
+    },
+    "test.test_deque.TestBasic.test_underflow": {
+      "source": "Lib/test/test_deque.py:492",
+      "variant": "test.test_deque.TestBasic",
+      "result": "compile-blocked",
+      "location": "upstream:494:39",
+      "reason": "Imre: assertRaises needs a fixed native method receiver"
+    }
+  }
+}

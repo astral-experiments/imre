@@ -63,6 +63,14 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if value.ty == Type::ObjectValue
+            && let Type::Class(class) = ty
+        {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::ObjectRecordProject(class), vec![value]),
+            };
+        }
         if matches!(value.ty, Type::Document(_)) {
             return if ty == Type::Str {
                 documents::op(ir::DocumentOp::AsStr, Type::Str, vec![value])
@@ -157,6 +165,9 @@ impl Checker<'_> {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
         match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) => {
+                return Ok(vec![InstanceType::ModuleSpec]);
+            }
             Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => {
                 return Ok(vec![InstanceType::ForwardRef]);
             }
@@ -550,6 +561,17 @@ impl Checker<'_> {
                 .get(&slot)
                 .copied()
                 .unwrap_or(self.locals[slot]);
+            if current == Type::ObjectValue {
+                for (classes, truth) in &constraints {
+                    if *truth
+                        && let [InstanceType::Exact(Type::Class(class))] = classes.as_slice()
+                        && self.boxed_dataclass(*class)
+                    {
+                        self.narrowed.insert_mut(slot, Type::Class(*class));
+                    }
+                }
+                continue;
+            }
             if let (Type::Class(_), Type::Class(mut base)) = (self.locals[slot], current) {
                 for (classes, positive) in &constraints {
                     if *positive && let Some(child) = self.tested_subclass(base, classes) {
