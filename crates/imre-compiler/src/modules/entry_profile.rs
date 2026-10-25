@@ -73,7 +73,7 @@ impl Profile {
             .map(|(_, explanation)| explanation.as_str())
     }
 
-    pub(super) fn ranges(&self, module: ModuleId) -> impl Iterator<Item = TextRange> + '_ {
+    pub(crate) fn ranges(&self, module: ModuleId) -> impl Iterator<Item = TextRange> + '_ {
         self.suites
             .iter()
             .filter(move |((owner, _), _)| *owner == module)

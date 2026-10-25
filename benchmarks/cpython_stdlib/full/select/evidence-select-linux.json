@@ -8,8 +8,9 @@
     "denominator": 6,
     "distinct_ids": 6,
     "counts": {
+      "host-driven-native-operation": 1,
       "native-body-host-fixture": 2,
-      "reference-only": 4
+      "reference-only": 3
     },
     "records": [
       {
@@ -90,14 +91,18 @@
         "opt_level": 0,
         "fixture_variant": "integer-fd readiness",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "native select returns integer read fds for the subprocess pipe",
+          "fixture": "CPython makes the subprocess, converts file objects, reads and asserts; adding a spurious writer fails the original test"
+        },
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_select.SelectTestCase.test_select_mutated",
@@ -125,8 +130,9 @@
     "denominator": 6,
     "distinct_ids": 6,
     "counts": {
+      "host-driven-native-operation": 1,
       "native-body-host-fixture": 2,
-      "reference-only": 4
+      "reference-only": 3
     },
     "records": [
       {
@@ -207,14 +213,18 @@
         "opt_level": 3,
         "fixture_variant": "integer-fd readiness",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "native select returns integer read fds for the subprocess pipe",
+          "fixture": "CPython makes the subprocess, converts file objects, reads and asserts; adding a spurious writer fails the original test"
+        },
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_select.SelectTestCase.test_select_mutated",

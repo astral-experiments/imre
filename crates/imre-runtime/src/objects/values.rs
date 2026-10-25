@@ -308,6 +308,7 @@ unsafe fn scalar_equal(left: usize, right: usize, kind: WordKind) -> bool {
             }
             7 if raw & NULLABLE != 0 => *(left as *const f64) == *(right as *const f64),
             7 => f64::from_bits(left as u64) == f64::from_bits(right as u64),
+            14 => left == right,
             8 => *(left as *const Bytes) == *(right as *const Bytes),
             _ => unreachable!("WordKind validates concrete representations"),
         }
@@ -408,7 +409,7 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
 pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
     let mut output = String::new();
     // SAFETY: the caller supplies the exact checked representation and root.
-    unsafe { write_repr(&mut output, word, WordKind::new(kind)) };
+    unsafe { write_checked_repr(&mut output, word, WordKind::new(kind)) };
     if super::exceptions::imre_error_pending() != 0 {
         return std::ptr::null();
     }
@@ -720,6 +721,7 @@ unsafe fn write_scalar(
         match raw & !NULLABLE {
             0 => output.push_str("None"),
             10 => super::string_enums::write_repr(output, word),
+            14 => super::typing::write_repr(output, word),
             12 => super::annotations::write_repr(output, word),
             13 => {
                 let (member, value) = super::annotations::member(word);
@@ -736,14 +738,9 @@ unsafe fn write_scalar(
                     write!(output, "{value}").unwrap();
                 } else {
                     let value = value.big();
-                    if check_digits {
-                        static LIMIT: std::sync::LazyLock<num_bigint::BigUint> =
-                            std::sync::LazyLock::new(|| num_bigint::BigUint::from(10u8).pow(4300));
-                        if value.magnitude() >= &*LIMIT {
-                            super::exceptions::Error::new(super::exceptions::Kind::ValueError,
-                                "Exceeds the limit (4300 digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit").raise();
-                            return false;
-                        }
+                    if check_digits && let Err(error) = crate::integer_text::check_decimal(&value) {
+                        error.raise();
+                        return false;
                     }
                     write!(output, "{value}").unwrap();
                 }

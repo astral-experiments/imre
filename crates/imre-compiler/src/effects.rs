@@ -304,6 +304,7 @@ mod tests {
             }
         }
         let module = Module {
+            list_builds: Default::default(),
             ignore_python_environment: false,
             types,
             functions,
@@ -361,6 +362,7 @@ mod tests {
             ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
@@ -420,6 +422,7 @@ mod tests {
             ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
@@ -477,6 +480,7 @@ def conversion(values: list[str]) -> bool:
             ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),

@@ -21,24 +21,13 @@ mod nargs;
 use binding::{Bound, IntegerRange};
 use nargs::{Nargs, positional_counts};
 
+use crate::integer_text::decimal_digits_allowed;
+
 fn owned_text(value: &str) -> Result<crate::StrOwner, Error> {
     Str::try_new(value)
         .ok()
         .and_then(|text| StrOwner::try_new(text).ok())
         .ok_or_else(Error::allocation)
-}
-
-/// Large decimal conversions obey the interpreter's configured digit limit,
-/// including leading zeroes. Underscores and signs do not count.
-fn decimal_digits_allowed(count: usize) -> bool {
-    if count <= 640 {
-        return true;
-    }
-    let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(4300);
-    limit == 0 || count <= limit
 }
 
 #[derive(Deserialize, Copy, Clone, PartialEq)]

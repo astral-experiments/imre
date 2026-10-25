@@ -131,29 +131,51 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
 /// An unused generated repr does not constrain a closed entry. Check its full
 /// field tree on each operation that can actually format the value.
 pub(super) fn can_format(ty: Type, types: &Types, classes: &ClassInfo) -> bool {
-    fn check(ty: Type, types: &Types, classes: &ClassInfo, seen: &mut HashSet<usize>) -> bool {
-        if let Type::Class(id) = ty {
-            if !seen.insert(id) {
-                return true;
-            }
-            let class = &classes.declarations.definitions[id];
-            return class.dataclass.is_none_or(|d| !d.repr)
-                || class
-                    .fields
-                    .iter()
-                    .zip(&classes.fields[id])
-                    .all(|(field, &ty)| !field.repr || check(ty, types, classes, seen));
-        }
-        if matches!(ty, Type::ModuleSpec(_)) {
-            return repr_supported(ty, types);
-        }
-        repr_supported(ty, types)
-            && types
-                .children(ty)
+    check_format(ty, types, classes, &mut HashSet::new(), false)
+}
+
+/// The dispatch branch already proved the exact outer record layout.
+pub(super) fn can_format_concrete(ty: Type, types: &Types, classes: &ClassInfo) -> bool {
+    check_format(ty, types, classes, &mut HashSet::new(), true)
+}
+
+fn check_format(
+    ty: Type,
+    types: &Types,
+    classes: &ClassInfo,
+    seen: &mut HashSet<usize>,
+    exact: bool,
+) -> bool {
+    if let Type::Class(id) = ty {
+        if !exact && classes.has_concrete_subclasses(id) {
+            return classes
+                .concrete_layouts(id)
                 .into_iter()
-                .all(|ty| check(ty, types, classes, seen))
+                .all(|class| check_format(Type::Class(class), types, classes, seen, true));
+        }
+        if classes.has_repr_override(id) {
+            // The descriptor walk borrows contents and cannot run a mutating callback.
+            return false;
+        }
+        if !seen.insert(id) {
+            return true;
+        }
+        let class = &classes.declarations.definitions[id];
+        return class.dataclass.is_none_or(|d| !d.repr)
+            || class
+                .fields
+                .iter()
+                .zip(&classes.fields[id])
+                .all(|(field, &ty)| !field.repr || check_format(ty, types, classes, seen, false));
     }
-    check(ty, types, classes, &mut HashSet::new())
+    if matches!(ty, Type::ModuleSpec(_)) {
+        return repr_supported(ty, types);
+    }
+    repr_supported(ty, types)
+        && types
+            .children(ty)
+            .into_iter()
+            .all(|ty| check_format(ty, types, classes, seen, false))
 }
 
 /// Rejects only generated operations whose supported field representations cannot
@@ -262,6 +284,17 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
             dataclass_eq: class.dataclass.as_ref().is_some_and(|options| options.eq),
             dataclass_repr: class.dataclass.as_ref().is_some_and(|options| options.repr),
             toml_hash: class.toml_hash,
+            initializer_fields: (class.generated_initializer
+                && !classes.methods[id].contains_key("__post_init__"))
+            .then(|| {
+                let fields = class.fields.iter().enumerate();
+                fields
+                    .clone()
+                    .filter(|(_, f)| !f.kw_only)
+                    .chain(fields.filter(|(_, f)| f.kw_only))
+                    .map(|(index, _)| index)
+                    .collect()
+            }),
             fields: class
                 .fields
                 .iter()
