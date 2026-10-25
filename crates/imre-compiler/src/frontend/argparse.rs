@@ -45,16 +45,20 @@ fn literal<'a>(expr: &'a ast::Expr, module: &SourceModule) -> Result<&'a str, St
     Ok(value.value.to_str())
 }
 
-fn method<'a>(expr: &'a ast::Expr, receiver: &str, name: &str) -> Option<&'a ast::ExprCall> {
+fn method_receiver<'a>(expr: &'a ast::Expr, name: &str) -> Option<(&'a str, &'a ast::ExprCall)> {
     let ast::Expr::Call(call) = expr else {
         return None;
     };
     let ast::Expr::Attribute(attribute) = &*call.func else {
         return None;
     };
-    (attribute.attr.as_str() == name
-        && matches!(&*attribute.value, ast::Expr::Name(name) if name.id == receiver))
-    .then_some(call)
+    let receiver = attribute.value.as_name_expr()?;
+    (attribute.attr.as_str() == name).then_some((receiver.id.as_str(), call))
+}
+
+fn method<'a>(expr: &'a ast::Expr, receiver: &str, name: &str) -> Option<&'a ast::ExprCall> {
+    let (owner, call) = method_receiver(expr, name)?;
+    (owner == receiver).then_some(call)
 }
 
 fn names(expr: &ast::Expr, name: &str) -> bool {
@@ -368,6 +372,29 @@ struct Subcommand {
     name: String,
     help: Option<String>,
     options: Vec<OptionField>,
+    groups: Vec<Value>,
+}
+
+fn argument_group(call: &ast::ExprCall, module: &SourceModule) -> Result<Value, String> {
+    let kw = keywords(call, &["title", "description"], module)?;
+    if call.arguments.args.len() > 2 {
+        return Err(module.error(call, "argparse groups accept a title and a description"));
+    }
+    let text = |index, name| match (call.arguments.args.get(index), kw.get(name).copied()) {
+        (Some(_), Some(_)) => Err(module.error(call, "repeated argparse group argument")),
+        (Some(value), None) | (None, Some(value))
+            if !matches!(value, ast::Expr::NoneLiteral(_)) =>
+        {
+            literal(value, module).map(Some)
+        }
+        _ => Ok(None),
+    };
+    let title = text(0, "title")?;
+    let description = text(1, "description")?;
+    if description.is_some_and(|s| s.contains("%(prog)") && !template(s, &["prog"])) {
+        return Err(module.error(call, "unsupported argparse group description substitution"));
+    }
+    Ok(json!({"title": title, "description": description}))
 }
 
 /// Each descriptor uses the same order for storage, parsing, and destruction.
@@ -541,9 +568,9 @@ impl Parsers {
                             .error(expr, "argparse description requires a literal or __doc__"));
                     }
                     let builder = name.id.as_str();
-                    let mut builders = Vec::<&str>::new();
+                    let mut builders = Vec::<String>::new();
                     let register =
-                        |name: &ast::ExprName, builders: &[&str]| -> Result<(), String> {
+                        |name: &ast::ExprName, builders: &[String]| -> Result<(), String> {
                             let name = name.id.as_str();
                             if reserved(name)
                                 || module.bindings.contains_key(name)
@@ -551,7 +578,7 @@ impl Parsers {
                                     .parameters
                                     .iter_non_variadic_params()
                                     .any(|param| param.name() == name)
-                                || builders.contains(&name)
+                                || builders.iter().any(|builder| builder == name)
                             {
                                 return Err(module
                                     .error(ctor, "argparse builder requires a fresh local name"));
@@ -559,45 +586,73 @@ impl Parsers {
                             Ok(())
                         };
                     register(name, &builders)?;
-                    builders.push(builder);
-                    let read_options = |builder: &str,
-                                        index: &mut usize,
-                                        mut names: HashSet<String>|
-                     -> Result<Vec<OptionField>, String> {
-                        let mut options: Vec<OptionField> = Vec::new();
-                        let mut spellings = HashSet::new();
-                        while let Some(ast::Stmt::Expr(stmt)) = function.body.get(*index)
-                            && let Some(add) = method(&stmt.value, builder, "add_argument")
-                        {
-                            let field = option(add, graph, module_id, types, classes)?;
-                            if field.option["flag"] == field.name
-                                && options.iter().any(OptionField::many_positional)
-                            {
-                                return Err(module.error(
-                                    add,
-                                    "a positional with nargs='+' must be the last positional",
-                                ));
-                            }
-                            for value in &add.arguments.args {
-                                let name = literal(value, module)?;
-                                if !spellings.insert(name) {
-                                    return Err(module
-                                        .error(value, "argparse option spellings must be unique"));
+                    builders.push(builder.to_owned());
+                    let read_options =
+                        |builder: &str,
+                         index: &mut usize,
+                         mut names: HashSet<String>,
+                         builders: &mut Vec<String>|
+                         -> Result<(Vec<OptionField>, Vec<Value>), String> {
+                            let mut options: Vec<OptionField> = Vec::new();
+                            let mut spellings = HashSet::new();
+                            let mut groups = Vec::new();
+                            let mut group_names = HashMap::new();
+                            while let Some(stmt) = function.body.get(*index) {
+                                if let Some((group, call)) =
+                                    assigned_call(Some(stmt), builder, "add_argument_group")
+                                {
+                                    register(group, builders)?;
+                                    builders.push(group.id.to_string());
+                                    group_names.insert(group.id.as_str(), groups.len());
+                                    groups.push(argument_group(call, module)?);
+                                    *index += 1;
+                                    continue;
                                 }
+                                let ast::Stmt::Expr(stmt) = stmt else { break };
+                                let Some((owner, add)) =
+                                    method_receiver(&stmt.value, "add_argument")
+                                else {
+                                    break;
+                                };
+                                let group = group_names.get(owner);
+                                if owner != builder && group.is_none() {
+                                    break;
+                                }
+                                let mut field = option(add, graph, module_id, types, classes)?;
+                                if let Some(group) = group {
+                                    field.option["group"] = json!(group);
+                                }
+                                if field.option["flag"] == field.name
+                                    && options.iter().any(OptionField::many_positional)
+                                {
+                                    return Err(module.error(
+                                        add,
+                                        "a positional with nargs='+' must be the last positional",
+                                    ));
+                                }
+                                for value in &add.arguments.args {
+                                    let name = literal(value, module)?;
+                                    if !spellings.insert(name) {
+                                        return Err(module.error(
+                                            value,
+                                            "argparse option spellings must be unique",
+                                        ));
+                                    }
+                                }
+                                if !names.insert(field.name.clone()) {
+                                    return Err(module.error(
+                                        add,
+                                        "argparse arguments require unique destination fields",
+                                    ));
+                                }
+                                options.push(field);
+                                *index += 1;
                             }
-                            if !names.insert(field.name.clone()) {
-                                return Err(module.error(
-                                    add,
-                                    "argparse arguments require unique destination fields",
-                                ));
-                            }
-                            options.push(field);
-                            *index += 1;
-                        }
-                        Ok(options)
-                    };
+                            Ok((options, groups))
+                        };
                     let mut index = start + 1;
-                    let options = read_options(builder, &mut index, HashSet::new())?;
+                    let (options, groups) =
+                        read_options(builder, &mut index, HashSet::new(), &mut builders)?;
                     let mut root_names = options
                         .iter()
                         .map(|field| field.name.clone())
@@ -614,7 +669,7 @@ impl Parsers {
                             ));
                         }
                         register(group, &builders)?;
-                        builders.push(group.id.as_str());
+                        builders.push(group.id.to_string());
                         let kw = keywords(add, &["dest", "required"], module)?;
                         let Some(dest) = kw.get("dest") else {
                             return Err(
@@ -637,7 +692,7 @@ impl Parsers {
                             assigned_call(function.body.get(index), group.id.as_str(), "add_parser")
                         {
                             register(child, &builders)?;
-                            builders.push(child.id.as_str());
+                            builders.push(child.id.to_string());
                             let [name] = call.arguments.args.as_ref() else {
                                 return Err(module.error(
                                     call,
@@ -667,12 +722,17 @@ impl Parsers {
                                 ));
                             }
                             index += 1;
-                            let options =
-                                read_options(child.id.as_str(), &mut index, root_names.clone())?;
+                            let (options, groups) = read_options(
+                                child.id.as_str(),
+                                &mut index,
+                                root_names.clone(),
+                                &mut builders,
+                            )?;
                             children.push(Subcommand {
                                 name: name.into(),
                                 help: help.map(str::to_owned),
                                 options,
+                                groups,
                             });
                         }
                         if children.is_empty() {
@@ -698,7 +758,7 @@ impl Parsers {
                         );
                     }
                     for builder in builders {
-                        let mut outside = ContainsName(builder, false);
+                        let mut outside = ContainsName(&builder, false);
                         outside.visit_body(&function.body[..start]);
                         outside.visit_body(&function.body[index + 1..]);
                         if outside.1 {
@@ -731,8 +791,9 @@ impl Parsers {
                         tags.insert(child.name.clone(), variant);
                         child_schemas.push(json!({
                             "name": child.name, "help": child.help,
-                            "prog": format!("{prog} {}", child.name), "raw": false,
+                            "raw": false,
                             "options": child.options.iter().map(|f| &f.option).collect::<Vec<_>>(),
+                            "groups": child.groups,
                         }));
                     }
                     let subcommands = command.as_ref().map(|field| {
@@ -746,7 +807,7 @@ impl Parsers {
                         .into_iter()
                         .map(|field| field.option)
                         .collect::<Vec<_>>();
-                    let schema = json!({"prog": prog, "raw": raw, "options": options, "subcommands": subcommands}).to_string();
+                    let schema = json!({"prog": prog, "raw": raw, "options": options, "groups": groups, "subcommands": subcommands}).to_string();
                     parsers.calls.insert(
                         (module_id, parse.start()),
                         Parser {
