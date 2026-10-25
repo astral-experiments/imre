@@ -50,6 +50,9 @@ impl Emitter<'_, '_> {
             TextOperation::Lower => {
                 self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))
             }
+            TextOperation::Capitalize => {
+                self.checked_instruction(format!("call ptr @imre_str_capitalize(ptr {source})"))
+            }
             TextOperation::Split(reverse) => {
                 let separator =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
@@ -95,7 +98,16 @@ impl Emitter<'_, '_> {
                 self.checked_pointer(format!("call ptr @imre_str_unquote(ptr {source})"))
             }
             TextOperation::ShlexSplit => {
-                self.checked_instruction(format!("call ptr @imre_shlex_split(ptr {source})"))
+                let source = self.instruction(format!("inttoptr i64 {source} to ptr"));
+                let comments =
+                    self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let posix = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
+                self.checked_instruction(format!(
+                    "call ptr @imre_shlex_split_options(ptr {source}, i32 {comments}, i32 {posix})"
+                ))
+            }
+            TextOperation::ShlexQuote => {
+                self.checked_instruction(format!("call ptr @imre_shlex_quote(ptr {source})"))
             }
         };
         self.owned(Value {

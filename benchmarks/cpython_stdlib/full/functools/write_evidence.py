@@ -16,9 +16,13 @@ def observe(name, level, body, body_rev, probes):
     proof = {"opt_level": level, "complete_method": {**body, "compiler_commit": body_rev}}
     loc = roles(body="unobserved", assertions="unobserved", operation="unobserved", fixture="unobserved")
     if state == "native_body_host_fixture":
-        operation = ("Native functools.partial constructs and calls both bound and unbound str.join."
-                     if name.endswith(".test_with_bound_and_unbound_methods")
-                     else f"Imre executed the product operations of the complete unchanged {name} method.")
+        if name.endswith(".test_with_bound_and_unbound_methods"):
+            operation = "Native functools.partial constructs and calls both bound and unbound str.join."
+        elif name.endswith(".test_get_annotations"):
+            operation = ("Imre creates an lru_cache wrapper, reads the original and wrapper annotations, "
+                         "and compares both dictionaries with the expected builtin class objects.")
+        else:
+            operation = f"Imre executed the product operations of the complete unchanged {name} method."
         proof.update(operation=operation,
                      fixture=body["fixture_execution"])
         return dict(outcome="pass", roles=roles(body="imre", assertions="imre", operation="imre", fixture="mixed"), evidence=proof)
@@ -48,6 +52,8 @@ def observe(name, level, body, body_rev, probes):
             native = counts.get("native_calls", 0)
             host = counts.get("host_binding", 0)
             detail = f"Imre evaluated {native} folds; {host} calls reached the host argument binder."
+            if warnings := counts.get("host_warnings"):
+                detail += f" The host emitted {warnings} deprecation warnings for the pure variant."
         else:
             native = counts.get("lookups", 0) + counts.get("clears", 0) + counts.get("snapshots", 0)
             host = sum(v for k, v in counts.items() if k.startswith("host_"))

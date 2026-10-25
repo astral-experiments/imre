@@ -4,21 +4,24 @@
 use super::exceptions::{Error, Kind, Result, finish};
 use super::files::errno_error;
 use super::{Bytes, Int, Str};
+use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
 use std::rc::Rc;
 
-macro_rules! open_flags {
+macro_rules! descriptor_constants {
     ($($name:ident = $flag:ident),* $(,)?) => {$(
         #[unsafe(no_mangle)]
         pub static $name: usize = ((libc::$flag as usize) << 1) | 1;
     )*};
 }
-open_flags! {
+descriptor_constants! {
     imre_os_o_rdonly = O_RDONLY, imre_os_o_wronly = O_WRONLY, imre_os_o_rdwr = O_RDWR,
     imre_os_o_append = O_APPEND, imre_os_o_creat = O_CREAT, imre_os_o_excl = O_EXCL,
     imre_os_o_trunc = O_TRUNC, imre_os_o_cloexec = O_CLOEXEC, imre_os_o_directory = O_DIRECTORY,
     imre_os_o_nofollow = O_NOFOLLOW, imre_os_o_nonblock = O_NONBLOCK,
+    imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
+    imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
 }
 
 /// Open relative to an optional directory fd. Set close-on-exec atomically.
@@ -120,6 +123,40 @@ pub extern "C" fn imre_os_strerror(code: usize) -> *const Str {
             Ok(Rc::into_raw(Rc::new(Str::from(text.as_ref()))))
         }),
         std::ptr::null(),
+    )
+}
+
+/// Move the shared open-file offset, retaining the kernel's errors for pipes,
+/// closed descriptors, and unsupported sparse-file seeks.
+///
+/// # Safety
+/// All arguments are rooted tagged Python integers for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_lseek(fd: usize, position: usize, whence: usize) -> usize {
+    finish(
+        (|| {
+            let fd = c_int(fd)?;
+            // SAFETY: the compiler retains the exact integer for the call.
+            let position = unsafe { Int::borrow(position) };
+            let position = position
+                .as_small()
+                .or_else(|| position.big().to_i64())
+                .ok_or_else(|| {
+                    Error::new(
+                        Kind::OverflowError,
+                        "Python int too large to convert to C long",
+                    )
+                })?;
+            let whence = c_int(whence)?;
+            // SAFETY: lseek takes integer values and retains no pointers.
+            let offset = unsafe { libc::lseek(fd, position, whence) };
+            if offset < 0 {
+                Err(errno_error(io::Error::last_os_error()))
+            } else {
+                Ok(Int::from_usize(offset as usize).into_raw())
+            }
+        })(),
+        0,
     )
 }
 

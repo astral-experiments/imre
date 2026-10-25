@@ -64,6 +64,11 @@ for turn in range(4):
         print(len(list(Path("bad\0path").glob("*"))))
     except ValueError:
         print("nul wildcard scan")
+    print(len(list(Path("missing").glob("**/\0"))))
+    try:
+        print(len(list(Path("missing").glob("**/\0/*"))))
+    except ValueError:
+        print("nul scan after recursive wildcard")
     print(len(list(zip([], Path("bad\0path").glob("*")))))
 
 print(Path("sentinel.txt").read_text(encoding="utf-8"))

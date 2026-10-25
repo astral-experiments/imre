@@ -1,0 +1,19 @@
+{
+  "imre_revision": "4105d882f774b14d058d4bcc49baac14d4add77f",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "method": "BaseFileTest.assertLogFile",
+  "method_sha256": "3053bbf5754ed56f712c601dcf3e357d3e66b8bd3747139ffaf67bdc496075ee",
+  "logging_occurrences": 0,
+  "levels": {
+    "0": [
+      "['visible.log']",
+      "False is not true : Log file \"absent '\u03c0'.log\" does not exist",
+      "['visible.log']"
+    ],
+    "3": [
+      "['visible.log']",
+      "False is not true : Log file \"absent '\u03c0'.log\" does not exist",
+      "['visible.log']"
+    ]
+  }
+}

@@ -123,6 +123,24 @@ impl Session {
             .read_to_string("stdlib/subprocess.pyi")
             .map_err(|error| error.to_string())?
             .replace("shell: bool =", "shell: bool | int =");
+        // check_output accepts **kwargs and reports these conflicts before
+        // launching. Code that catches those ValueErrors must reach the runtime.
+        let mut checked = false;
+        let subprocess: String = subprocess
+            .split_inclusive('\n')
+            .flat_map(|line| {
+                if line.trim_start().starts_with("def check_output(") {
+                    checked = true;
+                }
+                let extra = if checked && line.trim() == "*," {
+                    checked = false;
+                    "        stdout: object = ...,\n        check: object = ...,\n        capture_output: bool = False,\n"
+                } else {
+                    ""
+                };
+                [line, extra]
+            })
+            .collect();
         system
             .fs()
             .write_file_all(SystemPathBuf::from(root).join("subprocess.pyi"), subprocess)
@@ -193,7 +211,12 @@ impl Session {
     }
 
     /// Parses a normalized source once; semantic checks wait until every import is present.
-    pub(crate) fn add(&mut self, path: &Path, source: &str) -> Result<ParsedModuleRef, String> {
+    pub(crate) fn add(
+        &mut self,
+        path: &Path,
+        source: &str,
+        kind: crate::SourceKind,
+    ) -> Result<ParsedModuleRef, String> {
         let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
         check_source_complexity(source).map_err(|error| format!("{path}: {error}"))?;
         let file = self.write_file(path, source)?;
@@ -202,7 +225,12 @@ impl Session {
             return Err(format!("{path}: {error}"));
         }
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
-        check_indentation(source, parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
+        // The parser has already checked Python indentation; file inputs additionally
+        // enforce Imre's source-file policy. -c accepts legal tab-indented blocks.
+        if kind == crate::SourceKind::File {
+            check_indentation(source, parsed.tokens())
+                .map_err(|error| format!("{path}: {error}"))?;
+        }
         let mut limits = SuiteLimits {
             tokens: parsed.tokens(),
             scope_start: TextSize::default(),
@@ -254,6 +282,15 @@ impl Session {
     fn parsed(&self, file: File) -> ParsedModuleRef {
         ruff_db::parsed::parsed_module(&self.db, self.db.program_file(file).python_file(&self.db))
             .load(&self.db)
+    }
+
+    /// Refresh the semantic AST after a source rewrite that preserves byte offsets.
+    pub(crate) fn replace_source(&mut self, module: usize, source: String) -> ParsedModuleRef {
+        let file = self.files[module];
+        let original = ruff_db::source::source_text(&self.db, file);
+        let value = original.with_text(source, &Default::default());
+        file.set_source_text_override(&mut self.db).to(Some(value));
+        self.parsed(file)
     }
 
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
@@ -445,9 +482,21 @@ pub(crate) enum CheckedDiagnostic {
     Call(TextRange),
     Keyword(TextRange),
     TupleListRead(TextRange),
+    MissingArgument(TextRange),
 }
 
 impl CheckedDiagnostic {
+    pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
+        let (range, kind) = match self {
+            Self::Decorator(range) => (range, 0),
+            Self::Call(range) => (range, 1),
+            Self::Keyword(range) => (range, 2),
+            Self::TupleListRead(range) => (range, 3),
+            Self::MissingArgument(range) => (range, 4),
+        };
+        (range.start(), range.end(), kind)
+    }
+
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
             Self::Decorator(decorator) => {
@@ -456,6 +505,7 @@ impl CheckedDiagnostic {
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
         }
     }
 }
@@ -517,31 +567,50 @@ fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) ->
     }
     let nodes = covering_node(root, range);
     let Some(call) = nodes.ancestors().find_map(|node| match node {
-        AnyNodeRef::ExprCall(call) => Some(call),
+        // An excess argument may itself be a call. Find the call that takes it.
+        AnyNodeRef::ExprCall(call)
+            if rule != "too-many-positional-arguments"
+                || call.arguments.args.iter().any(|arg| arg.range() == range) =>
+        {
+            Some(call)
+        }
         _ => None,
     }) else {
         return false;
     };
-    let Some(callee) = call.func.inferred_type(&SemanticModel::new(db, file)) else {
+    let model = SemanticModel::new(db, file);
+    let Some(callee) = call.func.inferred_type(&model) else {
         return false;
     };
-    match (rule, callee) {
-        (
-            "too-many-positional-arguments",
-            Type::KnownInstance(KnownInstanceType::FunctoolsPartial(_)),
-        ) => call.arguments.args.iter().any(|arg| arg.range() == range),
-        ("missing-argument", Type::ClassLiteral(_))
-            if call.arguments.args.is_empty() && call.range() == range =>
-        {
-            let env = ProgramEnvironment::from_file(file);
-            callee.is_assignable_to(
-                db,
-                &env,
-                KnownClass::FunctoolsPartial.to_subclass_of(db, &env),
-            )
-        }
-        _ => false,
+    let is_partial = |ty| {
+        matches!(
+            ty,
+            Type::KnownInstance(KnownInstanceType::FunctoolsPartial(_))
+        )
+    };
+    if is_partial(callee) {
+        return rule == "too-many-positional-arguments";
     }
+    if !matches!(callee, Type::ClassLiteral(_)) {
+        return false;
+    }
+    let checked_constructor = match rule {
+        "missing-argument" => call.arguments.args.is_empty() && call.range() == range,
+        "too-many-positional-arguments" => call
+            .arguments
+            .args
+            .first()
+            .and_then(|target| target.inferred_type(&model))
+            .is_some_and(is_partial),
+        _ => false,
+    };
+    let env = ProgramEnvironment::from_file(file);
+    checked_constructor
+        && callee.is_assignable_to(
+            db,
+            &env,
+            KnownClass::FunctoolsPartial.to_subclass_of(db, &env),
+        )
 }
 
 #[cfg(test)]
@@ -990,7 +1059,11 @@ mod diagnostic_mode_tests {
         let root = Path::new("/project");
         let mut session = Session::new(root, &[]).unwrap();
         session
-            .add(&root.join("main.py"), "def f(x: int) -> None:\n    x()\n")
+            .add(
+                &root.join("main.py"),
+                "def f(x: int) -> None:\n    x()\n",
+                crate::SourceKind::File,
+            )
             .unwrap();
         let file = session.files[0];
         assert!(
