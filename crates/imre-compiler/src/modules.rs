@@ -16,6 +16,7 @@ mod declarations;
 mod empty_keywords;
 mod entry_profile;
 mod reachability;
+mod type_aliases;
 
 pub(crate) type ModuleId = usize;
 
@@ -46,6 +47,7 @@ pub(crate) enum Binding {
     Module(ModuleId),
     Definition(DefinitionId),
     Value(DefinitionId),
+    TypeAlias(ModuleId, usize),
     IntrinsicModule(IntrinsicModule),
     Intrinsic(Intrinsic),
 }
@@ -135,6 +137,7 @@ pub(crate) enum Intrinsic {
     ContextManager,
     FunctionCache,
     CachedProperty,
+    NewType,
     Reduce,
     TomlDumps,
     TomliLoads,
@@ -167,6 +170,7 @@ pub(crate) enum Intrinsic {
     Ndiff,
     Final,
     Argv,
+    OrigArgv,
     Logger,
     LogRoot,
     LogEmit(Option<u8>),
@@ -241,6 +245,8 @@ pub(crate) enum Intrinsic {
     TemporaryDirectory,
     Popen,
     SubprocessRun,
+    SubprocessCall,
+    SubprocessCheckCall,
     SubprocessStdout,
     CompletedProcess,
     SubprocessError,
@@ -365,6 +371,7 @@ impl IntrinsicModule {
             (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
             (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
+            (Self::Typing, "NewType") => Intrinsic::NewType,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
@@ -404,6 +411,7 @@ impl IntrinsicModule {
                 Intrinsic::RawDescriptionHelpFormatter
             }
             (Self::Sys, "argv") => Intrinsic::Argv,
+            (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
             (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
             (Self::Sys, "exit") => Intrinsic::SysExit,
@@ -499,6 +507,8 @@ impl IntrinsicModule {
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
             (Self::Subprocess, "Popen") => Intrinsic::Popen,
             (Self::Subprocess, "run") => Intrinsic::SubprocessRun,
+            (Self::Subprocess, "call") => Intrinsic::SubprocessCall,
+            (Self::Subprocess, "check_call") => Intrinsic::SubprocessCheckCall,
             (Self::Subprocess, "CompletedProcess") => Intrinsic::CompletedProcess,
             (Self::Subprocess, "SubprocessError") => Intrinsic::SubprocessError,
             (Self::Subprocess, "CalledProcessError") => Intrinsic::CalledProcessError,
@@ -527,6 +537,11 @@ impl IntrinsicModule {
     }
 }
 
+pub(crate) struct TypeAlias {
+    pub(crate) value: ast::Expr,
+    pub(crate) constructor: bool,
+}
+
 pub(crate) struct SourceModule {
     pub(crate) path: PathBuf,
     pub(crate) name: String,
@@ -535,6 +550,7 @@ pub(crate) struct SourceModule {
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
+    pub(crate) aliases: Vec<TypeAlias>,
     pub(crate) type_guards: Vec<usize>,
     /// Fixed pattern declarations in the entry module precede ordinary executable statements.
     pub(crate) entry_globals: Vec<usize>,
@@ -892,7 +908,10 @@ fn resolve_binding(
             match resolve_binding(modules, module, &attribute.value)? {
                 Binding::Module(module) => modules[module].export(attribute.attr.as_str()),
                 Binding::IntrinsicModule(module) => module.symbol(attribute.attr.as_str()),
-                Binding::Definition(_) | Binding::Value(_) | Binding::Intrinsic(_) => None,
+                Binding::Definition(_)
+                | Binding::Value(_)
+                | Binding::TypeAlias(..)
+                | Binding::Intrinsic(_) => None,
             }
         }
         _ => None,
@@ -985,6 +1004,7 @@ impl<'a> Loader<'a> {
             archive: None,
             bindings: HashMap::new(),
             type_bindings: HashMap::new(),
+            aliases: Vec::new(),
             type_guards: Vec::new(),
             entry_globals: Vec::new(),
             executable: Vec::new(),
@@ -1005,9 +1025,34 @@ impl<'a> Loader<'a> {
             let parsed = self.modules[id].parsed.clone();
             for index in self.modules[id].type_guards.clone() {
                 let ast::Stmt::If(guard) = &parsed.syntax().body[index] else {
-                    unreachable!()
+                    continue; // ordinary runtime-visible type declarations have no guarded imports
                 };
                 for statement in &guard.body {
+                    if let ast::Stmt::Import(import) = statement {
+                        for alias in &import.names {
+                            let full = alias.name.as_str();
+                            let name = if alias.asname.is_some() {
+                                full
+                            } else {
+                                full.split('.').next().unwrap()
+                            };
+                            let found = self
+                                .by_name
+                                .get(name)
+                                .copied()
+                                .map(Binding::Module)
+                                .or_else(|| {
+                                    IntrinsicModule::named(name).map(Binding::IntrinsicModule)
+                                });
+                            if let Some(binding) = found {
+                                let local = alias.asname.as_ref().map_or(name, |id| id.as_str());
+                                self.modules[id]
+                                    .type_bindings
+                                    .insert(local.to_owned(), binding);
+                            }
+                        }
+                        continue;
+                    }
                     let ast::Stmt::ImportFrom(import) = statement else {
                         continue;
                     };
@@ -1016,7 +1061,14 @@ impl<'a> Loader<'a> {
                         let binding = self
                             .by_name
                             .get(&name)
-                            .and_then(|&target| self.modules[target].export(alias.name.as_str()))
+                            .and_then(|&target| {
+                                let target = &self.modules[target];
+                                target
+                                    .type_bindings
+                                    .get(alias.name.as_str())
+                                    .copied()
+                                    .or_else(|| target.export(alias.name.as_str()))
+                            })
                             .or_else(|| IntrinsicModule::named(&name)?.symbol(alias.name.as_str()));
                         if let Some(binding) = binding {
                             let local = alias.asname.as_ref().unwrap_or(&alias.name);
@@ -1072,11 +1124,19 @@ impl<'a> Loader<'a> {
                     if resolve_binding(&self.modules, id, &guard.test)
                         == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
                         && guard.elif_else_clauses.is_empty()
-                        && guard
-                            .body
-                            .iter()
-                            .all(|s| matches!(s, ast::Stmt::ImportFrom(_))) =>
+                        && guard.body.iter().all(type_aliases::type_statement) =>
                 {
+                    self.modules[id].type_guards.push(index);
+                    for stmt in &guard.body {
+                        if let (Some(name), Some(value)) = (value_name(stmt), module_value(stmt)) {
+                            let known = self.add_alias(id, value, false);
+                            self.modules[id]
+                                .type_bindings
+                                .insert(name.to_owned(), known);
+                        }
+                    }
+                }
+                _ if self.alias_declaration(id, statement)? => {
                     self.modules[id].type_guards.push(index);
                 }
                 ast::Stmt::FunctionDef(function) => {

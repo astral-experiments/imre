@@ -57,6 +57,7 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            Self::Repr => Contract::new(true, HeapEffect::PreservesLists),
             Self::Str
                 if args
                     .first()
@@ -186,6 +187,7 @@ impl Builtin {
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
+                | ProcessOperation::Call { .. }
                 | ProcessOperation::PopenPid
                 | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
@@ -388,6 +390,7 @@ impl Builtin {
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
             | Self::OsName
+            | Self::SysOrigArgv
             | Self::SysArgv
             | Self::FileFileno
             | Self::TextClose
@@ -416,7 +419,6 @@ impl Builtin {
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
-            | Self::Repr
             | Self::SetDiscard
             | Self::SetIter
             | Self::SortDetach
@@ -706,6 +708,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_none"
                 | "imre_input"
                 | "imre_sys_argv"
+                | "imre_sys_orig_argv"
                 | "imre_path_read_bytes"
                 | "imre_path_read_text"
                 | "imre_path_write_text"

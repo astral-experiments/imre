@@ -268,6 +268,7 @@ fn emit_program(
             }
         });
     }
+    let (uses_sys_argv, uses_orig_argv) = module.sys_argument_usage();
     let mut emitter = Emitter {
         module,
         output,
@@ -309,7 +310,8 @@ fn emit_program(
         inline_dispatch,
         callable_targets,
         integer_regions: integer_regions::analyze(module),
-        uses_sys_argv: module.uses_sys_argv(),
+        uses_sys_argv,
+        uses_orig_argv,
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -494,6 +496,7 @@ struct Emitter<'a, 'module> {
     callable_targets: crate::callables::Targets,
     integer_regions: Vec<Option<integer_regions::Summary>>,
     uses_sys_argv: bool,
+    uses_orig_argv: bool,
     has_extensions: bool,
 }
 
@@ -1681,7 +1684,12 @@ impl Emitter<'_, '_> {
             self.prepare_directory_frame(&value);
         }
         if entry {
-            let layout = self.instruction("call { i64, i64 } @imre_seq_layout()");
+            let startup = if self.uses_orig_argv {
+                "imre_seq_layout_with_orig_argv"
+            } else {
+                "imre_seq_layout"
+            };
+            let layout = self.instruction(format!("call {{ i64, i64 }} @{startup}()"));
             self.line(format!(
                 "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
             ));
@@ -3205,6 +3213,22 @@ impl Emitter<'_, '_> {
                     };
                     self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
                 }
+                Type::Dict(_) if !matches!(op, Compare::Equal | Compare::NotEqual) => {
+                    debug_assert!(self.module.types.is_counter(left.ty));
+                    debug_assert!(self.module.types.is_counter(right.ty));
+                    let (subset, superset) =
+                        if matches!(op, Compare::Greater | Compare::GreaterEqual) {
+                            (right, left)
+                        } else {
+                            (left, right)
+                        };
+                    let strict = u32::from(matches!(op, Compare::Less | Compare::Greater));
+                    let result = self.instruction(format!(
+                        "call i32 @imre_counter_subset(ptr {}, ptr {}, i32 {strict})",
+                        subset.operand, superset.operand
+                    ));
+                    self.instruction(format!("icmp ne i32 {result}, 0"))
+                }
                 Type::Path | Type::PurePath(_) | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
                     let operation = if left.ty.is_path() {
                         "path"
@@ -3247,6 +3271,7 @@ impl Emitter<'_, '_> {
                         "call i32 @imre_record_equal(ptr {}, ptr {})",
                         left.operand, right.operand
                     ));
+                    self.check_error();
                     let predicate = if matches!(op, Compare::Equal) {
                         "ne"
                     } else {
@@ -3260,6 +3285,7 @@ impl Emitter<'_, '_> {
                             "call i32 @imre_record_equal(ptr {}, ptr {})",
                             left.operand, right.operand
                         ));
+                        self.check_error();
                         let predicate = if matches!(op, Compare::Equal) {
                             "ne"
                         } else {
@@ -3271,6 +3297,7 @@ impl Emitter<'_, '_> {
                             "call i32 @imre_tuple_compare(ptr {}, ptr {})",
                             left.operand, right.operand
                         ));
+                        self.check_error();
                         self.instruction(format!("icmp {predicate} i32 {order}, 0"))
                     }
                 }
@@ -4095,6 +4122,7 @@ impl Emitter<'_, '_> {
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
+            Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::SysStreamWrite { stderr } => Value {
@@ -6260,6 +6288,7 @@ declare i64 @imre_string_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
 declare i64 @imre_projected_hash(ptr)
 declare ptr @imre_popen_pipes(ptr, ptr, ptr, i32, i64, i1 zeroext)
+declare i64 @imre_subprocess_call(ptr, ptr, ptr, i32, i64, i1 zeroext, i32, i64, i1 zeroext)
 declare ptr @imre_popen_pipe(ptr, i32)
 declare i64 @imre_file_fileno(ptr)
 declare i64 @imre_popen_pid(ptr)
@@ -6536,6 +6565,7 @@ declare ptr @imre_counter_new(i32)
 declare void @imre_counter_update(ptr, ptr)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
+declare i32 @imre_counter_subset(ptr, ptr, i32)
 declare ptr @imre_key_union(ptr, ptr)
 declare ptr @imre_key_difference(ptr, ptr)
 declare ptr @imre_key_intersection(ptr, ptr)
@@ -6616,6 +6646,8 @@ declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
+declare ptr @imre_sys_orig_argv()
+declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_os_name()
 declare i64 @imre_sys_stream_write(i32, ptr)
