@@ -1412,6 +1412,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) => return Ok(Type::JsonDecoder),
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
@@ -5609,6 +5610,12 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
                 }
+                if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "memo" {
+                    return Ok(Expr {
+                        ty: self.types.dict(Type::Str, Type::Str),
+                        kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
+                    });
+                }
                 if matches!(receiver.ty, Type::TimedFileHandler | Type::ClockTime) {
                     return self.timed_attribute(receiver, attribute);
                 }
@@ -6371,6 +6378,20 @@ impl<'a> Checker<'a> {
         ) {
             return self.json_decode(call);
         }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) {
+            self.reject_builtin_keywords(call)?;
+            if !call.arguments.args.is_empty() {
+                return Err(error(
+                    self.source,
+                    call,
+                    "JSONDecoder expects keyword-only options",
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::JsonDecoder,
+                kind: ExprKind::Builtin(Builtin::JsonDecoderNew, vec![]),
+            });
+        }
         if let Some(Binding::Intrinsic(operation @ (Intrinsic::JsonLoads | Intrinsic::JsonLoad))) =
             self.resolve(&call.func)
         {
@@ -6536,6 +6557,20 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
+                let args = self.arguments(
+                    call,
+                    &[Parameter {
+                        name: "s".into(),
+                        ty: Type::Str,
+                        kind: ParameterKind::PositionalOrKeyword,
+                        default: None,
+                        sign_only: false,
+                    }],
+                    Some(receiver),
+                )?;
+                return Ok(self.ordered_builtin(Builtin::JsonDecoderDecode, Type::JsonRoot, args));
             }
             if receiver.ty == Type::ZipInfo
                 && attribute.attr.as_str() == "is_dir"

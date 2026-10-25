@@ -305,6 +305,7 @@ impl Builtin {
             | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
+            | Self::JsonDecoderDecode
             | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
@@ -347,6 +348,8 @@ impl Builtin {
             | Self::StrDescriptor(_)
             | Self::NewPlainObject
             | Self::InspectSentinel
+            | Self::JsonDecoderNew
+            | Self::JsonDecoderMemo
             | Self::HashAvailable
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
@@ -728,6 +731,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"
                 | "imre_json_index"
+                | "imre_json_decoder_decode"
                 | "imre_exception_message"
                 | "imre_import_error_reject_reset"
                 | "imre_exception_repr"

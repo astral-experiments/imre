@@ -4,10 +4,13 @@ import argparse
 import ast
 import hashlib
 import json
+import os
 from pathlib import Path
+import select
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bindings import Boundary, Probe
@@ -21,9 +24,7 @@ METHOD = "test.test_json.test_decode.TestDecode.test_keys_reuse"
 SOURCE = BENCH / "upstream/Lib/test/test_json/test_decode.py"
 # Emit the complete native result, followed by the native owner equivalence class
 # of each key. Equal spellings must stay separate when the owners are distinct.
-DRIVER = b"""import json
-doc = json.loads(open("keys.txt").read())
-print(repr(doc))
+EXPOSE = b"""print(repr(doc))
 seen: list[str] = []
 for row in doc:
     for key in row:
@@ -35,6 +36,21 @@ for row in doc:
             seen.append(name)
         print(owner)
 """
+DRIVER = b'import json\ndoc = json.loads(open("keys.txt").read())\n' + EXPOSE
+DECODER = b'''import json
+import sys
+decoder = json.decoder.JSONDecoder()
+print("READY")
+sys.stdout.flush()
+if input() != "decode":
+    raise ValueError("expected decode")
+doc = decoder.decode(open("keys.txt").read())
+''' + EXPOSE + b'''print("END")
+sys.stdout.flush()
+if input() != "memo":
+    raise ValueError("expected memo")
+print(repr(decoder.memo))
+'''
 
 
 class ProjectedKey(str):
@@ -59,6 +75,54 @@ def project(data):
     return result, [int(t) for t in tokens]
 
 
+class DecoderSession:
+    """Keep the actual native decoder alive until the original method reads its memo."""
+
+    def __init__(self, program, directory, ops, traces):
+        self.directory, self.ops, self.traces = directory, ops, traces
+        self.child = subprocess.Popen([program], cwd=directory, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, bufsize=0)
+        try:
+            if self.receive(b"READY\n"):
+                raise ValueError("unexpected constructor output")
+            ops.append("json.decoder.JSONDecoder")
+        except BaseException:
+            self.close()
+            raise
+
+    def receive(self, marker):
+        response = bytearray()
+        while not response.endswith(marker):
+            if not select.select([self.child.stdout], [], [], 30)[0]:
+                raise TimeoutError("native decoder response")
+            chunk = os.read(self.child.stdout.fileno(), 65536)
+            if not chunk:
+                raise ValueError(("incomplete native decoder response", self.child.stderr.read()))
+            response.extend(chunk)
+        return response[:-len(marker)].decode()
+
+    def decode(self, text):
+        (self.directory / "keys.txt").write_text(text)
+        self.child.stdin.write(b"decode\n")
+        value, owners = project(self.receive(b"END\n"))
+        self.ops.append("JSONDecoder.decode")
+        self.traces.append(owners)
+        return value
+
+    @property
+    def memo(self):
+        output, err = self.child.communicate(b"memo\n", timeout=30)
+        if self.child.returncode or err:
+            raise ValueError((self.child.returncode, output, err))
+        self.ops.append("JSONDecoder.memo")
+        return ast.literal_eval(output.decode())
+
+    def close(self):
+        if self.child.poll() is None:
+            self.child.kill()
+            self.child.communicate(timeout=30)
+
+
 def run(tools, work):
     plain_directory = work / "ordinary"
     plain_directory.mkdir()
@@ -66,6 +130,9 @@ def run(tools, work):
     owner_directory = work / "owners"
     owner_directory.mkdir()
     owners = tools.build(DRIVER, owner_directory)
+    decoder_directory = work / "decoder"
+    decoder_directory.mkdir()
+    decoder = tools.build(DECODER, decoder_directory)
     ids = [case.id() for case in cases(load_suite("test.test_json")) if routine(case) == METHOD]
     if len(ids) != 2:
         raise ValueError(ids)
@@ -74,7 +141,7 @@ def run(tools, work):
         def execute(case, original):
             native = Native(plain, plain_directory, case.JSONDecodeError)
             proxy = Probe(native)
-            traces = []
+            traces, ops, sessions = [], [], []
 
             def loads(document):
                 (owner_directory / "keys.txt").write_text(document)
@@ -83,9 +150,17 @@ def run(tools, work):
                     raise ValueError(output.stderr)
                 value, tokens = project(output.stdout.decode())
                 traces.append(tokens)
+                ops.append("json.loads")
                 return value
 
+            def constructor():
+                session = DecoderSession(decoder, decoder_directory, ops, traces)
+                sessions.append(session)
+                return session
+
             case.json = proxy
+            if mode == "native-owners":
+                proxy.decoder = SimpleNamespace(JSONDecoder=constructor)
             case.loads = proxy.loads if mode == "repr" else loads
             try:
                 original()
@@ -94,7 +169,13 @@ def run(tools, work):
                 detail = str(exc)
             else:
                 outcome, detail = "pass", None
-            return {"outcome": outcome, "reason": detail, "repr_calls": native.calls, "native_key_owners": traces}
+            finally:
+                for session in sessions:
+                    session.close()
+            if outcome == "pass" and ops != ["json.loads", "json.decoder.JSONDecoder", "JSONDecoder.decode", "JSONDecoder.memo"]:
+                raise ValueError(("missing native operation", ops))
+            return {"outcome": outcome, "reason": detail, "repr_calls": native.calls,
+                    "native_operations": ops, "native_key_owners": traces}
 
         complete, failed, skipped = run_in_fixtures(load_suite("test.test_json"), dict.fromkeys(ids, execute))
         if failed or skipped or set(complete) != set(ids):
@@ -118,7 +199,7 @@ def main():
     report = {"cpython_commit": COMMIT, "method": METHOD,
               "method_sha256": hashlib.sha256(method_bytes(SOURCE, "TestDecode", "test_keys_reuse")).hexdigest(),
               "fixture": "CPython module, class, instance, unmodified method, sorted and identity assertions",
-              "operation": "one Imre json.loads; key owner comparisons in Imre",
+              "operation": "Imre json.loads and a live JSONDecoder instance; key owner comparisons in Imre",
               "distinct-owner-negative-control": "passed", "levels": {}}
     for level in (0, 3):
         with tempfile.TemporaryDirectory() as tmp:

@@ -157,6 +157,7 @@ impl Types {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -528,6 +529,7 @@ impl Types {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::Sha256
+            | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
