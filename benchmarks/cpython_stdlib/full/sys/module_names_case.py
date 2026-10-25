@@ -11,8 +11,19 @@ CASE_ID = "test.test_sys.SysModuleTest.test_module_names"
 
 def verify_table(cpython_source, native_table):
     header = "Python/stdlib_module_names.h"
-    verify_files(cpython_source, {header: "56e349a544c07971287625a740eb9f5dd566bdc6"})
-    names = re.findall(r'^"([^"]+)",?$', (cpython_source / header).read_text(), re.MULTILINE)
+    blob = "56e349a544c07971287625a740eb9f5dd566bdc6"
+    path = cpython_source / header
+    if path.is_file() or not (cpython_source / ".git").exists():
+        verify_files(cpython_source, {header: blob})
+        data = path.read_text()
+    else:
+        # CI has a sparse Lib/test checkout. Verify the same header in its Git tree.
+        git = ["git", "-C", cpython_source]
+        actual = subprocess.check_output([*git, "rev-parse", f"HEAD:{header}"], text=True).strip()
+        if actual != blob:
+            raise ValueError(f"upstream blob mismatch: {path}")
+        data = subprocess.check_output([*git, "cat-file", "blob", blob], text=True)
+    names = re.findall(r'^"([^"]+)",?$', data, re.MULTILINE)
     if len(names) != 297 or names != sorted(set(names)) or names != native_table.read_text().splitlines():
         raise ValueError("native module names differ from the pinned CPython table")
 
