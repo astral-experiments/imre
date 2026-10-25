@@ -82,4 +82,24 @@ def run() -> None:
         print(calls)
 
 
+def local_comparators() -> None:
+    def numeric(left, right):
+        print("numeric comparator")
+        return int(left) - int(right)
+
+    key = cmp_to_key(mycmp=numeric)
+    print(key("kept without comparing").obj)
+    print(key(4.0) == key("4"))
+    print(key(2) < key("35"))
+
+    def reverse(left, right):
+        print("reverse comparator")
+        return right - left
+
+    descending_key = cmp_to_key(reverse)
+    print(descending_key(9) < key(4))
+    print(key(4) < descending_key(9))
+
+
 run()
+local_comparators()

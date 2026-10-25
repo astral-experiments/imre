@@ -15,6 +15,8 @@ pub(super) struct Function {
 #[derive(Clone)]
 pub(super) struct Binding {
     site: TextRange,
+    cmp_input: bool,
+    comparator: Option<Rc<ast::StmtFunctionDef>>,
     function: Option<Function>,
     pub(super) generic: Option<Rc<ast::StmtFunctionDef>>,
     instances: HashMap<Type, Function>,
@@ -91,6 +93,18 @@ impl Checker<'_> {
     /// Only an unconditional definition in the enclosing function's suite can
     /// introduce a fixed call target. Reserve its spelling throughout the suite.
     pub(super) fn collect_local_functions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
+        let has_candidate = stmts
+            .iter()
+            .filter_map(ast::Stmt::as_function_def_stmt)
+            .any(cmp_keys::can_specialize);
+        let cmp_inputs = if has_candidate {
+            cmp_keys::local_comparators(stmts, |callee| {
+                self.resolve(callee)
+                    == Some(crate::modules::Binding::Intrinsic(Intrinsic::CmpToKey))
+            })
+        } else {
+            HashSet::new()
+        };
         for (index, statement) in stmts.iter().enumerate() {
             let Some(function) = statement.as_function_def_stmt() else {
                 continue;
@@ -112,6 +126,8 @@ impl Checker<'_> {
                 name.to_owned(),
                 Binding {
                     site: function.range,
+                    cmp_input: cmp_inputs.contains(name) && cmp_keys::can_specialize(function),
+                    comparator: None,
                     function: None,
                     generic: None,
                     instances: HashMap::new(),
@@ -142,6 +158,21 @@ impl Checker<'_> {
                 "local definitions must appear directly in the enclosing function's suite",
             ));
         }
+        if self.local_functions[name].cmp_input {
+            if comprehensions::function_reads(definition)
+                .iter()
+                .any(|n| self.names.contains_key(n) || self.local_functions.contains_key(n))
+            {
+                return Err(error(
+                    self.source,
+                    definition,
+                    "deferred local comparators must be noncapturing",
+                ));
+            }
+            self.local_functions.get_mut(name).unwrap().comparator =
+                Some(Rc::new(definition.clone()));
+            return Ok(());
+        }
         if definition.returns.is_none()
             || definition
                 .parameters
@@ -167,9 +198,74 @@ impl Checker<'_> {
             None,
             &inference::Inference::default(),
         )?;
-        let function = self.lift_local(definition, signature)?;
+        let function = self.lift_local(definition, signature, false)?;
         self.local_functions.get_mut(name).unwrap().function = Some(function);
         Ok(())
+    }
+
+    pub(super) fn deferred_comparator(&self, argument: &ast::Expr) -> Option<(usize, u32)> {
+        let definition = self.local_function_binding(argument)?.comparator.as_ref()?;
+        Some((self.module, u32::from(definition.range.start())))
+    }
+
+    /// Compile the original function for the two objects that will be compared.
+    pub(super) fn specialize_comparator(
+        &mut self,
+        site: (usize, u32),
+        left: Type,
+        right: Type,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let definition = self
+            .local_functions
+            .values()
+            .filter_map(|b| b.comparator.as_ref())
+            .find(|f| site == (self.module, u32::from(f.range.start())))
+            .cloned()
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    node,
+                    "deferred comparator used outside its defining scope",
+                )
+            })?;
+        let name = definition.name.as_str();
+        let key = self.types.tuple(vec![left, right]);
+        if let Some(function) = self.local_functions[name].instances.get(&key) {
+            return function.callback(self.types, self.source, node);
+        }
+        let params = definition
+            .parameters
+            .iter_non_variadic_params()
+            .zip([left, right])
+            .enumerate()
+            .map(|(i, (p, ty))| Parameter {
+                name: p.name().to_string(),
+                ty,
+                kind: if i < definition.parameters.posonlyargs.len() {
+                    ParameterKind::PositionalOnly
+                } else {
+                    ParameterKind::PositionalOrKeyword
+                },
+                default: None,
+                sign_only: false,
+            })
+            .collect();
+        let signature = Signature {
+            id: 0,
+            asynchronous: false,
+            method: None,
+            returns: Type::None,
+            params,
+        };
+        let function = self.lift_local(&definition, signature, true)?;
+        let value = function.callback(self.types, self.source, node)?;
+        self.local_functions
+            .get_mut(name)
+            .unwrap()
+            .instances
+            .insert(key, function);
+        Ok(value)
     }
 
     fn generic_awaitable_wrapper(&self, definition: &ast::StmtFunctionDef) -> bool {
@@ -238,7 +334,7 @@ impl Checker<'_> {
                     sign_only: false,
                 }],
             };
-            let function = self.lift_local(definition, signature)?;
+            let function = self.lift_local(definition, signature, false)?;
             self.local_functions
                 .get_mut(name)
                 .unwrap()
@@ -253,6 +349,7 @@ impl Checker<'_> {
         &mut self,
         definition: &ast::StmtFunctionDef,
         mut signature: Signature,
+        infer_return: bool,
     ) -> Result<Function, String> {
         signature.id = self.helpers.reserve();
         let mut helper = Checker::new(
@@ -266,6 +363,7 @@ impl Checker<'_> {
         );
         helper.inference = self.inference;
         helper.returns = signature.returns;
+        helper.inferred_returns = infer_return.then(Vec::new);
         helper.asynchronous = signature.asynchronous;
         let mut params = Vec::new();
         for (parameter, ty) in definition
@@ -329,6 +427,20 @@ impl Checker<'_> {
             ));
         }
         let (mut body, falls) = helper.function_body(&definition.body)?;
+        if let Some(mut returns) = helper.inferred_returns.take() {
+            if falls || returns.is_empty() {
+                returns.push(Type::None);
+            }
+            let ty = returns[0];
+            if returns.iter().any(|other| *other != ty) {
+                return Err(error(
+                    self.source,
+                    definition,
+                    "local comparator returns need one exact type",
+                ));
+            }
+            signature.returns = ty;
+        }
         if falls && self.types.payload(signature.returns).is_some() {
             body.push(Statement::Return(helper.coerce(
                 Expr {

@@ -23,6 +23,7 @@ enum Shape {
     Tuple(Vec<Type>),
     NamedTuple(TupleOrigin, Vec<Type>),
     PartialFrame(Vec<Type>),
+    DeferredCmpFrame((usize, u32), Vec<Type>),
     Callable(Vec<Type>, Type),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
@@ -111,10 +112,15 @@ impl Types {
             Type::Deque(id) => matches!(storage.shapes.get(id), Some(Shape::Deque(_))),
             Type::Tuple(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
+                Some(
+                    Shape::Tuple(_)
+                        | Shape::NamedTuple(..)
+                        | Shape::PartialFrame(_)
+                        | Shape::DeferredCmpFrame(..)
+                )
             ),
             Type::CmpKey(id, bound) => {
-                matches!(storage.shapes.get(id), Some(Shape::PartialFrame(fields)) if fields.len() == if bound { 2 } else { 1 })
+                matches!(storage.shapes.get(id), Some(Shape::PartialFrame(fields) | Shape::DeferredCmpFrame(_, fields)) if fields.len() == if bound { 2 } else { 1 })
             }
             Type::ForwardRef(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Tuple(fields)) if fields.len() == 5)
@@ -213,6 +219,7 @@ impl Types {
                 Shape::Tuple(fields)
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields)
+                | Shape::DeferredCmpFrame(_, fields)
                 | Shape::Union(fields) => fields.clone(),
                 Shape::DeclaredCache(callable, _) => vec![*callable],
                 Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
@@ -712,8 +719,23 @@ impl Types {
         Type::Tuple(self.intern(Shape::PartialFrame(fields)))
     }
 
+    /// Retain a local comparator's definition until a comparison supplies operand types.
+    pub(crate) fn cmp_frame(&self, fields: Vec<Type>, source: Option<(usize, u32)>) -> Type {
+        match source {
+            Some(site) => Type::Tuple(self.intern(Shape::DeferredCmpFrame(site, fields))),
+            None => self.partial_frame(fields),
+        }
+    }
+
+    pub(crate) fn deferred_cmp_source(&self, layout: usize) -> Option<(usize, u32)> {
+        match self.0.borrow().shapes[layout] {
+            Shape::DeferredCmpFrame(site, _) => Some(site),
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_partial_frame(&self, ty: Type) -> bool {
-        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::PartialFrame(_)))
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::PartialFrame(_) | Shape::DeferredCmpFrame(..)))
     }
 
     pub(crate) fn process_args(&self, command: Type) -> usize {
@@ -917,9 +939,10 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
-            Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
-                Some(fields.clone())
-            }
+            Shape::Tuple(fields)
+            | Shape::NamedTuple(_, fields)
+            | Shape::PartialFrame(fields)
+            | Shape::DeferredCmpFrame(_, fields) => Some(fields.clone()),
             _ => unreachable!("tuple type identity has a tuple shape"),
         }
     }
@@ -934,7 +957,8 @@ impl Types {
             .filter_map(|(id, shape)| match shape {
                 Shape::Tuple(fields)
                 | Shape::NamedTuple(_, fields)
-                | Shape::PartialFrame(fields) => Some((Type::Tuple(id), fields.clone())),
+                | Shape::PartialFrame(fields)
+                | Shape::DeferredCmpFrame(_, fields) => Some((Type::Tuple(id), fields.clone())),
                 _ => None,
             })
             .collect()
@@ -1122,7 +1146,10 @@ impl TypeDescription<'_> {
                 })?;
                 self.write_type(*element)?;
             }
-            Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
+            Shape::Tuple(fields)
+            | Shape::NamedTuple(_, fields)
+            | Shape::PartialFrame(fields)
+            | Shape::DeferredCmpFrame(_, fields) => {
                 self.write_str("tuple[")?;
                 self.write_types(fields, ", ")?;
             }
