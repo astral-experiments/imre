@@ -69,55 +69,46 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn errno_builtin(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
-        let Some(name) = call.func.as_name_expr() else {
-            return Ok(None);
-        };
-        if self.resolve(&call.func).is_some()
-            || self.names.contains_key(name.id.as_str())
-            || !matches!(name.id.as_str(), "getattr" | "hasattr" | "vars")
+    /// Lower reflection on a statically typed module after evaluating its arguments once.
+    pub(super) fn errno_builtin(
+        &self,
+        name: &str,
+        call: &ast::ExprCall,
+        args: &[Expr],
+    ) -> Result<Expr, String> {
+        let owner = args[0].clone();
+        if name == "vars" && args.len() == 1 {
+            return Ok(op(Op::Namespace, Type::ModuleNamespace, vec![owner]));
+        }
+        if name == "getattr"
+            && let [_, key, default] = args
         {
-            return Ok(None);
-        }
-        let Some(first) = call.arguments.args.first() else {
-            return Ok(None);
-        };
-        let owner = self.expr(first)?;
-        if owner.ty != Type::NativeModule {
-            return Ok(None);
-        }
-        self.reject_builtin_keywords(call)?;
-        if name.id == "vars" && call.arguments.args.len() == 1 {
-            return Ok(Some(op(Op::Namespace, Type::ModuleNamespace, vec![owner])));
-        }
-        if name.id == "getattr"
-            && let [_, key, default] = call.arguments.args.as_ref()
-        {
-            let key = self.expr_expected(key, Type::Str)?;
-            let default = self.expr_expected(default, Type::ObjectValue)?;
-            return Ok(Some(op(
+            let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
+            let default =
+                self.coerce(default.clone(), Type::ObjectValue, &call.arguments.args[2])?;
+            return Ok(op(
                 Op::DefaultLookup,
                 Type::ObjectValue,
                 vec![owner, key, default],
-            )));
+            ));
         }
-        let [_, key] = call.arguments.args.as_ref() else {
+        let [_, key] = args else {
             return Err(error(
                 self.source,
                 call,
                 "module attribute lookup requires a name string",
             ));
         };
-        if name.id == "getattr"
-            && let ast::Expr::StringLiteral(lit) = key
+        if name == "getattr"
+            && let ast::Expr::StringLiteral(lit) = &call.arguments.args[1]
         {
-            return Ok(Some(self.errno_attribute(owner, lit.value.to_str())));
+            return Ok(self.errno_attribute(owner, lit.value.to_str()));
         }
-        let key = self.expr_expected(key, Type::Str)?;
-        Ok(Some(match name.id.as_str() {
+        let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
+        Ok(match name {
             "hasattr" => op(Op::Has, Type::Bool, vec![owner, key]),
             "getattr" => op(Op::Lookup, Type::ObjectValue, vec![owner, key]),
             _ => return Err(error(self.source, call, "vars takes exactly one module")),
-        }))
+        })
     }
 }
