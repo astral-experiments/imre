@@ -1,0 +1,14 @@
+{
+  "compiler_revision": "c2f397dbe55d6faedfbdc6c58f376d1674ce27af",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre_sha256": "09a7ae1a3db3f55a4049f8d58d6524803ad40131680ded3c8ba778ad5c56513d",
+  "parents": [
+    "749bb63abbdc2d513da890520c213314eb397cac",
+    "c7b1dca45069f580cdd37c8585f6842a1cd98b40"
+  ],
+  "runtime_sha256": "f304acd28a54e8120d3fa18f053e5023c71c369d5ca28cc405f7871bdea008ed",
+  "tree": "c45c21b3d34b1cd4e1f409e7488b5c371799a53a",
+  "main_revision": "c7b1dca45069f580cdd37c8585f6842a1cd98b40",
+  "published_docs": "e1da641f81ef6a171b67fb2cddb9de279d39d662",
+  "docs_sha256": "991aa28d7b9c1b671efdf3ea9b9e4875f466718124c53889ca7fd16ba2b97de4"
+}
