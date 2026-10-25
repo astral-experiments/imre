@@ -70,9 +70,10 @@ fn writes(
                 initialized.extend(parent.writes.iter().map(String::as_str));
                 continue;
             }
-            if ast::helpers::any_over_body(std::slice::from_ref(stmt), |expr| {
-                matches!(expr, ast::Expr::Call(call) if super_method(call).is_some())
-            }) {
+            if ast::helpers::any_over_body(
+                std::slice::from_ref(stmt),
+                |expr| matches!(expr, ast::Expr::Call(call) if super_method(call).is_some()),
+            ) {
                 return Err(module.error(
                     stmt,
                     "a field initializer cannot read or expose the incomplete instance",
