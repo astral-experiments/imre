@@ -4,6 +4,31 @@ use super::*;
 use crate::ir::InstanceType;
 
 impl Checker<'_> {
+    /// Compare numeric values without changing the stored member used by repr or identity.
+    pub(super) fn numeric_union_comparison(&self, values: Vec<Expr>) -> Vec<Expr> {
+        if !values.iter().any(|v| self.types.is_bool_or_int(v.ty))
+            || !values
+                .iter()
+                .all(|v| matches!(v.ty, Type::Int | Type::Bool) || self.types.is_bool_or_int(v.ty))
+        {
+            return values;
+        }
+        values
+            .into_iter()
+            .map(|value| {
+                let cast = match value.ty {
+                    Type::Int => return value,
+                    Type::Bool => Builtin::Int,
+                    _ => Builtin::UnionProject,
+                };
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(cast, vec![value]),
+                }
+            })
+            .collect()
+    }
+
     /// Reads a proved member through explicit ownership-preserving projection.
     /// Optional members keep zero intact until a separate non-None proof exists.
     pub(super) fn read_local(&self, slot: usize) -> Expr {
