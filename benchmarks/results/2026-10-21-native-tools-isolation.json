@@ -7,7 +7,7 @@
     "native_processes": 0,
     "network_operations": 0
   },
-  "relocated_archive": "/tmp/relar-native-tools-evidence-final-3-isolated",
-  "replay_output": "/tmp/relar-native-tools-evidence-final-3-isolated-replay.json",
+  "relocated_archive": "/tmp/imre-native-tools-evidence-final-3-isolated",
+  "replay_output": "/tmp/imre-native-tools-evidence-final-3-isolated-replay.json",
   "replay_output_sha256": "3d67f8c7923710334320cff9a0dff2ae4dbf26bbf14a061943d98803cd184f42"
 }

@@ -35,18 +35,18 @@
           "report_sha256": "6ad242963c4997bcc629faee8a6df7b49c4112f052b3e262bb49c080477606f4",
           "report_bytes": 1489,
           "median_ms": {
-            "relar": 885.958305,
+            "imre": 885.958305,
             "port": 1283.805075,
             "original": 978.7144519999999,
             "codon": 949.1843195,
             "rust": 872.88514
           },
           "ratios": {
-            "relar_over_rust": 1.014976959053284,
+            "imre_over_rust": 1.014976959053284,
             "codon_over_rust": 1.0874103315586288,
-            "original_over_relar": 1.1046958378024347,
-            "port_over_relar": 1.4490581190499705,
-            "codon_over_relar": 1.0713645485833558,
+            "original_over_imre": 1.1046958378024347,
+            "port_over_imre": 1.4490581190499705,
+            "codon_over_imre": 1.0713645485833558,
             "original_over_rust": 1.121240822131535,
             "port_over_rust": 1.4707606031648106
           }
@@ -57,18 +57,18 @@
           "report_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "report_bytes": 0,
           "median_ms": {
-            "relar": 10.685626000000001,
+            "imre": 10.685626000000001,
             "port": 84.578026,
             "original": 95.72251750000001,
             "codon": 19.496595,
             "rust": 9.7866925
           },
           "ratios": {
-            "relar_over_rust": 1.0918526356069735,
+            "imre_over_rust": 1.0918526356069735,
             "codon_over_rust": 1.992153631065858,
-            "original_over_relar": 8.958063617424006,
-            "port_over_relar": 7.9151213040770845,
-            "codon_over_relar": 1.8245627350236662,
+            "original_over_imre": 8.958063617424006,
+            "port_over_imre": 7.9151213040770845,
+            "codon_over_imre": 1.8245627350236662,
             "original_over_rust": 9.78088537061934,
             "port_over_rust": 8.642146057005471
           }
@@ -79,18 +79,18 @@
           "report_sha256": "6ad242963c4997bcc629faee8a6df7b49c4112f052b3e262bb49c080477606f4",
           "report_bytes": 1489,
           "median_ms": {
-            "relar": 97.416642,
+            "imre": 97.416642,
             "port": 725.4537869999999,
             "original": 296.0133325,
             "codon": 135.6347105,
             "rust": 50.0242585
           },
           "ratios": {
-            "relar_over_rust": 1.947388025751546,
+            "imre_over_rust": 1.947388025751546,
             "codon_over_rust": 2.711378730381381,
-            "original_over_relar": 3.038632069662184,
-            "port_over_relar": 7.4469184330948295,
-            "codon_over_relar": 1.3923156014759779,
+            "original_over_imre": 3.038632069662184,
+            "port_over_imre": 7.4469184330948295,
+            "codon_over_imre": 1.3923156014759779,
             "original_over_rust": 5.917395707124774,
             "port_over_rust": 14.502039785357336
           }
@@ -101,18 +101,18 @@
           "report_sha256": "73cbc74bf3f97bfdbbb8933a749156213074ac57ba010d06b75ae48b45a946b2",
           "report_bytes": 109258,
           "median_ms": {
-            "relar": 907.7808195,
+            "imre": 907.7808195,
             "port": 1302.1634745,
             "original": 997.040711,
             "codon": 969.37815,
             "rust": 888.4647894999999
           },
           "ratios": {
-            "relar_over_rust": 1.0217409065933503,
+            "imre_over_rust": 1.0217409065933503,
             "codon_over_rust": 1.091070981603599,
-            "original_over_relar": 1.0983275803835157,
-            "port_over_relar": 1.4344470014438324,
-            "codon_over_relar": 1.067854849074612,
+            "original_over_imre": 1.0983275803835157,
+            "port_over_imre": 1.4344470014438324,
+            "codon_over_imre": 1.067854849074612,
             "original_over_rust": 1.122206217717534,
             "port_over_rust": 1.4656331797153341
           }
@@ -123,18 +123,18 @@
           "report_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "report_bytes": 0,
           "median_ms": {
-            "relar": 10.816319499999999,
+            "imre": 10.816319499999999,
             "port": 85.2265515,
             "original": 96.644785,
             "codon": 19.516005999999997,
             "rust": 10.028839
           },
           "ratios": {
-            "relar_over_rust": 1.0785216015532806,
+            "imre_over_rust": 1.0785216015532806,
             "codon_over_rust": 1.9459885635814873,
-            "original_over_relar": 8.935089704034723,
-            "port_over_relar": 7.879441015032887,
-            "codon_over_relar": 1.8043111614815002,
+            "original_over_imre": 8.935089704034723,
+            "port_over_imre": 7.879441015032887,
+            "codon_over_imre": 1.8043111614815002,
             "original_over_rust": 9.636687257617757,
             "port_over_rust": 8.498147342877875
           }
@@ -145,18 +145,18 @@
           "report_sha256": "73cbc74bf3f97bfdbbb8933a749156213074ac57ba010d06b75ae48b45a946b2",
           "report_bytes": 109258,
           "median_ms": {
-            "relar": 102.0145315,
+            "imre": 102.0145315,
             "port": 722.333506,
             "original": 301.138457,
             "codon": 141.809299,
             "rust": 53.755782
           },
           "ratios": {
-            "relar_over_rust": 1.8977406281616367,
+            "imre_over_rust": 1.8977406281616367,
             "codon_over_rust": 2.638028761259579,
-            "original_over_relar": 2.951917266806249,
-            "port_over_relar": 7.080692283530214,
-            "codon_over_relar": 1.3900892050854539,
+            "original_over_imre": 2.951917266806249,
+            "port_over_imre": 7.080692283530214,
+            "codon_over_imre": 1.3900892050854539,
             "original_over_rust": 5.6019733281900725,
             "port_over_rust": 13.437317421965883
           }
@@ -167,18 +167,18 @@
           "report_sha256": "48ac07681567895cf9a2494ea8c53140a3a279e193fdd0c9fb316d2c5304da87",
           "report_bytes": 96557,
           "median_ms": {
-            "relar": 899.360509,
+            "imre": 899.360509,
             "port": 1288.7640165,
             "original": 993.008328,
             "codon": 961.672188,
             "rust": 885.4478489999999
           },
           "ratios": {
-            "relar_over_rust": 1.015712568521921,
+            "imre_over_rust": 1.015712568521921,
             "codon_over_rust": 1.0860856334860214,
-            "original_over_relar": 1.1041271192840423,
-            "port_over_relar": 1.4329782146349503,
-            "codon_over_relar": 1.0692844286317225,
+            "original_over_imre": 1.1041271192840423,
+            "port_over_imre": 1.4329782146349503,
+            "codon_over_imre": 1.0692844286317225,
             "original_over_rust": 1.121475792302704,
             "port_over_rust": 1.4554939830228217
           }
@@ -189,18 +189,18 @@
           "report_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "report_bytes": 0,
           "median_ms": {
-            "relar": 10.457297500000001,
+            "imre": 10.457297500000001,
             "port": 83.8448955,
             "original": 96.2176365,
             "codon": 19.1400345,
             "rust": 9.629921
           },
           "ratios": {
-            "relar_over_rust": 1.085917267649444,
+            "imre_over_rust": 1.085917267649444,
             "codon_over_rust": 1.9875588283642203,
-            "original_over_relar": 9.201004035698515,
-            "port_over_relar": 8.01783591793195,
-            "codon_over_relar": 1.8303041010356642,
+            "original_over_imre": 9.201004035698515,
+            "port_over_imre": 8.01783591793195,
+            "codon_over_imre": 1.8303041010356642,
             "original_over_rust": 9.991529162077239,
             "port_over_rust": 8.706706472462235
           }
@@ -211,18 +211,18 @@
           "report_sha256": "48ac07681567895cf9a2494ea8c53140a3a279e193fdd0c9fb316d2c5304da87",
           "report_bytes": 96557,
           "median_ms": {
-            "relar": 99.359897,
+            "imre": 99.359897,
             "port": 720.7864950000001,
             "original": 303.747641,
             "codon": 138.7786,
             "rust": 52.7781395
           },
           "ratios": {
-            "relar_over_rust": 1.88259567202061,
+            "imre_over_rust": 1.88259567202061,
             "codon_over_rust": 2.629471241592364,
-            "original_over_relar": 3.0570446444806603,
-            "port_over_relar": 7.254299941554891,
-            "codon_over_relar": 1.3967264881524586,
+            "original_over_imre": 3.0570446444806603,
+            "port_over_imre": 7.254299941554891,
+            "codon_over_imre": 1.3967264881524586,
             "original_over_rust": 5.7551790168730745,
             "port_over_rust": 13.656913673510601
           }
@@ -258,18 +258,18 @@
           "report_sha256": "6ad242963c4997bcc629faee8a6df7b49c4112f052b3e262bb49c080477606f4",
           "report_bytes": 1489,
           "median_ms": {
-            "relar": 885.4571475,
+            "imre": 885.4571475,
             "port": 1290.0728370000002,
             "original": 980.896048,
             "codon": 943.7768235,
             "rust": 865.467902
           },
           "ratios": {
-            "relar_over_rust": 1.02309646083212,
+            "imre_over_rust": 1.02309646083212,
             "codon_over_rust": 1.090481601130483,
-            "original_over_relar": 1.107784889160884,
-            "port_over_relar": 1.4569568280547422,
-            "codon_over_relar": 1.0658639169209485,
+            "original_over_imre": 1.107784889160884,
+            "port_over_imre": 1.4569568280547422,
+            "codon_over_imre": 1.0658639169209485,
             "original_over_rust": 1.1333707994638025,
             "port_over_rust": 1.4906073743679984
           }
@@ -280,18 +280,18 @@
           "report_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "report_bytes": 0,
           "median_ms": {
-            "relar": 10.2696805,
+            "imre": 10.2696805,
             "port": 83.7664005,
             "original": 95.034657,
             "codon": 19.3104945,
             "rust": 9.553833
           },
           "ratios": {
-            "relar_over_rust": 1.074927780295092,
+            "imre_over_rust": 1.074927780295092,
             "codon_over_rust": 2.0212300654616846,
-            "original_over_relar": 9.253905902914896,
-            "port_over_relar": 8.156670550753747,
-            "codon_over_relar": 1.880340337754422,
+            "original_over_imre": 9.253905902914896,
+            "port_over_imre": 8.156670550753747,
+            "codon_over_imre": 1.880340337754422,
             "original_over_rust": 9.947280531279958,
             "port_over_rust": 8.76783176972007
           }
@@ -302,18 +302,18 @@
           "report_sha256": "6ad242963c4997bcc629faee8a6df7b49c4112f052b3e262bb49c080477606f4",
           "report_bytes": 1489,
           "median_ms": {
-            "relar": 73.06976399999999,
+            "imre": 73.06976399999999,
             "port": 720.672731,
             "original": 296.207936,
             "codon": 134.3793125,
             "rust": 46.3736525
           },
           "ratios": {
-            "relar_over_rust": 1.575674117970328,
+            "imre_over_rust": 1.575674117970328,
             "codon_over_rust": 2.8977513147147507,
-            "original_over_relar": 4.053768888592551,
-            "port_over_relar": 9.862803594110417,
-            "codon_over_relar": 1.839054968071335,
+            "original_over_imre": 4.053768888592551,
+            "port_over_imre": 9.862803594110417,
+            "codon_over_imre": 1.839054968071335,
             "original_over_rust": 6.387418717988625,
             "port_over_rust": 15.540564353864513
           }
@@ -324,18 +324,18 @@
           "report_sha256": "73cbc74bf3f97bfdbbb8933a749156213074ac57ba010d06b75ae48b45a946b2",
           "report_bytes": 109258,
           "median_ms": {
-            "relar": 899.9689015,
+            "imre": 899.9689015,
             "port": 1310.2752385000001,
             "original": 1008.444509,
             "codon": 970.7704715,
             "rust": 890.48706
           },
           "ratios": {
-            "relar_over_rust": 1.0106479273264228,
+            "imre_over_rust": 1.0106479273264228,
             "codon_over_rust": 1.090156741300654,
-            "original_over_relar": 1.1205326176484556,
-            "port_over_relar": 1.4559116835216557,
-            "codon_over_relar": 1.0786711295045788,
+            "original_over_imre": 1.1205326176484556,
+            "port_over_imre": 1.4559116835216557,
+            "codon_over_imre": 1.0786711295045788,
             "original_over_rust": 1.1324639675280628,
             "port_over_rust": 1.4714141253214843
           }
@@ -346,18 +346,18 @@
           "report_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "report_bytes": 0,
           "median_ms": {
-            "relar": 10.2181715,
+            "imre": 10.2181715,
             "port": 83.934285,
             "original": 95.0686775,
             "codon": 19.130482,
             "rust": 9.4968785
           },
           "ratios": {
-            "relar_over_rust": 1.0759505346941103,
+            "imre_over_rust": 1.0759505346941103,
             "codon_over_rust": 2.0143968357602975,
-            "original_over_relar": 9.303883527498046,
-            "port_over_relar": 8.214217680726929,
-            "codon_over_relar": 1.8722020862538862,
+            "original_over_imre": 9.303883527498046,
+            "port_over_imre": 8.214217680726929,
+            "codon_over_imre": 1.8722020862538862,
             "original_over_rust": 10.010518456143249,
             "port_over_rust": 8.838091905671952
           }
@@ -368,18 +368,18 @@
           "report_sha256": "73cbc74bf3f97bfdbbb8933a749156213074ac57ba010d06b75ae48b45a946b2",
           "report_bytes": 109258,
           "median_ms": {
-            "relar": 77.014905,
+            "imre": 77.014905,
             "port": 717.554538,
             "original": 300.53736,
             "codon": 138.1815865,
             "rust": 49.566157
           },
           "ratios": {
-            "relar_over_rust": 1.553780031806783,
+            "imre_over_rust": 1.553780031806783,
             "codon_over_rust": 2.7878212648198653,
-            "original_over_relar": 3.9023272183481885,
-            "port_over_relar": 9.317086582136277,
-            "codon_over_relar": 1.7942187489551538,
+            "original_over_imre": 3.9023272183481885,
+            "port_over_imre": 9.317086582136277,
+            "codon_over_imre": 1.7942187489551538,
             "original_over_rust": 6.063358109445523,
             "port_over_rust": 14.476703085938254
           }
@@ -390,18 +390,18 @@
           "report_sha256": "48ac07681567895cf9a2494ea8c53140a3a279e193fdd0c9fb316d2c5304da87",
           "report_bytes": 96557,
           "median_ms": {
-            "relar": 903.3783955,
+            "imre": 903.3783955,
             "port": 1302.5069799999999,
             "original": 1008.313643,
             "codon": 980.4947975,
             "rust": 884.6723715
           },
           "ratios": {
-            "relar_over_rust": 1.021144578041115,
+            "imre_over_rust": 1.021144578041115,
             "codon_over_rust": 1.1083140257195203,
-            "original_over_relar": 1.116158686130545,
-            "port_over_relar": 1.4418177216636792,
-            "codon_over_relar": 1.085364452353676,
+            "original_over_imre": 1.116158686130545,
+            "port_over_imre": 1.4418177216636792,
+            "codon_over_imre": 1.085364452353676,
             "original_over_rust": 1.1397593905757006,
             "port_over_rust": 1.4723043490004593
           }
@@ -412,18 +412,18 @@
           "report_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "report_bytes": 0,
           "median_ms": {
-            "relar": 10.688336,
+            "imre": 10.688336,
             "port": 85.361199,
             "original": 96.703217,
             "codon": 20.202993499999998,
             "rust": 10.160044
           },
           "ratios": {
-            "relar_over_rust": 1.051997018910548,
+            "imre_over_rust": 1.051997018910548,
             "codon_over_rust": 1.9884750006988157,
-            "original_over_relar": 9.047546503029096,
-            "port_over_relar": 7.986388058908328,
-            "codon_over_relar": 1.8901907181810151,
+            "original_over_imre": 9.047546503029096,
+            "port_over_imre": 7.986388058908328,
+            "codon_over_imre": 1.8901907181810151,
             "original_over_rust": 9.517991949641162,
             "port_over_rust": 8.40165642983436
           }
@@ -434,18 +434,18 @@
           "report_sha256": "48ac07681567895cf9a2494ea8c53140a3a279e193fdd0c9fb316d2c5304da87",
           "report_bytes": 96557,
           "median_ms": {
-            "relar": 75.249436,
+            "imre": 75.249436,
             "port": 719.8535925,
             "original": 302.23268399999995,
             "codon": 138.2159205,
             "rust": 49.127354
           },
           "ratios": {
-            "relar_over_rust": 1.531721736937023,
+            "imre_over_rust": 1.531721736937023,
             "codon_over_rust": 2.813420818471111,
-            "original_over_relar": 4.0164112857935566,
-            "port_over_relar": 9.56623239674514,
-            "codon_over_relar": 1.8367701852277005,
+            "original_over_imre": 4.0164112857935566,
+            "port_over_imre": 9.56623239674514,
+            "codon_over_imre": 1.8367701852277005,
             "original_over_rust": 6.1520244709291685,
             "port_over_rust": 14.652806102685686
           }

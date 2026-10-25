@@ -1,4 +1,4 @@
-"""Benchmark the unchanged dependency-planner package on CPython and Relar."""
+"""Benchmark the unchanged dependency-planner package on CPython and Imre."""
 
 import argparse
 import hashlib
@@ -14,14 +14,14 @@ from types import SimpleNamespace
 HERE = Path(__file__).resolve().parent
 shared = SimpleNamespace(**runpy.run_path(str(HERE / "benchmark.py")))
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "dependency_validate.py")))
-PAIR_ORDERS = (("cpython", "relar"), ("relar", "cpython"))
+PAIR_ORDERS = (("cpython", "imre"), ("imre", "cpython"))
 TRIPLET_ORDERS = (
-    ("cpython", "baseline", "relar"),
-    ("relar", "baseline", "cpython"),
-    ("baseline", "relar", "cpython"),
-    ("cpython", "relar", "baseline"),
-    ("relar", "cpython", "baseline"),
-    ("baseline", "cpython", "relar"),
+    ("cpython", "baseline", "imre"),
+    ("imre", "baseline", "cpython"),
+    ("baseline", "imre", "cpython"),
+    ("cpython", "imre", "baseline"),
+    ("imre", "cpython", "baseline"),
+    ("baseline", "cpython", "imre"),
 )
 
 
@@ -150,7 +150,7 @@ def benchmark(args: argparse.Namespace) -> dict:
     inputs.update({"binary": binary, "llvm_ir": llvm})
     hashes.update({name: shared.sha256(inputs[name]) for name in ("binary", "llvm_ir")})
     validation = validator.validate(binary, python)
-    commands = {"cpython": validator.python_command(python), "relar": [str(binary)]}
+    commands = {"cpython": validator.python_command(python), "imre": [str(binary)]}
     baseline_validation = None
     if provenance is not None:
         baseline_validation = validator.validate(inputs["baseline"], python)
@@ -185,21 +185,21 @@ def benchmark(args: argparse.Namespace) -> dict:
                         group[implementation] = compact_output(result)
                     phases[phase].append(group)
             cpython = shared.summary(phases["samples"], "cpython")
-            relar = shared.summary(phases["samples"], "relar")
-            speedup = cpython["median_seconds"] / relar["median_seconds"]
+            imre = shared.summary(phases["samples"], "imre")
+            speedup = cpython["median_seconds"] / imre["median_seconds"]
             summary = {
                 "cpython": cpython,
-                "relar": relar,
+                "imre": imre,
                 "speedup_ratio_of_medians": speedup,
             }
             baseline_message = ""
             if provenance is not None:
                 baseline = shared.summary(phases["samples"], "baseline")
-                baseline_speedup = baseline["median_seconds"] / relar["median_seconds"]
+                baseline_speedup = baseline["median_seconds"] / imre["median_seconds"]
                 summary.update(
                     {
                         "baseline": baseline,
-                        "baseline_to_relar_ratio_of_medians": baseline_speedup,
+                        "baseline_to_imre_ratio_of_medians": baseline_speedup,
                         "cpython_to_baseline_ratio_of_medians": cpython[
                             "median_seconds"
                         ]
@@ -230,7 +230,7 @@ def benchmark(args: argparse.Namespace) -> dict:
             )
             print(
                 f"{shape}, {size} tasks: CPython {cpython['median_seconds']:.6f}s, "
-                f"Relar {relar['median_seconds']:.6f}s, {speedup:.2f}x{baseline_message}",
+                f"Imre {imre['median_seconds']:.6f}s, {speedup:.2f}x{baseline_message}",
                 flush=True,
             )
     if validator.package_sources() != source_paths:
@@ -250,7 +250,7 @@ def benchmark(args: argparse.Namespace) -> dict:
         "sources": source_hashes,
         "sha256": hashes,
         "tools": {
-            "relar": compiler_version,
+            "imre": compiler_version,
             "clang": clang_version,
             "cpython": python_info,
             "harness_python": sys.version,
@@ -276,9 +276,9 @@ def benchmark(args: argparse.Namespace) -> dict:
             "includes": "fresh process startup, package imports, input parsing, all scheduling and complete report output, and process exit",
             "excludes": "Rust workspace builds, AOT compilation, oracle/differential validation, and warmups",
             "ordering": (
-                "all six CPython/baseline/Relar orders in a repeating cycle; adjacent orders reverse each other"
+                "all six CPython/baseline/Imre orders in a repeating cycle; adjacent orders reverse each other"
                 if provenance is not None
-                else "alternating CPython-first and Relar-first pairs, starting with CPython"
+                else "alternating CPython-first and Imre-first pairs, starting with CPython"
             ),
             "fully_balanced_samples": args.samples % len(orders) == 0,
             "cpu": "harness and children inherit the same single-CPU affinity",
@@ -292,9 +292,9 @@ def benchmark(args: argparse.Namespace) -> dict:
                 "<package-root>",
             ],
             "cpython_imports": "explicit package-root bootstrap runs unchanged package as __main__; normal bytecode caching is allowed",
-            "relar_command": ["<artifact-dir>/dependency_planner"],
+            "imre_command": ["<artifact-dir>/dependency_planner"],
             "compile_command": [
-                "relar",
+                "imre",
                 "build",
                 "examples/dependency_planner/__main__.py",
                 "--module-root",

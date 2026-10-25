@@ -1,0 +1,358 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "execution": "native-body-and-operations",
+  "passed_at_opt_levels": [
+    0,
+    3
+  ],
+  "passed": {
+    "test.test_pathlib.test_join.PathJoinTest.test_full_match": {
+      "method_sha256": "75d710d6349f0a7932160566757914f65f10ce2b058fcb6590b471488be71e32",
+      "assertions": 55
+    },
+    "test.test_pathlib.test_join.PathJoinTest.test_name": {
+      "method_sha256": "8006b06e712f88fa8d9091ca658ad7944c484e997ee6175ad0b69b05ba2d15ce",
+      "assertions": 6
+    },
+    "test.test_pathlib.test_join.PathJoinTest.test_parent": {
+      "method_sha256": "83bbc0b985a4e30e47d786831a95fbffd1c38933a21a7467d1112c845b884e7e",
+      "assertions": 8
+    },
+    "test.test_pathlib.test_join.PathJoinTest.test_stem": {
+      "method_sha256": "feb5f75373806e7ad05ed04327650639bcdc67f77f78bad113603b4b5257c7b7",
+      "assertions": 13
+    },
+    "test.test_pathlib.test_join.PathJoinTest.test_suffix": {
+      "method_sha256": "f5bb67b71ef09d1e5debcdc3d80c4b158ff4bb713920a789af0ed3d6d0f16c71",
+      "assertions": 21
+    },
+    "test.test_pathlib.test_join.PurePathJoinTest.test_full_match": {
+      "method_sha256": "75d710d6349f0a7932160566757914f65f10ce2b058fcb6590b471488be71e32",
+      "assertions": 55
+    },
+    "test.test_pathlib.test_join.PurePathJoinTest.test_name": {
+      "method_sha256": "8006b06e712f88fa8d9091ca658ad7944c484e997ee6175ad0b69b05ba2d15ce",
+      "assertions": 6
+    },
+    "test.test_pathlib.test_join.PurePathJoinTest.test_parent": {
+      "method_sha256": "83bbc0b985a4e30e47d786831a95fbffd1c38933a21a7467d1112c845b884e7e",
+      "assertions": 8
+    },
+    "test.test_pathlib.test_join.PurePathJoinTest.test_stem": {
+      "method_sha256": "feb5f75373806e7ad05ed04327650639bcdc67f77f78bad113603b4b5257c7b7",
+      "assertions": 13
+    },
+    "test.test_pathlib.test_join.PurePathJoinTest.test_suffix": {
+      "method_sha256": "f5bb67b71ef09d1e5debcdc3d80c4b158ff4bb713920a789af0ed3d6d0f16c71",
+      "assertions": 21
+    },
+    "test.test_pathlib.test_join_posix.PosixPathJoinTest.test_div": {
+      "method_sha256": "b45e7481f00d3cc4249023b5f12c15ed4b29d10031d7693ee69dbe35f02f55ba",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_join_posix.PosixPathJoinTest.test_join": {
+      "method_sha256": "fd173eda4b53fffd1bc5195a7051bf1e01866d597350bc95a5d1e3333d0646f6",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_join_posix.PurePosixPathJoinTest.test_div": {
+      "method_sha256": "b45e7481f00d3cc4249023b5f12c15ed4b29d10031d7693ee69dbe35f02f55ba",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_join_posix.PurePosixPathJoinTest.test_join": {
+      "method_sha256": "fd173eda4b53fffd1bc5195a7051bf1e01866d597350bc95a5d1e3333d0646f6",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_join_windows.PureWindowsPathJoinTest.test_anchor": {
+      "method_sha256": "188f347c5afcd9a965fb6ded7e08570c9b4f0e14b48ac68551ae04d2130a787d",
+      "assertions": 6
+    },
+    "test.test_pathlib.test_join_windows.PureWindowsPathJoinTest.test_div": {
+      "method_sha256": "d570033c7b57491983b77d8eaf6aa3efe67c2d7817c5b622345dc2536333aec0",
+      "assertions": 14
+    },
+    "test.test_pathlib.test_join_windows.PureWindowsPathJoinTest.test_join": {
+      "method_sha256": "2549a7a4f7afb194c616b3fb1596a7c812af1edd79af7093706247cf4c4f2f85",
+      "assertions": 12
+    },
+    "test.test_pathlib.test_join_windows.PureWindowsPathJoinTest.test_name": {
+      "method_sha256": "138ece79c7eafe55e3a1e2b7a987891ebb8d783bcc7bd703a0c465ac003b204f",
+      "assertions": 8
+    },
+    "test.test_pathlib.test_join_windows.PureWindowsPathJoinTest.test_parent": {
+      "method_sha256": "9fce37d44f4b43654011b2ad1d5385cc636e3ac9a33c6bf7c6959bd5407011d2",
+      "assertions": 11
+    },
+    "test.test_pathlib.test_join_windows.PureWindowsPathJoinTest.test_stem": {
+      "method_sha256": "686b0b0077e33e861c717a08ce42f98c72434a7ddcac28646940f7c559d339cf",
+      "assertions": 9
+    },
+    "test.test_pathlib.test_join_windows.PureWindowsPathJoinTest.test_str": {
+      "method_sha256": "b8b5c54a39649b7215311a7e79e811a22665c0b7143208c21e8f3277787ab127",
+      "assertions": 5
+    },
+    "test.test_pathlib.test_join_windows.PureWindowsPathJoinTest.test_suffix": {
+      "method_sha256": "b06a4d303927a2587e8922c2eae6420d143d66cf27ccfd6e19441882f11c330b",
+      "assertions": 16
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_as_posix_common": {
+      "method_sha256": "4a41932e71f4fecf633f56928b6dce69c5cef918de48d15cb78547fd2e872cdd",
+      "assertions": 6
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_div_nested": {
+      "method_sha256": "9b528f979e01b4f67db87d9d289cbb3ea90ec4d170dac101f67485a67c8355df",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_drive_common": {
+      "method_sha256": "10fcce0af9cffa831a65e09b7ece0c1613794a23d4a9accacadf2b551e3920bc",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_eq_posix": {
+      "method_sha256": "8be36e3c58c6795219885a331748d1c71b9eca8fdc7d762b5b150fcc0cc13d92",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_full_match_case_sensitive": {
+      "method_sha256": "8cd584dc194e236f5c3597fc702b0b4b684f49d0b8f0883013169a3c1a491987",
+      "assertions": 4
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_is_absolute_posix": {
+      "method_sha256": "24a1cf6336819374a8067f75c971cc1b18147da0d21c10c467e5547fd117c2ee",
+      "assertions": 8
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_join_nested": {
+      "method_sha256": "07f9e62e168eb8c6918211074e93ce097c470943f44dd92d4813ca117c4d8698",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_match_common": {
+      "method_sha256": "980164f5188d3bc3ab98127c250aef973d95f0450a8474ed1d4455f58cc61b1d",
+      "assertions": 34
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_match_posix": {
+      "method_sha256": "a64c99576f0c68954d8ac5faf76af68ee40225f992348ef659ec20a4ec53925e",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_name_empty": {
+      "method_sha256": "51992fa7e033de600cf8d19364028d3175f7c637edca2701aa4b74a9ac63c6da",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_root_common": {
+      "method_sha256": "17aba38625ff05c2504f64dd785ff18fd724940ee2c3c87a2f4a11ded6e869ab",
+      "assertions": 4
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_root_posix": {
+      "method_sha256": "37974301081254e2498be7dea74b23b92feab1ac65c12c94843eeddcc8431edd",
+      "assertions": 2
+    },
+    "test.test_pathlib.test_pathlib.PathTest.test_stem_empty": {
+      "method_sha256": "5431aed6b8ee1d11b469ce78b8995297cfdf6a5e3d73c02b24cbbd86e455f64c",
+      "assertions": 2
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_as_posix_common": {
+      "method_sha256": "4a41932e71f4fecf633f56928b6dce69c5cef918de48d15cb78547fd2e872cdd",
+      "assertions": 6
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_div_nested": {
+      "method_sha256": "9b528f979e01b4f67db87d9d289cbb3ea90ec4d170dac101f67485a67c8355df",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_drive_common": {
+      "method_sha256": "10fcce0af9cffa831a65e09b7ece0c1613794a23d4a9accacadf2b551e3920bc",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_eq_posix": {
+      "method_sha256": "8be36e3c58c6795219885a331748d1c71b9eca8fdc7d762b5b150fcc0cc13d92",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_full_match_case_sensitive": {
+      "method_sha256": "8cd584dc194e236f5c3597fc702b0b4b684f49d0b8f0883013169a3c1a491987",
+      "assertions": 4
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_is_absolute_posix": {
+      "method_sha256": "24a1cf6336819374a8067f75c971cc1b18147da0d21c10c467e5547fd117c2ee",
+      "assertions": 8
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_join_nested": {
+      "method_sha256": "07f9e62e168eb8c6918211074e93ce097c470943f44dd92d4813ca117c4d8698",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_match_common": {
+      "method_sha256": "980164f5188d3bc3ab98127c250aef973d95f0450a8474ed1d4455f58cc61b1d",
+      "assertions": 34
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_match_posix": {
+      "method_sha256": "a64c99576f0c68954d8ac5faf76af68ee40225f992348ef659ec20a4ec53925e",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_name_empty": {
+      "method_sha256": "51992fa7e033de600cf8d19364028d3175f7c637edca2701aa4b74a9ac63c6da",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_root_common": {
+      "method_sha256": "17aba38625ff05c2504f64dd785ff18fd724940ee2c3c87a2f4a11ded6e869ab",
+      "assertions": 4
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_root_posix": {
+      "method_sha256": "37974301081254e2498be7dea74b23b92feab1ac65c12c94843eeddcc8431edd",
+      "assertions": 2
+    },
+    "test.test_pathlib.test_pathlib.PosixPathTest.test_stem_empty": {
+      "method_sha256": "5431aed6b8ee1d11b469ce78b8995297cfdf6a5e3d73c02b24cbbd86e455f64c",
+      "assertions": 2
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_as_posix_common": {
+      "method_sha256": "4a41932e71f4fecf633f56928b6dce69c5cef918de48d15cb78547fd2e872cdd",
+      "assertions": 6
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_div_nested": {
+      "method_sha256": "9b528f979e01b4f67db87d9d289cbb3ea90ec4d170dac101f67485a67c8355df",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_drive_common": {
+      "method_sha256": "10fcce0af9cffa831a65e09b7ece0c1613794a23d4a9accacadf2b551e3920bc",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_eq_posix": {
+      "method_sha256": "8be36e3c58c6795219885a331748d1c71b9eca8fdc7d762b5b150fcc0cc13d92",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_full_match_case_sensitive": {
+      "method_sha256": "8cd584dc194e236f5c3597fc702b0b4b684f49d0b8f0883013169a3c1a491987",
+      "assertions": 4
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_is_absolute_posix": {
+      "method_sha256": "24a1cf6336819374a8067f75c971cc1b18147da0d21c10c467e5547fd117c2ee",
+      "assertions": 8
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_join_nested": {
+      "method_sha256": "07f9e62e168eb8c6918211074e93ce097c470943f44dd92d4813ca117c4d8698",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_match_common": {
+      "method_sha256": "980164f5188d3bc3ab98127c250aef973d95f0450a8474ed1d4455f58cc61b1d",
+      "assertions": 34
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_match_posix": {
+      "method_sha256": "a64c99576f0c68954d8ac5faf76af68ee40225f992348ef659ec20a4ec53925e",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_name_empty": {
+      "method_sha256": "51992fa7e033de600cf8d19364028d3175f7c637edca2701aa4b74a9ac63c6da",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_root_common": {
+      "method_sha256": "17aba38625ff05c2504f64dd785ff18fd724940ee2c3c87a2f4a11ded6e869ab",
+      "assertions": 4
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_root_posix": {
+      "method_sha256": "37974301081254e2498be7dea74b23b92feab1ac65c12c94843eeddcc8431edd",
+      "assertions": 2
+    },
+    "test.test_pathlib.test_pathlib.PurePathTest.test_stem_empty": {
+      "method_sha256": "5431aed6b8ee1d11b469ce78b8995297cfdf6a5e3d73c02b24cbbd86e455f64c",
+      "assertions": 2
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_as_posix_common": {
+      "method_sha256": "4a41932e71f4fecf633f56928b6dce69c5cef918de48d15cb78547fd2e872cdd",
+      "assertions": 6
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_div_nested": {
+      "method_sha256": "9b528f979e01b4f67db87d9d289cbb3ea90ec4d170dac101f67485a67c8355df",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_drive_common": {
+      "method_sha256": "10fcce0af9cffa831a65e09b7ece0c1613794a23d4a9accacadf2b551e3920bc",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_eq_posix": {
+      "method_sha256": "8be36e3c58c6795219885a331748d1c71b9eca8fdc7d762b5b150fcc0cc13d92",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_full_match_case_sensitive": {
+      "method_sha256": "8cd584dc194e236f5c3597fc702b0b4b684f49d0b8f0883013169a3c1a491987",
+      "assertions": 4
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_is_absolute_posix": {
+      "method_sha256": "24a1cf6336819374a8067f75c971cc1b18147da0d21c10c467e5547fd117c2ee",
+      "assertions": 8
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_join_nested": {
+      "method_sha256": "07f9e62e168eb8c6918211074e93ce097c470943f44dd92d4813ca117c4d8698",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_match_common": {
+      "method_sha256": "980164f5188d3bc3ab98127c250aef973d95f0450a8474ed1d4455f58cc61b1d",
+      "assertions": 34
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_match_posix": {
+      "method_sha256": "a64c99576f0c68954d8ac5faf76af68ee40225f992348ef659ec20a4ec53925e",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_name_empty": {
+      "method_sha256": "51992fa7e033de600cf8d19364028d3175f7c637edca2701aa4b74a9ac63c6da",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_root_common": {
+      "method_sha256": "17aba38625ff05c2504f64dd785ff18fd724940ee2c3c87a2f4a11ded6e869ab",
+      "assertions": 4
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_root_posix": {
+      "method_sha256": "37974301081254e2498be7dea74b23b92feab1ac65c12c94843eeddcc8431edd",
+      "assertions": 2
+    },
+    "test.test_pathlib.test_pathlib.PurePosixPathTest.test_stem_empty": {
+      "method_sha256": "5431aed6b8ee1d11b469ce78b8995297cfdf6a5e3d73c02b24cbbd86e455f64c",
+      "assertions": 2
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_as_posix_common": {
+      "method_sha256": "4a41932e71f4fecf633f56928b6dce69c5cef918de48d15cb78547fd2e872cdd",
+      "assertions": 6
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_div_nested": {
+      "method_sha256": "9b528f979e01b4f67db87d9d289cbb3ea90ec4d170dac101f67485a67c8355df",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_drive_common": {
+      "method_sha256": "10fcce0af9cffa831a65e09b7ece0c1613794a23d4a9accacadf2b551e3920bc",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_drive_windows": {
+      "method_sha256": "2fa0ddfaade447e61f6b9c3a2d2eed3994c227788a7028f94c47b52bd67de8a3",
+      "assertions": 8
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_full_match_case_sensitive": {
+      "method_sha256": "8cd584dc194e236f5c3597fc702b0b4b684f49d0b8f0883013169a3c1a491987",
+      "assertions": 4
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_join_nested": {
+      "method_sha256": "07f9e62e168eb8c6918211074e93ce097c470943f44dd92d4813ca117c4d8698",
+      "assertions": 1
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_match_common": {
+      "method_sha256": "980164f5188d3bc3ab98127c250aef973d95f0450a8474ed1d4455f58cc61b1d",
+      "assertions": 34
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_match_windows": {
+      "method_sha256": "67b13175c11468e73ae4b4db19bed6e159de444b42940a0b343a2121d0023f04",
+      "assertions": 20
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_name_empty": {
+      "method_sha256": "51992fa7e033de600cf8d19364028d3175f7c637edca2701aa4b74a9ac63c6da",
+      "assertions": 3
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_root_common": {
+      "method_sha256": "17aba38625ff05c2504f64dd785ff18fd724940ee2c3c87a2f4a11ded6e869ab",
+      "assertions": 4
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_root_windows": {
+      "method_sha256": "d022fefa5a37ca29f346d7fb90b925c5bad70dac24239a8f7a52d1d0ae9330e0",
+      "assertions": 7
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_stem_empty": {
+      "method_sha256": "5431aed6b8ee1d11b469ce78b8995297cfdf6a5e3d73c02b24cbbd86e455f64c",
+      "assertions": 2
+    },
+    "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_str_windows": {
+      "method_sha256": "ab47f1166ba628f35158141da5e4a2686df4b5aceba25f864fc8b13d7361f546",
+      "assertions": 5
+    }
+  }
+}

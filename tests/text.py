@@ -1,6 +1,7 @@
 """Compare native text parsing, fixed regexes and bounded URL decoding with CPython."""
 
 import argparse
+import ast
 from pathlib import Path
 import sys
 import tempfile
@@ -9,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comprehensions import require_result, run
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "text"
+STDLIB = FIXTURES.parents[2] / "benchmarks" / "cpython_stdlib"
 REJECTED = {
     "split_bytes": '"abc".split(b"b")',
     "split_wrong_limit": '"abc".split("b", True)',
@@ -17,7 +19,7 @@ REJECTED = {
     "split_extra": '"abc".split("b", 1, 2)',
     "strip_keyword": '"abc".strip(chars="c")',
     "strip_wrong_type": '"abc".lstrip(1)',
-    "startswith_tuple": '"abc".startswith(("a", "b"))',
+    "startswith_mixed_tuple": '"abc".startswith(("x", 1))',
     "startswith_bounds": '"abc".startswith("a", 0)',
     "endswith_keyword": '"abc".endswith(suffix="c")',
     "find_keyword": '"abc".find("a", start=0)',
@@ -34,16 +36,54 @@ REJECTED = {
     "regex_dynamic": 'import re\ndef bad(value: str) -> None:\n    re.compile(value)',
     "regex_bytes": 'import re\nre.compile(b"x")',
     "regex_flags": 'import re\nre.compile("x", re.IGNORECASE)',
+    "regex_compiled_flags": 'import re\np = re.compile("x")\nre.search(p, "x", re.UNICODE)',
     "regex_search_bytes": 'import re\nre.search("x", b"x")',
     "regex_dynamic_group": 'import re\ndef bad(index: int) -> None:\n    if m := re.search("(x)", "x"):\n        m.group(index)',
     "regex_unchecked_match": 'import re\nre.search("x", "y").start()',
     "regex_match_bounds": 'import re\nre.compile("x").search("text", 2)',
     "regex_backreference": 'import re\nre.compile(r"(x)\\1")',
     "regex_lookbehind": 'import re\nre.compile(r"(?<=x)y")',
-    "regex_end_anchor": 'import re\nre.compile("x$")',
+    "regex_interior_end_anchor": 'import re\nre.compile("x$y")',
+    "regex_optional_group_as_str": 'import re\ndef bad() -> str:\n    if m := re.search("(?P<x>x)?z", "z"):\n        a, = m.groups()\n        return a\n    return ""',
+    "regex_aliased_dict_as_str": 'import re\ndef bad() -> str:\n    match = re.search("(?P<x>x)", "x")\n    if match is None:\n        return ""\n    groups = match.groupdict()\n    alias = groups\n    alias["x"] = None\n    return groups["x"]',
     "regex_nested_repeat": 'import re\nre.compile("(x?)*")',
+    "sub_nullable": 'import re\nre.sub("x*", "!", "xxx")',
+    "sub_invalid_group": 'import re\nre.sub("(x)", r"\\2", "none")',
+    "sub_unclosed_group": 'import re\nre.sub("(x)", r"\\g<1", "none")',
+    "sub_dynamic_template": 'import re\ndef bad(s: str) -> str:\n    return re.sub("x", s, "x")',
     "regex_invalid_unused": 'import re\ndef unused() -> None:\n    re.compile("[")',
 }
+
+
+def cpython_sub_cases(directory):
+    """Keep the three upstream bodies byte-identical, including their expected values."""
+    sys.path.insert(0, str(STDLIB))
+    from upstream import verify_upstream
+
+    verify_upstream()
+    data = (STDLIB / "upstream/Lib/test/test_re.py").read_bytes()
+    cls = next(n for n in ast.parse(data).body if isinstance(n, ast.ClassDef) and n.name == "ReTests")
+    adapter = b"""import re
+
+class Case:
+    checks: int
+
+    def __init__(self) -> None:
+        self.checks = 0
+
+    def assertEqual(self, actual: str, expected: str) -> None:
+        assert actual == expected
+        self.checks += 1
+
+"""
+    for name, count in (("test_bug_449964", 1), ("test_bug_449000", 4), ("test_bug_114660", 1)):
+        method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == name)
+        assert not method.decorator_list
+        body = b"".join(data.splitlines(keepends=True)[method.lineno - 1:method.end_lineno])
+        entry = f"\ncase = Case()\ncase.{name}()\nassert case.checks == {count}\n"
+        source = directory / (name + ".py")
+        source.write_bytes(adapter + body + entry.encode())
+        yield source
 
 
 def main() -> None:
@@ -60,7 +100,7 @@ def main() -> None:
     if sys.flags.optimize:
         parser.error("validation requires assertions")
     compiler = str(args.compiler.resolve())
-    flags = ["--runtime", str(args.runtime.resolve()), "--clang", args.clang]
+    flags = ["--quiet", "--runtime", str(args.runtime.resolve()), "--clang", args.clang]
     if args.target:
         flags += ["--target", args.target]
     if args.lto_linker:
@@ -68,15 +108,15 @@ def main() -> None:
     if args.sanitize:
         flags += ["--sanitize"]
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-text-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-text-") as directory:
         temporary = Path(directory)
-        for source in sorted(FIXTURES.glob("*.py")):
+        for source in [*sorted(FIXTURES.glob("*.py")), *cpython_sub_cases(temporary)]:
             expected = run([args.python, "-I", "-B", str(source)], temporary)
             require_result(expected, None)
             for level in args.opt_levels:
                 binary = temporary / f"{source.stem}-O{level}"
                 built = run([
-                    compiler, "build", str(source), "--module-root", str(FIXTURES),
+                    compiler, "build", str(source), "--module-root", str(source.parent),
                     "-o", str(binary), "--opt-level", level, *flags,
                 ], temporary)
                 require_result(built, None)

@@ -1,4 +1,4 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Concrete layouts and unboxed optionals
 
@@ -16,7 +16,7 @@ Generic sequences store raw words with one element kind per container. Dictionar
 
 ## Measurement method
 
-The four engines are CPython 3.14.5, preserved Relar, new Relar, and the preserved Rust BigInt reference. Each workload has 32 measured rounds and two warmups per engine. Four Williams orders repeat eight times, balancing positions and directed adjacent pairs within each measured round cycle. Cross-round predecessors are not balanced. Every sample starts a fresh process pinned to CPU 0. Ordinary and ThinLTO runs were sequential, outside ptrace, after all task builds/tests/profilers stopped. No samples were discarded.
+The four engines are CPython 3.14.5, preserved Imre, new Imre, and the preserved Rust BigInt reference. Each workload has 32 measured rounds and two warmups per engine. Four Williams orders repeat eight times, balancing positions and directed adjacent pairs within each measured round cycle. Cross-round predecessors are not balanced. Every sample starts a fresh process pinned to CPU 0. Ordinary and ThinLTO runs were sequential, outside ptrace, after all task builds/tests/profilers stopped. No samples were discarded.
 
 Timing includes process startup, imports, parsing, validation, scheduling, complete output, and exit. Batch cases include framing, recovery, and cleanup. Manifest cases also include file opens, reads, writes, flushes, and closes. Fixture creation, oracle execution, output/filesystem comparisons, hashing, and deletion are outside the timer. Manifest inputs are page-cache warm; output is not fsynced. These are whole-program measurements on a shared devbox, with uncontrolled frequency and shared-resource noise, rather than isolated layout costs or cold-storage throughput.
 
@@ -24,11 +24,11 @@ There are five incremental workloads and six each for batch and manifest, for **
 
 ## Whole-program results
 
-Times are median milliseconds. Brackets show observed interquartile ranges, not confidence intervals. All layered/wide inputs contain 16,384 targets; boundary inputs contain 128 and exercise arbitrary-precision values. Valid batches/manifests contain two valid all-changed requests; mixed variants add six recovered malformed/missing-input requests. `Change` is `new / previous − 1`; negative is faster. `CPython/Relar` is a speed ratio; `Relar/Rust` above one means Rust is faster.
+Times are median milliseconds. Brackets show observed interquartile ranges, not confidence intervals. All layered/wide inputs contain 16,384 targets; boundary inputs contain 128 and exercise arbitrary-precision values. Valid batches/manifests contain two valid all-changed requests; mixed variants add six recovered malformed/missing-input requests. `Change` is `new / previous − 1`; negative is faster. `CPython/Imre` is a speed ratio; `Imre/Rust` above one means Rust is faster.
 
 ### Ordinary linking
 
-| Program / input | CPython | Previous Relar | New Relar [Q1–Q3] | Rust BigInt | Change | CPython/Relar | Relar/Rust |
+| Program / input | CPython | Previous Imre | New Imre [Q1–Q3] | Rust BigInt | Change | CPython/Imre | Imre/Rust |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | incremental / layered-sparse | 115.11 | 59.53 | 50.39 [49.95–50.77] | 35.01 | -15.4% | 2.28× | 1.44× |
 | incremental / layered-all | 193.05 | 88.65 | 75.11 [74.54–75.71] | 54.04 | -15.3% | 2.57× | 1.39× |
@@ -50,7 +50,7 @@ Times are median milliseconds. Brackets show observed interquartile ranges, not 
 
 ### ThinLTO
 
-| Program / input | CPython | Previous Relar | New Relar [Q1–Q3] | Rust BigInt | Change | CPython/Relar | Relar/Rust |
+| Program / input | CPython | Previous Imre | New Imre [Q1–Q3] | Rust BigInt | Change | CPython/Imre | Imre/Rust |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | incremental / layered-sparse | 113.77 | 51.92 | 43.73 [43.21–44.51] | 31.65 | -15.8% | 2.60× | 1.38× |
 | incremental / layered-all | 194.65 | 78.32 | 65.95 [64.47–67.00] | 49.88 | -15.8% | 2.95× | 1.32× |
@@ -76,7 +76,7 @@ The small incremental boundary case moves by only +0.5% ordinary and +0.4% with 
 
 Executed instructions for the 16,384-target incremental planner:
 
-| Mode / input | Previous Relar | New Relar | Change | Rust BigInt |
+| Mode / input | Previous Imre | New Imre | Change | Rust BigInt |
 |---|---:|---:|---:|---:|
 | Ordinary / layered/all | 487,630,924 | 454,962,733 | -6.7% | 271,386,648 |
 | Ordinary / wide/all | 314,042,002 | 308,442,924 | -1.8% | 164,852,929 |
@@ -87,11 +87,11 @@ Allocation totals are identical between ordinary and ThinLTO profiles:
 
 | Input / engine | Allocations | Requested bytes | Peak live requested bytes |
 |---|---:|---:|---:|
-| layered/all / previous Relar | 463,279 | 41,672,660 | 14,971,708 |
-| layered/all / new Relar | 407,993 | 25,974,524 | 11,197,596 |
+| layered/all / previous Imre | 463,279 | 41,672,660 | 14,971,708 |
+| layered/all / new Imre | 407,993 | 25,974,524 | 11,197,596 |
 | layered/all / Rust BigInt | 310,488 | 19,556,738 | 9,003,632 |
-| wide/all / previous Relar | 295,190 | 28,740,141 | 11,520,808 |
-| wide/all / new Relar | 278,805 | 19,696,173 | 8,243,584 |
+| wide/all / previous Imre | 295,190 | 28,740,141 | 11,520,808 |
+| wide/all / new Imre | 278,805 | 19,696,173 | 8,243,584 |
 | wide/all / Rust BigInt | 196,821 | 13,266,251 | 6,145,620 |
 
 On layered/all, allocation count falls 11.9%, requested bytes 37.7%, and peak live requested heap 25.2%. Wide/all reduces these by 5.6%, 31.5%, and 28.4%. These profiles still show a substantial instruction and allocation gap to Rust.
@@ -102,11 +102,11 @@ Callgrind counts executed instructions, not CPU cycles or elapsed-time percentag
 
 ## Validation and toolchain
 
-The final compiler/runtime pass 19 compiler and 36 runtime unit tests, formatting, and Clippy. Native differential validation covers **1,609 checks**: 641 ordinary O0/O3 checks, 479 ThinLTO O3 checks, 479 AddressSanitizer O1 checks, and 10 ThinLTO CLI checks. The seven semantic suites cover integers, imports, classes, containers, exceptions, interactive/output I/O, and files/arguments. Sanitizer runs instrument generated code and the Rust runtime/target dependencies, with leak detection enabled outside ptrace; the prebuilt Rust standard library is not instrumented. Compiler unit-test success was captured in the task output without a standalone local log; the published validation record marks that limitation and also records the successful [implementation CI run](https://github.com/viarius-experiments/relar/actions/runs/39127175500).
+The final compiler/runtime pass 19 compiler and 36 runtime unit tests, formatting, and Clippy. Native differential validation covers **1,609 checks**: 641 ordinary O0/O3 checks, 479 ThinLTO O3 checks, 479 AddressSanitizer O1 checks, and 10 ThinLTO CLI checks. The seven semantic suites cover integers, imports, classes, containers, exceptions, interactive/output I/O, and files/arguments. Sanitizer runs instrument generated code and the Rust runtime/target dependencies, with leak detection enabled outside ptrace; the prebuilt Rust standard library is not instrumented. Compiler unit-test success was captured in the task output without a standalone local log; the published validation record marks that limitation and also records the successful [implementation CI run](https://github.com/viarius-experiments/imre/actions/runs/39127175500).
 
 The application gates cover 155 graph and 17 parser cases, 194 framed-batch cases, and 196 manifest cases plus a separate Linux `/dev/full` check, for all four engines in both linking modes. These include full report bytes, malformed inputs, recovery, Unicode, aliases, and arbitrary-precision boundaries. Independent implementation review also checked mixed pointer/integer record loads so LLVM pointer fields retain valid Rust pointer provenance during destruction.
 
-The host is Linux x86-64 on AMD EPYC-Milan. CPython 3.14.5 uses the GIL, has JIT disabled, and was built with PGO/LTO. Relar uses Clang 18.1.3 and Rust 1.98.1-dev (`f62703110`, Ohm `ohm-1.98.1-1`, LLVM 22.1.8). ThinLTO links with LLD 22.1.8 and uses import/inline budgets of 1000 for both native implementations. The frontend/runtime implementations and backend versions still differ. Per-application AOT compilation takes 0.687–0.783 seconds ordinary and 5.580–6.658 seconds with ThinLTO, excluding compiler/runtime builds; compilation is outside execution timings.
+The host is Linux x86-64 on AMD EPYC-Milan. CPython 3.14.5 uses the GIL, has JIT disabled, and was built with PGO/LTO. Imre uses Clang 18.1.3 and Rust 1.98.1-dev (`f62703110`, Ohm `ohm-1.98.1-1`, LLVM 22.1.8). ThinLTO links with LLD 22.1.8 and uses import/inline budgets of 1000 for both native implementations. The frontend/runtime implementations and backend versions still differ. Per-application AOT compilation takes 0.687–0.783 seconds ordinary and 5.580–6.658 seconds with ThinLTO, excluding compiler/runtime builds; compilation is outside execution timings.
 
 ## Evidence and reproduction
 

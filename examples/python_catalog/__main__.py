@@ -3,7 +3,7 @@ from pathlib import Path
 from sys import argv
 from typing import TextIO
 
-from relar.json import encode
+from imre.json import encode
 
 from .catalog import CatalogEntry, Selection, finish_catalog, select_line
 

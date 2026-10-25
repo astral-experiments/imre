@@ -1,4 +1,4 @@
-# Relar
+# Imre
 
 An ahead-of-time compiler for typed Python, written in Rust.
 
@@ -14,7 +14,7 @@ print(greet("world"))
 On Apple Silicon macOS or 64-bit Linux, build and run the executable.
 
 ```console
-$ relar build hello.py
+$ imre build hello.py
 $ ./hello
 Hello, world!
 ```
@@ -26,16 +26,24 @@ Hello, world!
 
 ## Language support
 
-Relar compiles a restricted subset of Python into native executables that run
+Imre compiles a restricted subset of Python into native executables that run
 without a Python installation.
 
-For a complete example, Relar can build Ruff’s conformance reporter directly
+For a complete example, Imre can build Ruff’s conformance reporter directly
 from its original Python file. The executable runs two versions of ty against
 a typing checkout and renders their differences. [Run the reporter](examples/conformance_report/README.md#run-directly-from-a-checkout).
 
-Relar supports:
+Imre also runs Ruff’s original memory reporter. It compares saved JSON captures
+or runs two versions of ty on flake8, Sphinx, Prefect, and Trio.
+[Run the memory reporter](examples/memory_report/README.md#run-ruffs-original-script).
 
-- Statically resolved imports
+Imre builds Ruff’s ecosystem checker from its original Python package. It clones
+58 repositories and compares the diagnostics from two Ruff binaries.
+[Run the ecosystem checker](examples/ruff_ecosystem/README.md#run-the-original-check-command).
+
+Imre supports:
+
+- Statically resolved imports, including [rebuilt native extension wheels](docs/extensions.md)
 - Functions with exact declared or inferred signatures
 - Classes and dataclasses with fixed fields
 - String enums with named members and aliases, and string-valued `Literal` annotations
@@ -60,15 +68,14 @@ But not:
 
 ## Design
 
-Types are part of Relar's compilation contract: variables, containers, and class
+Types are part of Imre's compilation contract: variables, containers, and class
 fields have known types, and each function has one declared or inferred
-signature. This lets Relar choose concrete representations. It aims to preserve
+signature. This lets Imre choose concrete representations. It aims to preserve
 Python's behavior for supported operations, including arbitrary-precision integers.
 
-Relar's runtime uses reference counting and restricts object graphs to avoid
-cycles. Compiled programs run without a Python installation, but Relar must
-implement the features and libraries they use. It cannot use arbitrary Python
-packages or CPython extensions.
+Imre's runtime uses reference counting and restricts object graphs to avoid
+cycles. Compiled programs run without a Python installation. Their imports must
+use supported Python or native extensions rebuilt against Imre’s `Python.h`.
 
 Other projects make different trade-offs:
 
@@ -83,39 +90,48 @@ Other projects make different trade-offs:
 
 For more, see the [design](docs/design.md) and [supported subset](docs/subset.md).
 
-## Benchmark
+## Benchmarks
 
-Running the same [inventory reconciliation program](examples/inventory_reconciliation/)
-with Relar and CPython, and comparing it with a Rust implementation:
+Imre and CPython 3.14.5 run the same Python programs. The Rust references read the same inputs and produce the same outputs.
 
-| Workload | CPython 3.14.5 (ms) | Relar (ms) | Rust (ms) | Relar speedup vs. CPython |
-| --- | ---: | ---: | ---: | ---: |
-| Repeated requests (64 products in stock) | 77.66 | 26.69 | 23.34 | 2.91× |
-| Distinct requests (16,384 products in stock) | 112.35 | 52.24 | 43.05 | 2.15× |
+<p align="center">
+  <img src="benchmarks/results/runtime-suite.svg" width="100%" alt="Six panels comparing median elapsed time for Rust, Imre and CPython on inventory reconciliation, Base45 decoding, Luhn checksums, telemetry and offline conformance reporting.">
+</p>
+
+Each result is the median of 12 fresh processes pinned to one AMD EPYC Milan CPU. Timings include startup, imports and file I/O.
+
+| Workload | Input per process | Rust (ms) | CPython (ms) | Imre (ms) | CPython / Imre |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Inventory (repeated) | 16,384 requests, 64 SKUs | 25.84 | 80.00 | 33.18 | 2.41× |
+| Inventory (distinct) | 16,384 requests, 16,384 SKUs | 48.02 | 117.84 | 60.54 | 1.95× |
+| Base45 decode | 64 × 16 KiB decoded | 9.17 | 190.52 | 14.51 | 13.13× |
+| Luhn checksum | 65,536 × 16 digits | 5.03 | 152.09 | 13.39 | 11.36× |
+| Telemetry report | 81 × 4,096 aligned pairs | 9.60 | 125.00 | 13.30 | 9.40× |
+| Conformance report | 146 files, two captured ty runs | 25.26 | 258.75 | 34.95 | 7.40× |
 
 ## Installation
 
-Install Relar on Linux or Apple Silicon macOS with the standalone installer.
+Install Imre on Linux or Apple Silicon macOS with the standalone installer.
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://labs.astral.sh/relar/install.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://labs.astral.sh/imre/install.sh | sh
 ```
 
 The x86-64 and ARM64 Linux releases include Clang 18, LLD 18, and the native
-link inputs that `relar build` and `relar run` need. Keep the `relar-toolchain`
-directory beside `relar` when moving an installation. The Linux binaries require
+link inputs that `imre build` and `imre run` need. Keep the `imre-toolchain`
+directory beside `imre` when moving an installation. The Linux binaries require
 glibc 2.39 or later. On macOS, install the Xcode Command Line Tools
 (`xcode-select --install`). For a source build on Debian or Ubuntu, install
 `clang-18`. Installing `lld-18` also enables faster links on x86-64.
-To install a specific version, use `https://labs.astral.sh/relar/releases/<version>/install.sh`.
+To install a specific version, use `https://labs.astral.sh/imre/releases/<version>/install.sh`.
 
 To build from source, use the [Rust toolchain](rust-toolchain.toml).
 
 ```console
-git clone https://github.com/astral-sh/relar.git
-cd relar
+git clone https://github.com/astral-sh/imre.git
+cd imre
 cargo build --workspace --release --locked
-./target/release/relar --version
+./target/release/imre --version
 ```
 
 ## Getting started
@@ -139,11 +155,13 @@ print(f"Total: {total([int(value) for value in argv[1:]])}")
 Compile and run it in one command.
 
 ```console
-relar run totals.py -- 10 20 12
+imre run totals.py -- 10 20 12
 # Output: Total: 42
 ```
 
 Arguments after `--` go into the script’s `sys.argv`. Use `build` to keep the compiled executable.
+
+Use `imre check --watch totals.py` to see diagnostics as you edit the script or its imports. Press Ctrl-C to stop.
 
 `build` and `run` share cached executables and module objects by default with
 the bundled Linux toolchain. Source builds on x86-64 Debian and Ubuntu also
@@ -152,7 +170,7 @@ goes to stderr. Pass `-v` to see each module decision or `-q` to suppress
 progress. [Build cache and code generation](docs/subset.md#incremental-builds)
 
 ```console
-relar build totals.py
+imre build totals.py
 ./totals 10 20 12
 ```
 
@@ -160,7 +178,7 @@ relar build totals.py
 `--allocator jemalloc` to use jemalloc for the compiled program's heap.
 For ThinLTO, select the allocator with `--runtime`. [ThinLTO build instructions](docs/subset.md#build-and-validate)
 
-Relar removes unused code when linking executables. Pass `--no-gc-sections` to keep it,
+Imre removes unused code when linking executables. Pass `--no-gc-sections` to keep it,
 or `--verbose-link` to see the Clang command. [Link options and environment variables](docs/subset.md#link-options)
 
 ## Releasing
@@ -171,7 +189,7 @@ Select **dry-run** to build the archives without publishing.
 
 ## License
 
-Relar is licensed under either of
+Imre is licensed under either of
 
 - Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or
   <https://www.apache.org/licenses/LICENSE-2.0>)
@@ -183,6 +201,6 @@ Vendored example code retains its original license; the Base45 codec uses
 [BSD-2-Clause](examples/base45_codec/upstream/LICENSE), and the Luhn checksum
 library uses its [upstream license](examples/luhn_checksum/upstream/LICENSE).
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in Relar
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in Imre
 by you, as defined in the Apache-2.0 license, shall be dually licensed as above, without any
 additional terms or conditions.

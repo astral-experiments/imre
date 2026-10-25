@@ -1,11 +1,11 @@
 [workspace]
 members = ["cargo:."]
-packages = ["relar"]
+packages = ["imre"]
 
 [dist]
 cargo-dist-version = "0.32.0"
 hosting = ["simple"]
-simple-download-url = "https://labs.astral.sh/relar/releases/{tag}"
+simple-download-url = "https://labs.astral.sh/imre/releases/{tag}"
 create-release = false
 installers = ["shell"]
 install-path = ["$XDG_BIN_HOME/", "$XDG_DATA_HOME/../bin", "~/.local/bin"]
@@ -19,8 +19,8 @@ local-artifacts-jobs = ["./build-release-binaries"]
 
 # The installer moves the Linux native toolchain as one private directory.
 [dist.binaries]
-"*" = ["relar", "librelar_runtime.a", "librelar_runtime_jemalloc.a", "relar-toolchain"]
-aarch64-apple-darwin = ["relar", "librelar_runtime.a"]
+"*" = ["imre", "libimre_runtime.a", "libimre_runtime_jemalloc.a", "imre-toolchain"]
+aarch64-apple-darwin = ["imre", "libimre_runtime.a"]
 
 [dist.min-glibc-version]
 "*" = "2.39"

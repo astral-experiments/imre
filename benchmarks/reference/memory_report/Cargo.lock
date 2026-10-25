@@ -67,7 +67,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "relar-memory-report-reference"
+name = "imre-memory-report-reference"
 version = "0.1.0"
 dependencies = [
  "num-bigint",

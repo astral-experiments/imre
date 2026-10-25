@@ -33,6 +33,8 @@ REJECTED = {
     "local_function_shadow": ({"main.py": "from helper import f\ndef g() -> None:\n    f = 1\n", "helper.py": HELPER}, "rebinding"),
     "module_rebinding": ({"main.py": "from helper import f\ndef f(value: int) -> int:\n    return value\n", "helper.py": HELPER}, "cannot be rebound"),
     "imports_after_execution": ({"main.py": "print(1)\nimport helper\n", "helper.py": HELPER}, "imports must precede"),
+    "guard_reads_later_import": ({"main.py": "import helper\n", "helper.py": 'if __name__ == "helper":\n    raise ValueError(message)\nfrom child import message\n', "child.py": 'message = "late"\n'}, "imports must precede"),
+    "library_computed_before_import": ({"main.py": "import package\n", "package/__init__.py": "metadata = str(7)\nfrom .child import f\n", "package/child.py": HELPER}, "imports must precede"),
     "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
     "namespace_package": ({"main.py": "import package.child\n", "package/child.py": HELPER}, "namespace-package"),
     "child_overwrites_definition": ({"main.py": "import package.child\n", "package/__init__.py": "def child() -> int:\n    return 1\n", "package/child.py": HELPER}, "overwrite"),
@@ -48,11 +50,18 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "cast_mutable": {"main.py": 'from typing import cast as view\ndef fresh() -> list[int]:\n    print("create")\n    return [1]\nvalues = view("list[int]", fresh())\nview("list[int]", values).append(7)\nprint(values[1])\n'},
     "inferred_signature": {"main.py": IMPORT, "helper.py": "def f(value):\n    return value\n"},
     "library_effect": {"main.py": IMPORT, "helper.py": "print(7)\n" + HELPER},
     "library_state": {"main.py": "from helper import f, values\nprint(f(values[0]))\n", "helper.py": "values = [1]\n" + HELPER},
     "package_effect": {"main.py": "import package\n", "package/__init__.py": "print(1)\n"},
     "active_library_else": {"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    print(1)\nelse:\n    print(2)\n'},
+    "guard_before_import": {
+        "main.py": "import pkg.guard\n",
+        "pkg/__init__.py": "",
+        "pkg/guard.py": 'if __name__ != "pkg.guard":\n    raise ValueError("wrong module")\nfrom . import child\n',
+        "pkg/child.py": 'print("child initialized")\n',
+    },
 }
 
 
@@ -90,7 +99,7 @@ def main() -> None:
         build_flags += ["--target", args.target]
     compiler, runtime = str(args.compiler.resolve()), str(args.runtime.resolve())
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-imports-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-imports-") as directory:
         temporary = Path(directory)
         root = temporary / "project"
         shutil.copytree(FIXTURES, root)
@@ -132,6 +141,22 @@ def main() -> None:
                 require_success(result)
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
                 checks += 1
+
+        # A failing guard must run before the next import initializes its child.
+        guarded = temporary / "wrong_name"
+        write_files(guarded, {"main.py": "import helper\n", "child.py": 'print("child initialized")\n',
+                              "helper.py": 'if "helper" == __name__:\n    raise ValueError("wrong module")\nimport child\n'})
+        baseline = run([args.python, "-E", "-m", "main"], guarded)
+        assert baseline.returncode and not baseline.stdout
+        for level in args.opt_levels:
+            executable = temporary / f"wrong-name-{level}"
+            require_success(run([compiler, "build", str(guarded / "main.py"), "-o", str(executable),
+                                 "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                                 *(["--sanitize"] if args.sanitize else []), *build_flags], temporary))
+            result = run([str(executable)], temporary)
+            assert result.returncode and result.stdout == baseline.stdout, result
+            assert result.stderr.splitlines()[-1] == baseline.stderr.splitlines()[-1], result
+            checks += 1
 
         chain = temporary / "deep_imports"
         files = {f"m{i}.py": f"import m{i + 1}\n" for i in range(97)}

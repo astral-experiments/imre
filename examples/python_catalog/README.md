@@ -6,10 +6,10 @@ It turns the raw python-build-standalone release index into the complete JSON
 catalog used to select Python downloads. PyPy, GraalPy, and Pyodide's separate
 network finders are outside this example.
 
-From the repository root, after building Relar:
+From the repository root, after building Imre:
 
 ```sh
-target/release/relar build examples/python_catalog/__main__.py \
+target/release/imre build examples/python_catalog/__main__.py \
   --module-root examples --clang clang-18 -o /tmp/python-catalog
 /tmp/python-catalog examples/python_catalog/sample/python-build-standalone.ndjson.gz \
   /tmp/download-metadata.json
@@ -83,7 +83,7 @@ the unchanged finder and renderer. The typed port also runs on CPython, giving
 a separate measurement of the same streaming algorithm.
 
 The [Variant sort check](../../benchmarks/uv_variant_validate.py) compiles uv’s
-original `Variant` and `variant_sort_key`. It sorts the Relar list in place
+original `Variant` and `variant_sort_key`. It sorts the Imre list in place
 and reads the result through an alias. CPython supplies the expected order for
 all 6,110 downloads passed to the renderer, including ties within each rank. The renderer then filters 12 downloads for Python
 versions older than 3.8.
@@ -94,7 +94,7 @@ effects against that upstream oracle:
 ```sh
 python3.14 benchmarks/reference/python_catalog/build.py \
   --artifact-dir /tmp/catalog-rust --target-dir /tmp/catalog-rust-target \
-  --build-cache /tmp/relar-shared-build
+  --build-cache /tmp/imre-shared-build
 python3.14 benchmarks/catalog_validate.py --binary /tmp/python-catalog \
   --rust /tmp/catalog-rust/python-catalog-reference
 ```
@@ -118,10 +118,10 @@ arguments after `--compute`; Rust prevents loop hoisting with `black_box`.
 Repeated timings include startup, preload, and one final publication; dividing
 by rounds gives an amortized estimate. Controls are reported without subtraction.
 
-Pass `--compute` to the validator and supply the corresponding Relar/Codon
+Pass `--compute` to the validator and supply the corresponding Imre/Codon
 compute binaries. It verifies both the complete last output and length sum,
 including zero-round behavior, failures, and output aliasing. Codon's native JSON
 parser lacks duplicate-key hooks and its native integers are signed 64-bit, so
 the validator explicitly records those two adversarial-case exclusions for
-Codon. They remain checked for Relar, CPython, and Rust. The complete real catalog
+Codon. They remain checked for Imre, CPython, and Rust. The complete real catalog
 is required to match for every engine.

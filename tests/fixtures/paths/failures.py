@@ -39,6 +39,10 @@ for turn in range(4):
     except OSError:
         print("close reports failure")
     try:
+        Path("failing-output").write_bytes(b"buffered failure")
+    except OSError:
+        print("binary close reports failure")
+    try:
         for item in Path("missing").iterdir():
             print("unreachable missing")
     except FileNotFoundError:

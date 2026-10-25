@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/astral-sh/ruff",
+  "revision": "601192dfdb7ac4a636dec0d7e2daf14ba179cfc8",
+  "source": "python/ruff-ecosystem/ruff_ecosystem",
+  "files": {
+    "LICENSE": "2597d854122b77ddc71971564ca2350a37608575ce324adc5650a2b2051c8f18",
+    "ruff_ecosystem/__init__.py": "35c047cb90f747824a2e01a29dc3e0448280c96f30788b9413fb88db3fb45b4f",
+    "ruff_ecosystem/__main__.py": "8b94e57dfcf4b5baa5a1a808c4d1db0bf4b71c464ee7d557ad8a72c177e05b7a",
+    "ruff_ecosystem/check.py": "6798611fe0b5a6d004c265f6e7d02020f66a01a5c78f8b7e1c361641c963f811",
+    "ruff_ecosystem/cli.py": "4b08bc7146bdbc739652ee32dbad05feb9bff26ce9c49c115774ff6b999e968b",
+    "ruff_ecosystem/defaults.py": "a343b7d2f3fb3171e71840f59bea2c7397815ce78a5bd726d84b18ac8e9d12f4",
+    "ruff_ecosystem/format.py": "47b34b0e680506d992b78e2972ba4ebf253011e3c35da7551bd0a6c142062df4",
+    "ruff_ecosystem/main.py": "43105c93e7b21de1ba4cc19cdd49aa376db2743bac5a8cffdf7cf65602a34d76",
+    "ruff_ecosystem/markdown.py": "3e6b036eac35212d22c8114ff7c3570789c349cc7bd35563a4402c03832bf10e",
+    "ruff_ecosystem/projects.py": "8e2727bfd1f741b8eecab6af16967ecfacdcf5a21f7a27344edd6d2776bf3f25",
+    "ruff_ecosystem/types.py": "fbd17c16d60d743f2614f6ecce3f47d22886c5c745c03a71d84151c9d1a7ea76"
+  }
+}

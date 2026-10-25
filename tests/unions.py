@@ -21,6 +21,8 @@ REJECTED = {
     "invariant_lists": "texts: list[str] = []\nvalues: list[str | bytes] = texts\n",
     "invariant_dicts": "texts: dict[str, str] = {}\nvalues: dict[str, str | bytes] = texts\n",
     "wrong_list_element": "values: list[str | bytes] = [1]\n",
+    "wrong_union_list_element": "value: str | list[str] | None = [1]\n",
+    "invariant_union_list_member": "items: list[int] = []\nvalue: str | list[str] = items\n",
     "wrong_dictionary_value": "values: dict[str, str | bytes] = {'bad': 1}\n",
     "union_key": "values: dict[str | bytes, int] = {}\n",
     "union_set_element": "values: set[str | bytes] = set()\n",

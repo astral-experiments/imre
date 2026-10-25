@@ -84,7 +84,7 @@ def collect_projects(capture_directory=None, workspace=None):
 if '--capture-dir' in flags:
     capture_directory = Path(flags['--capture-dir'])
     capture_directory.mkdir()
-    with tempfile.TemporaryDirectory(dir=capture_directory, prefix='.relar-capture-') as name:
+    with tempfile.TemporaryDirectory(dir=capture_directory, prefix='.imre-capture-') as name:
         workspace = Path(name)
         staged_manifest = workspace / 'projects.json'
         staged_manifest.write_text(manifest_text, encoding='utf-8')
@@ -106,12 +106,12 @@ role = 'old' if Path(sys.executable).name.endswith('-old') else 'new'
 config = json.loads(Path('producer.json').read_text())
 assert os.environ['TY_MEMORY_REPORT'] == 'json'
 assert os.environ['TY_MAX_PARALLELISM'] == '1'
-assert os.environ['RELAR_PROCESS_SENTINEL'] == 'inherited'
+assert os.environ['IMRE_PROCESS_SENTINEL'] == 'inherited'
 assert sys.argv[3:] == config.get('extra_args', [])
 with Path('events.log').open('a') as events:
     events.write(role + '\\n')
 if role == 'old' and config.get('workspace_symlink'):
-    workspace, = Path('../captures').glob('.relar-capture-*')
+    workspace, = Path('../captures').glob('.imre-capture-*')
     workspace.rmdir()
     workspace.symlink_to('../workspace-target', target_is_directory=True)
     Path('workspace-name.txt').write_text(workspace.name, encoding='utf-8')
@@ -138,7 +138,7 @@ def environment():
     """Use an explicit environment without recording or passing host secrets."""
     return {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
             "PYTHONHASHSEED": "0", "PYTHON_JIT": "0", "PYTHONPATH": "", "PYTHONDONTWRITEBYTECODE": "1",
-            "RELAR_PROCESS_SENTINEL": "inherited",
+            "IMRE_PROCESS_SENTINEL": "inherited",
             "TY_MEMORY_REPORT": "overridden", "TY_MAX_PARALLELISM": "overridden",
             "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"}
 
@@ -295,7 +295,7 @@ def cases(old_ty, new_ty, producer):
     ):
         yield change(make("prepared-manifest-" + label), manifest=manifest), "ValueError", True, {}
     yield change(make("prepared-manifest-json"), files={"projects.json": b"{"}), "ValueError", True, {}
-    for label, replacement, error in (("relative-executable", "./ty", "ValueError"), ("missing-executable", "/no-such-relar-ty", "FileNotFoundError"),
+    for label, replacement, error in (("relative-executable", "./ty", "ValueError"), ("missing-executable", "/no-such-imre-ty", "FileNotFoundError"),
                                        ("nonexecutable", str(producer), "PermissionError")):
         value = make("prepared-" + label)
         arguments = list(value.arguments)
@@ -424,7 +424,7 @@ def apply_effect_witnesses(value, expected, witnesses):
     workspace = witnesses["failed_cleanup_workspace"]
     assert set(workspace) == {"name", "symlink_target"}
     name = workspace["name"]
-    assert re.fullmatch(r"\.relar-capture-[A-Za-z0-9_]+", name)
+    assert re.fullmatch(r"\.imre-capture-[A-Za-z0-9_]+", name)
     assert workspace["symlink_target"] == "../workspace-target"
     expected["files"]["project-0000/workspace-name.txt"] = name.encode()
     expected["symlinks"] = {"captures/" + name: workspace["symlink_target"]}
@@ -436,7 +436,7 @@ def effect_witnesses(value, expected, directory):
         return {}
     filename = "project-0000/workspace-name.txt"
     name = (directory / filename).read_text(encoding="utf-8")
-    assert re.fullmatch(r"\.relar-capture-[A-Za-z0-9_]+", name)
+    assert re.fullmatch(r"\.imre-capture-[A-Za-z0-9_]+", name)
     workspace = directory / "captures" / name
     assert workspace.is_symlink() and workspace.readlink() == Path("../workspace-target")
     witnesses = {"failed_cleanup_workspace": {"name": name, "symlink_target": "../workspace-target"}}
