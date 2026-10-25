@@ -56,7 +56,7 @@ pub(crate) enum Type {
     Path,
     PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
-    CompletedProcess(ProcessCapture),
+    CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
     Popen(ProcessCapture, bool, usize),
     /// Async process handle, with bits for the captured stdout and stderr slots.
@@ -174,8 +174,10 @@ impl std::fmt::Display for Type {
             Self::Path => "pathlib.Path",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
-            Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
-            Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
+            Self::CompletedProcess(capture, _) if capture.text => {
+                "subprocess.CompletedProcess[str]"
+            }
+            Self::CompletedProcess(..) => "subprocess.CompletedProcess[bytes]",
             Self::Popen(..) => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
@@ -1174,6 +1176,9 @@ pub(crate) enum ProcessOperation {
     },
     Run {
         streams: u32,
+        validation: u32,
+        errors: u8,
+        timed: bool,
     },
     Popen {
         streams: u32,
@@ -1279,7 +1284,7 @@ pub(crate) enum InstanceType {
 impl InstanceType {
     pub(crate) fn accepts(self, ty: Type) -> bool {
         match self {
-            Self::Exact(Type::CompletedProcess(_)) => matches!(ty, Type::CompletedProcess(_)),
+            Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))

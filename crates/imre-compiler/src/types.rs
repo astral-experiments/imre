@@ -95,7 +95,9 @@ impl Types {
                 matches!(storage.shapes.get(id), Some(Shape::DirectoryContext(_)))
             }
             Type::AsyncProcess(bits) => bits <= 3,
-            Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
+            Type::Popen(_, _, id) | Type::CompletedProcess(_, Some(id)) => {
+                matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_)))
+            }
             Type::Int
             | Type::Float
             | Type::BuiltinClass
@@ -115,7 +117,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
-            | Type::CompletedProcess(_)
+            | Type::CompletedProcess(_, None)
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
@@ -464,7 +466,7 @@ impl Types {
             | Type::TextIO
             | Type::Path
             | Type::PurePath(_)
-            | Type::CompletedProcess(_)
+            | Type::CompletedProcess(..)
             | Type::EventLoop
             | Type::Coroutine(_)
             | Type::Task(_)
@@ -588,6 +590,16 @@ impl Types {
             unreachable!("Popen carries its original command type")
         };
         command
+    }
+
+    /// An unqualified CompletedProcess keeps its original list-of-strings ABI.
+    pub(crate) fn completed_command(&self, id: Option<usize>) -> Type {
+        id.map_or_else(|| self.list(Type::Str), |id| self.command_type(id))
+    }
+
+    pub(crate) fn completed(&self, capture: crate::ir::ProcessCapture, command: Type) -> Type {
+        let id = (command != self.list(Type::Str)).then(|| self.process_args(command));
+        Type::CompletedProcess(capture, id)
     }
 
     pub(crate) fn directory_context(&self, result: Type) -> Type {
