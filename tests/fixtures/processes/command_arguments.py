@@ -10,16 +10,16 @@ p = subprocess.Popen(argv, stdout=subprocess.PIPE)
 print(repr(p.args))
 print(repr(p.communicate()[0]))
 print(subprocess.call(("/bin/sh", "-c", "exit 18")))
-print(subprocess.check_call((b"/bin/true",)))
-print(subprocess.call(b"/bin/true"))
-print(subprocess.call(Path("/bin/true")))
+print(subprocess.check_call((b"directory/exit-zero",)))
+print(subprocess.call(b"directory/exit-zero"))
+print(subprocess.call(Path("directory/exit-zero")))
 try:
-    subprocess.check_call("/bin/false")
+    subprocess.check_call("directory/exit-one")
 except subprocess.CalledProcessError as string_error:
     print(str(string_error))
     print(string_error.cmd)
 try:
-    subprocess.check_call((Path("/bin/false"),))
+    subprocess.check_call((Path("directory/exit-one"),))
 except subprocess.CalledProcessError as tuple_error:
     print(str(tuple_error))
     print(repr(tuple_error.cmd))
@@ -28,7 +28,7 @@ try:
 except subprocess.TimeoutExpired as timeout_error:
     print(str(timeout_error))
     print(repr(timeout_error.cmd))
-aliased = [b"/bin/true"]
+aliased = [b"directory/exit-zero"]
 child = subprocess.Popen(aliased)
 aliased.append(b"after launch")
 print(repr(child.args))
