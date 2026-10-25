@@ -25,10 +25,26 @@ pub(super) fn builtin_type(name: &str) -> Option<Expr> {
             | "tuple"
             | "type"
     )
-    .then(|| Expr {
+    .then(|| class_value(name))
+}
+
+/// Class objects use the pooled name for identity, including its module for
+/// types outside builtins. This does not require constructing an instance.
+pub(super) fn class_value(name: &str) -> Expr {
+    Expr {
         ty: Type::BuiltinClass,
         kind: ExprKind::Builtin(Builtin::ClassNameView, vec![unpacking::string(name)]),
-    })
+    }
+}
+
+/// Both annotations describe the same item interface; their class values differ.
+pub(super) fn sequence_annotation(binding: Option<Binding>) -> bool {
+    matches!(
+        binding,
+        Some(Binding::Intrinsic(
+            Intrinsic::Sequence | Intrinsic::NominalClass("collections.abc.Sequence")
+        ))
+    )
 }
 
 pub(super) fn type_name(value: Expr) -> Expr {
@@ -145,6 +161,30 @@ fn symbolic(value: &ast::Expr) -> bool {
 }
 
 impl Checker<'_> {
+    /// Handle class objects from the sealed builtin domain. Fixed-layout
+    /// source classes use their own class dispatch.
+    pub(super) fn nominal_issubclass(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        let [child, parent] = call.arguments.args.as_ref() else {
+            return Ok(None);
+        };
+        if self.class_reference(child).is_some() || self.class_reference(parent).is_some() {
+            return Ok(None);
+        }
+        let child = self.expr(child)?;
+        let parent = self.expr(parent)?;
+        if child.ty != Type::BuiltinClass || parent.ty != Type::BuiltinClass {
+            return Ok(None);
+        }
+        self.reject_builtin_keywords(call)?;
+        Ok(Some(Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::ClassIsSubclass, vec![child, parent]),
+        }))
+    }
+
     pub(super) fn annotation_type_repr(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let [arg] = call.arguments.args.as_ref() else {
