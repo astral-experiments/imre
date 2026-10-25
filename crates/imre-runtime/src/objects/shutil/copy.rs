@@ -36,9 +36,8 @@ impl Name {
 
     fn path(&self) -> &Path {
         match self {
-            Self::Text(text) => Path::new(text.as_str()),
+            Self::Text(text) | Self::Path(text) => Path::new(text.as_str()),
             Self::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
-            Self::Path(text) => Path::new(text.as_str()),
         }
     }
 
@@ -142,10 +141,7 @@ fn copyfile(src: &Name, dst: &Name, follow: bool) -> Result<()> {
             let target = if matches!(src, Name::Bytes(_)) {
                 Filename::Bytes(Rc::new(target.into_os_string().into_vec()))
             } else {
-                match paths::path_utf8(target.into_os_string()) {
-                    Ok(s) => Filename::Str(Rc::new(s)),
-                    Err(error) => return error,
-                }
+                Filename::from_fs_text(target.into_os_string())
             };
             errno_with_filenames(e, Some(target), Some(dst.filename()))
         });
