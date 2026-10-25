@@ -51,7 +51,7 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-This baseline was executed with Imre compiler/runtime source `eb9cadb6079dd74bbcab6456ec0bdc51ada76bf9`. The pinned suite has no companion module. The two shorter `native-O*.json`
+This baseline was executed with Imre compiler/runtime source `a97ca870c41b88ccfcbf1e2fa0db0dbe1c66370b`. The pinned suite has no companion module. The two shorter `native-O*.json`
 files retain their original records and are not additional test occurrences.
 
 The versioned gate loads the original suite and runs its selected methods
@@ -80,4 +80,4 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/fu
 
 In the second row the original parent sets `PYTHONIOENCODING=""` for the child; it does not pass its own `-X utf8` to the child. CPython executes the original parent, comparison to `os.fsencode`, and fixture. Imre compiles only the child source. To reproduce either setting, use the gate command above with `--locale-audit /tmp/locale.json` in place of `--result`; add `-X utf8` to the host for the second row.
 
-`test.test_sys.SysModuleTest.test_orig_argv` launches `<executable> -I -X utf8 -c CODE arg` and expects two printed lists. The stock child prints `['-c', 'arg']` and the entire original invocation. Imre's command dispatcher rejects the first option, prints usage to stderr, and exits 1 with empty stdout. The case stays **failed** at O0/O3: neither child read nor the parent's final assertion ran. The [per-occurrence report](evidence-linux.json) includes the exact child source hash, the stock control, and independent checks compiling those same bytes as an executable and through `imre run`. In both supported modes the two lists exactly match the actual program arguments and launcher invocation. Those checks do not exercise `-c` or receive upstream credit. [#302](https://github.com/astral-sh/imre/pull/302) contains a proposed command dispatcher on its wheel branch; its parser at `797a733` accepts `-I`, `-B`, and `-c` and still rejects `-X`.
+`test.test_sys.SysModuleTest.test_orig_argv` launches `<executable> -I -X utf8 -c CODE arg` and asserts two printed lists. In [the prior audit](https://github.com/astral-sh/imre/pull/715), option dispatch failed before either sys read. Imre now compiles and runs those exact command bytes and returns 0 with empty stderr. At O0/O3 the native child reports `['-c', 'arg']` and the entire original invocation. The original parent comparison, subprocess fixture, and teardown run on CPython. The [per-occurrence report](evidence-linux.json) records both subjects, the child hash, the two native reads, and independent file and `imre run` controls. The stock test ID still occurs once per level.
