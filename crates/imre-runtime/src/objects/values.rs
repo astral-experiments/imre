@@ -6,6 +6,8 @@ use std::cmp::Ordering;
 use std::fmt::Write;
 use std::rc::Rc;
 
+use num_traits::ToPrimitive;
+
 use super::records::descriptor;
 use super::words::{NULLABLE, WordKind};
 use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
@@ -197,7 +199,14 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                         let (left, left_kind) = super::unions::member(left);
                         let (right, right_kind) = super::unions::member(right);
                         if left_kind != right_kind {
-                            Comparison::Done(false)
+                            let numbers = match (left_kind.base(), right_kind.base()) {
+                                (1, 2) => Some((left, right)),
+                                (2, 1) => Some((right, left)),
+                                _ => None,
+                            };
+                            Comparison::Done(numbers.is_some_and(|(flag, integer)| {
+                                Int::borrow(integer).big().to_usize() == Some(flag)
+                            }))
                         } else {
                             Comparison::Child {
                                 left,
@@ -242,6 +251,7 @@ unsafe fn scalar_equal(left: usize, right: usize, kind: WordKind) -> bool {
     // SAFETY: the shared kind selects the exact scalar or rooted allocation.
     unsafe {
         match raw & !NULLABLE {
+            12 => super::annotations::equal(left, right),
             0 | 1 | 10 => left == right,
             2 => integer_equal(left, right),
             3 | 11 => *(left as *const Str) == *(right as *const Str),
@@ -309,10 +319,16 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
+                    super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
+                ),
                 (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
                     object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)
                 }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
+                    left.compare_entry(right, position)
+                }
+                (Storage::Deque(left), Storage::Deque(right)) => {
                     left.compare_entry(right, position)
                 }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
@@ -392,7 +408,10 @@ impl ReprTarget for ReprWriter<'_> {
 pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
     let mut output = String::new();
     // SAFETY: the caller supplies the exact checked representation and root.
-    unsafe { write_repr(&mut output, word, WordKind::new(kind)) };
+    if unsafe { try_write_repr(&mut ReprWriter(&mut output), word, WordKind::new(kind)) }.is_err() {
+        super::exceptions::Error::allocation().raise();
+        return std::ptr::null();
+    }
     if super::exceptions::imre_error_pending() != 0 {
         return std::ptr::null();
     }
@@ -400,15 +419,8 @@ pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
 }
 
 /// # Safety
-/// The word and all descendants are rooted with the supplied representation;
-/// no runtime mutation or user callback can overlap formatting.
-pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind) {
-    // SAFETY: the caller roots the word and all its descendants throughout formatting.
-    if unsafe { try_write_repr(&mut ReprWriter(output), word, kind) }.is_err() {
-        super::exceptions::Error::allocation().raise();
-    }
-}
-
+/// The word and its descendants stay rooted under the supplied representation
+/// without overlapping mutation or user callbacks.
 pub(super) unsafe fn try_write_repr(
     output: &mut ReprWriter<'_>,
     word: usize,
@@ -436,6 +448,9 @@ pub(super) unsafe fn try_write_repr(
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::ObjectValue(field) => {
+                            Ok(Some(ReprTask::Word(field.word, field.kind)))
+                        }
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>")?;
                             Ok(None)
@@ -593,6 +608,7 @@ unsafe fn write_scalar(
         match raw & !NULLABLE {
             0 => output.write_str("None")?,
             10 => super::string_enums::write_repr(output, word)?,
+            12 => super::annotations::write_repr(output, word)?,
             11 => write!(output, "<class '{}'>", *(word as *const Str))?,
             1 => {
                 let value = if raw & NULLABLE != 0 { word - 1 } else { word };
@@ -851,11 +867,12 @@ mod tests {
                 chain.push(parent);
             }
             let mut output = String::new();
-            write_repr(
-                &mut output,
+            try_write_repr(
+                &mut ReprWriter(&mut output),
                 *chain.last().unwrap() as usize,
                 WordKind::new(5),
-            );
+            )
+            .unwrap();
             assert_eq!(output, "[".repeat(chain.len()) + &"]".repeat(chain.len()));
             for value in chain.into_iter().rev() {
                 imre_object_release(value);

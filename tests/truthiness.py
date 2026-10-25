@@ -12,7 +12,6 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "truthiness"
 REJECTED = {
     "unrelated_and_result": 'value = 1 and "text"\n',
     "unrelated_or_result": 'value = 1 or "text"\n',
-    "bool_int_result": "value = True and 1\n",
     "different_container_results": 'value = [1] or ["text"]\n',
     "different_optional_results": "def bad(left: int | None, right: str | None) -> int | None:\n    return left or right\n",
     "wrong_contextual_empty": "values: list[str] = [] or [1]\n",
