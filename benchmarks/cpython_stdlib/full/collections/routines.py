@@ -46,6 +46,19 @@ class NativeCase:
             if key not in right or left[key] != right[key]:
                 raise AssertionError("different entries")
 """
+
+# The C OrderedDict fixture supplies its concrete constructor as a callable.
+# It never asks for the class identity or subclasses; those variants are separate.
+ORDERED_SETITEM = """from collections import OrderedDict as ConcreteOrderedDict
+
+class NativeCase:
+    def OrderedDict(self, pairs: list[tuple[str, int]]) -> ConcreteOrderedDict[str, int]:
+        return ConcreteOrderedDict(pairs)
+
+    def assertEqual(self, left: list[tuple[str, int]], right: list[tuple[str, int]]) -> None:
+        if left != right:
+            raise AssertionError("different ordered entries")
+"""
 EMPTY = {f"test.test_deque.TestSequence.{method}" for method in
          ("test_getitem", "test_getslice", "test_subscript")}
 
@@ -170,6 +183,14 @@ def main():
                 if case_id == f"test.test_collections.TestCounter.{method}" and method in COUNTER_OPERATIONS:
                     fixture = UNARY_ASSERTIONS if method == "test_unary" else assertion_fixture(method, "NativeCase")
                     operation = ("imre", COUNTER_OPERATIONS[method])
+                elif case_id == "test.test_ordered_dict.CPythonOrderedDictTests.test_setitem":
+                    from test.test_ordered_dict import c_coll
+
+                    if type(case).OrderedDict is not c_coll.OrderedDict:
+                        raise ValueError(f"unexpected constructor for {case_id}")
+                    fixture = ORDERED_SETITEM
+                    operation = ("imre", "Native OrderedDict constructs ordered pairs, replaces an existing key, "
+                                 "inserts a new key and iterates items in insertion order")
                 elif case_id in EMPTY:
                     if len(node.body) != 1 or not isinstance(node.body[0], ast.Pass):
                         raise ValueError(f"{case_id} is no longer an empty upstream test")
