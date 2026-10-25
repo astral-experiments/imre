@@ -244,6 +244,15 @@ impl Checker<'_> {
                     )));
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "returncode"
+                {
+                    let value = self.coerce(value, self.types.optional(Type::Int), target)?;
+                    return Ok(Statement::Expr(builtin(
+                        Type::None,
+                        Builtin::Process(ir::ProcessOperation::PopenSetStatus),
+                        vec![value, receiver],
+                    )));
+                }
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.

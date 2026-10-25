@@ -438,6 +438,17 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
+            ProcessOperation::PopenSetStatus => {
+                let control = self.instruction(format!(
+                    "call ptr @imre_popen_control(ptr {})",
+                    args[1].value.operand
+                ));
+                self.line(format!(
+                    "call void @imre_child_set_status(ptr {control}, i64 {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             ProcessOperation::PopenCommunicate { text } => {
                 let layout = self
                     .output
