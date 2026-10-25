@@ -63,6 +63,9 @@ jobs:
           failed=0
           for opt in 0 3; do
             python3 -B "$dir/native.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" --result "$RUNNER_TEMP/itertools-O$opt.json" || failed=1
+            if test -f "$RUNNER_TEMP/itertools-O$opt.json"; then
+              python3 -B -c 'import json,sys; print("ITERTOOLS_STANDALONE="+json.dumps(json.load(open(sys.argv[1])),separators=(",",":")))' "$RUNNER_TEMP/itertools-O$opt.json"
+            fi
             for exercise in repeat sources tee batched chain compress accumulate predicates; do
               src="$dir/$exercise.py"
               if target/debug/imre build "$src" --opt-level "$opt" --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/iterator" && "$RUNNER_TEMP/iterator" "$RUNNER_TEMP/itertools-input" > "$RUNNER_TEMP/iterator.native" && python3 -B "$src" "$RUNNER_TEMP/itertools-input" > "$RUNNER_TEMP/iterator.reference" && diff -u "$RUNNER_TEMP/iterator.reference" "$RUNNER_TEMP/iterator.native"; then
@@ -73,6 +76,14 @@ jobs:
             done
           done
           python3 -B "$dir/batched_allocation.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 || failed=1
+          exit "$failed"
+      - name: Compare ordinary iterable and restricted source-generator fixtures
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          failed=0
+          for suite in iterables iterator_pipelines; do
+            python3 -B "tests/$suite.py" --compiler target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --opt-levels 0 3 || failed=1
+          done
           exit "$failed"
       - name: Check native tuple ownership and all compiler/runtime unit tests
         if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
