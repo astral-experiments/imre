@@ -362,6 +362,12 @@ fn os_error_kind(kind: io::ErrorKind) -> Kind {
 
 /// Format a POSIX errno without a filename, as in OSError(errno, strerror).
 pub(crate) fn errno_error(error: io::Error) -> Error {
+    if let Some(blocked) = error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<crate::BlockedWrite>())
+    {
+        return Error::blocked_write(blocked.errno, blocked.accepted);
+    }
     errno_with_filename(error, None)
 }
 

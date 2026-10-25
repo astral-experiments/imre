@@ -84,6 +84,7 @@ pub(crate) enum Kind {
     ImportError = 41,
     ModuleNotFoundError = 42,
     RecursionError = 43,
+    BlockingIOError = 44,
 }
 
 impl Kind {
@@ -141,6 +142,7 @@ impl Kind {
             41 => Self::ImportError,
             42 => Self::ModuleNotFoundError,
             43 => Self::RecursionError,
+            44 => Self::BlockingIOError,
             _ => return None,
         })
     }
@@ -195,6 +197,7 @@ impl Kind {
             Self::ImportError => "ImportError",
             Self::ModuleNotFoundError => "ModuleNotFoundError",
             Self::RecursionError => "RecursionError",
+            Self::BlockingIOError => "BlockingIOError",
         }
     }
 
@@ -244,6 +247,7 @@ impl Kind {
                 Self::OSError
                     | Self::UnsupportedOperation
                     | Self::FileNotFoundError
+                    | Self::BlockingIOError
                     | Self::PermissionError
                     | Self::IsADirectoryError
                     | Self::NotADirectoryError
@@ -487,7 +491,19 @@ impl Error {
             paths.append_message(&mut message);
             paths
         });
-        Self::errno_arguments(kind, errno, description, message, os_paths)
+        Self::errno_arguments(kind, errno, description, message, os_paths, None)
+    }
+
+    pub(super) fn blocked_write(errno: i32, accepted: usize) -> Self {
+        let description = crate::BlockedWrite::DESCRIPTION;
+        Self::errno_arguments(
+            Kind::BlockingIOError,
+            errno,
+            description,
+            format!("[Errno {errno}] {description}"),
+            None,
+            Some(accepted),
+        )
     }
 
     fn errno_arguments(
@@ -496,16 +512,20 @@ impl Error {
         description: &str,
         message: String,
         os_paths: Option<Box<os::Filenames>>,
+        accepted: Option<usize>,
     ) -> Self {
-        let args = [
+        let mut args = smallvec::smallvec![
             Self::int_arg(crate::Int::small(i64::from(errno)).unwrap()),
             Self::string_arg(description),
         ];
+        if let Some(count) = accepted {
+            args.push(Self::int_arg(crate::Int::from_usize(count)));
+        }
         Self {
             kind,
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
                 message: Rc::new(message.into()),
-                args: args.into_iter().collect(),
+                args,
                 os_paths,
             }))),
             cause: None,

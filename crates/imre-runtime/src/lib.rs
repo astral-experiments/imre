@@ -384,6 +384,38 @@ struct BinaryOutput<W> {
     written: usize,
 }
 
+/// A buffered write can accept bytes into the kernel and its own buffer before it stalls.
+#[derive(Debug)]
+struct BlockedWrite {
+    errno: i32,
+    accepted: usize,
+}
+
+impl BlockedWrite {
+    const DESCRIPTION: &'static str = "write could not complete without blocking";
+
+    fn error(error: io::Error, accepted: usize) -> io::Error {
+        if error.kind() != io::ErrorKind::WouldBlock {
+            return error;
+        }
+        io::Error::new(
+            io::ErrorKind::WouldBlock,
+            Self {
+                errno: error.raw_os_error().unwrap_or(libc::EAGAIN),
+                accepted,
+            },
+        )
+    }
+}
+
+impl std::fmt::Display for BlockedWrite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(Self::DESCRIPTION)
+    }
+}
+
+impl std::error::Error for BlockedWrite {}
+
 /// Writes directly to fd 1 so the native binary buffer observes descriptor errors.
 struct RawStdout;
 
@@ -471,15 +503,16 @@ impl<W: Write> Write for Output<W> {
 impl<W: Write> BinaryOutput<W> {
     #[cold]
     fn write_all_slow(&mut self, mut bytes: &[u8]) -> io::Result<()> {
+        let supplied = bytes.len();
         if let Err(error) = self.flush_buffer() {
-            return self.buffer_after_error(bytes, error);
+            return self.buffer_after_error(bytes, 0, error);
         }
         while !bytes.is_empty() && bytes.len() >= self.buffer.capacity() {
             match self.stdout.write(bytes) {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
                 Ok(count) => bytes = &bytes[count..],
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return self.buffer_after_error(bytes, error),
+                Err(error) => return self.buffer_after_error(bytes, supplied - bytes.len(), error),
             }
         }
         self.buffer.extend_from_slice(bytes);
@@ -488,7 +521,12 @@ impl<W: Write> BinaryOutput<W> {
 
     /// After a nonblocking write stalls, keep as much of the new input as fits
     /// behind the unwritten portion of the previous buffer.
-    fn buffer_after_error(&mut self, bytes: &[u8], error: io::Error) -> io::Result<()> {
+    fn buffer_after_error(
+        &mut self,
+        bytes: &[u8],
+        sent: usize,
+        error: io::Error,
+    ) -> io::Result<()> {
         if error.kind() != io::ErrorKind::WouldBlock {
             return Err(error);
         }
@@ -497,7 +535,7 @@ impl<W: Write> BinaryOutput<W> {
         let count = bytes.len().min(self.buffer.capacity() - self.buffer.len());
         self.buffer.extend_from_slice(&bytes[..count]);
         if count < bytes.len() {
-            return Err(error);
+            return Err(BlockedWrite::error(error, sent + count));
         }
         Ok(())
     }
@@ -519,13 +557,7 @@ impl<W: Write> BinaryOutput<W> {
 
 impl<W: Write> Write for BinaryOutput<W> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if bytes.len() > self.buffer.capacity() - self.buffer.len() {
-            self.flush_buffer()?;
-        }
-        if bytes.len() >= self.buffer.capacity() {
-            return self.stdout.write(bytes);
-        }
-        self.buffer.extend_from_slice(bytes);
+        self.write_all(bytes)?;
         Ok(bytes.len())
     }
 
@@ -541,8 +573,9 @@ impl<W: Write> Write for BinaryOutput<W> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.flush_buffer()?;
-        self.stdout.flush()
+        self.flush_buffer()
+            .and_then(|()| self.stdout.flush())
+            .map_err(|error| BlockedWrite::error(error, 0))
     }
 }
 
