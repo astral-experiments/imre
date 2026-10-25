@@ -9,8 +9,16 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "registration_errors": [[], ["const"], ["invalid"], ["both"], ["effects"], ["interrupt"]],
     "class_constants": [[], ["--as-class"], ["--optional"], ["--as-class", "--optional"],
                         ["--help"], ["--as-class=value"], ["--text", "<class 'tuple'>"]],
+    "boolean_options": [
+        [], ["--help"], ["-x"], ["-xxv"], ["--fe"], ["--no-f"], ["--no-q"], ["--no"],
+        ["--no-extra", "--extra"], ["--feature", "--no-feature"], ["--quiet=no"],
+        ["--no-extra=x"], ["-vx", "--no-quiet"], ["--no-f", "-x", "--no-e"],
+        ["prefix"], ["prefix", "+ββ"], ["prefix", "++m", "--no-e"],
+        ["prefix", "++no-mode"], ["prefix", "/v"], ["prefix", "--help"],
+    ],
     "numbers": [
         [], ["--help"], ["-i", "１２_３"], ["-i", "123456789012345678901234567890"],
         ["-i", "0" * 4301], ["-i", "\x1c34\x1f"],

@@ -90,3 +90,43 @@ with open("redirect-output", "wb") as higher:
         subprocess.Popen([missing], stdout=higher)
     except FileNotFoundError as failure:
         print(same_filename(failure, missing))
+
+large_buffer = 2**65
+exit_zero = ["/bin/sh", "-c", "exit 0"]
+print(subprocess.Popen(exit_zero, bufsize=large_buffer).wait())
+print(subprocess.Popen(exit_zero, stdout=subprocess.DEVNULL, bufsize=-large_buffer).wait())
+try:
+    subprocess.Popen([missing], stdout=subprocess.PIPE, bufsize=large_buffer)
+except OverflowError as overflow:
+    print(str(overflow))
+try:
+    subprocess.Popen(exit_zero, stdout=destination, stderr=subprocess.PIPE, bufsize=large_buffer)
+except ValueError as closed:
+    print(str(closed))
+try:
+    subprocess.Popen(["/bin/bad\x00command"], stdin=subprocess.STDOUT)
+except ValueError:
+    print("embedded NUL in the command")
+
+try:
+    subprocess.Popen(exit_zero, stdin=36893488147419103232, stdout=destination)
+except ValueError as closed:
+    print(str(closed))
+for executable in ("/bin/sh", "/bin/bad\x00command"):
+    try:
+        subprocess.Popen([executable], stdin=36893488147419103232)
+    except OverflowError:
+        print("oversized descriptor")
+    except ValueError:
+        print("invalid executable")
+    try:
+        subprocess.Popen([executable], stdin=36893488147419103232, cwd=".")
+    except OverflowError:
+        print("oversized descriptor with cwd")
+
+empty: list[str] = []
+try:
+    print(subprocess.Popen(empty, executable="/bin/sh", stdin=subprocess.DEVNULL).wait())
+except ValueError as invalid:
+    print(str(invalid))
+print(subprocess.Popen(empty, executable="/bin/sh", stdin=subprocess.DEVNULL, cwd=".").wait())

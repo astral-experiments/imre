@@ -1,0 +1,211 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "method": "test.test_json.test_decode.TestDecode.test_keys_reuse",
+  "method_sha256": "1a1e5a4bffdfb1845de2a717074560fc1c330be8d1fb7c918c5d2a84edd2d22f",
+  "fixture": "CPython module, class, instance, unmodified method, sorted and identity assertions",
+  "operation": "Imre json.loads and a live JSONDecoder instance; key owner comparisons in Imre",
+  "distinct-owner-negative-control": "passed",
+  "compile-only-components": {
+    "pass module loads": {
+      "source": "import json\nfrom typing import Any, Callable\nload: Callable[[str], list[dict[str, Any]]] = json.loads\nprint(repr(load('[]')))\n",
+      "exit": 1,
+      "diagnostic": "<case>:3:47: Imre: name is not a local value; globals and first-class functions are unsupported"
+    },
+    "pass bound decoder decode": {
+      "source": "import json\nfrom typing import Any, Callable\ndecoder = json.JSONDecoder()\nload: Callable[[str], list[dict[str, Any]]] = decoder.decode\nprint(repr(load('[]')))\n",
+      "exit": 1,
+      "diagnostic": "<case>:4:47: Imre: expected a fixed bound method"
+    },
+    "sort decoded object": {
+      "source": "import json\nrows = json.loads('[{\"b_key\": 1, \"a_key\": 2}]')\nprint(sorted(rows[0]))\n",
+      "exit": 1,
+      "diagnostic": "<case>:3:7: Imre: iteration requires a concrete container, homogeneous tuple, string, bytes, or range"
+    }
+  },
+  "levels": {
+    "0": {
+      "repr": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_operations": [],
+          "native_key_owners": []
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_operations": [],
+          "native_key_owners": []
+        }
+      },
+      "native-owners": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "pass",
+          "reason": null,
+          "repr_calls": [],
+          "native_operations": [
+            "json.loads",
+            "json.decoder.JSONDecoder",
+            "JSONDecoder.decode",
+            "JSONDecoder.memo"
+          ],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "pass",
+          "reason": null,
+          "repr_calls": [],
+          "native_operations": [
+            "json.loads",
+            "json.decoder.JSONDecoder",
+            "JSONDecoder.decode",
+            "JSONDecoder.memo"
+          ],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        }
+      },
+      "native-body-attempts": {
+        "general": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:6:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        "unshadowed-module": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:16:34: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+        }
+      }
+    },
+    "3": {
+      "repr": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_operations": [],
+          "native_key_owners": []
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_operations": [],
+          "native_key_owners": []
+        }
+      },
+      "native-owners": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "pass",
+          "reason": null,
+          "repr_calls": [],
+          "native_operations": [
+            "json.loads",
+            "json.decoder.JSONDecoder",
+            "JSONDecoder.decode",
+            "JSONDecoder.memo"
+          ],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "pass",
+          "reason": null,
+          "repr_calls": [],
+          "native_operations": [
+            "json.loads",
+            "json.decoder.JSONDecoder",
+            "JSONDecoder.decode",
+            "JSONDecoder.memo"
+          ],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        }
+      },
+      "native-body-attempts": {
+        "general": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:6:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+        },
+        "unshadowed-module": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:16:34: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+        }
+      }
+    }
+  }
+}

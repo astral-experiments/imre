@@ -253,6 +253,15 @@ impl Checker<'_> {
                 op == ast::CmpOp::IsNot,
             ));
         }
+        if let (Type::Class(a), Type::Class(b)) = (left.ty, right.ty)
+            && self.native_mock(a)
+            && self.native_mock(b)
+        {
+            return Ok(Self::identity_result(
+                vec![self.mock_node(left, a), self.mock_node(right, b)],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if !(types
             .iter()
             .all(|ty| matches!(ty, Type::StrEnum(_) | Type::Enum(_)))
@@ -266,6 +275,11 @@ impl Checker<'_> {
                         | Type::None
                 )
             })
+            || types == [Type::NativeModule; 2]
+            || types == [Type::ModuleNamespace; 2]
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::ForwardRef(_) | Type::Callable(_)))
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes))
@@ -284,11 +298,17 @@ impl Checker<'_> {
             || types == [Type::LogRecord; 2]
             || types.iter().all(|ty| matches!(ty, Type::Cursor(_)))
             || types == [Type::Path; 2]
+            || (types.iter().all(|ty| matches!(ty, Type::Tuple(_)))
+                && types
+                    .iter()
+                    .any(|ty| self.types.struct_sequence_fields(*ty).is_some()))
             || types == [Type::Logger; 2]
+            || types == [Type::StringIO; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
             || types == [Type::PathInfo; 2]
             || types == [Type::CodecInfo; 2]
+            || types == [Type::JsonDecoder; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(

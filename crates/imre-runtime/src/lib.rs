@@ -48,6 +48,7 @@ use std::borrow::Cow;
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::io::{self, IsTerminal, Write};
 use std::mem::ManuallyDrop;
+use std::os::fd::AsFd;
 use std::rc::Rc;
 use std::sync::{LazyLock, Mutex, Once};
 
@@ -370,42 +371,149 @@ fn initialize_io() {
 /// Standard output uses bounded block buffering for pipes and files, while
 /// terminals flush each printed line. LLVM supplies the process entry point, so
 /// input, fatal errors, and normal entry-point return explicitly flush it.
-struct Output<W = io::Stdout> {
-    stdout: W,
-    buffer: Vec<u8>,
-    written: usize,
+struct Output<W = RawStdout> {
+    raw: BinaryOutput<W>,
+    text: text_output::PendingText,
     line_buffered: bool,
     captures: Vec<Vec<u8>>,
 }
 
+struct BinaryOutput<W> {
+    inner: W,
+    buffer: Vec<u8>,
+    written: usize,
+}
+
+/// Writes directly to fd 1 so the native binary buffer observes descriptor errors.
+struct RawStdout;
+
+impl Write for RawStdout {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        rustix::io::write(io::stdout(), bytes).map_err(Into::into)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct StdioSettings {
+    stdout_capacity: usize,
+    stderr_capacity: usize,
+    stdout_line_buffered: bool,
+}
+
+static STDIO_SETTINGS: LazyLock<StdioSettings> = LazyLock::new(|| {
+    fn capacity(stream: impl AsFd) -> usize {
+        let block_size = rustix::fs::fstat(stream).map_or(0, |stat| stat.st_blksize.into());
+        text_output::binary_capacity(block_size)
+    }
+    let stdout = io::stdout();
+    StdioSettings {
+        stdout_capacity: capacity(&stdout),
+        stderr_capacity: capacity(io::stderr()),
+        stdout_line_buffered: stdout.is_terminal(),
+    }
+});
+
+/// Capture buffering from the startup descriptors before user code can replace them.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_stdio_init() {
+    initialize_io();
+    LazyLock::force(&STDIO_SETTINGS);
+}
+
 impl<W: Write> Output<W> {
-    fn with_stream(stream: W, line_buffered: bool) -> Self {
-        let mut buffer = Vec::new();
+    fn with_stream(stream: W, capacity: usize, line_buffered: bool) -> Self {
         // With zero capacity every write goes directly to the stream.
-        let _ = buffer.try_reserve_exact(8 * 1024);
+        let mut buffer = Vec::new();
+        let _ = buffer.try_reserve_exact(capacity);
         Self {
-            stdout: stream,
-            buffer,
-            written: 0,
+            raw: BinaryOutput {
+                inner: stream,
+                buffer,
+                written: 0,
+            },
+            text: text_output::PendingText::default(),
             line_buffered,
             captures: Vec::new(),
         }
     }
+}
+
+impl<W: Write> Write for Output<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.write_all(bytes)?;
+        Ok(bytes.len())
+    }
+
+    #[inline]
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if let Some(captured) = self.captures.last_mut() {
+            captured
+                .try_reserve(bytes.len())
+                .map_err(|_| io::ErrorKind::OutOfMemory)?;
+            captured.extend_from_slice(bytes);
+            return Ok(());
+        }
+        let flush_line = self.line_buffered && memchr::memchr2(b'\r', b'\n', bytes).is_some();
+        self.text.write(&mut self.raw, bytes, flush_line)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if !self.captures.is_empty() {
+            return Ok(());
+        }
+        self.text.flush(&mut self.raw)
+    }
+}
+
+impl<W: Write> BinaryOutput<W> {
+    /// Buffer writes to a file or pipe up to its configured binary capacity.
+    fn with_capacity(capacity: usize, inner: W) -> Self {
+        Self {
+            inner,
+            buffer: Vec::with_capacity(capacity),
+            written: 0,
+        }
+    }
 
     #[cold]
-    fn write_all_slow(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.flush_buffer()?;
-        if bytes.len() >= self.buffer.capacity() {
-            self.stdout.write_all(bytes)
-        } else {
-            self.buffer.extend_from_slice(bytes);
-            Ok(())
+    fn write_all_slow(&mut self, mut bytes: &[u8]) -> io::Result<()> {
+        if let Err(error) = self.flush_buffer() {
+            return self.buffer_after_error(bytes, error);
         }
+        while !bytes.is_empty() && bytes.len() >= self.buffer.capacity() {
+            match self.inner.write(bytes) {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(count) => bytes = &bytes[count..],
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return self.buffer_after_error(bytes, error),
+            }
+        }
+        self.buffer.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    /// After a nonblocking write stalls, keep as much of the new input as fits
+    /// behind the unwritten portion of the previous buffer.
+    fn buffer_after_error(&mut self, bytes: &[u8], error: io::Error) -> io::Result<()> {
+        if error.kind() != io::ErrorKind::WouldBlock {
+            return Err(error);
+        }
+        self.buffer.drain(..self.written);
+        self.written = 0;
+        let count = bytes.len().min(self.buffer.capacity() - self.buffer.len());
+        self.buffer.extend_from_slice(&bytes[..count]);
+        if count < bytes.len() {
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn flush_buffer(&mut self) -> io::Result<()> {
         while self.written < self.buffer.len() {
-            match self.stdout.write(&self.buffer[self.written..]) {
+            match self.inner.write(&self.buffer[self.written..]) {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
                 Ok(count) => self.written += count,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -418,20 +526,13 @@ impl<W: Write> Output<W> {
     }
 }
 
-impl<W: Write> Write for Output<W> {
+impl<W: Write> Write for BinaryOutput<W> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if let Some(captured) = self.captures.last_mut() {
-            captured
-                .try_reserve(bytes.len())
-                .map_err(|_| io::ErrorKind::OutOfMemory)?;
-            captured.extend_from_slice(bytes);
-            return Ok(bytes.len());
-        }
         if bytes.len() > self.buffer.capacity() - self.buffer.len() {
             self.flush_buffer()?;
         }
         if bytes.len() >= self.buffer.capacity() {
-            return self.stdout.write(bytes);
+            return self.inner.write(bytes);
         }
         self.buffer.extend_from_slice(bytes);
         Ok(bytes.len())
@@ -439,10 +540,9 @@ impl<W: Write> Write for Output<W> {
 
     #[inline]
     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if !self.captures.is_empty() {
-            return self.write(bytes).map(|_| ());
-        }
-        if bytes.len() <= self.buffer.capacity() - self.buffer.len() {
+        if bytes.len() < self.buffer.capacity()
+            && bytes.len() <= self.buffer.capacity() - self.buffer.len()
+        {
             self.buffer.extend_from_slice(bytes);
             return Ok(());
         }
@@ -450,34 +550,30 @@ impl<W: Write> Write for Output<W> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        if !self.captures.is_empty() {
-            return Ok(());
-        }
         self.flush_buffer()?;
-        self.stdout.flush()
+        self.inner.flush()
     }
 }
 
 static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
     initialize_io();
-    let stdout = io::stdout();
-    let line_buffered = stdout.is_terminal();
-    Mutex::new(Output::with_stream(stdout, line_buffered))
+    Mutex::new(Output::with_stream(
+        RawStdout,
+        STDIO_SETTINGS.stdout_capacity,
+        STDIO_SETTINGS.stdout_line_buffered,
+    ))
 });
 
 mod doctest;
 mod sys;
+mod text_output;
 
 /// Prints one value and a newline, returning with the writer lock released.
 /// Only primitive formatters run here; they cannot call user code.
 fn write_output(write: impl FnOnce(&mut Output) -> io::Result<()>) -> io::Result<()> {
     let mut output = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
     write(&mut output)?;
-    output.write_all(b"\n")?;
-    if output.line_buffered {
-        output.flush()?;
-    }
-    Ok(())
+    output.write_all(b"\n")
 }
 
 /// Handles write failures only after releasing the writer lock.
@@ -794,7 +890,8 @@ pub extern "C" fn imre_none_str() -> *const Str {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler supplies the readable constant span.
-    Rc::into_raw(Rc::new(Str::new(unsafe { text(data, length) })))
+    let literal = unsafe { text(data, length) };
+    Rc::into_raw(objects::literal_string(literal))
 }
 
 /// # Safety
@@ -804,7 +901,11 @@ pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *co
 pub unsafe extern "C" fn imre_str_static_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler's string globals have static storage duration.
     let literal: &'static str = unsafe { text(data, length) };
-    Rc::into_raw(Rc::new(Str::const_new(literal)))
+    Rc::into_raw(if literal.len() <= 2 {
+        objects::literal_string(literal)
+    } else {
+        Rc::new(Str::const_new(literal))
+    })
 }
 
 /// # Safety
@@ -1290,6 +1391,28 @@ pub unsafe extern "C" fn imre_list_append_pair(
 /// Returns an owned nonzero integer word, or raw zero with a pending error.
 ///
 /// # Safety
+/// The caller roots the exact integer returned by a Python length slot.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_length_result(value: usize) -> usize {
+    // SAFETY: this is the nonzero tagged result of the user's __len__ method.
+    let n = unsafe { Int::borrow(value) };
+    let negative = n
+        .as_small()
+        .map_or_else(|| n.big().sign() == num_bigint::Sign::Minus, |i| i < 0);
+    if negative {
+        return Error::new(Kind::ValueError, "__len__() should return >= 0").returning(0);
+    }
+    if decode_index(&n).is_err() {
+        return Error::new(
+            Kind::OverflowError,
+            "cannot fit 'int' into an index-sized integer",
+        )
+        .returning(0);
+    }
+    (*n).clone().into_raw()
+}
+
+/// # Safety
 /// The argument must be a live list handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_list_pop(list: *const List) -> usize {
@@ -1551,20 +1674,32 @@ mod tests {
     #[test]
     fn output_works_with_and_without_a_reserved_buffer() {
         for capacity in [0, 8] {
-            let mut output = Output {
-                stdout: Vec::new(),
-                buffer: Vec::with_capacity(capacity),
-                written: 0,
-                line_buffered: false,
-                captures: Vec::new(),
-            };
+            let mut output = BinaryOutput::with_capacity(capacity, Vec::new());
             output.write_all(b"abc").unwrap();
-            assert_eq!(output.stdout.is_empty(), capacity != 0);
+            assert_eq!(output.inner.is_empty(), capacity != 0);
             output.write_all(b"0123456789").unwrap();
             output.write_all(b"z").unwrap();
             output.flush().unwrap();
-            assert_eq!(output.stdout, b"abc0123456789z");
+            assert_eq!(output.inner, b"abc0123456789z");
         }
+    }
+
+    #[test]
+    fn nested_capture_leaves_pending_standard_output_untouched() {
+        let mut output = Output::with_stream(Vec::new(), 16, false);
+        output.write_all(b"before ").unwrap();
+        output.captures.push(Vec::new());
+        output.write_all(b"outer ").unwrap();
+        output.captures.push(Vec::new());
+        assert_eq!(output.write(b"inner").unwrap(), 5);
+        output.flush().unwrap();
+        assert!(output.raw.inner.is_empty());
+        assert_eq!(output.captures.pop().unwrap(), b"inner");
+        output.write_all(b"example").unwrap();
+        assert_eq!(output.captures.pop().unwrap(), b"outer example");
+        output.write_all(b"after").unwrap();
+        output.flush().unwrap();
+        assert_eq!(output.raw.inner, b"before after");
     }
 
     #[test]
@@ -1590,20 +1725,57 @@ mod tests {
             }
         }
 
-        let mut output = Output {
-            stdout: Sink::default(),
-            buffer: Vec::with_capacity(16),
-            written: 0,
-            line_buffered: false,
-            captures: Vec::new(),
-        };
+        let mut output = BinaryOutput::with_capacity(16, Sink::default());
         output.write_all(b"partial").unwrap();
         assert_eq!(
             output.flush().unwrap_err().kind(),
             io::ErrorKind::BrokenPipe
         );
         output.flush().unwrap();
-        assert_eq!(output.stdout.bytes, b"partial");
+        assert_eq!(output.inner.bytes, b"partial");
+    }
+
+    #[test]
+    fn nonblocking_output_keeps_the_suffix_that_fits() {
+        struct Pipe<'a>(&'a mut [u8]);
+
+        impl Write for Pipe<'_> {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if self.0.is_empty() && !bytes.is_empty() {
+                    return Err(io::ErrorKind::WouldBlock.into());
+                }
+                self.0.write(bytes)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        for (prefix, next, fits) in [
+            ("", "abcdef", true),
+            ("abc", "def", true),
+            ("", "abcdefg", false),
+            ("abc", "defg", false),
+        ] {
+            let mut pipe = [0; 2];
+            let mut restored = [0; 4];
+            let mut output = BinaryOutput::with_capacity(4, Pipe(&mut pipe));
+            output.write_all(prefix.as_bytes()).unwrap();
+            let result = output.write_all(next.as_bytes()).map_err(|e| e.kind());
+            assert_eq!(
+                result,
+                if fits {
+                    Ok(())
+                } else {
+                    Err(io::ErrorKind::WouldBlock)
+                }
+            );
+            output.inner = Pipe(&mut restored);
+            output.flush().unwrap();
+            assert_eq!(&pipe, b"ab");
+            assert_eq!(&restored, b"cdef");
+        }
     }
 
     #[test]

@@ -17,6 +17,7 @@ mod assignments;
 mod asyncio;
 mod bytes;
 mod cached_properties;
+mod call_binding_errors;
 mod callables;
 mod calls;
 mod codecs;
@@ -26,10 +27,13 @@ mod copying;
 mod counter;
 mod csv;
 mod dataclass_values;
+mod defaultdict_factory;
+mod deque;
 mod dispatch;
 mod doctest;
 mod documents;
 mod enums;
+mod errno;
 mod expandtabs;
 mod expansions;
 mod fixed_tuples;
@@ -45,17 +49,20 @@ mod inspect;
 mod iterables;
 mod itertools;
 mod json;
+mod keyword_forwarding;
 mod linecache;
 mod literals;
 mod local_functions;
 mod logging;
 mod logging_formatters;
 mod logging_records;
+mod mapping_abc;
 mod matching;
 mod module_values;
 mod namedtuples;
 mod namespaces;
 mod native_generators;
+mod ord;
 mod os;
 mod partials;
 mod paths;
@@ -82,9 +89,13 @@ mod truthiness;
 mod unbound_locals;
 mod unions;
 mod unittest;
+mod unittest_bound;
 mod unittest_equality;
 mod unittest_main;
+mod unittest_mock;
+mod unittest_setup;
 mod unpacking;
+mod warnings;
 mod zip_sums;
 mod zipfile;
 use assignments::LocalState;
@@ -110,6 +121,7 @@ struct ClassInfo {
     keyword_copies: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
+    setup_fields: unittest_setup::Slots,
     generators: HashSet<usize>,
     producer_items: HashMap<usize, Type>,
     contexts: HashSet<usize>,
@@ -140,11 +152,12 @@ impl ClassInfo {
                 .iter()
                 .enumerate()
                 .filter_map(|(id, class)| {
-                    class
-                        .methods
-                        .iter()
-                        .any(|method| method.name.as_str() == "__bool__")
-                        .then_some(id)
+                    (class.mapping
+                        || class
+                            .methods
+                            .iter()
+                            .any(|method| method.name.as_str() == "__bool__"))
+                    .then_some(id)
                 })
                 .collect(),
         );
@@ -172,7 +185,7 @@ impl ClassInfo {
                     .iter()
                     .map(|field| {
                         if field.name == crate::classes::EXCEPTION_ARGS_SLOT {
-                            return Ok(Type::ValueView);
+                            return Ok(Type::ObjectValue);
                         }
                         annotation_in_class(
                             &field.annotation,
@@ -220,6 +233,7 @@ impl ClassInfo {
             }
         }
         let cached_properties = cached_properties::slots(graph, types, &declarations, &mut fields)?;
+        let setup_fields = unittest_setup::slots(graph, types, &declarations, &mut fields);
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
         if let Some(id) = Self::cyclic_field_root(&fields, types) {
@@ -301,6 +315,7 @@ impl ClassInfo {
             keyword_copies: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
+            setup_fields,
             generators: HashSet::new(),
             producer_items: HashMap::new(),
             contexts: HashSet::new(),
@@ -372,6 +387,7 @@ const RESERVED: &[&str] = &[
     "sorted",
     "divmod",
     "isinstance",
+    "issubclass",
     "input",
     "print",
     "range",
@@ -389,6 +405,7 @@ const RESERVED: &[&str] = &[
     "None",
     "True",
     "False",
+    "__debug__",
     "__name__",
     "__doc__",
     "__file__",
@@ -402,6 +419,8 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
         "RecursionError" => return Some(43),
+        "Warning" => return Some(80),
+        "RuntimeWarning" => return Some(81),
         _ => {}
     }
     if name == "ImportError" {
@@ -533,10 +552,16 @@ pub(crate) fn lower_with_owners(
                                 node_index: ast::AtomicNodeIndex::NONE,
                             })));
                     }
+                    let defaults = if cached.is_some() {
+                        // A cache can distinguish omitted keywords from explicitly supplied defaults.
+                        keyword_forwarding::Defaults::local(module_id)
+                    } else {
+                        keyword_forwarding::prepare(graph, module_id, &mut function)
+                    };
                     let signature = signature(
                         &function,
                         graph,
-                        module_id,
+                        defaults,
                         &classes.declarations,
                         &types,
                         None,
@@ -549,7 +574,11 @@ pub(crate) fn lower_with_owners(
                             || !signature.params.iter().all(|p| {
                                 types.hashable_key(p.ty)
                                     && p.default.is_none()
-                                    && p.kind != ParameterKind::KeywordOnly
+                                    && matches!(
+                                        p.kind,
+                                        ParameterKind::PositionalOnly
+                                            | ParameterKind::PositionalOrKeyword
+                                    )
                             })
                         {
                             return Err(module.error(&function, "cached functions require exact immutable positional keys and an annotated synchronous result"));
@@ -642,10 +671,11 @@ pub(crate) fn lower_with_owners(
                 })]
                 .into();
             }
+            let defaults = keyword_forwarding::prepare(graph, module_id, &mut method);
             let mut signature = signature(
                 &method,
                 graph,
-                module_id,
+                defaults,
                 &classes.declarations,
                 &types,
                 Some(context),
@@ -808,6 +838,12 @@ pub(crate) fn lower_with_owners(
                 .zip(&signature.params)
             {
                 let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
+                checker.assigned.insert(slot);
+                params.push(slot);
+            }
+            if let Some(keyword) = &definition.parameters.kwarg {
+                let parameter = signature.params.last().expect("keyword-rest signature");
+                let slot = checker.declare(keyword.name.as_str(), parameter.ty, &**keyword)?;
                 checker.assigned.insert(slot);
                 params.push(slot);
             }
@@ -1073,12 +1109,13 @@ pub(crate) fn lower_with_owners(
 fn signature(
     function: &ast::StmtFunctionDef,
     graph: &SourceGraph,
-    module: ModuleId,
+    defaults: keyword_forwarding::Defaults,
     classes: &Classes,
     types: &Types,
     method: Option<records::MethodContext>,
     inference: &inference::Inference,
 ) -> Result<Signature, String> {
+    let module = defaults.module;
     let source = &graph.modules[module].source;
     let owner = method.map(|context| context.class);
     let receiver = method
@@ -1094,7 +1131,6 @@ fn signature(
     if !function.decorator_list.is_empty()
         || function.type_params.is_some()
         || function.parameters.vararg.is_some()
-        || function.parameters.kwarg.is_some()
     {
         return Err(error(
             source,
@@ -1105,20 +1141,27 @@ fn signature(
     let mut params = Vec::new();
     let mut parameter_types = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
-        let module = owner
-            .and_then(|id| {
-                let record = &classes.definitions[id];
-                (record.generated_initializer && function.name.as_str() == "__init__")
-                    .then(|| {
-                        record
-                            .fields
-                            .iter()
-                            .find(|field| field.name == parameter.name().as_str())
-                    })
-                    .flatten()
-                    .map(|field| field.module)
+        let origin = defaults
+            .forwarded
+            .filter(|(first, _)| index >= *first)
+            .map(|(_, id)| id);
+        let module = origin
+            .or_else(|| {
+                owner.and_then(|id| {
+                    let record = &classes.definitions[id];
+                    (record.generated_initializer && function.name.as_str() == "__init__")
+                        .then(|| {
+                            record
+                                .fields
+                                .iter()
+                                .find(|field| field.name == parameter.name().as_str())
+                        })
+                        .flatten()
+                        .map(|field| field.module)
+                })
             })
             .unwrap_or(module);
+        let source = origin.map_or(source, |id| &graph.modules[id].source);
         let sequence = parameter.annotation().is_some_and(|value|
             matches!(value, ast::Expr::Subscript(subscript) if graph.resolve(module, &subscript.value) == Some(Binding::Intrinsic(Intrinsic::Sequence))));
         let empty_sequence = sequence
@@ -1184,7 +1227,7 @@ fn signature(
                 .or(parameter
                     .default
                     .as_deref()
-                    .filter(|_| !empty_sequence)
+                    .filter(|value| !empty_sequence && !matches!(value, ast::Expr::Dict(dict) if dict.items.is_empty() && parameter.annotation().is_some()))
                     .map(|value| {
                         if inspect::is_sentinel(graph, module, value) {
                             Ok(Type::PlainObject)
@@ -1211,7 +1254,31 @@ fn signature(
             .default
             .as_deref()
             .map(|value| {
-                if empty_sequence {
+                if types.payload(ty).unwrap_or(ty) == Type::ReadOnlyObjectMapping
+                    && matches!(value, ast::Expr::Dict(d) if d.items.is_empty())
+                {
+                    // The read-only surface exposes neither identity nor mutation.
+                    let empty = Expr {
+                        ty: types.dict(Type::Str, Type::ObjectValue),
+                        kind: ExprKind::Dict {
+                            key: Type::Str,
+                            value: Type::ObjectValue,
+                            entries: Vec::new(),
+                        },
+                    };
+                    let view = Expr {
+                        ty: Type::ReadOnlyObjectMapping,
+                        kind: ExprKind::Builtin(Builtin::DictAsBase, vec![empty]),
+                    };
+                    Ok(if ty == view.ty {
+                        view
+                    } else {
+                        Expr {
+                            ty,
+                            kind: ExprKind::Present(Box::new(view)),
+                        }
+                    })
+                } else if empty_sequence {
                     // The read-only Sequence contract makes its empty backing list unobservable.
                     Ok(Expr {
                         ty,
@@ -1242,6 +1309,25 @@ fn signature(
                 && parameter.annotation().is_some()
                 && sign_parameters::only_compares_zero(function, parameter.name().as_str()),
         });
+    }
+    if let Some(keyword) = &function.parameters.kwarg {
+        let element = keyword.annotation.as_deref().ok_or_else(|| {
+            error(
+                source,
+                &**keyword,
+                "keyword rest parameters need an element annotation",
+            )
+        })?;
+        let element = annotation_in_class(element, graph, module, classes, types, owner)?;
+        let ty = types.dict(Type::Str, element);
+        params.push(Parameter {
+            name: keyword.name.to_string(),
+            ty,
+            kind: ParameterKind::KeywordRest,
+            default: None,
+            sign_only: false,
+        });
+        parameter_types.push(Some(ty));
     }
     let returns = function
         .returns
@@ -1439,19 +1525,24 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Any)) if graph.mutable_documents => {
             return Ok(documents::ANY);
         }
+        Some(Binding::Intrinsic(Intrinsic::Deque)) => return Ok(types.deque(Type::Int)),
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) => return Ok(Type::JsonDecoder),
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::StringIo)) => return Ok(Type::StringIO),
         Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return Ok(Type::LogFormatter),
+        Some(Binding::Intrinsic(Intrinsic::HandlerLevelType)) => return Ok(types.string_or_int()),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
+        Some(Binding::Intrinsic(Intrinsic::ModuleType)) => return Ok(Type::NativeModule),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
+        Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(
@@ -1481,6 +1572,7 @@ fn annotation_with_aliases(
             "bytes" => Ok(Type::Bytes),
             "BaseException" | "Exception" => Ok(Type::Exception),
             "ImportError" => Ok(Type::ImportException),
+            "object" => Ok(Type::ObjectValue),
             _ => Err(error(
                 source,
                 expression,
@@ -1488,6 +1580,25 @@ fn annotation_with_aliases(
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
+        ast::Expr::Subscript(subscript)
+            if matches!(
+                graph.resolve_type(module, &subscript.value),
+                Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+            ) =>
+        {
+            if let ast::Expr::Tuple(types) = &*subscript.slice
+                && let [key, value] = types.elts.as_slice()
+                && nested(key)? == Type::Str
+                && nested(value)? == Type::ObjectValue
+            {
+                return Ok(Type::ReadOnlyObjectMapping);
+            }
+            Err(error(
+                source,
+                expression,
+                "read-only mapping annotations currently require Mapping[str, object]",
+            ))
+        }
         ast::Expr::Subscript(subscript)
             if graph.resolve_type(module, &subscript.value)
                 == Some(Binding::Intrinsic(Intrinsic::Literal)) =>
@@ -1607,6 +1718,11 @@ fn annotation_with_aliases(
                 } else {
                     Ok(types.list(element))
                 }
+            }
+            item if graph.resolve_type(module, item)
+                == Some(Binding::Intrinsic(Intrinsic::Deque)) =>
+            {
+                Ok(types.deque(nested(&value.slice)?))
             }
             item if graph.resolve_type(module, item)
                 == Some(Binding::Intrinsic(Intrinsic::Counter)) =>
@@ -1822,6 +1938,7 @@ struct Checker<'a> {
     comprehension_exports: HashMap<String, usize>,
     narrowed: assignments::Narrowed,
     regex_guards: Vec<(usize, regex::CaptureLayout)>,
+    present_subscripts: Vec<ruff_text_size::TextRange>,
     regex_locals: HashMap<usize, regex::CaptureLayout>,
     /// Group dictionary locals whose complete set of reads resolves to capture slots.
     regex_fields: HashMap<usize, HashMap<String, usize>>,
@@ -1843,6 +1960,7 @@ struct Checker<'a> {
     module_scope: bool,
     class: Option<usize>,
     class_receiver: Option<String>,
+    super_method_base: Option<usize>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
     initializing: bool,
@@ -1882,6 +2000,7 @@ impl<'a> Checker<'a> {
             comprehension_exports: HashMap::new(),
             narrowed: assignments::Narrowed::new(),
             regex_guards: Vec::new(),
+            present_subscripts: Vec::new(),
             regex_locals: HashMap::new(),
             regex_fields: HashMap::new(),
             namespace_guards: Vec::new(),
@@ -1902,6 +2021,7 @@ impl<'a> Checker<'a> {
             module_scope: false,
             class: None,
             class_receiver: None,
+            super_method_base: None,
             iterator_source: None,
             super_initializer: None,
             initializing: false,
@@ -1910,7 +2030,7 @@ impl<'a> Checker<'a> {
 
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
-        if reserved(name)
+        if (name != "__doc__" && reserved(name))
             || self.graph.modules[self.module].bindings.contains_key(name)
             || self.local_functions.contains_key(name)
             || self.class_receiver.as_deref() == Some(name)
@@ -2028,6 +2148,28 @@ impl<'a> Checker<'a> {
         attribute: &ast::ExprAttribute,
         receiver: Expr,
     ) -> Result<(Expr, usize, Type), String> {
+        if let Type::Class(class) = receiver.ty
+            && self.native_mock(class)
+            && self.module
+                != self.classes.declarations.definitions[class]
+                    .definition
+                    .module
+            && matches!(attribute.attr.as_str(), "_node" | "_nodes")
+        {
+            return Err(error(
+                self.source,
+                attribute,
+                "private native mock storage is not a Python attribute",
+            ));
+        }
+        let receiver = if let Type::Class(class) = receiver.ty
+            && self.native_mock(class)
+            && Self::mock_state_member(attribute.attr.as_str())
+        {
+            self.mock_node(receiver, class)
+        } else {
+            receiver
+        };
         let Type::Class(class) = receiver.ty else {
             return Err(error(
                 self.source,
@@ -2085,6 +2227,32 @@ impl<'a> Checker<'a> {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
             });
+        }
+        if expected == Type::ObjectValue && self.boxable_value(value.ty) {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::BoxValue, vec![value]),
+            });
+        }
+        if (expected == Type::ReadOnlyObjectMapping
+            || self.types.payload(expected) == Some(Type::ReadOnlyObjectMapping))
+            && let Some((Type::Str, field)) = self.types.mapping(value.ty)
+            && !self.types.is_counter(value.ty)
+            && !self.types.is_default_list_dict(value.ty)
+            && (field == Type::ObjectValue || self.boxable_value(field))
+        {
+            let view = Expr {
+                ty: Type::ReadOnlyObjectMapping,
+                kind: ExprKind::Builtin(Builtin::DictAsBase, vec![value]),
+            };
+            return if expected == view.ty {
+                Ok(view)
+            } else {
+                Ok(Expr {
+                    ty: expected,
+                    kind: ExprKind::Present(Box::new(view)),
+                })
+            };
         }
         if let (Some(source), Some(destination)) = (
             self.types.directory_value(value.ty),
@@ -2199,6 +2367,16 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        if self.present_subscripts.contains(&expression.range()) {
+            let value = self.expr(expression)?;
+            if self.types.payload(value.ty) == Some(expected) {
+                return Ok(Expr {
+                    ty: expected,
+                    kind: ExprKind::Unwrap(Box::new(value)),
+                });
+            }
+            return self.coerce(value, expected, expression);
+        }
         // A record can carry user fields with distinct types. An expected scalar type
         // permits reading such a field; the runtime checks its actual representation.
         if let ast::Expr::Attribute(attr) = expression
@@ -2238,6 +2416,11 @@ impl<'a> Checker<'a> {
         self.reject_class_receiver_value(expression)?;
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
         if let ast::Expr::Call(call) = expression
+            && let Some(raised) = self.defaultdict_factory_error(call, expected)?
+        {
+            return Ok(raised);
+        }
+        if let ast::Expr::Call(call) = expression
             && let Some(shape) = self.types.mapping(concrete)
             && let Some(result) = self.fromkeys_call(call, Some(shape))?
         {
@@ -2257,8 +2440,12 @@ impl<'a> Checker<'a> {
             }
         }
         if matches!(concrete, Type::Callable(_)) {
-            if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
-                self.resolve(expression)
+            if let Some(Binding::Intrinsic(
+                op @ (Intrinsic::Copy(_)
+                | Intrinsic::RmTree
+                | Intrinsic::Move
+                | Intrinsic::DestInSrc),
+            )) = self.resolve(expression)
             {
                 let value = self.shutil_function_value(op, Some(concrete), expression)?;
                 return self.coerce(value, expected, expression);
@@ -2290,6 +2477,10 @@ impl<'a> Checker<'a> {
             }
         }
         let value = match expression {
+            ast::Expr::Dict(dict) if concrete == Type::ReadOnlyObjectMapping => {
+                let value = self.dictionary(dict, Some((Type::Str, Type::ObjectValue)))?;
+                self.coerce(value, concrete, expression)?
+            }
             ast::Expr::Call(call)
                 if self.types.is_counter(concrete)
                     && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Counter))
@@ -2344,14 +2535,18 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Expr::Call(call)
+                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Deque))
+                    && self.types.deque_element(concrete).is_some() =>
+            {
+                self.deque_new(call, self.types.deque_element(concrete))?
+            }
+            ast::Expr::Call(call)
                 if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Counter))
                     && self.types.mapping(concrete).is_some() =>
             {
                 self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
             }
-            ast::Expr::Call(call)
-                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
-            {
+            ast::Expr::Call(call) if self.is_defaultdict_constructor(&call.func) => {
                 let (key, value) = self.types.mapping(concrete).ok_or_else(|| {
                     error(
                         self.source,
@@ -2360,7 +2555,8 @@ impl<'a> Checker<'a> {
                     )
                 })?;
                 if self.types.element(value).is_none()
-                    || !matches!(call.arguments.args.as_slice(), [ast::Expr::Name(name)] if name.id == "list")
+                    || !matches!(call.arguments.args.as_slice(), [factory @ ast::Expr::Name(name)]
+                        if name.id == "list" && !self.names.contains_key("list") && self.resolve(factory).is_none())
                     || !call.arguments.keywords.is_empty()
                 {
                     return Err(error(
@@ -2599,6 +2795,9 @@ impl<'a> Checker<'a> {
     /// Captures the receiver before ordered bounds. Nullable integer operands
     /// preserve omitted bounds without allocating a general slice object.
     fn slice(&mut self, receiver: Expr, slice: &ast::ExprSlice) -> Result<Expr, String> {
+        if let Some(fields) = self.types.struct_sequence_fields(receiver.ty) {
+            return self.struct_sequence_slice(receiver, &fields, slice);
+        }
         if !matches!(receiver.ty, Type::Str | Type::Bytes)
             && self.types.element(receiver.ty).is_none()
         {
@@ -3126,6 +3325,7 @@ impl<'a> Checker<'a> {
             .types
             .element(iterable.ty)
             .or(set_element)
+            .or_else(|| self.types.deque_element(iterable.ty))
             .or(string.then_some(Type::Str))
             .or(bytes.then_some(Type::Int))
             .or_else(|| {
@@ -3145,7 +3345,12 @@ impl<'a> Checker<'a> {
                 )
             })?;
         let captured = self.hidden(iterable.ty);
-        let cursor = if mapping.is_none() && set_element.is_none() && !string && !bytes {
+        let cursor = if mapping.is_none()
+            && set_element.is_none()
+            && self.types.deque_element(iterable.ty).is_none()
+            && !string
+            && !bytes
+        {
             Some(self.hidden(Type::Int))
         } else {
             None
@@ -3210,6 +3415,8 @@ impl<'a> Checker<'a> {
                             Builtin::StringIter
                         } else if bytes {
                             Builtin::BytesIter
+                        } else if self.types.deque_element(self.locals[captured]).is_some() {
+                            Builtin::DequeIter { reverse: false }
                         } else if set_element.is_some() {
                             Builtin::SetIter
                         } else {
@@ -3445,6 +3652,7 @@ impl<'a> Checker<'a> {
                     matches!(&*assignment.value, ast::Expr::List(list) if list.elts.is_empty());
                 let empty_dict =
                     matches!(&*assignment.value, ast::Expr::Dict(dict) if dict.items.is_empty());
+                let empty_set = matches!(&*assignment.value, ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Name(value) if value.id == "set" && !self.names.contains_key("set")) && self.resolve(&call.func).is_none() && call.arguments.args.is_empty() && call.arguments.keywords.is_empty());
                 let returned = || {
                     later.iter().any(|statement| matches!(statement, ast::Stmt::Return(ret) if matches!(ret.value.as_deref(), Some(ast::Expr::Name(value)) if value.id == name.id)))
                 };
@@ -3458,8 +3666,8 @@ impl<'a> Checker<'a> {
                     && a.targets.iter().any(|target| matches!(target, ast::Expr::Subscript(sub)
                         if matches!(&*sub.slice, ast::Expr::Slice(_)) && self.assignment_context(target) == Some(self.types.list(documents::ANY)))))) {
                     Some(self.types.list(documents::ANY))
-                } else if empty_list
-                    && let Some(value) = inference::first_append(name.id.as_str(), later)
+                } else if (empty_list || empty_set)
+                    && let Some(value) = inference::first_insertion(name.id.as_str(), if empty_list { "append" } else { "add" }, later)
                 {
                     let element = match value {
                         ast::Expr::Call(call)
@@ -3469,7 +3677,7 @@ impl<'a> Checker<'a> {
                         }
                         _ => self.graph.session.scalar_type(self.module, value),
                     };
-                    element.map(|ty| self.types.list(ty))
+                    element.map(|ty| if empty_list { self.types.list(ty) } else { self.types.set(ty) })
                 } else {
                     None
                 };
@@ -3790,6 +3998,8 @@ impl<'a> Checker<'a> {
                         )
                     })?;
                     let key = self.expr_expected(&target.slice, key)?;
+                    self.graph
+                        .checked_dict_deletion(self.module, target.range());
                     statements.push(Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::DictDelete, vec![receiver, key]),
@@ -3858,6 +4068,7 @@ impl<'a> Checker<'a> {
                     false,
                 ));
             }
+            ast::Stmt::Assert(_) if self.graph.python_optimization() > 0 => None,
             ast::Stmt::Assert(assert) => {
                 let test = self.condition(&assert.test)?;
                 let successful = self.local_state();
@@ -4456,6 +4667,10 @@ impl<'a> Checker<'a> {
             if let Some(guard) = self.regex_guard(&condition, body) {
                 self.regex_guards.push(guard);
             }
+            let subscript_depth = self.present_subscripts.len();
+            if let Some(read) = self.immediate_present_subscript(test, body) {
+                self.present_subscripts.push(read);
+            }
             let namespace_depth = self.namespace_guards.len();
             self.enter_namespace_guards(test, true, body);
             // In a reachable-only profile, an impossible compatibility guard's
@@ -4470,6 +4685,7 @@ impl<'a> Checker<'a> {
             };
             self.namespace_guards.truncate(namespace_depth);
             self.regex_guards.truncate(guard_depth);
+            self.present_subscripts.truncate(subscript_depth);
             if yes_falls && known != Some(false) && !exit_fixed {
                 self.merge_exit(&mut joined);
             }
@@ -4571,6 +4787,13 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
+        if binary.op == ast::Operator::Mod
+            && matches!(left.ty, Type::Str | Type::StrLiteral(_))
+            && matches!(right.ty, Type::Str | Type::StrLiteral(_))
+        {
+            left = Self::string_value(left);
+            right = Self::string_value(right);
+        }
         if binary.op == ast::Operator::Add
             && left.ty == Type::JsonValue
             && right.ty == Type::JsonValue
@@ -4717,6 +4940,7 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
@@ -4740,11 +4964,15 @@ impl<'a> Checker<'a> {
                 &format!("no native implementation for {symbol}"),
             ));
         }
-        if let Some(target @ (Binding::Module(_) | Binding::IntrinsicModule(_))) =
-            self.resolve(expression)
-            && let Some(module) = self.module_docs(target, expression)?
-        {
-            return Ok(module);
+        if let Some(target) = self.resolve(expression) {
+            if matches!(target, Binding::Module(_) | Binding::IntrinsicModule(_))
+                && let Some(module) = self.module_docs(target, expression)?
+            {
+                return Ok(module);
+            }
+            if let Some(value) = self.errno_value(target, expression) {
+                return Ok(value);
+            }
         }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
@@ -4770,8 +4998,9 @@ impl<'a> Checker<'a> {
         {
             return self.callable_value(&signature, None, None, expression);
         }
-        if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
-            self.resolve(expression)
+        if let Some(Binding::Intrinsic(
+            op @ (Intrinsic::Copy(_) | Intrinsic::RmTree | Intrinsic::Move | Intrinsic::DestInSrc),
+        )) = self.resolve(expression)
         {
             return self.shutil_function_value(op, None, expression);
         }
@@ -4840,7 +5069,7 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::BuiltinsLast => {
                     return Ok(Expr {
-                        ty: Type::ValueView,
+                        ty: Type::ObjectValue,
                         kind: ExprKind::Builtin(Builtin::BuiltinsLast, vec![]),
                     });
                 }
@@ -4881,6 +5110,19 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
+                Intrinsic::SysVersionInfo => return Ok(self.sys_version_info(false)),
+                Intrinsic::SysHexversion => {
+                    return Ok(crate::version::integer(crate::version::hex(
+                        crate::version::components(false),
+                    )));
+                }
+                Intrinsic::SysVersion => {
+                    let [major, minor, micro] = crate::version::components(false);
+                    return Ok(unpacking::string(format!(
+                        "{major}.{minor}.{micro} (Imre {})",
+                        env!("CARGO_PKG_VERSION")
+                    )));
+                }
                 Intrinsic::SysExecutable | Intrinsic::SysPlatform | Intrinsic::OsName => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
@@ -4922,9 +5164,16 @@ impl<'a> Checker<'a> {
             ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
-            ast::Expr::Name(name) if name.id == "__doc__" => {
+            ast::Expr::Name(name) if name.id == "__debug__" => (
+                Type::Bool,
+                ExprKind::Bool(self.graph.python_optimization() == 0),
+            ),
+            ast::Expr::Name(name)
+                if name.id == "__doc__" && !self.names.contains_key("__doc__") =>
+            {
                 let module = &self.graph.modules[self.module];
-                if let Some(ast::Stmt::Expr(doc)) = module.parsed.syntax().body.first()
+                if self.graph.python_optimization() < 2
+                    && let Some(ast::Stmt::Expr(doc)) = module.parsed.syntax().body.first()
                     && let ast::Expr::StringLiteral(text) = &*doc.value
                 {
                     check_string(text, self.source)?;
@@ -4961,7 +5210,9 @@ impl<'a> Checker<'a> {
                         .into_owned(),
                 ),
             ),
-            ast::Expr::Name(name) if name.id == "__name__" => {
+            ast::Expr::Name(name)
+                if name.id == "__name__" && !self.names.contains_key("__name__") =>
+            {
                 let name = if self.module == self.graph.entry {
                     "__main__"
                 } else {
@@ -5128,15 +5379,37 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
+                    if self.mapping_class(receiver.ty).is_some() {
+                        let found = self.mapping_membership(key, receiver, expression)?;
+                        return Ok(if compare.ops[0] == ast::CmpOp::NotIn {
+                            Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Not(Box::new(found)),
+                            }
+                        } else {
+                            found
+                        });
+                    }
                     if receiver.ty == Type::Bytes {
                         return self.bytes_membership(key, receiver, compare.ops[0], expression);
                     }
                     if let Some(fields) = self.types.fields(receiver.ty) {
                         return self.tuple_contains(key, receiver, &fields, compare);
                     }
+                    let receiver = if receiver.ty == Type::ModuleNamespace {
+                        errno::op(ir::ErrnoOperation::Keys, Type::StringKeys, vec![receiver])
+                    } else {
+                        receiver
+                    };
                     let (key_type, builtin) =
-                        if let Some((key, _)) = self.types.mapping(receiver.ty) {
-                            (key, Builtin::DictContains)
+                        if let Some((target_key, _)) = self.types.mapping(receiver.ty) {
+                            if target_key == Type::Int && key.ty == Type::ObjectValue {
+                                (key.ty, Builtin::Errno(ir::ErrnoOperation::MemberContains))
+                            } else {
+                                (target_key, Builtin::DictContains)
+                            }
+                        } else if receiver.ty == Type::ReadOnlyObjectMapping {
+                            (Type::Str, Builtin::DictContains)
                         } else if receiver.ty == Type::Str {
                             (Type::Str, Builtin::StringContains)
                         } else if let Some(element) = self
@@ -5224,11 +5497,39 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if values.iter().all(|v| matches!(v.ty, Type::ForwardRef(_))) {
+                    let ops = compare
+                        .ops
+                        .iter()
+                        .map(|op| match op {
+                            ast::CmpOp::Eq => Ok(Compare::Equal),
+                            ast::CmpOp::NotEq => Ok(Compare::NotEqual),
+                            _ => Err(error(self.source, expression, "ForwardRef has no ordering")),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    return Ok(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Compare(values, ops),
+                    });
+                }
                 let mut values = self.numeric_union_comparison(values);
                 if let ([left, right], [op]) = (values.as_slice(), compare.ops.as_ref())
                     && let Some(result) = inspect::equality(left, right, *op)
                 {
                     return Ok(result);
+                }
+                if compare
+                    .ops
+                    .iter()
+                    .all(|op| matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq))
+                {
+                    for value in &mut values {
+                        if let Type::Class(class) = value.ty
+                            && self.native_mock(class)
+                        {
+                            *value = self.mock_node(value.clone(), class);
+                        }
+                    }
                 }
                 if values.iter().any(|value| {
                     matches!(
@@ -5293,19 +5594,22 @@ impl<'a> Checker<'a> {
                         compare.ops[0] == ast::CmpOp::NotEq,
                     ));
                 }
-                if values.iter().any(|value| value.ty == Type::ValueView) {
+                if values.iter().any(|value| value.ty == Type::ObjectValue) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
-                        || !values
-                            .iter()
-                            .all(|v| sys::displayable(v.ty) || self.import_argument_supported(v.ty))
+                        || !values.iter().all(|v| {
+                            v.ty == Type::ObjectValue
+                                || v.ty == Type::ListInt
+                                || self.boxable_value(v.ty)
+                                || self.types.mapping(v.ty) == Some((Type::Int, Type::Str))
+                        })
                     {
                         return Err(error(
                             self.source,
                             expression,
-                            "retained values support equality with native scalar, int list, or tuple values",
+                            "object values support equality with concrete scalars, tuples or integer-to-string dictionaries",
                         ));
                     }
-                    let reversed = values[0].ty != Type::ValueView;
+                    let reversed = values[0].ty != Type::ObjectValue;
                     let eq = Expr {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::SystemExitCodeEqual { reversed }, values),
@@ -5408,6 +5712,10 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
+                if self.mapping_class(list.ty).is_some() {
+                    let key = self.expr(&subscript.slice)?;
+                    return self.mapping_primitive(list, "__getitem__", &[key], expression);
+                }
                 if list.ty == Type::BuiltinClass {
                     // Python evaluates type arguments before invoking __class_getitem__.
                     self.expr(&subscript.slice)?;
@@ -5417,10 +5725,25 @@ impl<'a> Checker<'a> {
                         "runtime generic aliases of builtin classes are unsupported",
                     ));
                 }
-                if list.ty == Type::ValueView {
+                if list.ty == Type::ModuleNamespace {
+                    let key = self.expr_expected(&subscript.slice, Type::Str)?;
+                    return Ok(errno::op(
+                        ir::ErrnoOperation::Items,
+                        Type::ObjectValue,
+                        vec![list, key],
+                    ));
+                }
+                if list.ty == Type::ReadOnlyObjectMapping {
+                    let key = self.expr_expected(&subscript.slice, Type::Str)?;
+                    return Ok(Expr {
+                        ty: Type::ObjectValue,
+                        kind: ExprKind::Builtin(Builtin::MappingObjectGet, vec![list, key]),
+                    });
+                }
+                if list.ty == Type::ObjectValue {
                     let index = self.expr_expected(&subscript.slice, Type::Int)?;
                     return Ok(Expr {
-                        ty: Type::ValueView,
+                        ty: Type::ObjectValue,
                         kind: ExprKind::Builtin(Builtin::ExceptionFieldIndex, vec![list, index]),
                     });
                 }
@@ -5608,6 +5931,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Type::ForwardRef(layout) = receiver.ty {
+                    return self.forward_ref_attribute(layout, receiver, attribute);
+                }
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return Ok(wrapped);
                 }
@@ -5630,19 +5956,25 @@ impl<'a> Checker<'a> {
                 if let Type::StrDescriptor(method) = receiver.ty {
                     return self.descriptor_attribute(receiver, method, attribute);
                 }
-                if let Some(definition) = self.types.namedtuple_definition(receiver.ty) {
-                    return self.namedtuple_instance_attribute(attribute, receiver, definition);
+                if let Some(declaration) = self.types.tuple_metadata(receiver.ty) {
+                    if self.types.is_stat_result(receiver.ty) {
+                        return self.stat_result_attribute(receiver, attribute, &declaration);
+                    }
+                    return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
                     return Ok(self.string_join_value(Some(receiver), attribute));
+                }
+                if let Some(element) = self.types.deque_element(receiver.ty) {
+                    return self.deque_attribute(attribute, receiver, element);
                 }
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
                     let field = self.classes.fields[class].len() - 1;
-                    if self.classes.fields[class][field] == Type::ValueView {
+                    if self.exception_tuple_slot(class) {
                         return Ok(Expr {
-                            ty: Type::ValueView,
+                            ty: Type::ObjectValue,
                             kind: ExprKind::Field(
                                 Box::new(Self::exception_record(receiver)),
                                 field,
@@ -5691,6 +6023,9 @@ impl<'a> Checker<'a> {
                         _ => return self.class_attribute(attribute, class, Some(receiver), None),
                     }
                 }
+                if receiver.ty == Type::NativeModule {
+                    return Ok(self.errno_attribute(receiver, attribute.attr.as_str()));
+                }
                 if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
                     return self.zip_attribute(receiver, attribute);
                 }
@@ -5711,6 +6046,12 @@ impl<'a> Checker<'a> {
                 }
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
+                }
+                if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "memo" {
+                    return Ok(Expr {
+                        ty: self.types.dict(Type::Str, Type::Str),
+                        kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
+                    });
                 }
                 if matches!(receiver.ty, Type::TimedFileHandler | Type::ClockTime) {
                     return self.timed_attribute(receiver, attribute);
@@ -5786,7 +6127,7 @@ impl<'a> Checker<'a> {
                             if receiver.ty == Type::ImportException =>
                         {
                             (
-                                Type::ValueView,
+                                Type::ObjectValue,
                                 Builtin::ImportErrorField(match field {
                                     "args" => 0,
                                     "msg" => 1,
@@ -5796,7 +6137,7 @@ impl<'a> Checker<'a> {
                                 }),
                             )
                         }
-                        "code" => (Type::ValueView, Builtin::SystemExitCode),
+                        "code" => (Type::ObjectValue, Builtin::SystemExitCode),
                         "msg" => (Type::Str, Builtin::JsonErrorField(0)),
                         "doc" => (Type::Str, Builtin::JsonErrorField(1)),
                         "pos" => (Type::Int, Builtin::JsonErrorField(2)),
@@ -5820,6 +6161,12 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(builtin, vec![receiver]),
                     });
                 }
+                if receiver.ty == Type::StringIO
+                    && let Some(value) =
+                        self.string_io_attribute(&receiver, attribute.attr.as_str())
+                {
+                    return Ok(value);
+                }
                 if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
                     && attribute.attr.as_str() == "closed"
                 {
@@ -5827,6 +6174,9 @@ impl<'a> Checker<'a> {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::TextClosed, vec![receiver]),
                     });
+                }
+                if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
+                    return self.read_setup_field(receiver, attribute, field);
                 }
                 if let Type::Class(class) = receiver.ty
                     && (self.classes.methods[class].contains_key(attribute.attr.as_str())
@@ -5841,6 +6191,19 @@ impl<'a> Checker<'a> {
                         ))
                 {
                     return self.class_attribute(attribute, class, Some(receiver), None);
+                }
+                if let Type::Class(class) = receiver.ty
+                    && self.native_mock(class)
+                    && !Self::mock_state_member(attribute.attr.as_str())
+                    && !self.classes.declarations.definitions[class]
+                        .fields
+                        .iter()
+                        .any(|field| field.name == attribute.attr.as_str())
+                {
+                    return self.mock_child(class, receiver, attribute);
+                }
+                if let Some(bound) = self.bound_unittest_assertion(attribute, &receiver) {
+                    return Ok(bound);
                 }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 if let Some(name) = attribute.value.as_name_expr()
@@ -5968,6 +6331,11 @@ impl<'a> Checker<'a> {
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
         if receiver.is_none()
+            && let Some(raised) = self.defaultdict_factory_error(call, Type::None)?
+        {
+            return Ok(raised);
+        }
+        if receiver.is_none()
             && let Some(result) = self.fromkeys_call(call, None)?
         {
             return Ok(result);
@@ -5980,6 +6348,22 @@ impl<'a> Checker<'a> {
         }
         if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::MockCallList { mark })) = self.resolve(&call.func)
+        {
+            self.reject_builtin_keywords(call)?;
+            let [values] = call.arguments.args.as_ref() else {
+                return Err(error(self.source, call, "expected a mock call list"));
+            };
+            let values = self.expr(values)?;
+            if !matches!(self.types.element(values.ty), Some(Type::Class(c)) if self.bundled_mock_class(c, "_Call"))
+            {
+                return Err(error(self.source, call, "expected a mock call list"));
+            }
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::MockCallList { mark }, vec![values]),
+            });
         }
         if let Some(suite) = self.doctest_suite(call)? {
             return Ok(suite);
@@ -6061,8 +6445,15 @@ impl<'a> Checker<'a> {
         {
             return self.namedtuple_call(definition, &declaration, call);
         }
-        if crate::classes::super_init(call) {
-            return self.call_super_initializer(call);
+        if let Some((method, name)) = crate::classes::super_method(call)
+            && self.unshadowed_builtin(name, "super")
+        {
+            if method.attr.as_str() == "__init__" {
+                return self.call_super_initializer(call);
+            }
+            if let Some(base) = self.super_method_base {
+                return self.call_super_method(call, method, base);
+            }
         }
         if let Some(expr) = self.explicit_exception_initializer(call)? {
             return Ok(expr);
@@ -6165,6 +6556,43 @@ impl<'a> Checker<'a> {
             return self.simple_namespace(call);
         }
         calls::reject_unpacking(call, self.source)?;
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "dict" && !self.names.contains_key(name.id.as_str()))
+            && self.resolve(&call.func).is_none()
+            && call.arguments.args.is_empty()
+            && !call.arguments.keywords.is_empty()
+        {
+            let mut entries = Vec::with_capacity(call.arguments.keywords.len());
+            for keyword in &call.arguments.keywords {
+                let name = keyword.arg.as_ref().expect("unpacking excluded");
+                let value = self.expr(&keyword.value)?;
+                entries.push((
+                    Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(name.to_string()),
+                    },
+                    value,
+                ));
+            }
+            let first = entries[0].1.ty;
+            let value = if entries.iter().all(|(_, v)| v.ty == first) {
+                first
+            } else {
+                Type::ObjectValue
+            };
+            let entries = entries
+                .into_iter()
+                .zip(&*call.arguments.keywords)
+                .map(|((key, v), kw)| Ok((key, self.coerce(v, value, &kw.value)?)))
+                .collect::<Result<Vec<_>, String>>()?;
+            return Ok(Expr {
+                ty: self.types.dict(Type::Str, value),
+                kind: ExprKind::Dict {
+                    key: Type::Str,
+                    value,
+                    entries,
+                },
+            });
+        }
         if self.unshadowed_builtin(&call.func, "set")
             && let [input] = call.arguments.args.as_ref()
             && call.arguments.keywords.is_empty()
@@ -6232,6 +6660,18 @@ impl<'a> Checker<'a> {
             });
         }
         if let ast::Expr::Subscript(s) = &*call.func
+            && self.resolve(&s.value) == Some(Binding::Intrinsic(Intrinsic::Deque))
+        {
+            let ty = annotation(
+                &s.slice,
+                self.graph,
+                self.module,
+                &self.classes.declarations,
+                self.types,
+            )?;
+            return self.deque_new(call, Some(ty));
+        }
+        if let ast::Expr::Subscript(s) = &*call.func
             && self.resolve(&s.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
         {
             let ty = annotation(
@@ -6244,6 +6684,7 @@ impl<'a> Checker<'a> {
             return self.counter(call, None, Some(ty));
         }
         match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => return self.forward_ref(call),
             Some(Binding::Intrinsic(Intrinsic::GetAnnotations)) => {
                 return self.get_annotations(call);
             }
@@ -6319,6 +6760,7 @@ impl<'a> Checker<'a> {
                 return Ok(self.ordered_builtin(Builtin::BytesIo, Type::BinaryIO, args));
             }
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
+            Some(Binding::Intrinsic(Intrinsic::Deque)) => return self.deque_new(call, None),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
@@ -6370,6 +6812,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
+            Some(Binding::Intrinsic(Intrinsic::Move)) => return self.shutil_move(call, false),
+            Some(Binding::Intrinsic(Intrinsic::DestInSrc)) => return self.shutil_move(call, true),
             Some(Binding::Intrinsic(Intrinsic::IgnorePatterns)) => {
                 return self.shutil_ignore_patterns(call);
             }
@@ -6378,6 +6822,11 @@ impl<'a> Checker<'a> {
                 return self.public_fspath(call, symbol == Intrinsic::PosixNormcase);
             }
             Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
+            Some(Binding::Intrinsic(
+                op @ (Intrinsic::HandlerRename | Intrinsic::HandlerLookup),
+            )) => {
+                return self.named_handler(op, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::MakeLogRecord)) => {
                 return self.make_log_record(call);
             }
@@ -6417,39 +6866,14 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::CsvReader)) => return self.csv_reader(call),
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
-            Some(Binding::Intrinsic(Intrinsic::WarningFilter)) => {
-                let positional = call.arguments.args.as_ref();
-                let (action, category) = match (positional, call.arguments.keywords.as_slice()) {
-                    ([action], []) => (action, None),
-                    ([action, category], []) => (action, Some(category)),
-                    ([action], [kw])
-                        if kw.arg.as_ref().is_some_and(|k| k.as_str() == "category") =>
-                    {
-                        (action, Some(&kw.value))
-                    }
-                    _ => {
-                        return Err(error(
-                            self.source,
-                            call,
-                            "simplefilter requires an action and an optional static warning category",
-                        ));
-                    }
-                };
-                let category = match category {
-                    None => 0,
-                    Some(expr) if self.unshadowed_builtin(expr, "Warning") => 0,
-                    Some(expr) if self.unshadowed_builtin(expr, "ResourceWarning") => 1,
-                    Some(expr) if self.unshadowed_builtin(expr, "RuntimeWarning") => 2,
-                    Some(expr) => {
-                        return Err(error(self.source, expr, "unsupported warning category"));
-                    }
-                };
+            Some(Binding::Intrinsic(Intrinsic::WarningFilter { simple })) => {
+                return self.warning_filter(call, simple);
+            }
+            Some(Binding::Intrinsic(Intrinsic::WarningReset)) => {
+                self.arguments(call, &[], None)?;
                 return Ok(Expr {
                     ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::WarningFilter(category),
-                        vec![self.expr_expected(action, Type::Str)?],
-                    ),
+                    kind: ExprKind::Builtin(Builtin::WarningReset, vec![]),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
@@ -6573,6 +6997,20 @@ impl<'a> Checker<'a> {
         ) {
             return self.json_decode(call);
         }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) {
+            self.reject_builtin_keywords(call)?;
+            if !call.arguments.args.is_empty() {
+                return Err(error(
+                    self.source,
+                    call,
+                    "JSONDecoder expects keyword-only options",
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::JsonDecoder,
+                kind: ExprKind::Builtin(Builtin::JsonDecoderNew, vec![]),
+            });
+        }
         if let Some(Binding::Intrinsic(operation @ (Intrinsic::JsonLoads | Intrinsic::JsonLoad))) =
             self.resolve(&call.func)
         {
@@ -6597,8 +7035,16 @@ impl<'a> Checker<'a> {
         if gzip || matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
             return self.open(call, gzip);
         }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "issubclass" && !self.names.contains_key("issubclass") && self.resolve(&call.func).is_none())
+            && let Some(answer) = self.mapping_issubclass(call)?
+        {
+            return Ok(answer);
+        }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance") {
             return self.isinstance(call);
+        }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "issubclass") {
+            return self.issubclass(call);
         }
         if let Some(kind) = self.exception_category(&call.func) {
             return self.simple_exception(call, kind);
@@ -6669,6 +7115,16 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if receiver.ty == Type::ModuleNamespace
+                && attribute.attr.as_str() == "keys"
+                && call.arguments.is_empty()
+            {
+                return Ok(errno::op(
+                    ir::ErrnoOperation::Keys,
+                    Type::StringKeys,
+                    vec![receiver],
+                ));
+            }
             if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
                 return self.import_error(call, 41, Some(receiver));
             }
@@ -6733,6 +7189,9 @@ impl<'a> Checker<'a> {
             ) {
                 return self.task_method(receiver, attribute, call);
             }
+            if let Some(element) = self.types.deque_element(receiver.ty) {
+                return self.deque_method(call, attribute, receiver, element);
+            }
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
             }
@@ -6741,6 +7200,20 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::Sha256 {
                 return self.sha256_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
+                let args = self.arguments(
+                    call,
+                    &[Parameter {
+                        name: "s".into(),
+                        ty: Type::Str,
+                        kind: ParameterKind::PositionalOrKeyword,
+                        default: None,
+                        sign_only: false,
+                    }],
+                    Some(receiver),
+                )?;
+                return Ok(self.ordered_builtin(Builtin::JsonDecoderDecode, Type::JsonRoot, args));
             }
             if receiver.ty == Type::ZipInfo
                 && attribute.attr.as_str() == "is_dir"
@@ -6766,10 +7239,12 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);
             }
-            if matches!(attribute.attr.as_str(), "splitlines" | "isspace")
-                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            if matches!(
+                attribute.attr.as_str(),
+                "splitlines" | "isspace" | "isupper"
+            ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.line_method(
+                return self.splitlines_or_predicate(
                     Self::string_value(receiver),
                     attribute.attr.as_str(),
                     call,
@@ -6793,6 +7268,11 @@ impl<'a> Checker<'a> {
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.named_format_call(Self::string_value(receiver), call);
+            }
+            if attribute.attr.as_str() == "translate"
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.translate_method(Self::string_value(receiver), call);
             }
             if receiver.ty == Type::Str {
                 match attribute.attr.as_str() {
@@ -6853,12 +7333,18 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::StringIO
                 && matches!(
                     attribute.attr.as_str(),
-                    "getvalue" | "read" | "readline" | "seek" | "tell" | "truncate"
+                    "getvalue" | "read" | "readline" | "readlines" | "seek" | "tell" | "truncate"
                 )
             {
                 return self.string_io_method(receiver, attribute.attr.as_str(), call);
             }
             self.reject_builtin_keywords(call)?;
+            if receiver.ty == Type::StringIO
+                && let Some(value) =
+                    self.string_io_protocol(&receiver, attribute.attr.as_str(), call)?
+            {
+                return Ok(value);
+            }
             if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
                 let binary = receiver.ty == Type::BinaryIO;
                 let data_type = if binary { Type::Bytes } else { Type::Str };
@@ -6956,6 +7442,17 @@ impl<'a> Checker<'a> {
                 if attribute.attr.as_str() == "fromkeys" {
                     return self.dict_fromkeys(call, None, Some(receiver));
                 }
+                if attribute.attr.as_str() == "copy"
+                    && receiver.ty == self.types.dict(key_type, value_type)
+                {
+                    if !call.arguments.is_empty() {
+                        return Err(error(self.source, call, "dict.copy() takes no arguments"));
+                    }
+                    return Ok(Expr {
+                        ty: receiver.ty,
+                        kind: ExprKind::Builtin(Builtin::DictCopy, vec![receiver]),
+                    });
+                }
                 if attribute.attr.as_str() == "clear"
                     && call.arguments.args.is_empty()
                     && call.arguments.keywords.is_empty()
@@ -6979,7 +7476,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "supported dictionary methods are clear(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
+                        "supported dictionary methods are clear(), copy() on a plain dictionary, get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
                     ));
                 }
                 let key = self.expr_expected(&call.arguments.args[0], key_type)?;
@@ -7156,6 +7653,10 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
+        if name.id == "ord" && !self.names.contains_key("ord") && self.resolve(&call.func).is_none()
+        {
+            return self.ordinal_call(call);
+        }
         self.reject_builtin_keywords(call)?;
         if name.id == "bool" {
             return match call.arguments.args.as_ref() {
@@ -7290,6 +7791,15 @@ impl<'a> Checker<'a> {
                 },
             });
         }
+        if name.id == "frozenset"
+            && args.len() == 1
+            && self.types.element(args[0].ty) == Some(Type::Str)
+        {
+            return Ok(Expr {
+                ty: Type::StringKeys,
+                kind: ExprKind::Builtin(Builtin::FreezeStrings, args),
+            });
+        }
         if name.id == "divmod" && args.len() == 2 {
             let mut body = Vec::with_capacity(2);
             let mut slots = Vec::with_capacity(2);
@@ -7323,7 +7833,7 @@ impl<'a> Checker<'a> {
                 },
             });
         }
-        if args.len() == 1 && args[0].ty == Type::ValueView {
+        if args.len() == 1 && args[0].ty == Type::ObjectValue {
             let op = match name.id.as_str() {
                 "repr" => Some((Type::Str, Builtin::ExceptionFieldRepr)),
                 "len" => Some((Type::Int, Builtin::ExceptionFieldLen)),
@@ -7338,7 +7848,7 @@ impl<'a> Checker<'a> {
         }
         if matches!(name.id.as_str(), "str" | "print")
             && args.len() == 1
-            && args[0].ty == Type::ValueView
+            && args[0].ty == Type::ObjectValue
         {
             let text = Expr {
                 ty: Type::Str,
@@ -7400,6 +7910,12 @@ impl<'a> Checker<'a> {
                 text
             });
         }
+        if let [value] = args.as_slice()
+            && matches!(name.id.as_str(), "repr" | "str")
+            && let Some(rendered) = self.mock_call_repr(value, call)?
+        {
+            return Ok(rendered);
+        }
         if args.len() == 1
             && matches!(args[0].ty, Type::PlainObject | Type::StrDescriptor(_))
             && matches!(name.id.as_str(), "repr" | "str" | "print")
@@ -7416,6 +7932,13 @@ impl<'a> Checker<'a> {
             } else {
                 rendered
             });
+        }
+        if matches!(name.id.as_str(), "getattr" | "hasattr" | "vars")
+            && args.first().is_some_and(|arg| arg.ty == Type::NativeModule)
+            && self.resolve(&call.func).is_none()
+            && !self.names.contains_key(name.id.as_str())
+        {
+            return self.errno_builtin(name.id.as_str(), call, &args);
         }
         if name.id == "vars"
             && let [receiver] = args.as_slice()
@@ -7442,8 +7965,10 @@ impl<'a> Checker<'a> {
                     args[0].ty,
                     Type::Class(_)
                         | Type::CompletedProcess(..)
+                        | Type::ForwardRef(_)
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)
+                        | Type::Tuple(_)
                         | Type::StringIterable
                 ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
@@ -7457,6 +7982,20 @@ impl<'a> Checker<'a> {
                     }
                 });
             }
+        }
+        if name.id == "len"
+            && let [value] = args.as_slice()
+            && self.mapping_class(value.ty).is_some()
+        {
+            return self.mapping_length(value.clone(), call);
+        }
+        if name.id.as_str() == "len"
+            && matches!(args.as_slice(), [m] if m.ty == Type::ReadOnlyObjectMapping)
+        {
+            return Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::Len, args),
+            });
         }
         if name.id.as_str() == "len"
             && let ([source], [set]) = (call.arguments.args.as_ref(), args.as_slice())
@@ -7546,6 +8085,7 @@ impl<'a> Checker<'a> {
                             | Type::List(_)
                             | Type::Dict(_)
                             | Type::Set(_)
+                            | Type::Deque(_)
                             | Type::StringKeys
                             | Type::CodecInfo
                             | Type::Tuple(_)
