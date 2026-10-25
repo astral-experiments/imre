@@ -78,6 +78,17 @@ def tamper_real(source, out):
     return name
 
 
+def bundled_pip(python):
+    # Ask the selected reference interpreter, which may differ from this runner.
+    command = ("from pathlib import Path; import ensurepip; "
+               "wheels = sorted((Path(ensurepip.__file__).parent / '_bundled').glob('pip-*.whl')); "
+               "print(wheels[0] if len(wheels) == 1 else '')")
+    path = subprocess.check_output([python, "-I", "-B", "-c", command], text=True).strip()
+    if not path:
+        raise ValueError("reference interpreter has no unique bundled pip wheel; pass --real-wheel")
+    return Path(path)
+
+
 def observe(command, path, env=None):
     run = subprocess.run([*command, path], cwd=path.parent, env=env,
                          capture_output=True, timeout=150)
@@ -101,7 +112,7 @@ def main():
     parser.add_argument("--clang", default="clang")
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--opt-levels", nargs="+", default=("0", "3"))
-    parser.add_argument("--real-wheel", type=Path)
+    parser.add_argument("--real-wheel", type=Path, help="defaults to the reference interpreter's bundled pip wheel")
     parser.add_argument("--reference-only", action="store_true")
     args = parser.parse_args()
     if not args.reference_only and not (args.compiler and args.runtime):
@@ -122,11 +133,10 @@ def main():
             for case, (issue, member) in expected_issue.items():
                 path = root / (fmt + "-" + case) / "demo-1.0-py3-none-any.whl"
                 cases.append((make_wheel(path, compression, case), issue, member))
-        if args.real_wheel:
-            wheel = args.real_wheel.resolve()
-            bad = root / "real-tampered" / wheel.name
-            name = tamper_real(wheel, bad)
-            cases += [(wheel, "", ""), (bad, "didn't match RECORD", name)]
+        wheel = (args.real_wheel or bundled_pip(args.python)).resolve()
+        bad = root / "real-tampered" / wheel.name
+        name = tamper_real(wheel, bad)
+        cases += [(wheel, "", ""), (bad, "didn't match RECORD", name)]
         reference = []
         for path, issue, member in cases:
             actual = observe([args.python, "-S", "-B", DRIVER], path, env)
