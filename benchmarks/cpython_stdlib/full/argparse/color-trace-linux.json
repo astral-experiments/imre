@@ -1,0 +1,285 @@
+{
+  "implementation": "CPython",
+  "version": "3.14.5",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "input_blobs": {
+    "Lib/_colorize.py": "d6673f6692f76151b3b226ebe4d7976456a257e5",
+    "Lib/dataclasses.py": "f9c1113b1e367f47cd710367c1a2ec3619a94df3",
+    "Lib/test/test_argparse.py": "627e395c49b194f67566bbaa7bba9a567b71edd9"
+  },
+  "suite": {
+    "module": "test.test_argparse",
+    "tests": 1893,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "native_tests": 0
+  },
+  "field_name_instructions": {
+    "import": [
+      [
+        "<module>",
+        5,
+        "IMPORT_FROM"
+      ],
+      [
+        "<module>",
+        5,
+        "STORE_NAME"
+      ],
+      [
+        "ThemeSection.__annotate__",
+        124,
+        "LOAD_FROM_DICT_OR_GLOBALS"
+      ]
+    ],
+    "annotation_probe": [
+      [
+        "ThemeSection.__annotate__",
+        124,
+        "LOAD_FROM_DICT_OR_GLOBALS"
+      ]
+    ],
+    "suite": [],
+    "mapping_probe": []
+  },
+  "field_dictionary_loads": {
+    "import": [
+      [
+        "ThemeSection.__post_init__",
+        129,
+        "LOAD_ATTR"
+      ],
+      [
+        "ThemeSection.no_colors",
+        143,
+        "LOAD_ATTR"
+      ]
+    ],
+    "mapping_probe": [
+      [
+        "ThemeSection.__iter__",
+        154,
+        "LOAD_ATTR"
+      ],
+      [
+        "ThemeSection.__len__",
+        151,
+        "LOAD_ATTR"
+      ],
+      [
+        "ThemeSection.__post_init__",
+        129,
+        "LOAD_ATTR"
+      ],
+      [
+        "ThemeSection.copy_with",
+        135,
+        "LOAD_ATTR"
+      ]
+    ],
+    "suite": [],
+    "annotation_probe": []
+  },
+  "field_annotation_callers": {
+    "import": [
+      {
+        "loads": 1,
+        "callers": [
+          [
+            "annotationlib.py",
+            "get_annotations",
+            1003
+          ],
+          [
+            "dataclasses.py",
+            "_make_annotate_function.<locals>.__annotate__",
+            548
+          ],
+          [
+            "annotationlib.py",
+            "get_annotations",
+            1003
+          ],
+          [
+            "inspect.py",
+            "signature",
+            3323
+          ],
+          [
+            "dataclasses.py",
+            "_process_class",
+            1222
+          ],
+          [
+            "_colorize.py",
+            "<module>",
+            157
+          ]
+        ]
+      },
+      {
+        "loads": 1,
+        "callers": [
+          [
+            "annotationlib.py",
+            "get_annotations",
+            1003
+          ],
+          [
+            "dataclasses.py",
+            "_make_annotate_function.<locals>.__annotate__",
+            548
+          ],
+          [
+            "annotationlib.py",
+            "get_annotations",
+            1003
+          ],
+          [
+            "inspect.py",
+            "signature",
+            3323
+          ],
+          [
+            "dataclasses.py",
+            "_process_class",
+            1222
+          ],
+          [
+            "_colorize.py",
+            "<module>",
+            174
+          ]
+        ]
+      },
+      {
+        "loads": 1,
+        "callers": [
+          [
+            "annotationlib.py",
+            "get_annotations",
+            1003
+          ],
+          [
+            "dataclasses.py",
+            "_make_annotate_function.<locals>.__annotate__",
+            548
+          ],
+          [
+            "annotationlib.py",
+            "get_annotations",
+            1003
+          ],
+          [
+            "inspect.py",
+            "signature",
+            3323
+          ],
+          [
+            "dataclasses.py",
+            "_process_class",
+            1222
+          ],
+          [
+            "_colorize.py",
+            "<module>",
+            189
+          ]
+        ]
+      },
+      {
+        "loads": 1,
+        "callers": [
+          [
+            "annotationlib.py",
+            "get_annotations",
+            1003
+          ],
+          [
+            "dataclasses.py",
+            "_make_annotate_function.<locals>.__annotate__",
+            548
+          ],
+          [
+            "annotationlib.py",
+            "get_annotations",
+            1003
+          ],
+          [
+            "inspect.py",
+            "signature",
+            3323
+          ],
+          [
+            "dataclasses.py",
+            "_process_class",
+            1222
+          ],
+          [
+            "_colorize.py",
+            "<module>",
+            201
+          ]
+        ]
+      }
+    ],
+    "suite": [],
+    "mapping_probe": [],
+    "annotation_probe": [
+      {
+        "loads": 1,
+        "callers": [
+          [
+            "annotationlib.py",
+            "get_annotations",
+            1003
+          ]
+        ]
+      }
+    ]
+  },
+  "dataclasses_calls_during_colorize_import": {
+    "Field.__init__": 41,
+    "_get_field": 41,
+    "_process_class": 5,
+    "field": 41
+  },
+  "section_fields": [
+    "usage",
+    "prog",
+    "prog_extra",
+    "heading",
+    "summary_long_option",
+    "summary_short_option",
+    "summary_label",
+    "summary_action",
+    "long_option",
+    "short_option",
+    "label",
+    "action",
+    "reset"
+  ],
+  "field_values": "dataclasses.Field for every Argparse key, in declaration order",
+  "deferred_annotation": "ForwardRef('ClassVar[dict[str, dataclasses.Field[str]]]', is_class=True, owner=<class '_colorize.ThemeSection'>)",
+  "colorize_calls": {
+    "import": {
+      "ThemeSection.__annotate__": 16,
+      "ThemeSection.__post_init__": 8,
+      "ThemeSection.no_colors": 4
+    },
+    "suite": {
+      "get_theme": 10328
+    },
+    "mapping_probe": {
+      "ThemeSection.__getitem__": 16,
+      "ThemeSection.__iter__": 1,
+      "ThemeSection.__len__": 2,
+      "ThemeSection.__post_init__": 1,
+      "ThemeSection.copy_with": 1
+    },
+    "annotation_probe": {
+      "ThemeSection.__annotate__": 3
+    }
+  }
+}
