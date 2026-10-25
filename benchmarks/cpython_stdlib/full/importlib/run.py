@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1]))
+sys.path[:0] = [str(HERE), str(HERE.parents[1])]
 from product_controls import check
 from suite_evidence import reference_cases, roles, write_reports
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
