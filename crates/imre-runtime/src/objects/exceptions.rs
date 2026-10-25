@@ -41,6 +41,10 @@ pub(crate) enum Kind {
     RuntimeError = 10,
     EOFError = 11,
     OSError = 12,
+    // Module-specific OSError subclasses have stable, separately assigned ABI IDs.
+    ShutilError = 64,
+    SameFileError = 65,
+    SpecialFileError = 66,
     TypeError = 13,
     AttributeError = 14,
     MemoryError = 15,
@@ -66,6 +70,7 @@ pub(crate) enum Kind {
     StopIteration = 35,
     BadZipFile = 36,
     NotImplementedError = 37,
+    UnicodeEncodeError = 38,
     NameError = 39,
     UnboundLocalError = 40,
 }
@@ -86,6 +91,9 @@ impl Kind {
             10 => Self::RuntimeError,
             11 => Self::EOFError,
             12 => Self::OSError,
+            64 => Self::ShutilError,
+            65 => Self::SameFileError,
+            66 => Self::SpecialFileError,
             13 => Self::TypeError,
             14 => Self::AttributeError,
             15 => Self::MemoryError,
@@ -111,6 +119,7 @@ impl Kind {
             35 => Self::StopIteration,
             36 => Self::BadZipFile,
             37 => Self::NotImplementedError,
+            38 => Self::UnicodeEncodeError,
             39 => Self::NameError,
             40 => Self::UnboundLocalError,
             _ => fail("SystemError", "invalid exception kind"),
@@ -132,12 +141,16 @@ impl Kind {
             Self::RuntimeError => "RuntimeError",
             Self::EOFError => "EOFError",
             Self::OSError => "OSError",
+            Self::ShutilError => "Error",
+            Self::SameFileError => "SameFileError",
+            Self::SpecialFileError => "SpecialFileError",
             Self::TypeError => "TypeError",
             Self::AttributeError => "AttributeError",
             Self::MemoryError => "MemoryError",
             Self::SystemError => "SystemError",
             Self::UnicodeError => "UnicodeError",
             Self::UnicodeDecodeError => "UnicodeDecodeError",
+            Self::UnicodeEncodeError => "UnicodeEncodeError",
             Self::UnsupportedOperation => "UnsupportedOperation",
             Self::FileNotFoundError => "FileNotFoundError",
             Self::PermissionError => "PermissionError",
@@ -184,9 +197,13 @@ impl Kind {
                     | Self::TomlDecodeError
                     | Self::UnicodeError
                     | Self::UnicodeDecodeError
+                    | Self::UnicodeEncodeError
                     | Self::UnsupportedOperation
             ),
-            Self::UnicodeError => matches!(self, Self::UnicodeError | Self::UnicodeDecodeError),
+            Self::UnicodeError => matches!(
+                self,
+                Self::UnicodeError | Self::UnicodeDecodeError | Self::UnicodeEncodeError
+            ),
             Self::SubprocessError => {
                 matches!(
                     self,
@@ -194,6 +211,7 @@ impl Kind {
                 )
             }
             Self::RuntimeError => matches!(self, Self::RuntimeError | Self::NotImplementedError),
+            Self::ShutilError => matches!(self, Self::ShutilError | Self::SameFileError),
             Self::OSError => matches!(
                 self,
                 Self::OSError
@@ -204,6 +222,9 @@ impl Kind {
                     | Self::NotADirectoryError
                     | Self::FileExistsError
                     | Self::BadGzipFile
+                    | Self::ShutilError
+                    | Self::SameFileError
+                    | Self::SpecialFileError
             ),
             _ => self == expected,
         }
@@ -254,6 +275,7 @@ enum Payload {
     Message(Rc<Str>),
     /// Some builtins render a human message that differs from their original arguments.
     Arguments(Box<BuiltinArguments>),
+    Json(Rc<JsonError>),
     Key(OwnedWord),
     Exit(Option<OwnedWord>),
     Process(Box<super::processes::ProcessError>),
@@ -266,6 +288,14 @@ enum Payload {
 struct BuiltinArguments {
     message: Rc<Str>,
     args: smallvec::SmallVec<[OwnedWord; 5]>,
+}
+
+struct JsonError {
+    msg: Rc<Str>,
+    doc: Rc<Str>,
+    pos: usize,
+    lineno: usize,
+    colno: usize,
 }
 
 impl From<Rc<Str>> for Payload {
@@ -375,6 +405,7 @@ pub(crate) struct Error {
     kind: Kind,
     // A missing payload uses the preallocated MemoryError when raised.
     payload: Option<Payload>,
+    cause: Option<Rc<Object>>,
 }
 
 impl Error {
@@ -385,6 +416,7 @@ impl Error {
         Self {
             kind: Kind::SystemExit,
             payload: Some(Payload::Exit(Some(code))),
+            cause: None,
         }
     }
 
@@ -392,6 +424,7 @@ impl Error {
         Self {
             kind,
             payload: Some(Payload::Message(Rc::new(message.into()))),
+            cause: None,
         }
     }
 
@@ -418,6 +451,7 @@ impl Error {
                 message: Rc::new(message.into()),
                 args: args.into_iter().collect(),
             }))),
+            cause: None,
         }
     }
 
@@ -445,6 +479,7 @@ impl Error {
                 message: Rc::new(message.into()),
                 args: args.into_iter().collect(),
             }))),
+            cause: None,
         }
     }
 
@@ -452,10 +487,31 @@ impl Error {
         self.kind == kind
     }
 
+    pub(super) fn json_decode(
+        msg: &str,
+        doc: Rc<Str>,
+        pos: usize,
+        lineno: usize,
+        colno: usize,
+    ) -> Self {
+        Self {
+            kind: Kind::JsonDecodeError,
+            payload: Some(Payload::Json(Rc::new(JsonError {
+                msg: Rc::new(Str::from(msg)),
+                doc,
+                pos,
+                lineno,
+                colno,
+            }))),
+            cause: None,
+        }
+    }
+
     pub(crate) fn allocation() -> Self {
         Self {
             kind: Kind::MemoryError,
             payload: None,
+            cause: None,
         }
     }
 
@@ -463,6 +519,7 @@ impl Error {
         Self {
             kind: Kind::KeyError,
             payload: Some(Payload::Key(key)),
+            cause: None,
         }
     }
 
@@ -476,16 +533,25 @@ impl Error {
         Self::new(Kind::IndexError, "list index out of range")
     }
 
+    /// Retain the original exception when a native operation translates an error.
+    pub(super) fn with_cause(mut self, cause: Self) -> Self {
+        self.cause = Some(cause.into_object());
+        self
+    }
+
+    fn into_object(self) -> Rc<Object> {
+        match self.payload {
+            Some(payload) => exception_with_cause(self.kind, payload, self.cause),
+            None => SEQUENCE_ALLOCATION_ERROR.with_borrow(Rc::clone),
+        }
+    }
+
     /// Installs this error only after any runtime storage access has ended.
     /// Keep exception allocation and cleanup out of successful access paths.
     #[cold]
     #[inline(never)]
     pub(crate) fn raise(self) {
-        if let Some(payload) = self.payload {
-            replace_pending(Some(new_exception(self.kind, payload)));
-        } else {
-            sequence_allocation_failed();
-        }
+        replace_pending(Some(self.into_object()));
     }
 
     /// Returns a failure sentinel after installing the owned exception.
@@ -655,11 +721,20 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
 }
 
 fn new_exception(kind: Kind, payload: impl Into<Payload>) -> Rc<Object> {
+    exception_with_cause(kind, payload.into(), None)
+}
+
+fn exception_with_cause(kind: Kind, payload: Payload, cause: Option<Rc<Object>>) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
         kind,
-        payload: payload.into(),
-        suppress_context: false,
-        details: None,
+        payload,
+        suppress_context: cause.is_some(),
+        details: cause.map(|cause| {
+            Rc::new(ExceptionDetails {
+                cause: Some(cause),
+                ..Default::default()
+            })
+        }),
     }))))
 }
 
@@ -873,6 +948,10 @@ impl Storage {
             Payload::Empty => Rc::new(Str::new("")),
             Payload::Message(message) => Rc::clone(message),
             Payload::Arguments(arguments) => Rc::clone(&arguments.message),
+            Payload::Json(e) => Rc::new(Str::from(format!(
+                "{}: line {} column {} (char {})",
+                e.msg, e.lineno, e.colno, e.pos
+            ))),
             Payload::Process(process) => Rc::new(process.message()),
             Payload::Timeout(timeout) => Rc::new(timeout.message()),
             Payload::Key(key) if key.kind == WordKind::new(3) => {
@@ -896,6 +975,35 @@ impl Storage {
     }
 }
 
+/// # Safety
+/// The caller roots an exception and supplies the field selector emitted by the
+/// compiler. On success, string and integer fields transfer independent owners.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_json_error_field(value: *const Object, field: u32) -> usize {
+    // SAFETY: the exception stays live until the field has been acquired.
+    let result = unsafe {
+        object(value).0.with(|storage| {
+            let exception = storage.exception();
+            if let Payload::Json(e) = &exception.payload {
+                return Ok(match field {
+                    0 => Rc::into_raw(e.msg.clone()) as usize,
+                    1 => Rc::into_raw(e.doc.clone()) as usize,
+                    2 => crate::Int::from_usize(e.pos).into_raw(),
+                    3 => crate::Int::from_usize(e.lineno).into_raw(),
+                    4 => crate::Int::from_usize(e.colno).into_raw(),
+                    _ => unreachable!("invalid JSON exception field"),
+                });
+            }
+            let name = ["msg", "doc", "pos", "lineno", "colno"][field as usize];
+            Err(Error::new(
+                Kind::AttributeError,
+                format!("'{}' object has no attribute '{name}'", exception.name()),
+            ))
+        })
+    };
+    finish(result, 0)
+}
+
 fn exit_text(code: Option<&OwnedWord>, missing: &str) -> Rc<Str> {
     let Some(code) = code else {
         return Rc::new(Str::new(missing));
@@ -911,10 +1019,10 @@ fn exit_text(code: Option<&OwnedWord>, missing: &str) -> Rc<Str> {
 }
 
 /// Construct SystemExit with its original code. Kind 4 denotes an omitted
-/// argument; 0, 1, 2 and 3 represent None, bool, int and str respectively.
+/// argument; 0, 1, 2, 3 and 6 represent None, bool, int, str and tuple.
 ///
 /// # Safety
-/// The caller roots the scalar or immutable string described by `kind`.
+/// The caller roots the scalar, string or tuple described by `kind`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_new(kind: u32, word: usize) -> *const Object {
     let code = (kind != 4).then(|| {
@@ -981,11 +1089,26 @@ pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *co
     }
 }
 
-/// Compare the original exit code against a scalar or a second code view.
+/// Format the original payload, preserving string quotes and tuple shape.
+///
+/// # Safety
+/// The caller roots a code view from `imre_system_exit_code`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_system_exit_code_repr(value: *const Object) -> *const Str {
+    let mut text = String::new();
+    // SAFETY: the exit view keeps its correctly typed payload live throughout formatting.
+    unsafe {
+        let (kind, word) = exit_word(value);
+        super::values::write_repr(&mut text, word, kind);
+    }
+    Rc::into_raw(Rc::new(Str::from(text)))
+}
+
+/// Compare the original exit code against a scalar, tuple or a second code view.
 ///
 /// # Safety
 /// `value` is a rooted code view. `word` is rooted with kind 0 (None), 1
-/// (bool), 2 (int), 3 (str), or 5 (another code view).
+/// (bool), 2 (int), 3 (str), 5 (another code view) or 6 (tuple).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_equal(
     value: *const Object,
@@ -1025,6 +1148,8 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
+        // SAFETY: kind 6 roots the fixed tuple and its static descriptor.
+        6 => unsafe { super::records::descriptor(word as *const usize).length != 0 },
         _ => unreachable!(),
     })
 }

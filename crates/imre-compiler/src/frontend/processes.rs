@@ -62,10 +62,19 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
         fn visit_expr(&mut self, expr: &'ast ast::Expr) {
             if let ast::Expr::Call(call) = expr
                 && let Some(deadline) = match self.graph.resolve(self.module, &call.func) {
-                    Some(Binding::Intrinsic(Intrinsic::SubprocessRun)) => timeout_argument(call),
+                    Some(Binding::Intrinsic(
+                        Intrinsic::SubprocessRun
+                        | Intrinsic::SubprocessCall
+                        | Intrinsic::SubprocessCheckCall,
+                    )) => timeout_argument(call),
                     _ if matches!(&*call.func, ast::Expr::Attribute(a) if a.attr.as_str() == "wait") => {
                         timeout_argument(call)
                             .or_else(|| call.arguments.args.first())
+                            .filter(|d| !matches!(d, ast::Expr::NoneLiteral(_)))
+                    }
+                    _ if matches!(&*call.func, ast::Expr::Attribute(a) if a.attr.as_str() == "communicate") => {
+                        timeout_argument(call)
+                            .or_else(|| call.arguments.args.get(1))
                             .filter(|d| !matches!(d, ast::Expr::NoneLiteral(_)))
                     }
                     _ => None,
@@ -185,7 +194,20 @@ pub(super) fn process_error_view(
                 };
                 (capture, types.list(Type::Str))
             }
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::PopenWait), _) => {
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::PopenCommunicate { .. }),
+                args,
+            ) => {
+                timed = true;
+                let Type::Popen(capture, _) = args[0].ty else {
+                    unreachable!()
+                };
+                (capture, types.list(Type::Str))
+            }
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::PopenWait | ProcessOperation::Call { .. }),
+                _,
+            ) => {
                 timed = true;
                 (
                     ProcessCapture {
@@ -284,7 +306,11 @@ fn stream_plan(
         ProcessCapture {
             stdout,
             stderr,
-            text: text && (stdout || stderr),
+            text: text
+                && (stdout
+                    || stderr
+                    || graph.resolve(module, &call.func)
+                        == Some(Binding::Intrinsic(Intrinsic::Popen))),
         },
     ))
 }
@@ -305,6 +331,9 @@ fn error_field_type(graph: &SourceGraph, types: &Types, field: u32, timeout: boo
         fn visit_expr(&mut self, expression: &'ast ast::Expr) {
             if let ast::Expr::Call(call) = expression {
                 let ty = match self.graph.resolve(self.module, &call.func) {
+                    Some(Binding::Intrinsic(
+                        Intrinsic::SubprocessCall | Intrinsic::SubprocessCheckCall,
+                    )) => Some(Type::None),
                     Some(Binding::Intrinsic(Intrinsic::CheckOutput)) => {
                         self.check_output = true;
                         Some(if self.stdout { Type::Str } else { Type::None })
@@ -652,19 +681,52 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Which), returns, args))
     }
 
-    pub(super) fn popen(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    /// call and check_call accept the same Popen arguments with an extra wait deadline.
+    pub(super) fn popen(
+        &mut self,
+        call: &ast::ExprCall,
+        check_call: Option<bool>,
+    ) -> Result<Expr, String> {
         let directory = self.types.optional(Type::Str);
         let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
         let (streams, capture) = stream_plan(self.graph, self.module, call)
             .map_err(|message| error(self.source, call, message))?;
-        let params = [
+        let stdin = match call
+            .arguments
+            .keywords
+            .iter()
+            .find(|kw| kw.arg.as_deref() == Some("stdin"))
+            .map(|kw| &kw.value)
+        {
+            None | Some(ast::Expr::NoneLiteral(_)) => 0,
+            Some(arg) => match self.resolve(arg) {
+                Some(Binding::Intrinsic(Intrinsic::Pipe)) => 1,
+                Some(Binding::Intrinsic(Intrinsic::Devnull)) => 2,
+                _ => {
+                    return Err(error(
+                        self.source,
+                        arg,
+                        "stdin requires None, PIPE, or DEVNULL",
+                    ));
+                }
+            },
+        };
+        let streams = streams | (stdin << 12) | (u32::from(capture.text) << 16);
+        let default_bufsize = || Expr {
+            ty: Type::Int,
+            kind: ExprKind::Int("-1".into()),
+        };
+        let mut params = [
             ("args", self.types.list(Type::Str), None),
+            ("bufsize", Type::Int, Some(default_bufsize())),
             ("cwd", directory, Some(absent(directory))),
             ("env", environment, Some(absent(environment))),
+            ("stdin", Type::Bool, Some(boolean(false))),
             ("stdout", Type::Bool, Some(boolean(false))),
             ("stderr", Type::Bool, Some(boolean(false))),
             ("text", Type::Bool, Some(boolean(false))),
             ("encoding", Type::Bool, Some(boolean(false))),
+            ("close_fds", Type::Bool, Some(boolean(true))),
         ]
         .into_iter()
         .enumerate()
@@ -673,25 +735,40 @@ impl Checker<'_> {
             ty,
             default,
             sign_only: false,
-            kind: if index == 0 {
+            kind: if index <= 1 {
                 ParameterKind::PositionalOrKeyword
             } else {
                 ParameterKind::KeywordOnly
             },
         })
         .collect::<Vec<_>>();
+        if check_call.is_some() {
+            let deadline = self.types.optional(Type::Float);
+            params.push(Parameter {
+                name: "timeout".into(),
+                ty: deadline,
+                default: Some(absent(deadline)),
+                sign_only: false,
+                kind: ParameterKind::KeywordOnly,
+            });
+        }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             match index {
-                1 => checker.optional_path_argument(arg),
-                3.. => Ok(boolean(false)), // effect-free literals checked by stream_plan
+                1 if matches!(arg, ast::Expr::NoneLiteral(_)) => Ok(default_bufsize()),
+                2 => checker.optional_path_argument(arg),
+                4..=8 => Ok(boolean(false)), // effect-free literals checked by stream_plan
+                10 => checker.deadline_value(arg),
                 _ => checker.expr_expected(arg, params[index].ty),
             }
         })?;
-        Ok(self.ordered_builtin(
-            Builtin::Process(ProcessOperation::Popen { streams }),
-            Type::Popen(capture),
-            args,
-        ))
+        let (op, ty) = match check_call {
+            Some(check) => (ProcessOperation::Call { streams, check }, Type::Int),
+            None => (
+                ProcessOperation::Popen { streams },
+                Type::Popen(capture, stdin == 1),
+            ),
+        };
+        Ok(self.ordered_builtin(Builtin::Process(op), ty, args))
     }
 
     pub(super) fn popen_attribute(
@@ -699,7 +776,27 @@ impl Checker<'_> {
         receiver: Expr,
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
+        let Type::Popen(capture, stdin) = receiver.ty else {
+            unreachable!()
+        };
         let (op, ty) = match attr.attr.as_str() {
+            name @ ("stdin" | "stdout" | "stderr") => {
+                let (index, piped) = match name {
+                    "stdin" => (0, stdin),
+                    "stdout" => (1, capture.stdout),
+                    _ => (2, capture.stderr),
+                };
+                (
+                    ProcessOperation::PopenPipe(index),
+                    if !piped {
+                        Type::None
+                    } else if capture.text {
+                        Type::TextIO
+                    } else {
+                        Type::BinaryIO
+                    },
+                )
+            }
             "args" => (ProcessOperation::PopenArgs, self.types.list(Type::Str)),
             "pid" => (ProcessOperation::PopenPid, Type::Int),
             "returncode" => (
@@ -723,6 +820,38 @@ impl Checker<'_> {
                 ProcessOperation::PopenStatus { poll: true },
                 self.types.optional(Type::Int),
             ),
+            "communicate" => {
+                let Type::Popen(capture, _) = args[0].ty else {
+                    unreachable!()
+                };
+                let input = self
+                    .types
+                    .optional(if capture.text { Type::Str } else { Type::Bytes });
+                let timeout = self.types.optional(Type::Float);
+                let params = [("input", input), ("timeout", timeout)].map(|(name, ty)| Parameter {
+                    name: name.into(),
+                    ty,
+                    kind: ParameterKind::PositionalOrKeyword,
+                    default: Some(absent(ty)),
+                    sign_only: false,
+                });
+                let values =
+                    self.arguments_with(call, &params, args.pop(), |checker, index, arg| {
+                        if index == 1 {
+                            checker.deadline_value(arg)
+                        } else {
+                            checker.expr_expected(arg, input)
+                        }
+                    })?;
+                let pair = self
+                    .types
+                    .tuple(vec![capture.stream(true), capture.stream(false)]);
+                return Ok(self.ordered_builtin(
+                    Builtin::Process(ProcessOperation::PopenCommunicate { text: capture.text }),
+                    pair,
+                    values,
+                ));
+            }
             "wait" => {
                 let timeout = self.types.optional(Type::Float);
                 let param = Parameter {
