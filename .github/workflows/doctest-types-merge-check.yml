@@ -1,0 +1,114 @@
+name: Doctest and types prospective merge
+on:
+  push:
+    branches: [codex/stdlib-doctest-types-merge-check]
+permissions:
+  contents: read
+jobs:
+  exact-source:
+    runs-on: github-ubuntu-24.04-x86_64-4
+    timeout-minutes: 40
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - name: Check out the exact prospective merge, without this validation workflow
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 6d274f2a054e985de34b58164e08ee563fad4a45
+          persist-credentials: false
+      - run: test "$(git rev-parse 'HEAD^{tree}')" = f964ac4cc13601dd1a76b99615dcae5bc7f0a109
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14.5'
+      - name: Install Clang 18
+        run: sudo apt-get update && sudo apt-get install -y clang-18
+      - name: Build the actual compiler and runtime
+        run: cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+      - name: Check out the original CPython tests and library sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-stdlib-reference
+          sparse-checkout: |
+            Lib
+            Modules
+            Objects
+          persist-credentials: false
+      - name: Check the native doctest suites at O0 and O3
+        run: |
+          python3 -B benchmarks/cpython_stdlib/full/doctest/audit.py --cpython-source .cpython-stdlib-reference
+          python3 -B benchmarks/cpython_stdlib/full/doctest/native.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/doctest.json"
+          cmp benchmarks/cpython_stdlib/full/doctest/execution-linux.json "$RUNNER_TEMP/doctest.json"
+      - name: Check the original namespace methods, dictionary aliases, and both optimization levels
+        run: |
+          python3 -B benchmarks/cpython_stdlib/full/types/run.py --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/types.json"
+          python3 -B benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/types/reference-linux.json "$RUNNER_TEMP/types.json"
+      - name: Run a namespace doctest through its native unittest fixture at both optimization levels
+        shell: bash
+        run: |
+          d="$RUNNER_TEMP/doctest-simple-namespace"
+          mkdir "$d"
+          cat > "$d/document.py" <<'PYTHON'
+          """A namespace with a live dictionary.
+
+          >>> from types import SimpleNamespace
+          >>> ns = SimpleNamespace(value=2)
+          >>> ns.value
+          2
+          >>> ns.__dict__['value'] = 5
+          >>> ns.value
+          5
+          """
+          PYTHON
+          cat > "$d/case.py" <<'PYTHON'
+          import doctest
+          import document
+          import unittest
+
+          class Example(unittest.TestCase):
+              def test_document(self) -> None:
+                  suite = doctest.DocTestSuite(document)
+                  self.assertEqual(suite.countTestCases(), 1)
+                  suite.debug()
+                  print('ran the namespace doctest')
+
+          if __name__ == '__main__':
+              unittest.main()
+          PYTHON
+          python3 -B "$d/case.py" > "$d/reference" 2> "$d/reference.err"
+          grep -Fx 'ran the namespace doctest' "$d/reference"
+          for opt in 0 3; do
+            for mode in normal reachable; do
+              extra=(); if [[ "$mode" == reachable ]]; then extra=(--reachable-only); fi
+              target/debug/imre build "$d/case.py" --no-cache --opt-level "$opt" -o "$d/main" --runtime "$PWD/target/debug/libimre_runtime.a" --clang /usr/bin/clang-18 "${extra[@]}"
+              "$d/main" > "$d/native" 2> "$d/native.err"
+              cmp "$d/reference" "$d/native"
+              grep -F 'Ran 1 test' "$d/native.err"
+              grep -Fx 'OK' "$d/native.err"
+            done
+          done
+      - name: Compare every untouched entry point in the offline and full Git fixtures
+        shell: bash
+        run: |
+          for mode in vendored git; do
+            extra=(); if [[ "$mode" == git ]]; then extra=(--cpython-git .cpython-stdlib-reference); fi
+            status=0
+            python3 -B benchmarks/cpython_stdlib/full/check_suite_startup.py --compiler target/debug/imre "${extra[@]}" test.test_itertools test.test_json > "$RUNNER_TEMP/startup-$mode.json" || status=$?
+            test "$status" -le 1
+          done
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import json, os, re
+          root=Path(os.environ['RUNNER_TEMP'])
+          a,b=[json.loads((root/f'startup-{source}.json').read_text()) for source in ('vendored','git')]
+          for report in (a,b):
+              for row in report['checks']:
+                  row['diagnostic']=re.sub(r'(?<= under )/[^;\n]*?/imre-cpython-suite-[^/\s]+/Lib(?=;)', '<staged>/Lib', row['diagnostic'])
+          assert len(a['checks'])==8 and a['checks']==b['checks'] and a['tests_executed']==b['tests_executed']==0
+          print(json.dumps(a))
+          PYTHON
+      - name: Test compiler and runtime library changes in the same build
+        run: cargo test --locked -j 2 -p imre-compiler -p imre-runtime --lib --features imre-compiler/verify-ir
