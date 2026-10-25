@@ -424,10 +424,11 @@ jobs:
           name: cpython-logging-evidence-linux
           path: ${{ runner.temp }}/logging-evidence-linux.json
           if-no-files-found: error
+      - &install-wheel-tools
+        name: Install the wheel test dependencies
+        run: python3 -m pip install "wheel==0.45.1" "packaging==25.0"
       - name: Build and install a Imre extension wheel
-        run: |
-          python3 -m pip install "wheel==0.45.1" "packaging==25.0"
-          python3 tests/extension_wheel.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
+        run: python3 tests/extension_wheel.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
       - uses: ./.github/actions/test-google-crc32c
         with:
           cc: clang-18
@@ -644,6 +645,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - *setup-python
+      - *install-wheel-tools
       - *cpython-reference
       - run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
       - run: cargo build -p imre-compiler --release --locked --features imre-compiler/verify-ir
