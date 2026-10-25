@@ -37,15 +37,18 @@ def import_status(compiler, source, name):
 def measurements(name, rows):
     row = rows.get(name)
     if row is None:
-        return "—", "—"
+        return "—", "—", "—"
     native = row["fully_native_both"]
     total, covered = row["instances"], row["ledger_instances"]
     fraction = f"{native if native is not None else '—'} / {total:,}"
     if covered != total:
         fraction += f" ({covered:,} assessed)"
     levels = row["O3"]
-    assisted = levels["native-body-host-fixture"] + levels["host-driven-native-operation"]
-    return f"[{fraction}](../benchmarks/cpython_stdlib/full/{name}/)", str(assisted) if covered else "—"
+    return (
+        f"[{fraction}](../benchmarks/cpython_stdlib/full/{name}/)",
+        str(levels["native-body-host-fixture"]) if covered else "—",
+        str(levels["host-driven-native-operation"]) if covered else "—",
+    )
 
 
 def render(compiler):
@@ -68,6 +71,8 @@ def render(compiler):
     native = sum(row["fully_native_both"] or 0 for row in measured)
     denominator = sum(row["instances"] for row in measured)
     covered = sum(row["ledger_instances"] for row in measured)
+    host_fixtures = sum(row["O3"]["native-body-host-fixture"] for row in measured)
+    host_tests = sum(row["O3"]["host-driven-native-operation"] for row in measured)
     lines = [
         "# Standard library support",
         "",
@@ -77,12 +82,14 @@ def render(compiler):
         "",
         "**Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.",
         "",
-        "**Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. **Host-assisted** counts two other roles at O3: a native body with a CPython fixture, or a CPython test calling native operations. Mixed and blocked cases earn neither count. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.",
+        "**Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.",
+        "",
+        f"The last two columns show where CPython still helps at O3. **CPython fixture**: {host_fixtures:,} test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: {host_tests:,} executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.",
         "",
         "## Modules with examples, accepted imports or suite results",
         "",
-        "| Module | Import | Native API example or boundary | Native / upstream | Host-assisted |",
-        "| --- | --- | --- | ---: | ---: |",
+        "| Module | Import | Native API example or boundary | Native / upstream | CPython fixture | CPython test |",
+        "| --- | --- | --- | ---: | ---: | ---: |",
     ]
     for name in supported:
         note = "No API example recorded."
@@ -91,8 +98,8 @@ def render(compiler):
             if not (ROOT / path).is_file():
                 raise ValueError(f"{name}: missing example {path}")
             note += f" [Evidence](../{path})"
-        native, assisted = measurements(name, rows)
-        lines.append(f"| `{name}` | {imports[name]} | {note} | {native} | {assisted} |")
+        native, fixture, test = measurements(name, rows)
+        lines.append(f"| `{name}` | {imports[name]} | {note} | {native} | {fixture} | {test} |")
 
     lines.extend(["", "## Modules without an accepted import or a suite measurement", "",
                   "Both import probes reject these names. No native API example or full-suite ledger is recorded here.", "",
@@ -105,10 +112,10 @@ def render(compiler):
     if extra := sorted(rows.keys() - set(names)):
         lines.extend(["", "## Additional test subjects", "",
                       "These ledgers describe Python types or other subjects outside the top-level module inventory.", "",
-                      "| Subject | Native / upstream | Host-assisted |", "| --- | ---: | ---: |"])
+                      "| Subject | Native / upstream | CPython fixture | CPython test |", "| --- | ---: | ---: | ---: |"])
         for name in extra:
-            native, assisted = measurements(name, rows)
-            lines.append(f"| `{name}` | {native} | {assisted} |")
+            native, fixture, test = measurements(name, rows)
+            lines.append(f"| `{name}` | {native} | {fixture} | {test} |")
     lines.extend(["", "## Updating this page", "",
                   "Add an [API example](../benchmarks/cpython_stdlib/full/api_examples.toml) when a module gains a usable operation. Update the [per-test evidence](../benchmarks/cpython_stdlib/full/README.md) when native execution changes. From the repository root, use a current Linux Imre build and CPython 3.14.5:", "",
                   "```sh", "python3.14 -B benchmarks/cpython_stdlib/full/support_table.py --imre target/release/imre", "```", "",
