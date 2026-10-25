@@ -5884,31 +5884,27 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(self.string_join_value(None, attribute));
                 }
-                if let Some(Binding::Intrinsic(stream @ (Intrinsic::Stderr | Intrinsic::Stdout))) =
-                    self.resolve(&attribute.value)
+                if let Some(Binding::Intrinsic(
+                    stream @ (Intrinsic::Stdin | Intrinsic::Stdout | Intrinsic::Stderr),
+                )) = self.resolve(&attribute.value)
+                    && matches!(attribute.attr.as_str(), "encoding" | "errors")
                 {
-                    let kind = match (stream, attribute.attr.as_str()) {
-                        (_, "encoding") => Some(Builtin::SysStreamEncoding),
-                        (Intrinsic::Stdout, "errors") => Some(Builtin::SysStdoutErrors),
-                        (Intrinsic::Stderr, "errors") => {
-                            return Ok(unpacking::string("backslashreplace"));
-                        }
-                        _ => None,
+                    let descriptor = match stream {
+                        Intrinsic::Stdin => 0,
+                        Intrinsic::Stdout => 1,
+                        Intrinsic::Stderr => 2,
+                        _ => unreachable!(),
                     };
-                    if let Some(kind) = kind {
-                        return Ok(Expr {
-                            ty: Type::Str,
-                            kind: ExprKind::Builtin(kind, vec![]),
-                        });
-                    }
-                }
-                if attribute.attr.as_str() == "encoding"
-                    && matches!(
-                        self.resolve(&attribute.value),
-                        Some(Binding::Intrinsic(Intrinsic::Stdin))
-                    )
-                {
-                    return Ok(unpacking::string("utf-8"));
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::SysStreamText {
+                                descriptor,
+                                errors: attribute.attr.as_str() == "errors",
+                            },
+                            vec![],
+                        ),
+                    });
                 }
                 if let Some(class) = self.class_reference(&attribute.value) {
                     if let Some(member) = self.enum_member(class, attribute.attr.as_str()) {
@@ -7552,7 +7548,13 @@ impl<'a> Checker<'a> {
                                 ),
                                 Expr {
                                     ty: Type::Str,
-                                    kind: ExprKind::Builtin(Builtin::SysStreamEncoding, vec![]),
+                                    kind: ExprKind::Builtin(
+                                        Builtin::SysStreamText {
+                                            descriptor: 2,
+                                            errors: false,
+                                        },
+                                        vec![],
+                                    ),
                                 },
                             ),
                             unpacking::string("'>"),

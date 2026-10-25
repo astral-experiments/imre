@@ -5,6 +5,7 @@ from pathlib import Path
 
 from exit_case import exit_observation
 from ioencoding_case import observe as ioencoding_observation
+from locale_stream_cases import observe as locale_stream_observations
 from suite_evidence import roles
 from suite_inventory import load_suite
 from suite_native import NativeCompileError, native_method, run_in_fixtures, testcase_fixture
@@ -111,4 +112,5 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
         if state == "proposed":
             proof["exception_proposal"] = "unreviewed; still in the denominator"
         results[key] = {"outcome": outcome, "roles": locations, "reason": reason, "evidence": proof}
+    locale_stream_observations(module, toolchain, source, results)
     return results

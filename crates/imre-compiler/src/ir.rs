@@ -660,8 +660,10 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
-    SysStreamEncoding,
-    SysStdoutErrors,
+    SysStreamText {
+        descriptor: u8,
+        errors: bool,
+    },
     SysVersionInfo {
         implementation: bool,
     },

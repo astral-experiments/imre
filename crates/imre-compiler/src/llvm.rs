@@ -4539,8 +4539,14 @@ impl Emitter<'_, '_> {
                     Some(root),
                 )
             }
-            Builtin::SysStreamEncoding => self.call("imre_sys_stream_encoding", returns, &[]),
-            Builtin::SysStdoutErrors => self.call("imre_sys_stdout_errors", returns, &[]),
+            Builtin::SysStreamText { descriptor, errors } => Value {
+                ty: Type::Str,
+                operand: self.instruction(format!(
+                    "call ptr @imre_sys_stream_text(i32 {descriptor}, i32 {})",
+                    u32::from(*errors)
+                )),
+                small_integer: false,
+            },
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::DocCaptureStart => {
@@ -7571,8 +7577,7 @@ declare i32 @imre_finish_stdio()
 declare void @imre_record_error_init()
 declare void @imre_stdio_init()
 declare void @imre_stdio_command_init(i32, i32)
-declare ptr @imre_sys_stream_encoding()
-declare ptr @imre_sys_stdout_errors()
+declare ptr @imre_sys_stream_text(i32, i32)
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
