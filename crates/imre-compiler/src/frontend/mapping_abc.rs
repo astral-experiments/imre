@@ -54,20 +54,23 @@ impl Checker<'_> {
         Ok(type_error(Type::Class(class), message, inputs))
     }
 
-    /// Class objects are static here: preserve dict's virtual registration as
-    /// well as nominal Mapping bases, without guessing at other class values.
-    pub(super) fn mapping_issubclass(&self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+    /// Resolve declared Mapping subclasses statically and check class values at runtime.
+    pub(super) fn mapping_issubclass(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
         let [child, parent] = call.arguments.args.as_ref() else {
             return Ok(None);
         };
-        let Some(Binding::Intrinsic(Intrinsic::Mapping { typing_alias })) = self.resolve(parent)
+        let Some(Binding::Intrinsic(Intrinsic::Mapping { typing_alias })) =
+            self.collection_binding(parent)
         else {
             return Ok(None);
         };
         self.reject_builtin_keywords(call)?;
         if !typing_alias
             && matches!(
-                self.resolve(child),
+                self.collection_binding(child),
                 Some(Binding::Intrinsic(Intrinsic::Mapping {
                     typing_alias: true
                 }))
@@ -83,7 +86,7 @@ impl Checker<'_> {
         let matched = if let Some(id) = self.class_reference(child) {
             self.classes.declarations.definitions[id].mapping
         } else if matches!(
-            self.resolve(child),
+            self.collection_binding(child),
             Some(Binding::Intrinsic(
                 Intrinsic::Mapping { .. } | Intrinsic::Counter | Intrinsic::DefaultDict
             ))
@@ -108,11 +111,11 @@ impl Checker<'_> {
         {
             n.id == "dict"
         } else {
-            return Err(error(
-                self.source,
-                child,
-                "issubclass requires a supported static class",
-            ));
+            let subject = self.expr(child)?;
+            let mapping = annotations::class_value("collections.abc.Mapping");
+            return self
+                .builtin_subclass_values(subject, mapping, call)
+                .map(Some);
         };
         Ok(Some(Expr {
             ty: Type::Bool,
