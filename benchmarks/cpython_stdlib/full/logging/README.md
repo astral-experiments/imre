@@ -25,7 +25,7 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The replay of [`7a62075`](https://github.com/astral-sh/imre/commit/7a620758f5e244f26ddc3140eaca4d5b44246dcc)
+The replay of [`93a8abf`](https://github.com/astral-sh/imre/commit/93a8abfac3dce8ea9e6d9526be8452e5d7ab9d21)
 includes logger hierarchy and handler propagation, the level registry, ordinary
 and timed file handlers, records, formatters, filters and configuration.
 Both levels have the same counts:

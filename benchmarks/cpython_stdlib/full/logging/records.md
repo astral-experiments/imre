@@ -31,4 +31,4 @@ pinned CPython at O0 and O3. It checks that the original format and mutable argu
 mapping survive delivery, that formatting errors wait for `getMessage()`, and that the
 caller, paths and both enum display styles use their original Python values. A disabled
 logger still evaluates its arguments; the last-resort handler only renders eligible events.
-These direct comparisons are outside the 272 original occurrences.
+The [full replay](evidence-linux.json) at `93a8abf` reproduced all 272 individual records at each level, including the CP1251 bytes. The direct comparisons add no occurrences.
