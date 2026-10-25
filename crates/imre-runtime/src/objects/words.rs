@@ -116,7 +116,7 @@ impl WordKind {
                 6 | 12 | 13 | 14 => records::imre_record_retain(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
-                8 => Rc::increment_strong_count(word as *const Bytes),
+                8 => crate::retain_bytes(word as *const Bytes),
                 9 => unions::imre_union_retain(word),
                 _ => unreachable!(),
             }
@@ -141,7 +141,7 @@ impl WordKind {
                 6 | 12 | 13 | 14 => records::imre_record_release(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
-                8 => Rc::decrement_strong_count(word as *const Bytes),
+                8 => crate::release_bytes(word as *const Bytes),
                 9 => unions::imre_union_release(word),
                 _ => unreachable!(),
             }

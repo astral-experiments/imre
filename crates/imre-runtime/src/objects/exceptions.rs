@@ -619,14 +619,18 @@ impl Error {
 
     pub(super) fn unicode_decode(
         codec: &str,
-        bytes: Rc<super::Bytes>,
+        bytes: crate::BytesOwner,
         bounds: std::ops::Range<usize>,
         reason: &str,
         message: String,
     ) -> Self {
         // SAFETY: kind 8 owns the immutable input of the failed decode.
-        let object =
-            unsafe { OwnedWord::from_owned(Rc::into_raw(bytes) as usize, WordKind::new(8)) };
+        let object = unsafe {
+            OwnedWord::from_owned(
+                crate::BytesOwner::into_raw(bytes) as usize,
+                WordKind::new(8),
+            )
+        };
         Self::unicode_codec(
             Kind::UnicodeDecodeError,
             codec,
@@ -690,7 +694,7 @@ impl Error {
     }
 
     /// Use Python's argument-free MemoryError when an operation exhausts memory.
-    pub(super) fn memory_error() -> Self {
+    pub(crate) fn memory_error() -> Self {
         Self {
             kind: Kind::MemoryError,
             payload: Some(Payload::Empty),
