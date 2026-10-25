@@ -2550,8 +2550,9 @@ impl Emitter<'_, '_> {
             )
         });
         let (scratch, count, owners) = self.concat_parts(expressions[1..].to_vec());
-        let left = self.take_slot(slot);
-        self.forget(&left);
+        // Each append consumes the slot's reference only on success. A failed
+        // reserve leaves the original owner available to handlers and cleanup.
+        let left = self.borrow_slot(slot);
         let instruction = if let [_, suffix] = expressions.as_slice()
             && let ExprKind::Str(value) = &suffix.kind
             && value.len() > INLINE_CONCAT_LITERAL
@@ -2584,16 +2585,11 @@ impl Emitter<'_, '_> {
                 left.operand
             )
         };
-        let value = Value {
-            ty: Type::Str,
-            operand: self.instruction(instruction),
-            small_integer: false,
-        };
-        let value = self.owned(value);
+        let result = self.checked_pointer(instruction);
+        self.line(format!("store ptr {result}, ptr %local{slot}"));
         for owner in &owners {
             self.release_operand(owner);
         }
-        self.store(slot, &value);
         true
     }
 
@@ -2601,8 +2597,7 @@ impl Emitter<'_, '_> {
     /// source order and computed values stay owned across later mutation/errors;
     /// literal spans need no runtime string owner. Exact str(Int) conversions
     /// still run at their source position, using stack bytes or an owned BigInt
-    /// string. Allocation failure is fatal, so removed allocations cannot raise
-    /// a caught error.
+    /// string. The completed result is published only after allocation succeeds.
     /// Unique entry-block scratch avoids loop stack growth and nested overwrite.
     fn concat(&mut self, expression: &Expr) -> Value {
         let expressions = concat_leaves(expression);
@@ -2625,7 +2620,7 @@ impl Emitter<'_, '_> {
         let (scratch, count, owners) = self.concat_parts(expressions);
         let value = Value {
             ty: Type::Str,
-            operand: self.instruction(format!(
+            operand: self.checked_pointer(format!(
                 "call ptr @imre_str_concat_parts(ptr {scratch}, i64 {count})"
             )),
             small_integer: false,
@@ -5453,7 +5448,16 @@ const INLINE_CONCAT_LITERAL: usize = 3 * size_of::<usize>();
 fn concat_leaves(expression: &Expr) -> Vec<&Expr> {
     fn visit<'a>(expression: &'a Expr, output: &mut Vec<&'a Expr>) {
         if let ExprKind::Binary(Binary::Concat, left, right) = &expression.kind {
-            visit(left, output);
+            // A completed left addition can raise before the right operand runs.
+            // Only move its allocation past an immutable read or a literal.
+            if matches!(
+                right.kind,
+                ExprKind::Str(_) | ExprKind::Local(_) | ExprKind::Builtin(Builtin::GlobalGet(_), _)
+            ) {
+                visit(left, output);
+            } else {
+                output.push(left);
+            }
             visit(right, output);
         } else {
             debug_assert_eq!(expression.ty, Type::Str);
@@ -6456,6 +6460,23 @@ mod tests {
         assert_eq!(llvm.matches("call i64 @imre_int_literal(").count(), 1);
         assert!(llvm.contains("call void @imre_bytes_release(ptr %literal_"));
         assert!(llvm.contains("call void @imre_int_release(i64 %literal_"));
+    }
+
+    #[test]
+    fn string_allocation_precedes_later_addition_operands() {
+        let body = |expression: &str| {
+            function_body(&format!(
+                "def join(a: str, b: str) -> str:\n    return {expression}\ndef later() -> str:\n    print(1)\n    return 'end'\nprint(join('a', 'b'))\n"
+            ))
+        };
+        let addition = body("a + b + later()");
+        let (prefix, _) = addition.split_once("call ptr @fn_1(").unwrap();
+        assert!(prefix.contains("call ptr @imre_str_concat("));
+        assert!(prefix.contains("call i32 @imre_error_pending()"));
+
+        let formatted = body("f'{a}{b}{later()}'");
+        let (_, suffix) = formatted.split_once("call ptr @fn_1(").unwrap();
+        assert!(suffix.contains("call ptr @imre_str_concat_parts("));
     }
 
     #[test]

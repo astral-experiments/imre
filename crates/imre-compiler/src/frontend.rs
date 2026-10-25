@@ -4927,9 +4927,11 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // A formatted string evaluates every interpolation before joining them.
         Ok(parts
             .into_iter()
-            .reduce(|left, right| Expr {
+            .rev()
+            .reduce(|right, left| Expr {
                 ty: Type::Str,
                 kind: ExprKind::Binary(Binary::Concat, Box::new(left), Box::new(right)),
             })
