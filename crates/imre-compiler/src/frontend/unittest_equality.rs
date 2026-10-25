@@ -4,6 +4,85 @@
 use super::*;
 
 impl Checker<'_> {
+    /// Resolve a membership assertion from its container. The ordinary argument
+    /// binder still evaluates the receiver, member, container, and message in
+    /// source order, including when they are supplied by keyword.
+    pub(super) fn unittest_membership(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &str,
+        class: usize,
+        receiver: &Expr,
+    ) -> Result<Option<Expr>, String> {
+        if !self.unittest_case(class) || self.classes.methods[class].contains_key(name) {
+            return Ok(None);
+        }
+        let operand = |i: usize, key: &str| {
+            call.arguments.args.get(i).or_else(|| {
+                call.arguments
+                    .keywords
+                    .iter()
+                    .find(|kw| kw.arg.as_deref() == Some(key))
+                    .map(|kw| &kw.value)
+            })
+        };
+        let container = operand(1, "container");
+        let method = match container {
+            Some(ast::Expr::List(list)) if list.elts.is_empty() => {
+                let Some(member) = operand(0, "member") else {
+                    return Ok(None);
+                };
+                match self.expr(member)?.ty {
+                    Type::Str | Type::StrLiteral(_) => "_assertTextListMembership",
+                    Type::Int => "_assertIntListMembership",
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            member,
+                            "unsupported native unittest list member type",
+                        ));
+                    }
+                }
+            }
+            Some(ast::Expr::Dict(dict)) if dict.items.is_empty() => "_assertTextDictMembership",
+            Some(node) => {
+                let ty = self.expr(node)?.ty;
+                match ty {
+                    Type::Str | Type::StrLiteral(_) => "_assertTextMembership",
+                    Type::ListInt => "_assertIntListMembership",
+                    _ if self.types.element(ty) == Some(Type::Str) => "_assertTextListMembership",
+                    _ if self.types.mapping(ty) == Some((Type::Str, Type::Str)) => {
+                        "_assertTextDictMembership"
+                    }
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            node,
+                            "unsupported native unittest membership container",
+                        ));
+                    }
+                }
+            }
+            None => "_assertTextMembership",
+        };
+        let signature = self.classes.methods[class][method].clone();
+        let mut args = self.arguments(
+            call,
+            &signature.params[1..signature.params.len() - 1],
+            Some(receiver.clone()),
+        )?;
+        args.order.push(args.values.len());
+        args.values.push(Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Bool(name == "assertIn"),
+        });
+        self.calls.insert(signature.id);
+        Ok(Some(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(signature.id, args),
+        }))
+    }
+
     pub(super) fn unittest_equality(
         &mut self,
         call: &ast::ExprCall,

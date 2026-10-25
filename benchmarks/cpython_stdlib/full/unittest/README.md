@@ -61,9 +61,14 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 0 fully native passes, 15 native bodies with host
-fixtures, 9 host-driven native operations (36 calls), 9 compile blockers,
-1,055 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+The unchanged `Test_TestCase.testAssertIn` covers both membership assertions
+for strings, integer lists, and dictionary keys, with six actual failure
+checks. The [membership control](membership.py) compares complete failure
+text, keyword evaluation order, list contents, and subclass overrides.
+
+At each of O0 and O3: 0 fully native passes, 17 native bodies with host
+fixtures, 9 host-driven native operations (36 calls), 8 compile blockers,
+1,054 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
 
 Three additional complete equality methods are attempted at each level.
@@ -130,8 +135,9 @@ tree can keep an exception instance as its `side_effect`.
 that reads its local mock after a reset. These three complete methods use
 the same host fixture runner as the four above.
 
-Four additional original Mock methods have measured compile blockers. One
-reaches `TestCase.assertNotIn`. The three reset methods need constructor
+`test_assert_called_once_message_not_called` checks that a failure for a
+mock that never ran does not print a call list, using the stock `assertNotIn`.
+Three additional original Mock reset methods have measured compile blockers. They need constructor
 arguments (`parent` or `return_value`) or assign a mock as its own return value.
 The evidence records retain their original CPython passes, exact source lines,
 method hashes, and each native diagnostic. These are ordinary blockers.

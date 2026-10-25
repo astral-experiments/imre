@@ -84,6 +84,18 @@ impl<'a> Visitor<'a> for References<'_> {
                     }
                 }
             }
+            if matches!(name.as_str(), "assertIn" | "assertNotIn") {
+                self.found.attributes.extend(
+                    [
+                        "_assertTextMembership",
+                        "_assertTextListMembership",
+                        "_assertIntListMembership",
+                        "_assertTextDictMembership",
+                    ]
+                    .into_iter()
+                    .map(str::to_owned),
+                );
+            }
             if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
                 self.found.attributes.extend(
                     [

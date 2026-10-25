@@ -31,7 +31,6 @@ EQUALITY_BLOCKERS = {
     "testAssertEqual_shorten": (1067, "9:9: Imre: unknown class method"),
 }
 MOCK_BLOCKERS = {
-    "test_assert_called_once_message_not_called": (1858, "10:9: Imre: unknown class method"),
     "test_reset_mock": (337, '9:35: Imre: unexpected keyword argument "parent"'),
     "test_reset_mock_recursion": (377, "8:9: Imre: properties are read-only"),
     "test_reset_sideeffect": (1890, '7:18: Imre: unexpected keyword argument "return_value"'),
@@ -96,7 +95,7 @@ def run(args, level, root):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
-    for name in ["equality_protocol", "boolean_equality", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
+    for name in ["equality_protocol", "boolean_equality", "membership", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
                  "callable_binding", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
@@ -121,6 +120,7 @@ def run(args, level, root):
         ("test_result", "Test_TestResult", "test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun"),
         ("test_case", "Test_TestCase", "testAssertRaisesNoExceptionType", "unittest.TestCase.assertRaises"),
         ("test_case", "Test_TestCase", "testAssertRaisesCallable", "unittest.TestCase.assertRaises"),
+        ("test_case", "Test_TestCase", "testAssertIn", "unittest.TestCase.assertIn and assertNotIn"),
         ("test_assertions", "Test_Assertions", "test_assertRaises", "unittest.TestCase.assertRaises"),
         *(("test_case", "Test_TestCase", method, "unittest.TestCase string equality and failure messages")
           for method in ("testAssertEqualSingleLine", "testAssertEqualwithEmptyString",
@@ -131,6 +131,8 @@ def run(args, level, root):
         ("testmock.testmock", "MockTest", "test_assert_called", "unittest.mock.Mock.assert_called"),
         ("testmock.testmock", "MockTest", "test_assert_called_once", "unittest.mock.Mock.assert_called_once"),
         ("testmock.testmock", "MockTest", "test_ordered_call_signature", "unittest.mock.Mock.call_args and its representation"),
+        ("testmock.testmock", "MockTest", "test_assert_called_once_message_not_called",
+         "unittest.mock.Mock.assert_called_once failure message and TestCase.assertNotIn"),
         *(("testmock.testmock", "MockTest", method, "unittest.TestCase.assertRaises and unittest.mock.Mock." + assertion)
           for method, assertion in (("test_assert_any_call", "assert_any_call"),
                                     ("test_assert_called_with", "assert_called_with"),
