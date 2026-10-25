@@ -58,9 +58,7 @@ unsafe extern "C" fn original_len(_receiver: *const usize, argument: *const usiz
             b"tuple" => {
                 crate::Int::from_usize(records::descriptor(value as *const usize).length).into_raw()
             }
-            b"list" if value_kind.base() == 4 => {
-                crate::imre_list_len(value as *const crate::List)
-            }
+            b"list" if value_kind.base() == 4 => crate::imre_list_len(value as *const crate::List),
             b"list" => super::imre_seq_len(value as *const Object),
             b"dict" => super::mappings::imre_dict_len(value as *const Object),
             b"set" => super::mappings::imre_set_len(value as *const Object),
@@ -89,7 +87,9 @@ pub unsafe extern "C" fn imre_builtins_len(
                 if callable.is_null() {
                     return std::ptr::null();
                 }
-                callable.cast::<*const ()>().write(original_len as *const ());
+                callable
+                    .cast::<*const ()>()
+                    .write(original_len as *const ());
                 *slot = Some(OwnedWord::from_owned(callable as usize, WordKind::new(6)));
             }
         }
