@@ -1,0 +1,28 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_typing",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/typing.py": "5da5cb0d22f1484d8142ea5581f24dce711ec8b3",
+    "Lib/test/test_typing.py": "2c99b221e52d1f1c1fb9a18026231127aa683d73",
+    "Lib/test/typinganndata/__init__.py": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "Lib/test/typinganndata/_typed_dict_helper.py": "9df0ede7d40ee569624848d6d26f32511f3acc56",
+    "Lib/test/typinganndata/ann_module.py": "e1a1792cb4a8675821355ff00b7d327ca3fec720",
+    "Lib/test/typinganndata/ann_module2.py": "76cf5b3ad97e62b5275880cb073362364f9e63b1",
+    "Lib/test/typinganndata/ann_module3.py": "eccd7be22dd894001ead7313de11bfd390da1ee6",
+    "Lib/test/typinganndata/ann_module4.py": "13e9aee54c98b6cde395fd558e001ca656d11c69",
+    "Lib/test/typinganndata/ann_module5.py": "837041e121f652f83c0b6bb47c54a1b57bef3312",
+    "Lib/test/typinganndata/ann_module6.py": "679175669bc3ac51104a7ac1ad9454222a942ae5",
+    "Lib/test/typinganndata/ann_module695.py": "b6f3b06bd5065f5ea54b5acafc28d122c64688ea",
+    "Lib/test/typinganndata/ann_module7.py": "8f890cd28025be10203d1521c92a953b36533262",
+    "Lib/test/typinganndata/ann_module8.py": "bd031481378415e8cc017f06d8590b103bf8cebb",
+    "Lib/test/typinganndata/ann_module9.py": "952217393e1ff752be288c8aadcd15faac3694ee",
+    "Lib/test/typinganndata/fwdref_module.py": "7347a7a42455c227173d76a21ec1ede9b2b0b99d",
+    "Lib/test/typinganndata/mod_generics_cache.py": "6c1ee2fec8374d44d71f01b7ee26d9e1643c904d",
+    "Lib/test/typinganndata/partialexecution/__init__.py": "c39074ea84b7e6fc081a8478919642b3b4555a51",
+    "Lib/test/typinganndata/partialexecution/a.py": "ed0b8dcbd5553052f43ca0a9a853233047d1fa12",
+    "Lib/test/typinganndata/partialexecution/b.py": "36b8d2e52a3c6354040d9892f4469ebacb795e8d"
+  }
+}

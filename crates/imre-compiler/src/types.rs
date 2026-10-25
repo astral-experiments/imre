@@ -92,12 +92,20 @@ pub(crate) struct NamedTuple {
     pub(crate) fields: Vec<String>,
 }
 
+pub(crate) struct FunctionSite {
+    pub module: String,
+    pub qualname: String,
+    pub line: u32,
+}
 #[derive(Default)]
 struct Storage {
     shapes: Vec<Shape>,
     has_module_spec: bool,
     named_tuples: HashMap<DefinitionId, Rc<NamedTuple>>,
     cache_adapters: HashMap<usize, CachePolicy>,
+    source_sites: HashMap<(usize, u32), Rc<FunctionSite>>,
+    function_sites: HashMap<usize, Rc<FunctionSite>>,
+    plain_callbacks: HashSet<Type>,
     exceptions: Vec<NamedException>,
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
@@ -224,6 +232,8 @@ impl Types {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::FunctionRef
+            | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
             | Type::Poll
@@ -312,6 +322,30 @@ impl Types {
 }
 
 impl Types {
+    pub(crate) fn allow_plain_callbacks(&self, safe: HashSet<Type>) {
+        self.0.borrow_mut().plain_callbacks = safe;
+    }
+    pub(crate) fn is_plain_callback(&self, ty: Type) -> bool {
+        self.0.borrow().plain_callbacks.contains(&ty)
+    }
+    pub(crate) fn has_reflected_functions(&self) -> bool {
+        !self.0.borrow().function_sites.is_empty()
+    }
+    pub(crate) fn add_function_site(&self, module: usize, offset: u32, site: FunctionSite) {
+        self.0
+            .borrow_mut()
+            .source_sites
+            .insert((module, offset), Rc::new(site));
+    }
+    pub(crate) fn bind_function_site(&self, module: usize, offset: u32, id: usize) {
+        let mut storage = self.0.borrow_mut();
+        if let Some(site) = storage.source_sites.get(&(module, offset)).cloned() {
+            storage.function_sites.insert(id, site);
+        }
+    }
+    pub(crate) fn function_site(&self, id: usize) -> Option<Rc<FunctionSite>> {
+        self.0.borrow().function_sites.get(&id).cloned()
+    }
     pub(crate) fn set_exception_declarations(&self, declarations: Vec<NamedException>) {
         self.0.borrow_mut().exceptions = declarations;
     }
@@ -648,6 +682,8 @@ impl Types {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::FunctionRef
+            | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
             | Type::Poll

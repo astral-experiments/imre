@@ -315,6 +315,19 @@ impl Checker<'_> {
                 {
                     return self.store_instance_data(class, attribute, receiver, value);
                 }
+                if self.types.has_reflected_functions()
+                    && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))
+                    && let Some(index) = typing::attribute_index(attribute.attr.as_str())
+                {
+                    let value = self.coerce(value, Type::Str, target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::Typing(ir::TypingOperation::SetAttr(index)),
+                            vec![value, receiver],
+                        ),
+                    }));
+                }
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.

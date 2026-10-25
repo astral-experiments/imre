@@ -102,6 +102,7 @@ mod text;
 mod timed_handlers;
 mod truthiness;
 mod tuple_index;
+mod typing;
 mod unbound_locals;
 mod unions;
 mod unittest;
@@ -547,6 +548,7 @@ pub(crate) fn lower_with_owners(
     graph: &SourceGraph,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
     let types = Types::default();
+    typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
     let mut classes = ClassInfo::new(graph, &types)?;
     dataclass_values::validate(&classes, graph, &types)?;
@@ -587,6 +589,10 @@ pub(crate) fn lower_with_owners(
                     }
                     let cached = function_caches::policy(graph, module_id, function)?;
                     let mut function = function.clone();
+                    if module.overloads.contains(&statement_id) {
+                        graph.runtime_overload(module_id, function.name.range());
+                        typing::strip_overload(&mut function);
+                    }
                     if cached.is_some() {
                         function.decorator_list.clear();
                     }
@@ -812,6 +818,11 @@ pub(crate) fn lower_with_owners(
         }
     }
     for (module, function, signature) in &definitions {
+        types.bind_function_site(
+            *module,
+            function.name.range().start().to_u32(),
+            signature.id,
+        );
         let annotated = function
             .parameters
             .iter_non_variadic_params()
@@ -1123,6 +1134,7 @@ pub(crate) fn lower_with_owners(
         recursion_errors.push(helper.recursion_error);
     }
     let entry = entry.expect("source graph has an entry module");
+    typing::validate_functions(&functions, &entry, &types)?;
     let callable_targets = callables::targets(&functions, &entry, &types)?;
     for (function, calls) in functions.iter().zip(&mut call_graph) {
         ir::walk_expressions(&function.body, &mut |value| {
@@ -2321,6 +2333,9 @@ impl<'a> Checker<'a> {
 
     /// Optional and finite-union promotions are explicit; containers stay invariant.
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
+        if value.ty == Type::FunctionRef && matches!(expected, Type::Callable(_)) {
+            return Ok(typing::typed_function(value, expected));
+        }
         if matches!(expected, Type::Document(_))
             || matches!(value.ty, Type::Document(_)) && expected == Type::Str
         {
@@ -4310,7 +4325,14 @@ impl<'a> Checker<'a> {
                 return self.try_statement(try_);
             }
             ast::Stmt::With(with_) if !with_.is_async => {
-                return self.with_items(&with_.items, &with_.body);
+                if !with_.body.iter().any(ast::Stmt::is_function_def_stmt) {
+                    return self.with_items(&with_.items, &with_.body);
+                }
+                let enclosing = self.local_functions.clone();
+                self.collect_suite_definitions(&with_.body, false)?;
+                let result = self.with_items(&with_.items, &with_.body);
+                self.local_functions = enclosing;
+                return result;
             }
             ast::Stmt::With(with_) if self.asynchronous => {
                 return self.async_with(&with_.items, &with_.body);
@@ -5216,6 +5238,10 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
+        if typing::is_dummy(self.graph, self.resolve(expression)) {
+            return Ok(typing::dummy());
+        }
+
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
                 self.resolve(&attr.value)
@@ -6414,6 +6440,18 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(single_dispatch::original(receiver, layout));
                 }
+                if self.types.has_reflected_functions()
+                    && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))
+                    && let Some(index) = typing::attribute_index(attribute.attr.as_str())
+                {
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::Typing(ir::TypingOperation::Attr(index)),
+                            vec![receiver],
+                        ),
+                    });
+                }
                 if matches!(receiver.ty, Type::AnnotationValue(_)) {
                     return self.annotation_attribute(receiver, attribute);
                 }
@@ -6861,6 +6899,19 @@ impl<'a> Checker<'a> {
         {
             return Ok(result);
         }
+        if receiver.is_none()
+            && matches!(&*call.func,ast::Expr::Name(n) if n.id.as_str()=="len")
+            && !self.names.contains_key("len")
+            && self.resolve(&call.func).is_none()
+            && call.arguments.keywords.is_empty()
+            && let [arg] = call.arguments.args.as_ref()
+            && self.resolve(arg) == Some(Binding::Intrinsic(Intrinsic::OverloadRegistry))
+        {
+            return Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::Typing(ir::TypingOperation::RegistryLen), vec![]),
+            });
+        }
         if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
             return Ok(self.materialize_fixed_tuple(tuple));
         }
@@ -7223,6 +7274,14 @@ impl<'a> Checker<'a> {
             });
         }
         if let Some(binding) = self.local_function_binding(&call.func) {
+            if binding.overload_stub {
+                let callable = self.local(
+                    binding
+                        .value_slot
+                        .expect("an overloaded definition has a stub object"),
+                );
+                return self.invoke(call, callable);
+            }
             if let Some(definition) = binding.generic.clone() {
                 return self.call_generic_awaitable(call, &definition);
             }
@@ -7286,6 +7345,12 @@ impl<'a> Checker<'a> {
         }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => return self.forward_ref(call),
+            binding if typing::is_dummy(self.graph, binding) => {
+                return self.invoke(call, typing::dummy());
+            }
+            Some(Binding::Intrinsic(
+                op @ (Intrinsic::Overload | Intrinsic::GetOverloads | Intrinsic::ClearOverloads),
+            )) => return self.typing_overload(call, op),
             Some(Binding::Intrinsic(Intrinsic::GetAnnotations)) => {
                 return self.get_annotations(call);
             }

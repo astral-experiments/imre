@@ -308,6 +308,7 @@ unsafe fn scalar_equal(left: usize, right: usize, kind: WordKind) -> bool {
             }
             7 if raw & NULLABLE != 0 => *(left as *const f64) == *(right as *const f64),
             7 => f64::from_bits(left as u64) == f64::from_bits(right as u64),
+            14 => left == right,
             8 => *(left as *const Bytes) == *(right as *const Bytes),
             _ => unreachable!("WordKind validates concrete representations"),
         }
@@ -720,6 +721,7 @@ unsafe fn write_scalar(
         match raw & !NULLABLE {
             0 => output.push_str("None"),
             10 => super::string_enums::write_repr(output, word),
+            14 => super::typing::write_repr(output, word),
             12 => super::annotations::write_repr(output, word),
             13 => {
                 let (member, value) = super::annotations::member(word);
