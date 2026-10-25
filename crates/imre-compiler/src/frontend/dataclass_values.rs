@@ -40,7 +40,12 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
     match ty {
         Type::Float => inside,
         Type::Optional(_) => has_container_float(types.payload(ty).unwrap(), inside, types),
-        Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) | Type::Tuple(_) => types
+        Type::ListInt
+        | Type::List(_)
+        | Type::Dict(_)
+        | Type::Set(_)
+        | Type::Tuple(_)
+        | Type::VarTuple(_) => types
             .children(ty)
             .into_iter()
             .any(|child| has_container_float(child, true, types)),
@@ -96,6 +101,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::LogFormatter
         | Type::Logger
         | Type::TimedFileHandler
+        | Type::ProcessSelectorClass
         | Type::ClockTime
         | Type::Poll
         | Type::Socket
@@ -204,6 +210,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
         ty,
         Type::Logger
             | Type::TimedFileHandler
+            | Type::ProcessSelectorClass
             | Type::ClockTime
             | Type::LogFormatter
             | Type::LogRecord

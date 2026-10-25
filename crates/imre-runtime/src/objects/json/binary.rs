@@ -1,5 +1,6 @@
 //! Detect the encoding of binary JSON before handing text to the standard reader.
 
+use crate::StrOwner;
 use std::borrow::Cow;
 use std::rc::Rc;
 
@@ -125,7 +126,7 @@ pub unsafe extern "C" fn imre_json_loads_bytes(bytes: *const Bytes) -> *const Ob
     let bytes = unsafe { acquire_rc::<Bytes>(bytes as usize) };
     let result = decode(&bytes).and_then(|text| {
         super::readonly::loads(&text, || {
-            crate::Str::try_new(text.as_ref()).ok().map(Rc::new)
+            crate::Str::try_new(text.as_ref()).ok().map(StrOwner::new)
         })
     });
     finish(result, std::ptr::null())
@@ -155,7 +156,7 @@ mod tests {
         // SAFETY: take and repr each transfer one owner, and the exception stays rooted.
         let (error, repr) = unsafe {
             let error = Rc::from_raw(imre_error_take());
-            let repr = Rc::from_raw(imre_exception_repr(Rc::as_ptr(&error)));
+            let repr = crate::StrOwner::from_raw(imre_exception_repr(Rc::as_ptr(&error)));
             (error, repr)
         };
         assert_eq!(

@@ -1,5 +1,6 @@
 //! The default display hook owns the last displayed object in the builtins namespace.
 use super::{Error, Kind, Object, acquire_rc, boxed_values, exceptions};
+use crate::StrOwner;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -83,7 +84,7 @@ pub unsafe extern "C" fn imre_sys_displayhook(kind: u32, word: usize) {
         return;
     }
     // SAFETY: the runtime returned one owned reference.
-    let rendered = unsafe { Rc::from_raw(rendered) };
+    let rendered = unsafe { StrOwner::from_raw(rendered) };
     if crate::sys::write_display_line(&rendered) {
         drop(LAST.replace(Some(view)));
     }
