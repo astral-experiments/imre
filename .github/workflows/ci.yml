@@ -9,7 +9,7 @@ on:
       audit:
         description: Source of the requested per-occurrence results
         type: choice
-        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events, adapter-tools, codec-writer, plain-file, standalone, hierarchy]
+        options: [logging, removal, properties, text-stream, file-handler, list-clear, null-handler, handler-locks, startup, cache-trace, percent-scalar, record-attributes, adapter-events, adapter-tools, codec-writer, plain-file, standalone, hierarchy, drain]
         required: true
 permissions:
   contents: read
@@ -56,7 +56,7 @@ jobs:
             sudo apt-get update && sudo apt-get install -y clang-18
           fi
       - name: Build with default compiler features for prospective compiler checks
-        if: inputs.audit == 'properties' || inputs.audit == 'handler-locks'
+        if: inputs.audit == 'properties' || inputs.audit == 'handler-locks' || inputs.audit == 'drain'
         run: cargo build --locked -p imre-compiler -p imre-runtime -j 2
       - name: Build this source with IR verification
         run: cargo build --locked -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir -j 2
@@ -70,7 +70,7 @@ jobs:
           ordinary=(--compiler "$imre" --runtime "$runtime" --clang /usr/bin/clang-18 --opt-levels 0 3)
           tools=(--imre "$imre" --runtime "$runtime" --clang /usr/bin/clang-18)
           ref="$PWD/.cpython-stdlib-reference"
-          if [[ "$AUDIT" == properties || "$AUDIT" == handler-locks ]]; then
+          if [[ "$AUDIT" == properties || "$AUDIT" == handler-locks || "$AUDIT" == drain ]]; then
             for sample in tests/fixtures/iterator_pipelines/source_generator.py tests/fixtures/dataclasses/value_struct.py; do
               if [[ ! -f "$sample" ]]; then continue; fi
               PYTHONPATH="$PWD/stdlib" python3 -B "$sample" > "$results/overlap-reference"
@@ -259,6 +259,23 @@ jobs:
               PYTHONPATH="$ref/Lib" python3 -B tests/errno.py "${ordinary[@]}" --evidence "$results/errno-evidence.json"
               PYTHONPATH="$ref/Lib" python3 -B tests/unittest_main.py --compiler "$imre" --runtime "$runtime" --clang /usr/bin/clang-18 --manifest benchmarks/cpython_stdlib/full/errno/UPSTREAM.json --upstream-source benchmarks/cpython_stdlib/full/errno/upstream/Lib/test/test_errno.py
               ;;
+            drain)
+              cargo test --locked -p imre-runtime --lib -j 2 only_the_outermost_release_unblocks_another_thread
+              python3 -B tests/classes.py "${ordinary[@]}"
+              python3 -B tests/dataclass_records.py "${ordinary[@]}"
+              python3 -B benchmarks/cpython_stdlib/full/logging/adapter_properties.py "${tools[@]}" --cpython-source "$ref" --result "$results/adapter-properties.json"
+              PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/null_handler.py "${tools[@]}" --result "$results/null-handler.json"
+              fixture=tests/fixtures/logging/basic.py
+              python3 -I -B "$fixture" > "$results/basic-reference.stdout" 2> "$results/basic-reference.stderr"
+              for opt in 0 3; do
+                "$imre" build "$fixture" --no-cache --opt-level "$opt" --runtime "$runtime" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/logging-basic"
+                "$RUNNER_TEMP/logging-basic" > "$results/basic-O$opt.stdout" 2> "$results/basic-O$opt.stderr"
+                cmp "$results/basic-reference.stdout" "$results/basic-O$opt.stdout"
+                cmp "$results/basic-reference.stderr" "$results/basic-O$opt.stderr"
+              done
+              PYTHONPATH="$ref/Lib" python3 -B benchmarks/cpython_stdlib/full/logging/evidence.py "${tools[@]}" --result "$results/evidence-linux.json"
+              python3 -B benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/logging/reference-linux.json "$results/evidence-linux.json"
+              ;;
             properties)
               python3 -B tests/classes.py "${ordinary[@]}"
               python3 -B tests/dataclass_records.py "${ordinary[@]}"
@@ -280,7 +297,7 @@ jobs:
                           print(level["opt_level"], row["id"], row.get("reason", row.get("evidence")))
           PYTHON
       - name: Preserve the full per-occurrence JSON in this run log
-        if: (success() || failure()) && inputs.audit == 'logging'
+        if: (success() || failure()) && (inputs.audit == 'logging' || inputs.audit == 'drain')
         run: |
           python3 - <<'PYTHON'
           import base64, gzip, hashlib, os, textwrap
