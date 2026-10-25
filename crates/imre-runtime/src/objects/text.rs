@@ -6,8 +6,10 @@ mod translate;
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
+use regex_automata::meta::Regex;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
+use std::sync::LazyLock;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
@@ -110,6 +112,26 @@ pub unsafe extern "C" fn imre_int_hex_format(value: usize, width: u32, flags: u3
 pub unsafe extern "C" fn imre_str_contains(needle: *const Str, text: *const Str) -> u32 {
     // SAFETY: the caller roots both immutable strings through the search.
     unsafe { u32::from((&*text).contains((&*needle).as_str())) }
+}
+
+/// CPython 3.14's alphanumeric characters are Unicode 16 letters and numbers.
+pub(super) fn python_alnum(text: &str) -> bool {
+    if text.is_ascii() {
+        return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric());
+    }
+    static ALNUM: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\A[\p{L}\p{N}]+\z").expect("fixed Unicode class"));
+    ALNUM.is_match(text.as_bytes())
+}
+
+/// Tests a native string with Python's alphanumeric predicate.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isalnum(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_alnum(unsafe { &*value }))
 }
 
 /// Tests a nonempty Python string against the shared Unicode whitespace table.
