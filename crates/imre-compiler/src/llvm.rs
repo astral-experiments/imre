@@ -64,6 +64,7 @@ impl Type {
             | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
+            | Self::PurePath(_)
             | Self::CompletedProcess(_)
             | Self::EventLoop
             | Self::Coroutine(_)
@@ -112,6 +113,7 @@ impl Type {
             | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
+            | Self::PurePath(_)
             | Self::CompletedProcess(_)
             | Self::EventLoop
             | Self::Coroutine(_)
@@ -688,6 +690,7 @@ impl Emitter<'_, '_> {
             | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
+            | Type::PurePath(_)
             | Type::TextIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -3186,8 +3189,8 @@ impl Emitter<'_, '_> {
                     };
                     self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
                 }
-                Type::Path | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
-                    let operation = if left.ty == Type::Path {
+                Type::Path | Type::PurePath(_) | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
+                    let operation = if left.ty.is_path() {
                         "path"
                     } else {
                         "sequence"
@@ -4330,7 +4333,9 @@ impl Emitter<'_, '_> {
             }
             Builtin::Repr => self.value_repr(&args[0].value),
             Builtin::Str => match args[0].value.ty {
-                Type::Path => self.call("imre_path_text", Type::Str, &[&args[0].value]),
+                Type::Path | Type::PurePath(_) => {
+                    self.call("imre_path_text", Type::Str, &[&args[0].value])
+                }
                 Type::Str | Type::StrLiteral(_) => {
                     return Value {
                         ty: Type::Str,
@@ -4908,6 +4913,7 @@ impl Emitter<'_, '_> {
                     | Type::ExitCode
                     | Type::TimeoutExpired
                     | Type::Path
+                    | Type::PurePath(_)
                     | Type::TextIO
                     | Type::EventLoop
                     | Type::Coroutine(_)
@@ -5130,6 +5136,7 @@ impl Emitter<'_, '_> {
             | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
+            | Type::PurePath(_)
             | Type::TextIO
             | Type::BinaryIO
             | Type::EventLoop
@@ -5189,6 +5196,7 @@ impl Emitter<'_, '_> {
             | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
+            | Type::PurePath(_)
             | Type::TextIO
             | Type::BinaryIO
             | Type::EventLoop
@@ -5748,6 +5756,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ExitCode
         | Type::TimeoutExpired
         | Type::Path
+        | Type::PurePath(_)
         | Type::TextIO
         | Type::EventLoop
         | Type::Coroutine(_)
@@ -5962,6 +5971,11 @@ declare i32 @imre_path_text_exists(ptr)
 declare i32 @imre_path_exists(ptr)
 declare i32 @imre_path_is_file(ptr)
 declare i32 @imre_path_match(ptr, ptr, i64, i32)
+declare i32 @imre_path_match_object(ptr, ptr, i64, i32)
+declare ptr @imre_pure_path_new(i32)
+declare ptr @imre_path_join_object(ptr, ptr)
+declare ptr @imre_path_prefix(ptr, i32)
+declare ptr @imre_path_as_posix(ptr)
 declare i32 @imre_path_is_dir(ptr)
 declare i32 @imre_path_equal(ptr, ptr)
 declare ptr @imre_path_read_bytes(ptr)
