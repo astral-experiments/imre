@@ -39,13 +39,8 @@ pub(super) fn symbol(owner: IntrinsicModule, name: &str) -> Option<Binding> {
         (M::Declaration("email.policy"), "compat32") => "email.policy.compat32",
         (M::Declaration("importlib.resources"), "files") => "importlib.resources.files",
         (M::Declaration("warnings"), "warn") => "warnings.warn",
-        (M::Io, "BytesIO") => "io.BytesIO",
         (M::CollectionsAbc, "Collection") => "collections.abc.Collection",
         (M::CollectionsAbc, "Mapping") => "collections.abc.Mapping",
-        (M::Collections, "namedtuple") => "collections.namedtuple",
-        (M::Functools, "cached_property") => "functools.cached_property",
-        (M::Typing, "ClassVar") => "typing.ClassVar",
-        (M::Typing, "NewType") => "typing.NewType",
         _ => return None,
     };
     Some(Binding::Intrinsic(Intrinsic::Declaration(symbol)))

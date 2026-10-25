@@ -250,8 +250,8 @@ fn simple_dataclass(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClas
         return false;
     }
     let mut inherited_names = HashSet::new();
-    if let Some(bases) = &class.arguments {
-        if !bases.keywords.is_empty()
+    if let Some(bases) = &class.arguments
+        && (!bases.keywords.is_empty()
             || bases.args.iter().any(|base| {
                 let Some(Binding::Definition(id)) = graph.resolve(module, base) else {
                     return true;
@@ -274,10 +274,9 @@ fn simple_dataclass(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClas
                         }
                         _ => false,
                     })
-            })
-        {
-            return false;
-        }
+            }))
+    {
+        return false;
     }
     let mut had_default = false;
     let mut names = HashSet::new();
