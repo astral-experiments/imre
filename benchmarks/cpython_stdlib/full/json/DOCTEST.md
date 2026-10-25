@@ -24,3 +24,5 @@ The examples in a case share a namespace. The `json` case uses:
 The `json.encoder.JSONEncoder.encode` case imports `JSONEncoder` from `json.encoder` and calls `JSONEncoder().encode({"foo": ["bar", "baz"]})`.
 
 These are two source cases and four occurrences of the 216, including when the reference runs all 68 example occurrences. The host reference supplies discovery, shared example state, interactive display, and expected output checks. Running any of the same JSON calls in a different test does not credit either doctest case. The Python/C backend identity methods are separate unittest cases; neither is a doctest fixture.
+
+The [shared doctest implementation](https://github.com/astral-sh/imre/pull/646) discovers the same cases from the original docstrings. Its direct native runs reached the missing `io.StringIO` export in the root case and the missing `json.encoder.JSONEncoder` class in the encoder case. Neither direct run completed the corresponding package fixture.

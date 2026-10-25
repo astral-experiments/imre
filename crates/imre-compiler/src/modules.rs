@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::PosixPathOperation;
+use crate::ir::{CopyOperation, PosixPathOperation};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -87,6 +87,7 @@ pub(crate) enum IntrinsicModule {
     UrllibParse,
     Collections,
     CollectionsAbc,
+    Copy,
     Itertools,
     Operator,
     Textwrap,
@@ -113,6 +114,7 @@ pub(crate) enum Intrinsic {
     ArgparseNamespace,
     RawDescriptionHelpFormatter,
     FutureAnnotations,
+    ShallowCopy,
     TypeChecking,
     GetLogger,
     GetLevelName,
@@ -142,6 +144,8 @@ pub(crate) enum Intrinsic {
     LruCache,
     CachedProperty,
     NewType,
+    Partial,
+    Placeholder,
     Reduce,
     TomlDumps,
     TomliLoads,
@@ -245,7 +249,7 @@ pub(crate) enum Intrinsic {
     Path,
     PurePath(crate::ir::PathFlavor),
     Which,
-    CopyFile,
+    Copy(CopyOperation),
     ShutilError,
     SameFileError,
     SpecialFileError,
@@ -268,6 +272,14 @@ pub(crate) enum Intrinsic {
     FsPath,
     PosixPath(PosixPathOperation),
     Unquote,
+}
+
+impl Intrinsic {
+    /// Resolve the actual public export, including when the caller imported it under an alias.
+    pub(crate) fn exported_by(self, module: &str, name: &str) -> bool {
+        IntrinsicModule::named(module).and_then(|m| m.symbol(name))
+            == Some(Binding::Intrinsic(self))
+    }
 }
 
 impl IntrinsicModule {
@@ -303,6 +315,7 @@ impl IntrinsicModule {
             "urllib.parse" => Some(Self::UrllibParse),
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
+            "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
             "operator" => Some(Self::Operator),
             "textwrap" => Some(Self::Textwrap),
@@ -392,6 +405,8 @@ impl IntrinsicModule {
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
+            (Self::Functools, "partial") => Intrinsic::Partial,
+            (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
             (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
@@ -476,6 +491,7 @@ impl IntrinsicModule {
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
@@ -507,7 +523,12 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Shutil, "which") => Intrinsic::Which,
-            (Self::Shutil, "copyfile") => Intrinsic::CopyFile,
+            (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
+            (Self::Shutil, "copymode") => Intrinsic::Copy(CopyOperation::Mode),
+            (Self::Shutil, "copystat") => Intrinsic::Copy(CopyOperation::Stat),
+            (Self::Shutil, "_copyxattr") => Intrinsic::Copy(CopyOperation::Xattr),
+            (Self::Shutil, "copy") => Intrinsic::Copy(CopyOperation::Copy),
+            (Self::Shutil, "copy2") => Intrinsic::Copy(CopyOperation::Copy2),
             (Self::Shutil, "Error") => Intrinsic::ShutilError,
             (Self::Shutil, "SameFileError") => Intrinsic::SameFileError,
             (Self::Shutil, "SpecialFileError") => Intrinsic::SpecialFileError,
@@ -554,7 +575,7 @@ pub(crate) struct SourceModule {
     pub(crate) path: PathBuf,
     pub(crate) name: String,
     pub(crate) source: String,
-    bundled: bool,
+    pub(crate) bundled: bool,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
@@ -589,6 +610,7 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
     checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    checked_tuple_reads: std::cell::RefCell<Vec<Vec<TextRange>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -725,6 +747,14 @@ impl SourceGraph {
         self.checked_keywords.borrow_mut()[module].extend(keywords);
     }
 
+    /// Record the exact list read proved by lowering a fixed-width tuple spread.
+    /// Other diagnostics at this index or inside the receiver remain visible.
+    pub(crate) fn checked_tuple_list_read(&self, module: ModuleId, read: TextRange) {
+        if self.session.has_tuple_spreads(module) {
+            self.checked_tuple_reads.borrow_mut()[module].push(read);
+        }
+    }
+
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
     pub(crate) fn diagnostic_scopes(
         &self,
@@ -769,6 +799,12 @@ impl SourceGraph {
                         keywords.sort_unstable_by_key(|range| (range.start(), range.end()));
                         keywords.dedup();
                         keywords.into_iter().map(CheckedDiagnostic::Keyword)
+                    })
+                    .chain({
+                        let mut reads = self.checked_tuple_reads.borrow()[id].clone();
+                        reads.sort_unstable_by_key(|range| (range.start(), range.end()));
+                        reads.dedup();
+                        reads.into_iter().map(CheckedDiagnostic::TupleListRead)
                     })
                     .collect()
             })
@@ -1115,6 +1151,7 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_tuple_reads: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
