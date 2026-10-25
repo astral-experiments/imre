@@ -5229,6 +5229,17 @@ impl Emitter<'_, '_> {
                 },
                 _ => unreachable!("float conversion was checked"),
             },
+            Builtin::LengthResult => {
+                let value = self.checked_instruction(format!(
+                    "call i64 @imre_length_result(i64 {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Int,
+                    operand: value,
+                    small_integer: false,
+                }
+            }
             Builtin::Len if args[0].value.ty == Type::StringIterable => {
                 self.call("imre_string_iterable_len", Type::Int, &[&args[0].value])
             }
@@ -7746,6 +7757,7 @@ declare void @imre_args_clear()
 declare void @imre_int_retain(i64)
 declare void @imre_int_release(i64)
 declare i64 @imre_int_literal(ptr, i64)
+declare i64 @imre_length_result(i64)
 declare i64 @imre_int_binary(i64, i64, i32)
 declare i32 @imre_int_compare(i64, i64)
 declare void @imre_print_int(i64)

@@ -513,6 +513,7 @@ struct CheckedFile<'db> {
 /// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
+    AbstractClassCall(TextRange),
     Decorator(TextRange),
     Call(TextRange),
     DictDeletion(TextRange),
@@ -527,6 +528,7 @@ pub(crate) enum CheckedDiagnostic {
 impl CheckedDiagnostic {
     pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
         let (range, kind) = match self {
+            Self::AbstractClassCall(range) => (range, 9),
             Self::Decorator(range) => (range, 0),
             Self::Call(range) => (range, 1),
             Self::Keyword(range) => (range, 2),
@@ -542,6 +544,7 @@ impl CheckedDiagnostic {
 
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
+            Self::AbstractClassCall(call) => diagnostic == "call-non-callable" && call == range,
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
