@@ -7,7 +7,7 @@ import tempfile
 import textwrap
 
 HERE = Path(__file__).resolve().parent
-CASES = ("bindings", "tasks", "cancel", "old_values", "representations", "first_use", "error_order")
+CASES = ("bindings", "tasks", "cancel", "old_values", "representations", "first_use", "error_order", "shared_frame")
 BLOCKED = {
     "thread": ("""
         import threading

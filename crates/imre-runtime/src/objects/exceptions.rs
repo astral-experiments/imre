@@ -529,7 +529,7 @@ impl Error {
         Self {
             kind,
             payload: Some(Payload::Arguments(Box::new(BuiltinArguments {
-                message: Rc::new(message.into()),
+                message: StrOwner::new(message.into()),
                 args: smallvec::smallvec![argument],
                 os_paths: None,
             }))),
