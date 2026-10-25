@@ -5,7 +5,7 @@ use super::words::WordKind;
 use super::*;
 
 impl Storage {
-    fn chainmap(&self) -> &Rc<Object> {
+    fn chainmap(&self) -> &crate::ObjectOwner {
         let Self::ChainMap(maps) = self else {
             unreachable!("expected a ChainMap")
         };
@@ -18,8 +18,10 @@ impl Storage {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_chainmap_new(maps: *const Object) -> *const Object {
     // SAFETY: the caller keeps the input list alive until its owner is acquired.
-    let maps = unsafe { acquire_rc(maps as usize) };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ChainMap(maps)))))
+    let maps = unsafe { crate::ObjectOwner::acquire_word(maps as usize) };
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::ChainMap(maps),
+    ))))
 }
 
 /// # Safety
@@ -27,7 +29,11 @@ pub unsafe extern "C" fn imre_chainmap_new(maps: *const Object) -> *const Object
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_chainmap_maps(value: *const Object) -> *const Object {
     // SAFETY: the receiver stays alive until the list is retained.
-    Rc::into_raw(unsafe { object(value).0.with(|s| Rc::clone(s.chainmap())) })
+    crate::ObjectOwner::into_raw(unsafe {
+        object(value)
+            .0
+            .with(|s| crate::ObjectOwner::clone(s.chainmap()))
+    })
 }
 
 /// # Safety
@@ -35,7 +41,7 @@ pub unsafe extern "C" fn imre_chainmap_maps(value: *const Object) -> *const Obje
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_chainmap_set_maps(value: *const Object, maps: *const Object) {
     // SAFETY: acquire the new list before replacing the old one, including self-assignment.
-    let maps = unsafe { acquire_rc(maps as usize) };
+    let maps = unsafe { crate::ObjectOwner::acquire_word(maps as usize) };
     // SAFETY: the receiver is rooted and no borrowed list reference escapes.
     let old = unsafe {
         object(value).0.with_mut(|s| {

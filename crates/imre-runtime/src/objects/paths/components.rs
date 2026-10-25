@@ -162,7 +162,7 @@ pub unsafe extern "C" fn imre_path_suffixes(path: *const Object) -> *const Objec
                     .values
                     .push(StrOwner::into_raw(StrOwner::new(suffix)) as usize);
             }
-            Ok(Rc::into_raw(suffixes.into_object()))
+            Ok(crate::ObjectOwner::into_raw(suffixes.into_object()))
         })
     };
     finish(result, std::ptr::null())

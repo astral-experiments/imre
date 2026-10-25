@@ -128,5 +128,5 @@ unsafe fn gather<const N: usize>(
             }
         }
     }
-    Some(Rc::into_raw(result.into_object()))
+    Some(crate::ObjectOwner::into_raw(result.into_object()))
 }

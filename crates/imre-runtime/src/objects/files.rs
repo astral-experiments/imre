@@ -6,7 +6,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{
@@ -125,7 +124,12 @@ impl FileState {
         Ok(())
     }
 
-    pub(super) fn pipe(file: std::fs::File, read: bool, text: bool, bufsize: i32) -> Rc<Object> {
+    pub(super) fn pipe(
+        file: std::fs::File,
+        read: bool,
+        text: bool,
+        bufsize: i32,
+    ) -> crate::ObjectOwner {
         let fd = file.as_raw_fd();
         // Popen treats line buffering as a TextIOWrapper option and uses the
         // default binary buffer underneath. Binary mode also falls back to default.
@@ -147,7 +151,7 @@ impl FileState {
         } else {
             FileKind::BinaryWrite
         };
-        Rc::new(Object(StorageCell::new(Storage::File(Box::new(Self {
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(Self {
             fd: Some(fd),
             raw: !text && capacity == 0,
             name: None,
@@ -480,9 +484,9 @@ pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
 pub(super) fn open(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
     let state = open_state(path, mode, binary, gzip)?;
-    Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
-        Storage::File(Box::new(state)),
-    )))))
+    Ok(crate::ObjectOwner::into_raw(crate::ObjectOwner::new(
+        Object(StorageCell::new(Storage::File(Box::new(state)))),
+    )))
 }
 
 fn open_state(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
@@ -917,8 +921,8 @@ mod tests {
                 assert_eq!(imre_error_pending(), 1);
                 // SAFETY: take transfers the exception owner; message returns its own string.
                 let message = unsafe {
-                    let error = Rc::from_raw(imre_error_take());
-                    StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)))
+                    let error = crate::ObjectOwner::from_raw(imre_error_take());
+                    StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)))
                 };
                 assert!(message.starts_with(&format!("[Errno {errno}] ")));
                 assert!(message.ends_with(": b'raw-\\xff-link'"));
@@ -956,13 +960,13 @@ mod tests {
         StrOwner::new(Str::from(path.to_str().unwrap()))
     }
 
-    fn open(path: &str, mode: u32) -> Rc<Object> {
+    fn open(path: &str, mode: u32) -> crate::ObjectOwner {
         let path = StrOwner::new(Str::new(path));
         // SAFETY: the path owner stays live; this helper requires a successful open.
         let result = unsafe { imre_text_open(StrOwner::as_ptr(&path), mode) };
         assert!(!result.is_null());
         // SAFETY: open transfers this one owned reference to the Rc.
-        unsafe { Rc::from_raw(result) }
+        unsafe { crate::ObjectOwner::from_raw(result) }
     }
 
     fn take_error(kind: Kind) {
@@ -976,7 +980,7 @@ mod tests {
         assert_eq!(imre_error_pending(), 0);
     }
 
-    fn broken_pipe() -> Rc<Object> {
+    fn broken_pipe() -> crate::ObjectOwner {
         use std::net::Shutdown;
         use std::os::fd::OwnedFd;
         use std::os::unix::net::UnixStream;
@@ -986,7 +990,7 @@ mod tests {
         // down the writer guarantees EPIPE even while the child holds the peer.
         writer.shutdown(Shutdown::Write).unwrap();
         let file = File::from(OwnedFd::from(writer));
-        Rc::new(Object(StorageCell::new(Storage::File(Box::new(
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(
             FileState {
                 fd: Some(file.as_raw_fd()),
                 raw: false,
@@ -1158,34 +1162,37 @@ mod tests {
         let alias = file.clone();
         // SAFETY: all file and string handles remain rooted; reads transfer ownership.
         unsafe {
-            assert_eq!(imre_text_enter(Rc::as_ptr(&file)), 1);
-            let text = StrOwner::from_raw(imre_text_read(Rc::as_ptr(&file)));
+            assert_eq!(imre_text_enter(crate::ObjectOwner::as_ptr(&file)), 1);
+            let text = StrOwner::from_raw(imre_text_read(crate::ObjectOwner::as_ptr(&file)));
             assert_eq!(text.as_str(), "a\nβ\nc\n\0tail");
             assert_eq!(
-                StrOwner::from_raw(imre_text_read(Rc::as_ptr(&file))).as_str(),
+                StrOwner::from_raw(imre_text_read(crate::ObjectOwner::as_ptr(&file))).as_str(),
                 ""
             );
-            assert_eq!(imre_text_flush(Rc::as_ptr(&file)), 1);
-            assert_eq!(imre_text_write(Rc::as_ptr(&file), &Str::new("x")), 0);
+            assert_eq!(imre_text_flush(crate::ObjectOwner::as_ptr(&file)), 1);
+            assert_eq!(
+                imre_text_write(crate::ObjectOwner::as_ptr(&file), &Str::new("x")),
+                0
+            );
             let error = imre_error_take();
             for kind in [Kind::UnsupportedOperation, Kind::OSError, Kind::ValueError] {
                 assert_eq!(imre_exception_matches(error, kind as u32), 1);
             }
             imre_object_release(error);
-            assert_eq!(imre_text_close(Rc::as_ptr(&file)), 1);
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&file)), 1);
             drop(file);
-            assert_eq!(imre_text_closed(Rc::as_ptr(&alias)), 1);
-            assert_eq!(imre_text_enter(Rc::as_ptr(&alias)), 0);
+            assert_eq!(imre_text_closed(crate::ObjectOwner::as_ptr(&alias)), 1);
+            assert_eq!(imre_text_enter(crate::ObjectOwner::as_ptr(&alias)), 0);
             take_error(Kind::ValueError);
-            assert!(imre_text_read(Rc::as_ptr(&alias)).is_null());
+            assert!(imre_text_read(crate::ObjectOwner::as_ptr(&alias)).is_null());
             take_error(Kind::ValueError);
-            assert_eq!(imre_text_close(Rc::as_ptr(&alias)), 1);
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&alias)), 1);
         }
         std::fs::write(&path, [b'a', 0xf0, 0x9f]).unwrap();
         let invalid = open(path.to_str().unwrap(), 0);
         // SAFETY: the file remains rooted; the failed read transfers no string.
         unsafe {
-            assert!(imre_text_read(Rc::as_ptr(&invalid)).is_null());
+            assert!(imre_text_read(crate::ObjectOwner::as_ptr(&invalid)).is_null());
             let error = imre_error_take();
             for kind in [
                 Kind::UnicodeDecodeError,
@@ -1196,7 +1203,7 @@ mod tests {
             }
             imre_object_release(error);
             assert_eq!(
-                StrOwner::from_raw(imre_text_read(Rc::as_ptr(&invalid))).as_str(),
+                StrOwner::from_raw(imre_text_read(crate::ObjectOwner::as_ptr(&invalid))).as_str(),
                 ""
             );
         }
@@ -1207,18 +1214,25 @@ mod tests {
         let directory = Directory::new();
         let path = directory.0.join("output");
         let file = open(path.to_str().unwrap(), 1);
-        let weak = Rc::downgrade(&file);
+        let weak = crate::ObjectOwner::downgrade(&file);
         let values = imre_seq_new(5);
         // SAFETY: all values are rooted with their declared kinds and form no cycle.
         unsafe {
-            assert_eq!(imre_text_write(Rc::as_ptr(&file), &Str::new("")), 1);
             assert_eq!(
-                Int(imre_text_write(Rc::as_ptr(&file), &Str::new("é🦀\r\n"))).as_small(),
+                imre_text_write(crate::ObjectOwner::as_ptr(&file), &Str::new("")),
+                1
+            );
+            assert_eq!(
+                Int(imre_text_write(
+                    crate::ObjectOwner::as_ptr(&file),
+                    &Str::new("é🦀\r\n")
+                ))
+                .as_small(),
                 Some(4)
             );
-            assert!(imre_text_read(Rc::as_ptr(&file)).is_null());
+            assert!(imre_text_read(crate::ObjectOwner::as_ptr(&file)).is_null());
             take_error(Kind::UnsupportedOperation);
-            imre_seq_append(values, Rc::as_ptr(&file) as usize, 5);
+            imre_seq_append(values, crate::ObjectOwner::as_ptr(&file) as usize, 5);
             drop(file);
             assert!(weak.upgrade().is_some());
             imre_object_release(values);
@@ -1249,24 +1263,34 @@ mod tests {
         // SAFETY: file aliases and temporary immutable strings remain rooted for
         // each operation, and every pending failure is consumed before recovery.
         unsafe {
-            assert_eq!(imre_text_write_discard(Rc::as_ptr(&file), &Str::new("")), 1);
             assert_eq!(
-                imre_text_write_discard(Rc::as_ptr(&file), &Str::new("é\0🦀\n")),
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&file), &Str::new("")),
                 1
             );
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&file), std::ptr::null(), 0),
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&file), &Str::new("é\0🦀\n")),
                 1
             );
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&file), parts.as_ptr(), parts.len()),
+                imre_text_write_parts(crate::ObjectOwner::as_ptr(&file), std::ptr::null(), 0),
                 1
             );
-            assert_eq!(imre_text_close(Rc::as_ptr(&alias)), 1);
-            assert_eq!(imre_text_write_discard(Rc::as_ptr(&file), &Str::new("")), 0);
+            assert_eq!(
+                imre_text_write_parts(
+                    crate::ObjectOwner::as_ptr(&file),
+                    parts.as_ptr(),
+                    parts.len()
+                ),
+                1
+            );
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&alias)), 1);
+            assert_eq!(
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&file), &Str::new("")),
+                0
+            );
             take_error(Kind::ValueError);
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&file), std::ptr::null(), 0),
+                imre_text_write_parts(crate::ObjectOwner::as_ptr(&file), std::ptr::null(), 0),
                 0
             );
             take_error(Kind::ValueError);
@@ -1292,30 +1316,40 @@ mod tests {
         // following recovery; a large write reaches the broken pipe immediately.
         unsafe {
             assert_eq!(
-                imre_text_write_discard(Rc::as_ptr(&readonly), &Str::new("")),
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&readonly), &Str::new("")),
                 0
             );
             take_error(Kind::UnsupportedOperation);
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&readonly), std::ptr::null(), 0),
+                imre_text_write_parts(crate::ObjectOwner::as_ptr(&readonly), std::ptr::null(), 0),
                 0
             );
             take_error(Kind::UnsupportedOperation);
-            assert_eq!(imre_text_write_discard(Rc::as_ptr(&full), &unbuffered), 0);
-            take_error(Kind::OSError);
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&full), large_parts.as_ptr(), large_parts.len()),
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&full), &unbuffered),
                 0
             );
             take_error(Kind::OSError);
-            assert_eq!(imre_text_write_discard(Rc::as_ptr(&full), &Str::new("")), 1);
             assert_eq!(
-                imre_text_write_parts(Rc::as_ptr(&full), std::ptr::null(), 0),
+                imre_text_write_parts(
+                    crate::ObjectOwner::as_ptr(&full),
+                    large_parts.as_ptr(),
+                    large_parts.len()
+                ),
+                0
+            );
+            take_error(Kind::OSError);
+            assert_eq!(
+                imre_text_write_discard(crate::ObjectOwner::as_ptr(&full), &Str::new("")),
+                1
+            );
+            assert_eq!(
+                imre_text_write_parts(crate::ObjectOwner::as_ptr(&full), std::ptr::null(), 0),
                 1
             );
             // One assembled write bypasses the buffer on this failure. Fragmented
             // writes would leave the first 4096 bytes buffered and make close fail.
-            assert_eq!(imre_text_close(Rc::as_ptr(&full)), 1);
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&full)), 1);
         }
         assert_eq!(imre_error_pending(), 0);
     }
@@ -1325,14 +1359,20 @@ mod tests {
         let file = broken_pipe();
         // SAFETY: the file and strings stay rooted; each failure is consumed before reuse.
         unsafe {
-            assert_ne!(imre_text_write(Rc::as_ptr(&file), &Str::new("buffered")), 0);
-            assert_eq!(imre_text_flush(Rc::as_ptr(&file)), 0);
+            assert_ne!(
+                imre_text_write(crate::ObjectOwner::as_ptr(&file), &Str::new("buffered")),
+                0
+            );
+            assert_eq!(imre_text_flush(crate::ObjectOwner::as_ptr(&file)), 0);
             take_error(Kind::OSError);
-            assert_eq!(imre_text_close(Rc::as_ptr(&file)), 0);
-            assert_eq!(imre_text_closed(Rc::as_ptr(&file)), 1);
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&file)), 0);
+            assert_eq!(imre_text_closed(crate::ObjectOwner::as_ptr(&file)), 1);
             take_error(Kind::OSError);
-            assert_eq!(imre_text_close(Rc::as_ptr(&file)), 1);
-            assert_eq!(imre_text_write(Rc::as_ptr(&file), &Str::new("")), 0);
+            assert_eq!(imre_text_close(crate::ObjectOwner::as_ptr(&file)), 1);
+            assert_eq!(
+                imre_text_write(crate::ObjectOwner::as_ptr(&file), &Str::new("")),
+                0
+            );
             take_error(Kind::ValueError);
         }
 
@@ -1341,7 +1381,7 @@ mod tests {
         // exception reference, and both references are released exactly once.
         unsafe {
             assert_ne!(
-                imre_text_write(Rc::as_ptr(&dropped), &Str::new("buffered")),
+                imre_text_write(crate::ObjectOwner::as_ptr(&dropped), &Str::new("buffered")),
                 0
             );
             let error = imre_exception_new(Kind::RuntimeError as u32, std::ptr::null());
@@ -1357,7 +1397,10 @@ mod tests {
         // SAFETY: the file and string remain rooted through the buffered write.
         unsafe {
             assert_ne!(
-                imre_text_write(Rc::as_ptr(&ignored_failure), &Str::new("buffered")),
+                imre_text_write(
+                    crate::ObjectOwner::as_ptr(&ignored_failure),
+                    &Str::new("buffered")
+                ),
                 0
             );
         }
@@ -1375,7 +1418,10 @@ mod tests {
         let directory = Directory::new();
         let path = directory.0.join("existing");
         std::fs::write(&path, b"before").unwrap();
-        let Ok((mut writer, _)) = open_file(path.to_str().unwrap(), 2) else {
+        let Ok((mut writer, _)) = open_file(
+            &StrOwner::try_new(Str::new(path.to_str().unwrap())).unwrap(),
+            2,
+        ) else {
             panic!("could not open the existing file for append");
         };
         assert_eq!(writer.stream_position().unwrap(), 6);
@@ -1392,7 +1438,10 @@ mod tests {
             .custom_flags(libc::O_NONBLOCK)
             .open(&fifo)
             .unwrap();
-        let Ok((mut writer, _)) = open_file(fifo.to_str().unwrap(), 2) else {
+        let Ok((mut writer, _)) = open_file(
+            &StrOwner::try_new(Str::new(fifo.to_str().unwrap())).unwrap(),
+            2,
+        ) else {
             panic!("could not open the pipe for append");
         };
         writer.write_all(b"x").unwrap();
