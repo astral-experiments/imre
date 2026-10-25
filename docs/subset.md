@@ -781,8 +781,14 @@ On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes
 
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
-`shlex.split(text)` returns POSIX shell words with Python’s default quoting,
-escaping, and comment handling. A discarded `subprocess.run(argv, check=True,
+`shlex.split(s, comments=False, posix=True)` accepts a string or `None`
+and boolean mode flags. `shlex.quote(s)` quotes a POSIX shell word;
+`shlex.join(split_command)` quotes each item from a supported iterable before
+requesting the next. Both handle false scalar values and concrete containers
+before checking their type, as CPython does. The stateful `shlex.shlex` lexer
+is unsupported.
+
+A discarded `subprocess.run(argv, check=True,
 stdout=sys.stderr)` forwards both child streams to the parent’s stderr while
 the child is running. Failure raises `CalledProcessError` with uncaptured
 streams set to `None`. A handler around direct calls with the same stream mode,
@@ -953,6 +959,11 @@ A function returning `Sequence[T]` can return an exact `list[T]`.
 `collections.Counter[K]` uses exact string or integer keys and arbitrary-precision integer counts. `Counter(iterable)` counts each key, and `Counter(mapping)` copies integer counts. A bare `Counter` annotation or unconstrained empty `Counter()` uses string keys. `Counter[int]()` and an annotated `Counter[int]` destination select integer keys. String-key counters also accept keyword counts. `update` adds its positional iterable or mapping and then the keyword counts, retaining negative and zero entries. A missing subscription returns zero without inserting. Membership, `get`, key iteration and `items()` inspect the stored entries. Deleting an absent key is a no-op. `total()` and `sum(c.values())` sum all counts. Frozen dataclasses can hold independently created counters with `field(default_factory=Counter)`. `subtract(iterable, **counts)` decrements instead of replacing counts and retains nonpositive values. Typed mappings contribute their counts; other iterables contribute one per occurrence. Bound and unbound update/subtract calls support native argument errors.
 
 Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the counts for every key of either counter. An absent key contributes zero.
+
+`mapping.clear()` removes every entry in place and returns `None`. Aliases see
+the empty dictionary; a `Counter` still returns zero for a missing key, and a
+`defaultdict` keeps its factory. `dict.clear(mapping)` and the inherited class
+methods `Counter.clear(mapping)` and `defaultdict.clear(mapping)` do the same.
 
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
 
@@ -1299,6 +1310,18 @@ accepts nested tuples and exposes the original exception as `caught.exception`.
 A stored context can be entered later. Normal exit, return, break, and continue
 raise the missing-exception assertion; unrelated exceptions propagate.
 The callable form and runtime-selected exception classes need further support.
+
+`unittest.main()` discovers the compiled entry module's statically bound
+`TestCase` subclasses, including imports, aliases and inherited tests. It uses
+the default lexicographic order and makes a separate instance for each method.
+Its native runner calls `setUp`, the selected method and `tearDown`; a setup
+failure prevents the latter two. Skipped tests, assertion failures and other
+errors are reported separately. The default, `-v`, `-q` and `-f` modes return
+normal unittest exit codes, including 5 for an empty suite. Only zero-argument
+direct calls and the inherited initializer are supported. Custom loaders,
+module and class hooks, decorated tests, and named command-line selections
+require further support. Caught failures report their messages without CPython
+traceback frames.
 
 The [shared suite runner](../benchmarks/cpython_stdlib/SUITE_RUNNER.md) shows
 which parts of a complete pinned test run natively. The full CPython unittest

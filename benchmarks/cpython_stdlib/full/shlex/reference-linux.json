@@ -1,0 +1,27 @@
+{
+  "module": "test.test_shlex",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 19,
+  "reference": {
+    "test.test_shlex.ShlexTest.testCompat": "pass",
+    "test.test_shlex.ShlexTest.testEmptyStringHandling": "pass",
+    "test.test_shlex.ShlexTest.testJoin": "pass",
+    "test.test_shlex.ShlexTest.testJoinRoundtrip": "pass",
+    "test.test_shlex.ShlexTest.testPunctuationCharsReadOnly": "pass",
+    "test.test_shlex.ShlexTest.testPunctuationInWordChars": "pass",
+    "test.test_shlex.ShlexTest.testPunctuationWithPosix": "pass",
+    "test.test_shlex.ShlexTest.testPunctuationWithWhitespaceSplit": "pass",
+    "test.test_shlex.ShlexTest.testQuote": "pass",
+    "test.test_shlex.ShlexTest.testSplitNone": "pass",
+    "test.test_shlex.ShlexTest.testSplitPosix": "pass",
+    "test.test_shlex.ShlexTest.testSyntaxSplitAmpersandAndPipe": "pass",
+    "test.test_shlex.ShlexTest.testSyntaxSplitCustom": "pass",
+    "test.test_shlex.ShlexTest.testSyntaxSplitParen": "pass",
+    "test.test_shlex.ShlexTest.testSyntaxSplitRedirect": "pass",
+    "test.test_shlex.ShlexTest.testSyntaxSplitSemicolon": "pass",
+    "test.test_shlex.ShlexTest.testTokenTypes": "pass",
+    "test.test_shlex.ShlexTest.testUnicodeHandling": "pass",
+    "test.test_shlex.ShlexTest.test_lazy_imports": "pass"
+  }
+}

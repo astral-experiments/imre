@@ -147,7 +147,7 @@ impl Checker<'_> {
         })
     }
 
-    fn unshadowed_builtin(&self, func: &ast::Expr, name: &str) -> bool {
+    pub(super) fn unshadowed_builtin(&self, func: &ast::Expr, name: &str) -> bool {
         func.as_name_expr().is_some_and(|n| n.id.as_str() == name)
             && !self.names.contains_key(name)
             && self.resolve(func).is_none()

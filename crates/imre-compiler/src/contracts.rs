@@ -85,7 +85,8 @@ impl Builtin {
                     | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Unquote
-                    | TextOperation::ShlexSplit => true,
+                    | TextOperation::ShlexSplit
+                    | TextOperation::ShlexQuote => true,
                     TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -246,6 +247,7 @@ impl Builtin {
                 | ProcessOperation::OsErrorField(_)
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
+                | ProcessOperation::RmTree
                 | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
@@ -453,6 +455,7 @@ impl Builtin {
             | Self::CounterNew
             | Self::CounterTotal
             | Self::DictAsBase
+            | Self::DictClear
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)

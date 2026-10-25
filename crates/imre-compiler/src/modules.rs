@@ -16,6 +16,7 @@ mod declarations;
 pub(crate) mod doctest;
 mod empty_keywords;
 mod entry_profile;
+mod namedtuple_fields;
 mod os;
 mod reachability;
 mod type_aliases;
@@ -190,6 +191,8 @@ pub(crate) enum Intrinsic {
     OsDevnull,
     SysExit,
     ShlexSplit,
+    ShlexQuote,
+    ShlexJoin,
     Ndiff,
     DocCaptureStart,
     DocCaptureTake,
@@ -270,6 +273,7 @@ pub(crate) enum Intrinsic {
     PurePath(crate::ir::PathFlavor),
     Which,
     Copy(CopyOperation),
+    RmTree,
     ShutilError,
     SameFileError,
     SpecialFileError,
@@ -291,6 +295,7 @@ pub(crate) enum Intrinsic {
     Fd(crate::ir::FdOperation),
     OpenFlag(&'static str),
     FsPath,
+    PosixNormcase,
     PosixPath(PosixPathOperation),
     Fnmatch(FnmatchOperation),
     Unquote,
@@ -512,6 +517,8 @@ impl IntrinsicModule {
             (Self::Logging, "ERROR") => Intrinsic::LogLevel(40),
             (Self::Logging, "CRITICAL" | "FATAL") => Intrinsic::LogLevel(50),
             (Self::Shlex, "split") => Intrinsic::ShlexSplit,
+            (Self::Shlex, "quote") => Intrinsic::ShlexQuote,
+            (Self::Shlex, "join") => Intrinsic::ShlexJoin,
             (Self::Difflib, "ndiff") => Intrinsic::Ndiff,
             (Self::DoctestRuntime, "capture_start") => Intrinsic::DocCaptureStart,
             (Self::DoctestRuntime, "capture_take") => Intrinsic::DocCaptureTake,
@@ -590,6 +597,7 @@ impl IntrinsicModule {
             (Self::Pathlib, "PureWindowsPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
+            (Self::Shutil, "rmtree") => Intrinsic::RmTree,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
             (Self::Shutil, "copymode") => Intrinsic::Copy(CopyOperation::Mode),
@@ -618,6 +626,7 @@ impl IntrinsicModule {
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
             (Self::Os, "fspath") => Intrinsic::FsPath,
+            (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
             (Self::Os, "devnull") => Intrinsic::OsDevnull,
             (Self::PosixPath, "exists") => Intrinsic::OsPathExists,
             (Self::PosixPath, "commonpath") => Intrinsic::PosixPath(PosixPathOperation::Commonpath),
@@ -695,6 +704,13 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    pub(crate) fn is_unittest_main(&self, id: DefinitionId) -> bool {
+        let owner = &self.modules[id.module];
+        owner.bundled
+            && owner.name == "unittest"
+            && owner.bindings.get("main") == Some(&Binding::Definition(id))
+    }
+
     /// Keep module indices stable for the semantic cache. Only after lowering
     /// expose the files a disk build must revalidate and protect from writes.
     pub(crate) fn disk_inputs(
@@ -1277,6 +1293,7 @@ impl<'a> Loader<'a> {
         });
         let mut executable = false;
         let mut segment = 0;
+        let mut field_separators = Vec::new();
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
             if self.modules[id].archive.is_some() && !native_declaration(statement) {
                 return Err(self.modules[id].error(statement,
@@ -1373,6 +1390,15 @@ impl<'a> Loader<'a> {
                         && matches!(module_value(statement), Some(ast::Expr::Call(call))
                         if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::NamedTuple))) =>
                 {
+                    if let Some(ast::Expr::Call(call)) = module_value(statement)
+                        && let [_, fields] = call.arguments.args.as_ref()
+                    {
+                        namedtuple_fields::separators(
+                            fields,
+                            &self.modules[id].source,
+                            &mut field_separators,
+                        );
+                    }
                     if executable && id == 0 {
                         return Err(self.modules[id].error(
                             statement,
@@ -1418,6 +1444,15 @@ impl<'a> Loader<'a> {
                     self.modules[id].executable.push(index);
                 }
             }
+        }
+        if !field_separators.is_empty() {
+            let module = &mut self.modules[id];
+            let mut source = module.source.clone();
+            for range in field_separators {
+                let spaces = " ".repeat(range.len());
+                source.replace_range(range, &spaces);
+            }
+            module.parsed = self.session.replace_source(id, source);
         }
         self.loading.remove(&id);
         self.initialization

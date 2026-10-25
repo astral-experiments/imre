@@ -47,7 +47,7 @@ impl Member {
         info: Rc<Info>,
         encrypted_name: impl FnOnce() -> Str,
     ) -> Result<Self> {
-        let at = u64::try_from(info.offset).map_err(|_| bad("Truncated file header"))?;
+        let at = source.header_offset(info.offset)?;
         let mut header = [0; 30];
         if source.read(at, &mut header)? != 30 {
             return Err(bad("Truncated file header"));
@@ -161,9 +161,16 @@ impl Member {
             .try_reserve(request)
             .map_err(|_| Error::allocation())?;
         self.packed.resize(pending + request, 0);
-        let count = self
+        let count = match self
             .source
-            .read(self.packed_at, &mut self.packed[pending..])?;
+            .read(self.packed_at, &mut self.packed[pending..])
+        {
+            Ok(count) => count,
+            Err(error) => {
+                self.packed.truncate(pending);
+                return Err(error);
+            }
+        };
         self.packed.truncate(pending + count);
         if count == 0 {
             return Err(Error::new(Kind::EOFError, ""));
@@ -178,6 +185,11 @@ impl Member {
     fn refill(&mut self, want: usize) -> Result<()> {
         self.buffer.clear();
         self.pos = 0;
+        self.read_block(want).inspect_err(|_| self.buffer.clear())
+    }
+
+    /// Fill the member buffer with one decoded block and advance its logical size.
+    fn read_block(&mut self, want: usize) -> Result<()> {
         let n = want.min(BLOCK);
         while !self.eof && self.buffer.is_empty() {
             self.input(n)?;
@@ -186,11 +198,14 @@ impl Member {
                 grow(&mut self.buffer, len)?;
                 let before_in = inflater.total_in();
                 let before_out = inflater.total_out();
-                let status = match inflater.decompress(
+                let result = inflater.decompress(
                     &self.packed[self.packed_pos..],
                     &mut self.buffer,
                     FlushDecompress::None,
-                ) {
+                );
+                let consumed = (inflater.total_in() - before_in) as usize;
+                self.packed_pos += consumed;
+                let status = match result {
                     Ok(status) => status,
                     Err(error) => {
                         let message = error.message().unwrap_or("invalid compressed data");
@@ -202,9 +217,7 @@ impl Member {
                         return Err(deflate_error(diagnostic.as_deref().unwrap_or(message)));
                     }
                 };
-                let consumed = (inflater.total_in() - before_in) as usize;
                 let written = (inflater.total_out() - before_out) as usize;
-                self.packed_pos += consumed;
                 self.buffer.truncate(written);
                 self.eof = status == Status::StreamEnd
                     || (self.packed_left == 0 && self.packed_pos == self.packed.len());
@@ -248,7 +261,6 @@ impl Member {
             if let Some(crc) = &mut self.crc {
                 crc.update(&self.buffer);
                 if self.eof && crc.sum() != self.info.crc {
-                    self.buffer.clear();
                     return Err(bad(format!(
                         "Bad CRC-32 for file {}",
                         string_repr(&self.info.filename)
@@ -403,6 +415,22 @@ mod tests {
 
     // CPython-generated ZIP_DEFLATED archive containing exactly 4,097 NULs.
     const FIXTURE: &[u8] = b"PK\x03\x04\x14\x00\x00\x00\x08\x00\x00\x00!\x00\x7f\xd3u\xb8\x14\x00\x00\x00\x01\x10\x00\x00\x01\x00\x00\x00p\xed\xc1\x01\x0d\x00\x00\x00\xc2\xa0\xf7Om\x0f\x07\x14\x00\x00\x00poPK\x01\x02\x14\x03\x14\x00\x00\x00\x08\x00\x00\x00!\x00\x7f\xd3u\xb8\x14\x00\x00\x00\x01\x10\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\x01\x00\x00\x00\x00pPK\x05\x06\x00\x00\x00\x00\x01\x00\x01\x00/\x00\x00\x003\x00\x00\x00\x00\x00";
+
+    #[test]
+    fn invalid_deflate_block_consumes_input_without_advancing_member_position() {
+        let mut raw = FIXTURE.to_vec();
+        raw[31] = 7; // Reserved DEFLATE block type in the first payload byte.
+        let input = Source::Borrowed(FileState::memory(Rc::new(raw)));
+        let archive = Archive::open(input, None).ok().unwrap();
+        let mut member = archive.member_by_name(&Str::new("p")).ok().unwrap();
+        member.min_read = 1;
+        assert!(member.read(Some(1)).unwrap_err().is_kind(Kind::ZlibError));
+        assert_eq!(member.tell(), 0);
+        let packed_at = member.packed_at;
+        assert!(member.read(Some(1)).unwrap_err().is_kind(Kind::ZlibError));
+        assert_eq!(member.packed_at, packed_at + 1);
+        assert_eq!(member.tell(), 0);
+    }
 
     #[test]
     fn last_compressed_byte_flushes_before_returning_an_exact_sized_read() {
