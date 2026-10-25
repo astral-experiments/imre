@@ -1,5 +1,5 @@
 use super::*;
-use crate::objects::exceptions::imre_exception_matches;
+use crate::objects::exceptions::{imre_exception_cause, imre_exception_matches};
 
 thread_local! {
     static INITIALIZED: Cell<usize> = const { Cell::new(0) };
@@ -70,7 +70,16 @@ fn c_results_obey_the_pending_exception_contract() {
     Error::new(Kind::ValueError, "callback error").raise();
     // SAFETY: a returned immortal None represents success with an illegal pending error.
     assert!(unsafe { checked_result(Py::NONE) }.is_none());
-    assert!(take_matches(Kind::SystemError));
+    let error = imre_error_take();
+    // SAFETY: the pending slot transfers the SystemError, which owns its original cause.
+    unsafe {
+        assert_ne!(imre_exception_matches(error, Kind::SystemError as u32), 0);
+        let cause = imre_exception_cause(error);
+        assert!(!cause.is_null());
+        assert_ne!(imre_exception_matches(cause, Kind::ValueError as u32), 0);
+        imre_exception_release(cause);
+        imre_exception_release(error);
+    }
 }
 
 #[test]
