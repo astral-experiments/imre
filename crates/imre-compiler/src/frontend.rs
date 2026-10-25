@@ -5789,7 +5789,7 @@ impl<'a> Checker<'a> {
                 return self.popen(call, Some(true));
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
-            Some(Binding::Intrinsic(Intrinsic::CopyFile)) => return self.shutil_copyfile(call),
+            Some(Binding::Intrinsic(Intrinsic::Copy(op))) => return self.shutil_copy(op, call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;
                 let [path] = call.arguments.args.as_ref() else {

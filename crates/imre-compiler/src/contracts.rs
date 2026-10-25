@@ -233,7 +233,7 @@ impl Builtin {
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
                 | ProcessOperation::Which
-                | ProcessOperation::CopyFile
+                | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
