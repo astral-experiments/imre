@@ -16,6 +16,7 @@ pub(super) fn adapters(
     let mut invoked = false;
     let mut enum_receiver = false;
     let mut object_receiver = false;
+    let mut empty_partial = false;
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Callable { function, receiver } = &value.kind {
@@ -33,9 +34,10 @@ pub(super) fn adapters(
                     .is_some_and(|r| matches!(r.ty, Type::Deque(_)));
             }
             invoked |= matches!(value.kind, ExprKind::Invoke { .. });
+            empty_partial |= matches!(value.kind, ExprKind::Builtin(Builtin::EmptyPartial, _));
         });
     }
-    if targets.is_empty() && !invoked {
+    if targets.is_empty() && !invoked && !empty_partial {
         return;
     }
     output.common().push_str("%callable = type { ptr, ptr }\n");
@@ -46,6 +48,7 @@ pub(super) fn adapters(
         .into_iter()
         .chain(enum_receiver.then_some(("callable_enum", "i32 0, i32 10", 2)))
         .chain(object_receiver.then_some(("callable_object", "i32 0, i32 5", 2)))
+        .chain(empty_partial.then_some(("empty_partial", "i32 0, i32 0, i32 6", 3)))
         .chain(cached.then_some(("cache_callable", "i32 0, i32 6, i32 0, i32 0", 4)))
     {
         writeln!(
@@ -139,6 +142,17 @@ pub(super) fn adapters(
 }
 
 impl Emitter<'_, '_> {
+    /// Borrow the target's adapter and context for the lifetime of its owning third word.
+    pub(super) fn empty_partial(&mut self, target: &Value) -> Value {
+        let wrapper = self.record_with_layout(target.ty, "empty_partial");
+        let prefix = self.instruction(format!("load %callable, ptr {}", target.operand));
+        self.line(format!("store %callable {prefix}, ptr {}", wrapper.operand));
+        let owner = self.instruction(format!("getelementptr ptr, ptr {}, i64 2", wrapper.operand));
+        self.retain(target);
+        self.line(format!("store ptr {}, ptr {owner}", target.operand));
+        wrapper
+    }
+
     /// Captures the receiver once and transfers its owner into the immutable
     /// callable record. Its destructor uses the ordinary record descriptor.
     pub(super) fn callable_value(
