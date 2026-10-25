@@ -692,6 +692,10 @@ pub(crate) enum Builtin {
     JsonLoads,
     JsonEmptyObject,
     FunctionCache(usize),
+    FunctionCacheProbe(usize, i64),
+    FunctionCacheInsert(usize, i64),
+    FunctionCacheStat(usize, u32),
+    FunctionCacheClear(usize),
     HashStr,
     HashRecord,
     /// A dictionary with a read-only JSON receiver and a literal string key.
@@ -1009,6 +1013,21 @@ pub(crate) enum LogOperation {
     Emit,
 }
 
+/// POSIX descriptor calls use the target's C int and file descriptor flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FdOperation {
+    Open,
+    Pipe,
+    Dup2,
+    Close,
+    Dup,
+    Isatty,
+    GetBlocking,
+    SetBlocking,
+    GetInheritable,
+    SetInheritable,
+}
+
 /// Synchronous process operations cannot invoke language callbacks.
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
@@ -1090,6 +1109,8 @@ pub(crate) enum ProcessOperation {
     EnvironCopy,
     EnvironGet,
     GetCwd,
+    Fd(FdOperation),
+    OpenFlag(&'static str),
     Which,
     CopyFile,
     CheckReturnCode,

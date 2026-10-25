@@ -27,6 +27,7 @@ mod documents;
 mod enums;
 mod expansions;
 mod fixed_tuples;
+mod function_caches;
 mod functools;
 mod hashlib;
 mod inference;
@@ -40,6 +41,7 @@ mod logging_records;
 mod matching;
 mod module_values;
 mod native_generators;
+mod os;
 mod paths;
 mod pipelines;
 mod posixpath;
@@ -83,7 +85,7 @@ struct ClassInfo {
     fields: Vec<Vec<Type>>,
     methods: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
-    cached: HashSet<usize>,
+    cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
     generators: HashSet<usize>,
     producer_items: HashMap<usize, Type>,
@@ -256,7 +258,7 @@ impl ClassInfo {
             parsers,
             methods: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
-            cached: HashSet::new(),
+            cached: HashMap::new(),
             cached_properties,
             generators: HashSet::new(),
             producer_items: HashMap::new(),
@@ -424,7 +426,13 @@ pub(crate) fn lower_with_owners(
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
-                && !(name == "open" && *binding == Binding::Intrinsic(Intrinsic::GzipOpen))
+                && !(name == "open"
+                    && matches!(
+                        binding,
+                        Binding::Intrinsic(
+                            Intrinsic::GzipOpen | Intrinsic::Fd(ir::FdOperation::Open)
+                        )
+                    ))
             {
                 return Err(module.error(
                     module.parsed.syntax(),
@@ -441,16 +449,16 @@ pub(crate) fn lower_with_owners(
                     }) {
                         continue;
                     }
-                    let cached = matches!(function.decorator_list.as_slice(), [decorator] if graph.resolve(module_id, &decorator.expression) == Some(Binding::Intrinsic(Intrinsic::FunctionCache)));
+                    let cached = function_caches::policy(graph, module_id, function)?;
                     let mut function = function.clone();
-                    if cached {
+                    if cached.is_some() {
                         function.decorator_list.clear();
                     }
                     let element = native_generators::item_type(
                         &function, graph, module_id, &classes, &types,
                     )?;
                     if element.is_some() {
-                        if cached {
+                        if cached.is_some() {
                             return Err(
                                 module.error(&function, "generator functions cannot be cached")
                             );
@@ -472,14 +480,18 @@ pub(crate) fn lower_with_owners(
                         &inference,
                     )
                     .map_err(|error| format!("{}:{error}", module.path.display()))?;
-                    if cached {
+                    if let Some(policy) = cached {
                         if signature.asynchronous
-                            || !matches!(signature.params.as_slice(), [p] if types.hashable_key(p.ty) && p.default.is_none() && p.kind != ParameterKind::KeywordOnly)
                             || function.returns.is_none()
+                            || !signature.params.iter().all(|p| {
+                                types.hashable_key(p.ty)
+                                    && p.default.is_none()
+                                    && p.kind != ParameterKind::KeywordOnly
+                            })
                         {
-                            return Err(module.error(&function, "@cache requires one exact immutable positional key and an annotated synchronous result"));
+                            return Err(module.error(&function, "cached functions require exact immutable positional keys and an annotated synchronous result"));
                         }
-                        classes.cached.insert(signature.id);
+                        classes.cached.insert(signature.id, policy);
                     }
                     if let Some(element) = element {
                         classes.producer_items.insert(signature.id, element);
@@ -797,7 +809,7 @@ pub(crate) fn lower_with_owners(
         })();
         let (function, calls, reads, sums) =
             result.map_err(|error| format!("{}:{error}", module.path.display()))?;
-        let (function, calls, reads) = if classes.cached.contains(&signature.id) {
+        let (function, calls, reads) = if let Some(&policy) = classes.cached.get(&signature.id) {
             let raw = helpers.reserve();
             helpers.finish(
                 raw,
@@ -812,54 +824,12 @@ pub(crate) fn lower_with_owners(
                     ),
                 },
             );
-            let key = signature.params[0].ty;
-            let value = signature.returns;
-            let table = types.dict(key, value);
-            let local = |slot, ty| Expr {
-                ty,
-                kind: ExprKind::Local(slot),
-            };
-            let cache = || local(1, table);
-            let arg = || local(0, key);
-            let result = || local(2, value);
-            let builtin = |kind, ty, args| Expr {
-                ty,
-                kind: ExprKind::Builtin(kind, args),
-            };
-            let wrapper = ir::Function {
-                params: vec![0],
-                returns: value,
-                locals: vec![key, table, value],
-                body: vec![
-                    Statement::Assign(
-                        1,
-                        builtin(Builtin::FunctionCache(signature.id), table, vec![]),
-                    ),
-                    Statement::If(
-                        builtin(Builtin::DictContains, Type::Bool, vec![arg(), cache()]),
-                        vec![Statement::Return(builtin(
-                            Builtin::DictGet,
-                            value,
-                            vec![cache(), arg()],
-                        ))],
-                        vec![],
-                    ),
-                    Statement::Assign(
-                        2,
-                        Expr {
-                            ty: value,
-                            kind: ExprKind::Call(raw, ir::CallArgs::positional(vec![arg()])),
-                        },
-                    ),
-                    Statement::SetItem(cache(), arg(), result()),
-                    Statement::Return(result()),
-                ],
-            };
+            let wrapper = function_caches::wrapper(signature, raw, &types, policy);
             (wrapper, HashSet::from([raw]), HashSet::new())
         } else {
             (function, calls, reads)
         };
-        if sums.len() >= 2 && !classes.cached.contains(&signature.id) {
+        if sums.len() >= 2 && !classes.cached.contains_key(&signature.id) {
             zip_sums.push((functions.len(), sums));
         }
         owners.push(*module_id);
@@ -4490,6 +4460,15 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
+                Intrinsic::OpenFlag(name) => {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::OpenFlag(name)),
+                            vec![],
+                        ),
+                    });
+                }
                 Intrinsic::HashAvailable => {
                     return Ok(Expr {
                         ty: self.types.set(Type::Str),
@@ -5445,6 +5424,9 @@ impl<'a> Checker<'a> {
         if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
             return Ok(self.materialize_fixed_tuple(tuple));
         }
+        if let Some(value) = self.cache_control(call)? {
+            return Ok(value);
+        }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
@@ -5725,6 +5707,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
                 return Ok(Expr {
