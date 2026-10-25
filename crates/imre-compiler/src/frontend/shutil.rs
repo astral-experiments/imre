@@ -3,6 +3,124 @@
 use super::*;
 
 impl Checker<'_> {
+    /// Emit a native function value with the same ownership and indirect-call ABI as a def.
+    fn shutil_helper(
+        &mut self,
+        site: &impl Ranged,
+        locals: Vec<Type>,
+        result: Type,
+        op: ir::ProcessOperation,
+        args: Vec<Expr>,
+        receiver: Option<Expr>,
+    ) -> Expr {
+        let ty = self
+            .types
+            .callable(locals[usize::from(receiver.is_some())..].to_vec(), result);
+        let id = self.helpers.reserve();
+        self.helpers.finish(
+            id,
+            comprehensions::Helper {
+                module: self.module,
+                calls: HashSet::new(),
+                class_reads: HashSet::new(),
+                recursion_error: self.graph.modules[self.module].error(
+                    site,
+                    "recursive calls through this shutil operation are unsupported",
+                ),
+                function: ir::Function {
+                    params: (0..locals.len()).collect(),
+                    locals,
+                    returns: result,
+                    body: vec![Statement::Return(Expr {
+                        ty: result,
+                        kind: ExprKind::Builtin(Builtin::Process(op), args),
+                    })],
+                },
+            },
+        );
+        Expr {
+            ty,
+            kind: ExprKind::Callable {
+                function: id,
+                receiver: receiver.map(Box::new),
+            },
+        }
+    }
+
+    fn copy_result(&self, op: ir::CopyOperation, dst: Type) -> Type {
+        match op {
+            ir::CopyOperation::Mode | ir::CopyOperation::Stat | ir::CopyOperation::Xattr => {
+                Type::None
+            }
+            ir::CopyOperation::Copy | ir::CopyOperation::Copy2 if dst == Type::Path => {
+                self.types.union(&[Type::Str, Type::Path]).unwrap()
+            }
+            _ => dst,
+        }
+    }
+
+    /// Pass a copying or removal routine as a value, specializing its path types from a Callable annotation.
+    pub(super) fn shutil_function_value(
+        &mut self,
+        op: Intrinsic,
+        expected: Option<Type>,
+        site: &ast::Expr,
+    ) -> Result<Expr, String> {
+        let params = expected
+            .and_then(|ty| self.types.signature(ty))
+            .map(|(args, _)| args)
+            .unwrap_or_else(|| {
+                if matches!(op, Intrinsic::RmTree) {
+                    vec![Type::Str]
+                } else {
+                    vec![Type::Str; 2]
+                }
+            });
+        let path = |ty| matches!(ty, Type::Str | Type::Bytes | Type::Path);
+        let local = |i: usize| Expr {
+            ty: params[i],
+            kind: ExprKind::Local(i),
+        };
+        let flag = |v| Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Bool(v),
+        };
+        let none = Expr {
+            ty: Type::None,
+            kind: ExprKind::None,
+        };
+        let (op, result, args) = match (op, params.as_slice()) {
+            (Intrinsic::Copy(op), [src, dst]) if path(*src) && path(*dst) => (
+                ir::ProcessOperation::Copy(op),
+                self.copy_result(op, *dst),
+                vec![local(0), local(1), flag(true)],
+            ),
+            (Intrinsic::RmTree, [src] | [src, Type::Bool]) if path(*src) => (
+                ir::ProcessOperation::RmTree,
+                Type::None,
+                vec![
+                    self.fspath_value(local(0), site)?,
+                    if params.len() == 2 {
+                        local(1)
+                    } else {
+                        flag(false)
+                    },
+                    none.clone(),
+                    none.clone(),
+                    none,
+                ],
+            ),
+            _ => {
+                return Err(error(
+                    self.source,
+                    site,
+                    "shutil callback requires its positional path arguments and optional rmtree ignore_errors flag",
+                ));
+            }
+        };
+        Ok(self.shutil_helper(site, params, result, op, args, None))
+    }
+
     pub(super) fn shutil_ignore_patterns(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         calls::reject_unpacking(call, self.source)?;
@@ -38,38 +156,14 @@ impl Checker<'_> {
             })
             .collect();
         let result = self.types.set(ty);
-        let id = self.helpers.reserve();
-        self.helpers.finish(
-            id,
-            comprehensions::Helper {
-                module: self.module,
-                calls: HashSet::new(),
-                class_reads: HashSet::new(),
-                recursion_error: self.graph.modules[self.module].error(
-                    call,
-                    "recursive calls through ignore_patterns are unsupported",
-                ),
-                function: ir::Function {
-                    params: vec![0, 1, 2],
-                    locals,
-                    returns: result,
-                    body: vec![Statement::Return(Expr {
-                        ty: result,
-                        kind: ExprKind::Builtin(
-                            Builtin::Process(ir::ProcessOperation::IgnorePatterns),
-                            args,
-                        ),
-                    })],
-                },
-            },
-        );
-        Ok(Expr {
-            ty: self.types.callable(vec![ty, list], result),
-            kind: ExprKind::Callable {
-                function: id,
-                receiver: Some(Box::new(context)),
-            },
-        })
+        Ok(self.shutil_helper(
+            call,
+            locals,
+            result,
+            ir::ProcessOperation::IgnorePatterns,
+            args,
+            Some(context),
+        ))
     }
 
     pub(super) fn shutil_copytree(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -288,15 +382,7 @@ impl Checker<'_> {
             }
         })?;
         let dst = args.values[args.order[1]].ty;
-        let result = match op {
-            ir::CopyOperation::Mode | ir::CopyOperation::Stat | ir::CopyOperation::Xattr => {
-                Type::None
-            }
-            ir::CopyOperation::Copy | ir::CopyOperation::Copy2 if dst == Type::Path => {
-                self.types.union(&[Type::Str, Type::Path]).unwrap()
-            }
-            _ => dst,
-        };
+        let result = self.copy_result(op, dst);
         Ok(self.ordered_builtin(
             Builtin::Process(ir::ProcessOperation::Copy(op)),
             result,
