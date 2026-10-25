@@ -641,10 +641,7 @@ pub unsafe extern "C" fn imre_str_format_fields(
             }
         })
     });
-    super::finish(
-        result.and_then(crate::checked_owned_str),
-        std::ptr::null(),
-    )
+    super::finish(result.and_then(crate::checked_owned_str), std::ptr::null())
 }
 
 /// # Safety
