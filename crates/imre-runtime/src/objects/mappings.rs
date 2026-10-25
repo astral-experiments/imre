@@ -1083,6 +1083,28 @@ impl MappingIterator {
 }
 
 impl Storage {
+    /// Borrow at most two keys in normal iteration order. The words stay rooted
+    /// by this storage borrow. This avoids creating an iterator to unpack a pair.
+    pub(super) fn first_two_keys(&self) -> (usize, u32, [usize; 2]) {
+        fn keys<V: Copy>(table: &Tables<V>) -> (usize, u32, [usize; 2]) {
+            let mut words = [0; 2];
+            let size = table.len();
+            if size == 2 {
+                let mut dest = words.iter_mut();
+                table.all(|key, _| {
+                    *dest.next().unwrap() = key;
+                    true
+                });
+            }
+            (size, table.key_kind(), words)
+        }
+        match self {
+            Self::Dictionary(dict) => keys(&dict.tables),
+            Self::Set(set) => keys(&set.tables),
+            _ => unreachable!("checked mapping or set"),
+        }
+    }
+
     pub(super) fn dictionary(&self) -> &Mapping {
         match self {
             Self::Dictionary(value) => value,

@@ -65,6 +65,12 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::ImportErrorReset => Contract::new(false, Unknown),
+            Self::ImportErrorNew { .. }
+            | Self::ImportErrorField(_)
+            | Self::ExceptionFieldLen
+            | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
+            Self::ExceptionFieldRepr => Contract::new(false, PreservesOwners),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
@@ -159,6 +165,8 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::TimeSleep | Self::PercentInteger => Contract::new(true, PreservesLists),
+            Self::Formatter(_) => Contract::new(true, PreservesLists),
             Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
                 matches!(
@@ -264,6 +272,8 @@ impl Builtin {
             | Self::RegexGroupDict
             | Self::DictGet
             | Self::JsonDecode(_)
+            | Self::CsvReader { .. }
+            | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
             | Self::JsonErrorField(_)
@@ -301,6 +311,7 @@ impl Builtin {
             | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
+            | Self::CsvLineNumber
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::HashAvailable
@@ -670,6 +681,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_deletions"
                 | "imre_log_file_should_roll"
                 | "imre_log_file_roll"
+                | "imre_time_sleep"
+                | "imre_str_percent_int"
+                | "imre_formatter_format"
+                | "imre_formatter_time"
+                | "imre_formatter_message"
                 | "imre_logrecord_message"
                 | "imre_log_config"
                 | "imre_log_config_named"
@@ -698,6 +714,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_regex_groupdict"
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
+                | "imre_exception_field_index"
+                | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
                 | "imre_urlsafe_b64encode"

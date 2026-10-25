@@ -21,6 +21,7 @@ mod calls;
 mod comprehensions;
 mod contexts;
 mod counter;
+mod csv;
 mod dataclass_values;
 mod dispatch;
 mod documents;
@@ -30,6 +31,7 @@ mod fixed_tuples;
 mod function_caches;
 mod functools;
 mod hashlib;
+mod import_errors;
 mod inference;
 mod iterables;
 mod itertools;
@@ -37,6 +39,7 @@ mod json;
 mod literals;
 mod local_functions;
 mod logging;
+mod logging_formatters;
 mod logging_records;
 mod matching;
 mod module_values;
@@ -352,6 +355,12 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
         _ => {}
+    }
+    if name == "ImportError" {
+        return Some(41);
+    }
+    if name == "ModuleNotFoundError" {
+        return Some(42);
     }
     if name == "StopIteration" {
         return Some(35);
@@ -1310,6 +1319,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return Ok(Type::LogFormatter),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
@@ -1340,6 +1350,7 @@ fn annotation_with_aliases(
             "str" => Ok(Type::Str),
             "bytes" => Ok(Type::Bytes),
             "BaseException" | "Exception" => Ok(Type::Exception),
+            "ImportError" => Ok(Type::ImportException),
             _ => Err(error(
                 source,
                 expression,
@@ -1993,8 +2004,10 @@ impl<'a> Checker<'a> {
             };
             return self.coerce(literals::view(value, string), expected, node);
         }
-        if matches!(value.ty, Type::TimeoutExpired | Type::NamedException(_))
-            && expected == Type::Exception
+        if matches!(
+            value.ty,
+            Type::ImportException | Type::TimeoutExpired | Type::NamedException(_)
+        ) && expected == Type::Exception
         {
             return Ok(Expr {
                 ty: expected,
@@ -2929,8 +2942,12 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("range iteration returned above")
         };
-        if matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
-            let input = self.prepare_file_lines(iterable);
+        if matches!(iterable.ty, Type::TextIO | Type::BinaryIO | Type::CsvReader) {
+            let input = if iterable.ty == Type::CsvReader {
+                self.prepare_csv_reader(iterable)
+            } else {
+                self.prepare_file_lines(iterable)
+            };
             return self.lower_prepared_iteration(
                 target,
                 input,
@@ -3829,6 +3846,9 @@ impl<'a> Checker<'a> {
     /// turn an arbitrary first-party definition into a builtin category.
     /// Class-form raises construct a new instance, just like an explicit call.
     fn simple_exception(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
+        if self.is_import_error(kind) {
+            return self.import_error(call, kind);
+        }
         if kind == 32 {
             return self.system_exit(call, false);
         }
@@ -3902,6 +3922,9 @@ impl<'a> Checker<'a> {
                     "raise a constructed exception payload with its required arguments",
                 ));
             }
+            if self.is_import_error(kind) {
+                return Ok(self.import_error_value(kind, Vec::new(), vec![], [None; 3]));
+            }
             if kind == 32 {
                 return Ok(Expr {
                     ty: Type::Exception,
@@ -3950,6 +3973,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::TimeoutExpired)) => Some(27),
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
+            Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(67),
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),
@@ -4055,6 +4079,9 @@ impl<'a> Checker<'a> {
                         && let Some(&class) = self.classes.declarations.ids.get(&def)
                     {
                         self.narrowed.insert_mut(slot, Type::NamedException(class));
+                    }
+                    if !kinds.is_empty() && kinds.iter().all(|kind| self.is_import_error(*kind)) {
+                        self.narrowed.insert_mut(slot, Type::ImportException);
                     }
                     if !kinds.is_empty() && kinds.iter().all(|kind| *kind == 27) {
                         self.narrowed.insert_mut(slot, Type::TimeoutExpired);
@@ -4291,6 +4318,12 @@ impl<'a> Checker<'a> {
         right: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if op == ast::Operator::Mod && left.ty == Type::Str && right.ty == Type::Int {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::PercentInteger, vec![left, right]),
+            });
+        }
         let left = Self::integer_addend(op, left, right.ty);
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
@@ -4906,19 +4939,19 @@ impl<'a> Checker<'a> {
                         compare.ops[0] == ast::CmpOp::NotEq,
                     ));
                 }
-                if values.iter().any(|value| value.ty == Type::ExitCode) {
+                if values.iter().any(|value| value.ty == Type::ExceptionField) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                         || !values.iter().all(|v| {
-                            v.ty == Type::ExitCode || sys::exit_payload_supported(v.ty, self.types)
+                            v.ty == Type::ExceptionField || self.import_argument_supported(v.ty)
                         })
                     {
                         return Err(error(
                             self.source,
                             expression,
-                            "unsupported comparison with a SystemExit payload",
+                            "exception fields support equality with None, bool, int, str, bytes, or tuples",
                         ));
                     }
-                    let reversed = values[0].ty != Type::ExitCode;
+                    let reversed = values[0].ty != Type::ExceptionField;
                     let eq = Expr {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::SystemExitCodeEqual { reversed }, values),
@@ -5026,6 +5059,13 @@ impl<'a> Checker<'a> {
                         subscript,
                         "runtime generic aliases of builtin classes are unsupported",
                     ));
+                }
+                if list.ty == Type::ExceptionField {
+                    let index = self.expr_expected(&subscript.slice, Type::Int)?;
+                    return Ok(Expr {
+                        ty: Type::ExceptionField,
+                        kind: ExprKind::Builtin(Builtin::ExceptionFieldIndex, vec![list, index]),
+                    });
                 }
                 let list = match list.ty {
                     documents::LIST => self.document_list(list),
@@ -5247,11 +5287,20 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::ZipFile | Type::ZipInfo) {
                     return self.zip_attribute(receiver, attribute);
                 }
+                if receiver.ty == Type::CsvReader && attribute.attr.as_str() == "line_num" {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::CsvLineNumber, vec![receiver]),
+                    });
+                }
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::TimedFileHandler | Type::ClockTime) {
                     return self.timed_attribute(receiver, attribute);
+                }
+                if receiver.ty == Type::LogFormatter {
+                    return self.formatter_attr(receiver, attribute);
                 }
                 if receiver.ty == Type::LogRecord {
                     return self.log_record_field(receiver, attribute);
@@ -5271,7 +5320,10 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::CompletedProcess(_)) {
                     return self.process_attribute(receiver, attribute);
                 }
-                if matches!(receiver.ty, Type::Exception | Type::TimeoutExpired) {
+                if matches!(
+                    receiver.ty,
+                    Type::Exception | Type::ImportException | Type::TimeoutExpired
+                ) {
                     let field = if receiver.ty == Type::TimeoutExpired {
                         self.timeout_error_attribute(&receiver, attribute)?
                     } else {
@@ -5281,7 +5333,21 @@ impl<'a> Checker<'a> {
                         return Ok(value);
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
-                        "code" => (Type::ExitCode, Builtin::SystemExitCode),
+                        field @ ("args" | "msg" | "name" | "path" | "name_from")
+                            if receiver.ty == Type::ImportException =>
+                        {
+                            (
+                                Type::ExceptionField,
+                                Builtin::ImportErrorField(match field {
+                                    "args" => 0,
+                                    "msg" => 1,
+                                    "name" => 2,
+                                    "path" => 3,
+                                    _ => 4,
+                                }),
+                            )
+                        }
+                        "code" => (Type::ExceptionField, Builtin::SystemExitCode),
                         "msg" => (Type::Str, Builtin::JsonErrorField(0)),
                         "doc" => (Type::Str, Builtin::JsonErrorField(1)),
                         "pos" => (Type::Int, Builtin::JsonErrorField(2)),
@@ -5740,6 +5806,7 @@ impl<'a> Checker<'a> {
                 };
                 return self.fspath_argument(path);
             }
+            Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
             Some(Binding::Intrinsic(Intrinsic::MakeLogRecord)) => {
                 return self.make_log_record(call);
             }
@@ -5760,7 +5827,33 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
                 return self.root_log(level, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::CsvReader)) => return self.csv_reader(call),
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
+                self.reject_builtin_keywords(call)?;
+                let [arg] = call.arguments.args.as_ref() else {
+                    return Err(error(self.source, call, "time.sleep takes one number"));
+                };
+                let value = self.expr(arg)?;
+                let seconds = match value.ty {
+                    Type::Float => value,
+                    Type::Int | Type::Bool => Expr {
+                        ty: Type::Float,
+                        kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+                    },
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            arg,
+                            "time.sleep requires an integer or float",
+                        ));
+                    }
+                };
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::TimeSleep, vec![seconds]),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::WallTime)) if call.arguments.is_empty() => {
                 return Ok(Expr {
                     ty: Type::Float,
@@ -5916,6 +6009,13 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
+                let replacement = self.import_error(call, 41)?;
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::ImportErrorReset, vec![receiver, replacement]),
+                });
+            }
             if matches!(receiver.ty, Type::NamedException(_))
                 && matches!(attribute.attr.as_str(), "__init__" | "__post_init__")
             {
@@ -5997,6 +6097,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::TimedFileHandler {
                 return self.timed_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::LogFormatter {
+                return self.formatter_method(receiver, attribute, call);
             }
             if receiver.ty == Type::LogRecord {
                 return self.log_record_method(receiver, attribute, call);
@@ -6525,15 +6628,22 @@ impl<'a> Checker<'a> {
                 },
             });
         }
-        if name.id == "repr" && args.len() == 1 && args[0].ty == Type::ExitCode {
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Repr, args),
-            });
+        if args.len() == 1 && args[0].ty == Type::ExceptionField {
+            let op = match name.id.as_str() {
+                "repr" => Some((Type::Str, Builtin::ExceptionFieldRepr)),
+                "len" => Some((Type::Int, Builtin::ExceptionFieldLen)),
+                _ => None,
+            };
+            if let Some((ty, op)) = op {
+                return Ok(Expr {
+                    ty,
+                    kind: ExprKind::Builtin(op, args),
+                });
+            }
         }
         if matches!(name.id.as_str(), "str" | "print")
             && args.len() == 1
-            && args[0].ty == Type::ExitCode
+            && args[0].ty == Type::ExceptionField
         {
             let text = Expr {
                 ty: Type::Str,
@@ -6552,7 +6662,10 @@ impl<'a> Checker<'a> {
             && args.len() == 1
             && matches!(
                 args[0].ty,
-                Type::Exception | Type::NamedException(_) | Type::TimeoutExpired
+                Type::Exception
+                    | Type::NamedException(_)
+                    | Type::ImportException
+                    | Type::TimeoutExpired
             )
         {
             return Ok(Expr {
@@ -6568,7 +6681,10 @@ impl<'a> Checker<'a> {
         }
         if name.id == "repr"
             && args.len() == 1
-            && matches!(args[0].ty, Type::Exception | Type::NamedException(_))
+            && matches!(
+                args[0].ty,
+                Type::Exception | Type::ImportException | Type::NamedException(_)
+            )
         {
             return Ok(Expr {
                 ty: Type::Str,
@@ -6664,6 +6780,7 @@ impl<'a> Checker<'a> {
                             | Type::None
                             | Type::Exception
                             | Type::NamedException(_)
+                            | Type::ImportException
                             | Type::TimeoutExpired
                     ) =>
             {

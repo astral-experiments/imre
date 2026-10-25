@@ -204,8 +204,11 @@ reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
 `json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
 a text stream. Both accept scalar values, typed lists, tuples, dictionaries
-with string or integer keys, and parsed documents. Keyword options include
-`indent` (integer, string, or `None`), `ensure_ascii` and `allow_nan`.
+with string or integer keys, and parsed documents. Fresh nested list and dict
+displays can mix JSON types. Both functions accept `indent` (integer, string,
+or `None`), `ensure_ascii`, `allow_nan`, `sort_keys`, and `separators`.
+Separators are unpacked as the item separator and key separator; sorting
+compares dictionary keys before converting them to JSON strings.
 Defaults match Python's separators, escaping and nonfinite number spellings.
 Dynamic hooks, arbitrary mapping keys, and general `Any` remain outside this
 boundary.
@@ -297,6 +300,18 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 `str.startswith(prefix)` and `str.endswith(suffix)` accept one positional string, without tuple alternatives or bounds. `str.find(sub[, start])` accepts a positional substring and an optional integer or `None` start, returning a Unicode scalar index or `-1`; an end bound and `rfind` are not yet supported. `str.partition(sep)` requires a nonempty positional string and returns a fixed `(before, separator, after)` tuple; a missing separator returns `(original, "", "")`. `str.isspace()` is false for an empty string and otherwise checks every character against Python's whitespace definition. These operations use native UTF-8 storage and do not import or call Python methods.
 
 `urllib.parse.unquote(string)` is a sealed native import for one positional or named string argument. It decodes percent escapes with the default UTF-8 replacement behavior. Byte inputs, configurable `encoding`/`errors`, and other URL parsing APIs remain unsupported.
+
+## CSV reader
+
+`csv.reader(lines)` returns a lazy iterator over lists of strings. The supported
+input types are a text file, a live `list[str]`, and a string (one character per
+input element). `for`, `list`, `iter(reader)` and `next(reader)` share the
+same cursor. `reader.line_num` counts physical lines, including lines pulled
+for multiline fields. Errors use `csv.Error`; the default field limit is
+131,072 characters. Excel is the supported dialect. Literal `delimiter`,
+`quotechar`, `escapechar`, `doublequote`, `skipinitialspace` and `strict`
+keywords customize it. Other dialects, writers, dictionary adapters, and
+changing the field limit are outside the subset. An explicit text `lineterminator` is validated against the dialect characters; the reader recognizes CR and LF independently of this setting. A nonstring raises `TypeError`.
 
 ## Fixed regular expressions
 
@@ -995,6 +1010,16 @@ Exceptions contain an immutable category, message, optional explicit cause, and 
 
 An explicitly typed local assigned in a `try` body may be read after a handled exception. When a simple assignment did not complete on that path and no earlier value exists, the read raises `UnboundLocalError` (a `NameError`). A successfully assigned `None` remains an ordinary value.
 
+`ImportError` and its subclass `ModuleNotFoundError` retain their positional
+arguments in `.args`. The keyword-only `name`, `path`, and `name_from` attributes
+default to `None`; `.msg` is the sole positional argument, or `None`. Arguments
+can be `None`, booleans, integers, strings, bytes, or fixed tuples of these
+values. On a constructed or narrowed import exception, these fields support
+`str`, `repr`, equality, truth, and type tests. Strings, bytes, and tuples also
+support length and integer indexing. Reinitializing an instance resets omitted
+fields. Arbitrary objects, expanded keyword dictionaries, direct field writes,
+and pickling remain outside this subset.
+
 User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent
 Python method resolution order. A class that carries fields can use an ordinary
@@ -1212,7 +1237,7 @@ python3 tests/bytes.py --compiler target/release/imre --runtime target/release/l
 
 ### Closed entry profiles
 
-`--reachable-only` checks and compiles definitions used by the entrypoint. It can resolve selected standard-library declarations, such as `configparser.ConfigParser`, when only an unused function needs them. Using one in executable code still requires a native implementation. Unknown exports, modules with observable import effects, and first-party module initializers remain subject to normal checks. `--entry-profile FILE` also selects particular branch bodies in named functions. The JSON file maps each qualified function name to the condition and value it requires.
+`--reachable-only` checks and compiles definitions used by the entrypoint. It can resolve selected standard-library declarations, such as `configparser.ConfigParser`, when only an unused function needs them. Using one in executable code still requires a native implementation. Unreferenced first-party module values built solely from builtin literals may omit their storage if their keys are statically hashable and their annotations contain only static types. Other first-party initializers and modules with observable import effects remain subject to normal checks; unknown exports are rejected. `--entry-profile FILE` also selects particular branch bodies in named functions. The JSON file maps each qualified function name to the condition and value it requires.
 
 ```json
 {"tools.report.run": {"mode": "Mode.markdown", "args.debug": "False"}}

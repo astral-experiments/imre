@@ -49,3 +49,11 @@ without changing the upstream test. With the original CPython
 `ThemeSection(Mapping[str, str])`. The [collections coordination note](https://github.com/astral-sh/imre/pull/572#issuecomment-6392290392)
 tracks that real subclass requirement. Neither startup observation is counted
 as a passing routine.
+
+The post-merge [startup record](startup-linux.json) reruns both the imports
+entry point and the original suite runner on main
+`f5807a7d6d6edcc55cd01e061b73d097820c614d`, with and without
+`--reachable-only`. The module root contained the pinned `Lib/test` and
+`Lib/_colorize.py`; Imre supplied argparse and the other intrinsic modules.
+All four checks exited 1 with empty stdout and the same unsupported
+`collections.abc.Mapping` export on stderr. No upstream case executed.
