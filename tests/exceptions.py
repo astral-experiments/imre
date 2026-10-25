@@ -25,6 +25,7 @@ def upstream_support_payloads() -> str:
 
 ACCEPTED = {
     "upstream_support_payloads": upstream_support_payloads(),
+    "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
     "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
@@ -925,6 +926,22 @@ def annotated(value: str) -> str:
     return value
 Basic("original", item=annotated(37))
 """,
+    "exception_recursive_dynamic_list": """
+class E(Exception):
+    def __init__(self, value, *args):
+        self.value = value
+        super().__init__(value, *args)
+
+
+def exercise() -> None:
+    values: list[object] = []
+    error = E(values)
+    values.append(error.value)
+    print(repr(error.value))
+
+
+exercise()
+""",
     "exception_forwarding_object": """
 class Box:
     def __init__(self, item: int) -> None:
@@ -1184,7 +1201,7 @@ def main() -> None:
                 assert "multiple independent exception payload layouts" in result.stderr, result
             if name == "exception_binder_adjacent_error":
                 assert "str" in result.stderr and "int" in result.stderr, result
-            if name == "exception_forwarding_object":
+            if name in {"exception_forwarding_object", "exception_recursive_dynamic_list"}:
                 assert "forwarding exception fields require" in result.stderr, result
             passed += 1
         cases = [(name, source, None) for name, source in ACCEPTED.items()]

@@ -26,6 +26,21 @@ fn missing(names: &[&str]) -> String {
 impl Checker<'_> {
     /// Only admit values whose runtime type, repr, scalar comparison and indexing we can expose.
     pub(super) fn forwarding_value_supported(&self, ty: Type) -> bool {
+        self.forwarding_member_supported(ty, false)
+    }
+
+    fn forwarding_member_supported(&self, ty: Type, inside_list: bool) -> bool {
+        // An erased element of a mutable list could point back into that list.
+        // Immutable tuples of independently rooted views cannot introduce such a cycle.
+        if ty == Type::ObjectValue {
+            return !inside_list;
+        }
+        if let Some(item) = self.types.element(ty) {
+            return self.forwarding_member_supported(item, true);
+        }
+        if let Some(item) = self.types.payload(ty) {
+            return self.forwarding_member_supported(item, inside_list);
+        }
         matches!(
             ty,
             Type::None
@@ -35,18 +50,12 @@ impl Checker<'_> {
                 | Type::StrLiteral(_)
                 | Type::Bytes
                 | Type::Float
-                | Type::ExceptionField
-        ) || self
-            .types
-            .payload(ty)
-            .or_else(|| self.types.element(ty))
-            .is_some_and(|item| self.forwarding_value_supported(item))
-            || !self.types.is_partial_frame(ty)
-                && self.types.fields(ty).is_some_and(|items| {
-                    items
-                        .into_iter()
-                        .all(|item| self.forwarding_value_supported(item))
-                })
+        ) || !self.types.is_partial_frame(ty)
+            && self.types.fields(ty).is_some_and(|items| {
+                items
+                    .into_iter()
+                    .all(|item| self.forwarding_member_supported(item, inside_list))
+            })
     }
 
     /// Prove only the exact argument ranges independently diagnosed by ty.
@@ -304,7 +313,7 @@ impl Checker<'_> {
             kind: ExprKind::Tuple(args),
         };
         let args = Expr {
-            ty: Type::ExceptionField,
+            ty: Type::ObjectValue,
             kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![tuple]),
         };
         let decl = &self.classes.declarations.definitions[class];
@@ -322,12 +331,12 @@ impl Checker<'_> {
                     "forwarding exception did not initialize a declared field",
                 )
             })?;
-            fields.push(if value.ty == Type::ExceptionField {
+            fields.push(if value.ty == Type::ObjectValue {
                 value
             } else {
                 Expr {
-                    ty: Type::ExceptionField,
-                    kind: ExprKind::Builtin(Builtin::BoxExceptionField, vec![value]),
+                    ty: Type::ObjectValue,
+                    kind: ExprKind::Builtin(Builtin::BoxValue, vec![value]),
                 }
             });
         }

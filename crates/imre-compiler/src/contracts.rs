@@ -65,6 +65,9 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::Str if args.first().is_some_and(|e| e.ty == Type::ObjectValue) => {
+                Contract::new(true, PreservesOwners)
+            }
             Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
@@ -73,9 +76,11 @@ impl Builtin {
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
-            Self::ExceptionTupleView
-            | Self::ExceptionFieldRepr
-            | Self::BoxExceptionField
+            Self::MappingObjectGet | Self::ExceptionFieldRepr => {
+                Contract::new(true, PreservesOwners)
+            }
+            Self::BoxValue
+            | Self::ExceptionTupleView
             | Self::ExceptionKeywordSuggestion
             | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
@@ -313,6 +318,7 @@ impl Builtin {
             | Self::KeyIntersection
             | Self::KeyDifference
             | Self::RegexGroupDict
+            | Self::RegexFindIter
             | Self::Errno(_)
             | Self::DictGet
             | Self::NamespaceWrap
@@ -848,6 +854,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_splitlines"
                 | "imre_str_splitlines_options"
                 | "imre_str_translate"
+                | "imre_mapping_object_get"
+                | "imre_exception_field_repr"
+                | "imre_system_exit_code_text"
                 | "imre_exception_field_index"
                 | "imre_exception_formatter_result"
                 | "imre_exception_field_len"

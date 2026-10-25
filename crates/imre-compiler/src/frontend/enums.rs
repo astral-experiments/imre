@@ -148,12 +148,12 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
-        if [left.ty, right.ty].contains(&Type::ExceptionField)
+        if [left.ty, right.ty].contains(&Type::ObjectValue)
             && [left.ty, right.ty]
                 .iter()
                 .any(|ty| matches!(ty, Type::ListInt | Type::List(_)))
         {
-            let reversed = right.ty == Type::ExceptionField;
+            let reversed = right.ty == Type::ObjectValue;
             let same = Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Builtin(
