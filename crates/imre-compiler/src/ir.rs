@@ -109,6 +109,8 @@ pub(crate) enum Type {
     SimpleNamespace(usize),
     /// Nominal ModuleSpec backed by a record whose loader and state keep their exact types.
     ModuleSpec(usize),
+    /// A POSIX IPv4 stream socket with shared descriptor ownership.
+    Socket,
     Sha256,
     Poll,
     JsonDecoder,
@@ -201,6 +203,26 @@ pub(crate) enum TypingOperation {
     SetAttr(u32),
     RegistryLen,
     Dummy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SocketOp {
+    Constant(&'static str),
+    New,
+    Bind,
+    Listen,
+    Accept,
+    Connect,
+    SockName,
+    Recv,
+    Send,
+    SendAll,
+    Close,
+    Fileno,
+    SetBlocking,
+    GetBlocking,
+    SetSockOpt,
+    GetSockOpt,
 }
 
 impl Type {
@@ -305,6 +327,7 @@ impl std::fmt::Display for Type {
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
             Self::Poll => "select.poll",
+            Self::Socket => "socket.socket",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -940,6 +963,7 @@ pub(crate) enum Builtin {
     Decode,
     DecodeAscii,
     UrlsafeB64encode,
+    Socket(SocketOp),
     Sha256Hex,
     Sha256New,
     HashNew,

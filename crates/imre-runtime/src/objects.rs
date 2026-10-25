@@ -45,6 +45,7 @@ pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod shutil;
+mod socket;
 mod source_modules;
 mod stdlib;
 mod string_enums;
@@ -93,6 +94,7 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    Socket(socket::Socket),
     StrDescriptor(u32),
     Sequence(Words),
     Deque(Box<deque::Deque>),
@@ -127,6 +129,7 @@ enum Storage {
     ZipInfo(Rc<zipfile::Info>),
     Popen(Box<processes::Popen>),
     AsyncProcess(Box<processes::AsyncProcess>),
+    AsyncCoroutine(Rc<asyncio::Task>),
     AsyncTask(Rc<asyncio::Task>),
     GeneratorContext(Rc<contexts::Manager>),
     DirectoryContext(tempdirs::DirectoryContext),

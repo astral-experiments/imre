@@ -30,6 +30,7 @@ mod posixpath;
 mod processes;
 mod records;
 mod runtime;
+mod socket;
 mod stdlib;
 mod string_enums;
 mod structs;
@@ -110,6 +111,7 @@ impl Type {
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::Poll
+            | Self::Socket
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -189,6 +191,7 @@ impl Type {
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::Poll
+            | Self::Socket
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -829,6 +832,7 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::Poll
+            | Type::Socket
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -3545,6 +3549,7 @@ impl Emitter<'_, '_> {
                 | Type::PlainObject
                 | Type::PathInfo
                 | Type::Poll
+                | Type::Socket
                 | Type::Sha256
                 | Type::JsonDecoder
                 | Type::ZipFile
@@ -5123,6 +5128,7 @@ impl Emitter<'_, '_> {
             Builtin::CsvLineNumber => {
                 self.call("imre_csv_line_number", Type::Int, &[&args[0].value])
             }
+            Builtin::Socket(op) => self.socket_operation(*op, &args, returns),
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::HashNew => self.call(
                 "imre_hash_new",
@@ -6758,6 +6764,7 @@ impl Emitter<'_, '_> {
                     | Type::SimpleNamespace(_)
                     | Type::PathInfo
                     | Type::Poll
+                    | Type::Socket
                     | Type::Sha256
                     | Type::JsonDecoder
                     | Type::ZipFile
@@ -7038,6 +7045,7 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::Poll
+            | Type::Socket
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -7131,6 +7139,7 @@ impl Emitter<'_, '_> {
             | Type::SimpleNamespace(_)
             | Type::PathInfo
             | Type::Poll
+            | Type::Socket
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -7743,6 +7752,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::SimpleNamespace(_)
         | Type::PathInfo
         | Type::Poll
+        | Type::Socket
         | Type::Sha256
         | Type::JsonDecoder
         | Type::ZipFile
@@ -8161,6 +8171,34 @@ declare ptr @imre_linecache_line_int(ptr, i64, ptr)
 declare ptr @imre_linecache_line_float(ptr, double, ptr)
 declare ptr @imre_inspect_sentinel()
 declare ptr @imre_inspect_str_descriptor(i32)
+@imre_socket_af_inet = external constant i64
+@imre_socket_sock_stream = external constant i64
+@imre_socket_sol_socket = external constant i64
+@imre_socket_so_reuseaddr = external constant i64
+@imre_socket_ipproto_tcp = external constant i64
+@imre_socket_tcp_nodelay = external constant i64
+@imre_socket_somaxconn = external constant i64
+@imre_socket_so_sndbuf = external constant i64
+@imre_socket_so_rcvbuf = external constant i64
+@imre_socket_so_linger = external constant i64
+@imre_socket_msg_peek = external constant i64
+@imre_socket_default_backlog = external constant i64
+declare ptr @imre_socket_new(i64, i64, i64)
+declare void @imre_socket_bind(ptr, ptr)
+declare void @imre_socket_listen(ptr, i64)
+declare ptr @imre_socket_accept(ptr, ptr, ptr)
+declare void @imre_socket_connect(ptr, ptr)
+declare ptr @imre_socket_sockname(ptr, ptr)
+declare ptr @imre_socket_recv(ptr, i64, i64)
+declare i64 @imre_socket_send(ptr, ptr, i64)
+declare void @imre_socket_sendall(ptr, ptr, i64)
+declare void @imre_socket_close(ptr)
+declare i64 @imre_socket_fileno(ptr)
+declare void @imre_socket_setblocking(ptr, i64)
+declare i1 @imre_socket_getblocking(ptr)
+declare void @imre_socket_setsockopt(ptr, i64, i64, i64)
+declare void @imre_socket_setsockopt_bytes(ptr, i64, i64, ptr)
+declare i64 @imre_socket_getsockopt(ptr, i64, i64)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()
