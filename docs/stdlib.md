@@ -2,7 +2,7 @@
 
 Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) on Linux. Dotted APIs such as `os.path` appear under their parent. Private modules and third-party packages are outside this inventory.
 
-**At a glance:** 50 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 24 public modules with recorded suites, 65 complete test executions pass natively at both optimization levels; 8,324 of 8,324 upstream executions have a classification.
+**At a glance:** 50 modules accept an ordinary import; 3 more accept it only with `--reachable-only`. Across 24 public modules with recorded suites, 72 complete test executions pass natively at both optimization levels; 8,324 of 8,324 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -62,7 +62,7 @@ Imre checks 194 publicly named top-level modules from [CPython 3.14.5](https://g
 | `tomllib` | Yes | Read selected TOML table keys with `load` on a binary stream. [Evidence](../tests/fixtures/paths/toml_discovery.py) | — | — |
 | `types` | Yes | Fixed-layout `SimpleNamespace` construction and attributes. [Evidence](../benchmarks/cpython_stdlib/full/types/README.md) | [0 / 129](../benchmarks/cpython_stdlib/full/types/) | 3 |
 | `typing` | Yes | Selected annotations and aliases, including `Callable`, `Literal`, `Self` and `Union`. [Evidence](../docs/subset.md) | — | — |
-| `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [0 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 24 |
+| `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [7 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 17 |
 | `urllib` | Yes | `urllib.parse.unquote` on strings with the default UTF-8 replacement behavior. [Evidence](../tests/fixtures/text/unquote.py) | — | — |
 | `warnings` | Yes | Warning filters and matching for supported native warnings. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 2 |
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — |
@@ -220,6 +220,14 @@ These names are still probed. The reasons come from the [scope inventory](../ben
 | `turtle` | Rejected | Educational desktop graphics |
 | `turtledemo` | Rejected | Interactive turtle demo programs |
 | `winsound` | Rejected | Optional Windows sound playback |
+
+## Additional test subjects
+
+These ledgers describe Python types or other subjects outside the top-level module inventory.
+
+| Subject | Native / upstream | Host-assisted |
+| --- | ---: | ---: |
+| `str` | [— / 138 (0 assessed)](../benchmarks/cpython_stdlib/full/str/) | — |
 
 ## Updating this page
 
