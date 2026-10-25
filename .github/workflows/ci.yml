@@ -21,7 +21,7 @@ jobs:
           base=$(git rev-parse HEAD)
           git fetch --no-tags origin refs/heads/codex/shutil-shared-random
           head=$(git rev-parse FETCH_HEAD)
-          test "$head" = 872292d89670b0d924c90c3751731261e11f04d6
+          test "$head" = f3d1c1d21231d017db78b9fff70f5c51a5b3e1e4
           tree=$(git merge-tree --write-tree "$base" "$head")
           src=$(git -c user.name='Imre CI' -c user.email='ci@localhost' commit-tree "$tree" -p "$base" -p "$head" -m 'Test the exact prospective random merge')
           git switch --detach "$src"
@@ -108,6 +108,24 @@ jobs:
           Path(sys.argv[4]).write_text(json.dumps(rows,indent=2)+'\n')
           print([(level,len(values)) for level,values in rows.items()])
           PY
+      - name: Check the compiler features merged in the same batch
+        run: |
+          out="$RUNNER_TEMP/evidence"
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/random-batch-XXXXXX")
+          : > "$out/batch-fixtures.tsv"
+          for fixture in tests/fixtures/callables/cache_info.py tests/fixtures/dataclasses/boxed_records.py tests/fixtures/exceptions/generic_args_records.py tests/fixtures/files/logging_adapter_core.py tests/fixtures/paths/fnmatch_py314.py; do
+            name=$(basename "$fixture" .py)
+            PYTHONHASHSEED=0 PYTHONPATH="$PWD/stdlib" python -B "$fixture" > "$work/$name.ref" 2> "$work/$name.referr"
+            for level in 0 3; do
+              target/debug/imre build "$fixture" -o "$work/probe" --no-cache --opt-level "$level" --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18
+              PYTHONHASHSEED=0 "$work/probe" > "$work/$name.native" 2> "$work/$name.stderr"
+              cmp "$work/$name.ref" "$work/$name.native"
+              cmp "$work/$name.referr" "$work/$name.stderr"
+              printf '%s\t-O%s\t%s\t%s\n' "$name" "$level" "$(wc -l < "$work/$name.native")" "$(sha256sum "$work/$name.native" | cut -d' ' -f1)" >> "$out/batch-fixtures.tsv"
+            done
+          done
+          test "$(wc -l < "$out/batch-fixtures.tsv")" -eq 10
       - name: Generate and check the table with the resolved compiler and pinned CPython
         run: |
           set -euo pipefail
@@ -118,18 +136,10 @@ jobs:
           git cat-file -e "$docs:docs/stdlib.md"
           git diff --exit-code "$docs" HEAD -- "$dir/support_table.py"
           echo "$docs" > "$evidence/table-source.txt"
-          python - <<'PY'
-          import sys
-          from pathlib import Path
-          assert sys.version_info[:3] == (3, 14, 5)
-          p = Path('benchmarks/cpython_stdlib/full/api_examples.toml')
-          s = p.read_text()
-          assert '\nrandom = ' not in s and s.count('\nre = ') == 1
-          row = 'random = ["Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences.","benchmarks/cpython_stdlib/full/shutil/random.md"]'
-          p.write_text(s.replace('\nre = ', '\n' + row + '\nre = '))
-          PY
+          git cat-file -e "HEAD:$dir/api_examples.toml"
           python -B "$dir/support_table.py" --imre target/debug/imre
           python -B "$dir/support_table.py" --imre target/debug/imre --check
+          git diff --exit-code HEAD -- docs/stdlib.md "$dir/api_examples.toml"
           cp docs/stdlib.md "$dir/api_examples.toml" "$evidence/"
           python - <<'PY'
           from pathlib import Path
