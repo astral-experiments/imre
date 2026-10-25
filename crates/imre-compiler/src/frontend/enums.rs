@@ -148,6 +148,12 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        if left.ty == Type::SourceModule && right.ty == Type::SourceModule {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         let operands = [&left, &right];
         let tuple = |e: &Expr| {
             matches!(e.ty, Type::Tuple(_))
@@ -437,6 +443,13 @@ impl Checker<'_> {
             || types == [Type::HandlerLock; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
+            || types.iter().all(|&t| {
+                matches!(t, Type::Calendar(_))
+                    || self
+                        .types
+                        .payload(t)
+                        .is_some_and(|p| matches!(p, Type::Calendar(_)))
+            })
             || types == [Type::PathInfo; 2]
             || types == [Type::JsonDecoder; 2]
             || types == [Type::Poll; 2]
