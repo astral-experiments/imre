@@ -219,6 +219,7 @@ impl Builtin {
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Which
+                | ProcessOperation::CopyFile
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)

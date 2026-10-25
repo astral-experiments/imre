@@ -443,6 +443,30 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
+            ProcessOperation::CopyFile => {
+                let tag = |ty| match ty {
+                    Type::Str => 0,
+                    Type::Bytes => 1,
+                    Type::Path => 2,
+                    _ => unreachable!(),
+                };
+                let [src, dst, follow] = args else {
+                    unreachable!()
+                };
+                let follow = self.instruction(format!("zext i1 {} to i32", follow.value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_shutil_copyfile(ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
+                    src.value.operand,
+                    tag(src.value.ty),
+                    dst.value.operand,
+                    tag(dst.value.ty)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             ProcessOperation::Which => {
                 let path =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));

@@ -46,6 +46,7 @@ mod record_inputs;
 mod records;
 mod regex;
 mod sequences;
+mod shutil;
 mod sign_parameters;
 mod sorted_rows;
 mod stdlib;
@@ -3873,6 +3874,9 @@ impl<'a> Checker<'a> {
             {
                 Some(self.classes.declarations.exceptions[&def])
             }
+            Some(Binding::Intrinsic(Intrinsic::ShutilError)) => Some(64),
+            Some(Binding::Intrinsic(Intrinsic::SameFileError)) => Some(65),
+            Some(Binding::Intrinsic(Intrinsic::SpecialFileError)) => Some(66),
             Some(Binding::Intrinsic(Intrinsic::CancelledError)) => Some(33),
             Some(Binding::Intrinsic(Intrinsic::UnsupportedOperation)) => Some(19),
             Some(Binding::Intrinsic(Intrinsic::SubprocessError)) => Some(25),
@@ -5534,6 +5538,7 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call),
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
+            Some(Binding::Intrinsic(Intrinsic::CopyFile)) => return self.shutil_copyfile(call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;
                 let [path] = call.arguments.args.as_ref() else {
