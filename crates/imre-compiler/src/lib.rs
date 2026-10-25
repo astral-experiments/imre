@@ -23,6 +23,7 @@ mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
 mod verify;
+mod version;
 mod watch;
 
 use std::borrow::Cow;

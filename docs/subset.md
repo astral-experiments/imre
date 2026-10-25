@@ -218,6 +218,13 @@ The explicit typed schema decoder and the encoder retain their 128-container lim
 Unicode scalar values. Integers retain their exact precision. The standard
 reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
+`json.JSONDecoder()` and `json.decoder.JSONDecoder()` create a reusable decoder.
+Its `decode(s)` method accepts Unicode text; `memo` returns the same dictionary
+on each read from that instance. Keys repeated within one document share the
+same string object. Separate decodes have independent key namespaces. Like
+CPython's default decoder, scanning does not consult or clear entries that a
+caller inserts into the public `memo` dictionary.
+
 `json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
 a text stream. Both accept scalar values, typed lists, tuples, dictionaries
 with string or integer keys, and parsed documents. Fresh nested list and dict
@@ -308,6 +315,8 @@ The complete document is parsed before schema conversion. Unknown record fields 
 The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as for typed JSON. Python 3.15+ uses its TOML 1.1 `tomllib`; earlier versions require `tomli>=2.4`, for example `python -m pip install 'tomli>=2.4'`. Native compilation uses the pinned Rust TOML parser and links no Python interpreter or compatibility module. This boundary currently provides decoding only.
 
 ## Native text operations
+
+`ord(value)` returns the Unicode code point of one native string character or the unsigned value of a one-byte `bytes` object. Invalid lengths count Unicode scalars for strings and bytes for `bytes`. Direct consumers can also iterate `map(ord, source)`: input evaluation happens at iterator creation and the conversion runs on each pull. A source `StrEnum` contributes its Unicode value. Mutable `bytearray`, native strings containing lone surrogate code points, and storing the builtin as a first-class callback are outside this subset.
 
 `str.lower()` uses Unicode 16 full lowercase mappings, including expanding characters and contextual Greek final sigma. `str.capitalize()` titlecases the first code point and lowercases the remainder in the original string context.
 
@@ -665,6 +674,8 @@ for path in sorted(root.glob("*.json"), key=lambda path: path.name):
 
 `mkdir(mode=0o777, parents=False, exist_ok=False)` creates a directory. The mode is an exact integer within the signed C-int range; larger values raise `OverflowError`. Boolean options require exact booleans. The process umask applies, and missing parents use mode `0o777` independently of the leaf mode. `exist_ok=True` accepts an existing directory, including a symlink to one, without changing its permissions. `unlink(missing_ok=False)` removes a file or symlink; its flag suppresses only `FileNotFoundError`. `rmdir()` removes an empty directory. These methods return `None` and preserve their normal filesystem error categories.
 
+On POSIX, `new_link.symlink_to(target, target_is_directory=False)` and `new_link.hardlink_to(target)` accept strings, bytes, native paths, and typed `__fspath__` methods returning strings or bytes. Hard links follow a symlink source. Relative symlink targets retain their original spelling on disk; `readlink()` returns that target as a fresh Path without following it. OS failures retain the two converted pathnames. Reading a target containing undecodable bytes still needs surrogateescape support. An OS error involving a `StrEnum` source currently retains its text, losing the enum identity.
+
 Concrete paths expose `info`, a view with `exists()`, `is_dir()`, `is_file()`, and `is_symlink()`. The first three accept the keyword-only `follow_symlinks` flag. A saved view retains its results after filesystem changes; a new `Path(p)` starts with an empty cache. Paths from `iterdir()` use the file type reported by the directory scan. Calling these predicates on a path directly queries the filesystem again.
 
 `absolute()` prefixes a relative path with the working directory and preserves symlinks and `..` components. `is_absolute()` checks the lexical anchor without accessing the filesystem. `resolve(strict=False)` returns a new absolute path, resolves symbolic links, and removes `..` components in filesystem order. Its `strict` argument is an exact boolean and may be positional or named. With `strict=True`, missing components, non-directory traversal, permission failures, and symlink loops retain their operating-system exception categories. The default resolves as far as possible, appending unresolved components while still normalizing parents. Acyclic symlink chains are not limited by the kernel's per-system-call symlink count. Argument evaluation precedes filesystem access. Resolution requires UTF-8 paths and symlink targets.
@@ -995,6 +1006,12 @@ Fixed classes reserve field names beginning with `__`. A fixed class can extend 
 ## Concrete containers and optional values
 
 An empty tuple or a fixed tuple of homogeneous `str`, `bytes`, `int`, or `bool` supports `in` and `not in`. The needle and all tuple elements evaluate in Python order before the first comparison.
+
+`collections.deque[T]` stores one concrete element type in a native ring. Its
+constructor accepts an iterable and an optional nonnegative `maxlen`. It supports
+append, pop, and extend at either end, clear, shallow copy, equality, length,
+truth testing, and forward or reverse iteration. A saved append or pop method
+keeps its receiver alive. An unannotated empty deque defaults to integer elements.
 
 `list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition copies references to the same elements, so `[row] * 3` shares `row` across all three positions. `list[int]` retains its specialized tagged-integer storage and runtime calls; other lists use owned runtime slots.
 
@@ -1389,3 +1406,20 @@ The [shared suite runner](../benchmarks/cpython_stdlib/SUITE_RUNNER.md) shows
 which parts of a complete pinned test run natively. The full CPython unittest
 API, dynamic method discovery in a native process, traceback reports, and
 arbitrary assertion operand types are not supported by this implementation.
+
+### Native errno registry
+
+`import errno` exposes the target platform's integer constants and one mutable
+`dict[int, str]` at `errno.errorcode`. Forward aliases stay distinct names;
+the reverse dictionary uses the last registered name for each value.
+Module aliases share the same registry and dictionary. `vars(errno)` and
+`errno.__dict__` provide insertion-ordered key iteration, membership, and lookup.
+The module supports dynamic `hasattr` and `getattr`, including scalar defaults.
+Changing the module namespace and calling bound module descriptors are outside
+this subset. The reverse dictionary supports ordinary insertion, replacement,
+and deletion.
+
+Native `TestCase.assertHasAttr` currently accepts a native module and a string;
+`assertIn` accepts a scalar or native module member and a `dict[int, str]`.
+Both use the normal assertion failure and optional test message. The errno
+suite runs every original method; see the [reference and native evidence](../benchmarks/cpython_stdlib/full/errno/README.md).
