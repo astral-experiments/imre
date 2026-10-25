@@ -4595,6 +4595,15 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::GlobalGet(slot), Vec::new()),
             });
         }
+        if let ast::Expr::Attribute(attr) = expression
+            && attr.attr.as_str() == "avoids_symlink_attacks"
+            && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::RmTree))
+        {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(true),
+            });
+        }
         if let Some(Binding::Intrinsic(Intrinsic::AccessMode(mode))) = self.resolve(expression) {
             return Ok(Expr {
                 ty: Type::Int,
@@ -5964,6 +5973,7 @@ impl<'a> Checker<'a> {
                 return self.popen(call, Some(true));
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
+            Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::Copy(op))) => return self.shutil_copy(op, call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;

@@ -25,8 +25,8 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-This replay of `f43af96` includes logger hierarchy, the level registry, timed
-file handlers, records, formatters, filters, configuration and [FileHandler](files.md).
+This replay of `984eec0` includes logger hierarchy, the level registry, timed
+file handlers, records, single and batch formatters, filters and configuration.
 Both levels have the same counts:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
@@ -40,7 +40,7 @@ Both levels have the same counts:
 No occurrence has a fully native fixture. Native assertions check root logger
 identity, immediate child membership, level-name mapping independence, daily
 rollover with an explicit time, record representation, formatter precision,
-an empty name filter, delayed file opening and emission after closing in write mode.
+an empty name filter, and the default and custom buffering formatters.
 Four bodies verify native stderr with the original
 CPython output helper. The 34 host-driven methods exercise the registry, timed
 files, record flags, [formatters](formatters.md), or [configuration](config.md).

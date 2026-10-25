@@ -1248,6 +1248,7 @@ pub(crate) enum ProcessOperation {
     Strerror,
     DescriptorConstant(&'static str),
     Which,
+    RmTree,
     Copy(CopyOperation),
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.

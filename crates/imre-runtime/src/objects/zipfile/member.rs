@@ -47,7 +47,7 @@ impl Member {
         info: Rc<Info>,
         encrypted_name: impl FnOnce() -> Str,
     ) -> Result<Self> {
-        let at = u64::try_from(info.offset).map_err(|_| bad("Truncated file header"))?;
+        let at = source.header_offset(info.offset)?;
         let mut header = [0; 30];
         if source.read(at, &mut header)? != 30 {
             return Err(bad("Truncated file header"));

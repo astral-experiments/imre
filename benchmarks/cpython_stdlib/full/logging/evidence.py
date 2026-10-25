@@ -159,6 +159,7 @@ def known_cases(toolchain, work, original):
     formatter = toolchain.build((HERE / "formatter_driver.py").read_bytes(), directory("formatters"))
     executions.update(native_formatters.host_formatter_cases(toolchain, formatter, original))
     executions[native_formatters.PRECISION] = native_formatters.precision_case(toolchain, directory("precision"))
+    executions.update(native_formatters.buffering_cases(toolchain, directory("buffering")))
     record_binary = toolchain.build((HERE / "record_driver.py").read_bytes(), directory("records"))
     def optional(case, method):
         with native_records.native_flags(record_binary) as (driver, calls), patch.object(original, "logging", driver):
