@@ -64,6 +64,8 @@ pub(crate) enum Type {
     HandlerLock,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
+    /// One live imported module from the closed source graph.
+    SourceModule,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
     PurePath(PathFlavor),
@@ -94,6 +96,7 @@ pub(crate) enum Type {
     Logger,
     TimedFileHandler,
     ClockTime,
+    Calendar(CalendarType),
     /// An exact instance of Python's plain, identity-only object.
     PlainObject,
     /// An exact immutable method descriptor on the builtin str class.
@@ -102,7 +105,10 @@ pub(crate) enum Type {
     SimpleNamespace(usize),
     /// Nominal ModuleSpec backed by a record whose loader and state keep their exact types.
     ModuleSpec(usize),
+    /// A POSIX IPv4 stream socket with shared descriptor ownership.
+    Socket,
     Sha256,
+    Poll,
     JsonDecoder,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -114,6 +120,33 @@ pub(crate) enum Type {
     JsonValue,
     JsonObject,
     None,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum CalendarType {
+    DateTime,
+    Delta,
+    Zone,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CalendarOp {
+    DateTime,
+    Delta,
+    Zone,
+    Utc,
+    ZoneLimit,
+    Now,
+    Shift { reverse: bool, subtract: bool },
+    Negate,
+    Field,
+    TzInfo,
+    Offset,
+    ZoneOffset,
+    ZoneName,
+    Text { iso: bool },
+    NullableEqual,
+    TotalSeconds,
 }
 
 /// Each captured stream has one exact text or byte representation. An inherited
@@ -152,6 +185,26 @@ impl ProcessCapture {
 pub(crate) enum PathFlavor {
     Posix,
     Windows,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SocketOp {
+    Constant(&'static str),
+    New,
+    Bind,
+    Listen,
+    Accept,
+    Connect,
+    SockName,
+    Recv,
+    Send,
+    SendAll,
+    Close,
+    Fileno,
+    SetBlocking,
+    GetBlocking,
+    SetSockOpt,
+    GetSockOpt,
 }
 
 impl Type {
@@ -221,6 +274,7 @@ impl std::fmt::Display for Type {
             Self::StringIO => "io.StringIO",
             Self::HandlerLock => "_thread.RLock",
             Self::BinaryIO => "typing.BinaryIO",
+            Self::SourceModule => "module",
             Self::Path => "pathlib.Path",
             Self::PathInfo => "pathlib.types.PathInfo",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
@@ -246,10 +300,15 @@ impl std::fmt::Display for Type {
             Self::Logger => "logging.Logger",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
+            Self::Calendar(CalendarType::DateTime) => "datetime.datetime",
+            Self::Calendar(CalendarType::Delta) => "datetime.timedelta",
+            Self::Calendar(CalendarType::Zone) => "datetime.timezone",
             Self::PlainObject => "object",
             Self::StrDescriptor(_) => "method_descriptor",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
+            Self::Poll => "select.poll",
+            Self::Socket => "socket.socket",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -675,6 +734,12 @@ pub(crate) enum Builtin {
     EnumLookup(usize),
     EnumString,
     NominalIdentity,
+    /// Intern a source module by its import name, retaining its source filename.
+    SourceModule,
+    /// Read __name__ or __file__ from the evaluated module.
+    SourceModuleAttribute {
+        filename: bool,
+    },
     /// Match an exception against the category list retained by an assertion context.
     ExceptionMatchesAny,
     LiteralStringView,
@@ -739,6 +804,7 @@ pub(crate) enum Builtin {
     PercentFormat,
     Logging(LogOperation),
     Timed(TimedOperation),
+    Calendar(CalendarOp),
     LogRecord(LogRecordOperation),
     Formatter(FormatterOperation),
     Input,
@@ -878,6 +944,7 @@ pub(crate) enum Builtin {
     Decode,
     DecodeAscii,
     UrlsafeB64encode,
+    Socket(SocketOp),
     Sha256Hex,
     Sha256New,
     HashNew,
@@ -1502,6 +1569,17 @@ pub(crate) enum LogOperation {
     Emit,
 }
 
+/// Kernel readiness for exact integer descriptors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Readiness {
+    New,
+    Register,
+    Modify,
+    Unregister,
+    Poll,
+    Select,
+}
+
 /// POSIX descriptor calls use the target's C int and file descriptor flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
@@ -1645,6 +1723,7 @@ pub(crate) enum ProcessOperation {
     CredentialId {
         group: bool,
     },
+    Readiness(Readiness),
     OsErrorField(u32),
     Strerror,
     QuoteCommandArgument,

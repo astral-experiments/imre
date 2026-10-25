@@ -373,6 +373,9 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                 (Storage::Deque(left), Storage::Deque(right)) => {
                     left.compare_entry(right, position)
                 }
+                (Storage::Calendar(left), Storage::Calendar(right)) => {
+                    Comparison::Done(super::calendar::equal(left, right))
+                }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Document(left), Storage::Document(right)) => {
@@ -450,6 +453,10 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
                         Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
+                        Storage::Calendar(value) => {
+                            super::calendar::write_repr(value, output);
+                            None
+                        }
                         Storage::ModuleMember(member) => {
                             let text = member.text(1);
                             if !text.is_null() {
@@ -459,6 +466,14 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                             None
                         }
                         Storage::Exception(_) => Some(ReprTask::Exception(owner)),
+                        Storage::SourceModule { name, filename } => {
+                            output.push_str("<module ");
+                            super::exceptions::push_string_repr(name, output);
+                            output.push_str(" from ");
+                            super::exceptions::push_string_repr(filename, output);
+                            output.push('>');
+                            None
+                        }
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
