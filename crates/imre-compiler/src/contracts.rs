@@ -76,7 +76,10 @@ impl Builtin {
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
             Self::MappingObjectGet => Contract::new(true, PreservesOwners),
-            Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
+            Self::BoxValue
+            | Self::ObjectRecordProject(_)
+            | Self::ObjectRecordIdentity { .. }
+            | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
             Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {

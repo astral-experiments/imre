@@ -148,6 +148,30 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
+        let record = match (left.ty, right.ty) {
+            (Type::ObjectValue, Type::Class(class)) => Some((class, false)),
+            (Type::Class(class), Type::ObjectValue) => Some((class, true)),
+            _ => None,
+        };
+        if let Some((class, reversed)) = record
+            && self.boxed_dataclass(class)
+        {
+            let bit = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::ObjectRecordIdentity { class, reversed },
+                    vec![left, right],
+                ),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(bit)),
+                }
+            } else {
+                bit
+            });
+        }
         // A comparison with a bool singleton only observes whether the other
         // operand is that same singleton; integer object identity is irrelevant.
         if let Some(union) = [left.ty, right.ty]

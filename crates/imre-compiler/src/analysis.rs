@@ -528,7 +528,7 @@ pub(crate) enum CheckedDiagnostic {
     Call(TextRange),
     DictDeletion(TextRange),
     Keyword(TextRange),
-    TupleListRead(TextRange),
+    CheckedIndexRead(TextRange),
     MissingArgument(TextRange),
     BuiltinImport(TextRange),
     ExcessArgument(TextRange),
@@ -541,7 +541,7 @@ impl CheckedDiagnostic {
             Self::Decorator(range) => (range, 0),
             Self::Call(range) => (range, 1),
             Self::Keyword(range) => (range, 2),
-            Self::TupleListRead(range) => (range, 3),
+            Self::CheckedIndexRead(range) => (range, 3),
             Self::DictDeletion(range) => (range, 8),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
@@ -562,7 +562,7 @@ impl CheckedDiagnostic {
             Self::PositionalKeyword(keyword) => {
                 diagnostic == "positional-only-parameter-as-kwarg" && keyword == range
             }
-            Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::CheckedIndexRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
             Self::ExcessArgument(arg) => {

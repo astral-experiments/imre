@@ -701,6 +701,11 @@ pub(crate) enum Builtin {
     ImportErrorReset,
     ImportErrorRejectReset,
     BoxValue,
+    ObjectRecordProject(usize),
+    ObjectRecordIdentity {
+        class: usize,
+        reversed: bool,
+    },
     MappingObjectGet,
     ExceptionTupleView,
     ExceptionFieldRepr,

@@ -110,7 +110,7 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
     let Some(semantics) = (unsafe { left_layout.semantics.as_ref() }) else {
         return Comparison::Done(false);
     };
-    if !std::ptr::eq(left_layout, right_layout) {
+    if !std::ptr::eq(left_layout, right_layout) && !left_layout.same_class(right_layout) {
         // Named tuples compare structurally with other tuple layouts. Both
         // descriptors must agree on how to read every word before traversing.
         // SAFETY: the immutable descriptors cover each initialized field.

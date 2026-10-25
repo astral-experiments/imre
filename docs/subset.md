@@ -945,6 +945,17 @@ Use `typing.assert_never(member)` as a statement to check that every alternative
 
 ## Fixed classes
 
+An instance of a sealed `@dataclass(slots=True)` can be passed to an
+`object` parameter or returned as `object` when the class has generated
+initialization, equality and repr, no user-defined special methods or special
+fields, and only scalar or fixed-tuple fields. The object keeps the original
+instance alive: mutation through another reference is visible. Equality,
+identity with a typed instance, truth, repr, and `isinstance` consult its
+class. Guard a local with `isinstance(value, MyDataclass)` to read its fields.
+A dataclass has neither tuple length nor indexing; both operations raise its
+ordinary Python `TypeError`. Inheritance, mutable container fields, and
+unguarded access on a general `object` are outside this subset.
+
 Class bodies may bind a string literal or a fixed tuple of up to 1024 string
 literals. A tuple may alias an earlier tuple in the same class or concatenate
 it with a literal suffix. Reads through the class, an instance, and an

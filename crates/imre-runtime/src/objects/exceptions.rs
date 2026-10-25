@@ -1255,7 +1255,17 @@ pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32
         return kind;
     }
     // SAFETY: the code view roots its typed payload.
-    unsafe { exit_word(value).0.raw() }
+    let (kind, word) = unsafe { exit_word(value) };
+    if kind.raw() == 6
+        // SAFETY: the view owns a record when its payload kind is 6.
+        && unsafe { super::records::descriptor(word as *const usize) }
+            .class_semantics()
+            .is_some()
+    {
+        15 // nominal objects do not implement the tuple protocol
+    } else {
+        kind.raw()
+    }
 }
 
 /// Render an exit code as a Python value, including None for a missing argument.
@@ -1354,8 +1364,11 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
-        // SAFETY: the tuple remains rooted while its immutable length is read.
-        6 => unsafe { super::records::descriptor(word as *const usize) }.length != 0,
+        6 => {
+            // SAFETY: the view roots the record and its immutable descriptor.
+            let layout = unsafe { super::records::descriptor(word as *const usize) };
+            layout.class_semantics().is_some() || layout.length != 0
+        }
         _ => unreachable!(),
     })
 }

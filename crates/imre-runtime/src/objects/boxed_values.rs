@@ -60,8 +60,13 @@ pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *c
                         .returning(std::ptr::null());
                 }
             } else if k.raw() == 6 {
-                let n = records::descriptor(w as *const usize).length;
-                pending.extend((0..n).map(|i| tuple_item(w, i)));
+                let layout = records::descriptor(w as *const usize);
+                let class = layout.class_semantics();
+                pending.extend(
+                    (0..layout.length)
+                        .filter(|&i| class.is_none_or(|s| (*s.fields.add(i)).flags & 2 != 0))
+                        .map(|i| tuple_item(w, i)),
+                );
             }
             let Some(value) = pending.pop() else { break };
             next = value;
@@ -82,6 +87,32 @@ pub unsafe extern "C" fn imre_box_value(kind: u32, word: usize) -> *const Object
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ObjectValue(
         boxed,
     )))))
+}
+
+/// Borrow the payload of an erased instance with the requested exact class.
+///
+/// # Safety
+/// The caller roots the erased value for the lifetime of the returned borrow.
+/// The requested descriptor is immutable compiler-emitted class metadata.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_object_record_payload(
+    value: *const Object,
+    expected: *const records::RecordDescriptor,
+) -> *const usize {
+    // SAFETY: the rooted object keeps the candidate payload alive.
+    unsafe {
+        (*value).0.with(|s| {
+            if let Storage::ObjectValue(v) = s
+                && v.kind.raw() == 6
+            {
+                let ptr = v.word as *const usize;
+                if records::descriptor(ptr).same_class(&*expected) {
+                    return ptr;
+                }
+            }
+            std::ptr::null()
+        })
+    }
 }
 
 /// Compare nested fixed tuples by their members, even across distinct native descriptors.
@@ -109,16 +140,24 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
         if ka.raw() == 6 && wa != wb {
             // SAFETY: both words are rooted tuple payloads with static descriptors.
             unsafe {
-                let n = records::descriptor(wa as *const usize).length;
-                if n != records::descriptor(wb as *const usize).length {
-                    return false;
-                }
-                if n != 0 {
-                    if n > 1 {
-                        pending.push((wa, wb, 1, n));
+                let a = records::descriptor(wa as *const usize);
+                let b = records::descriptor(wb as *const usize);
+                if a.class_semantics().is_some() || b.class_semantics().is_some() {
+                    if !values::equal(wa, wb, ka) {
+                        return false;
                     }
-                    next = (tuple_item(wa, 0), tuple_item(wb, 0));
-                    continue;
+                } else {
+                    let n = a.length;
+                    if n != b.length {
+                        return false;
+                    }
+                    if n != 0 {
+                        if n > 1 {
+                            pending.push((wa, wb, 1, n));
+                        }
+                        next = (tuple_item(wa, 0), tuple_item(wb, 0));
+                        continue;
+                    }
                 }
             }
         } else {
