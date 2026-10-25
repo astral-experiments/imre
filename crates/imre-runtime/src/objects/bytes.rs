@@ -483,13 +483,18 @@ pub unsafe extern "C" fn imre_str_encode(value: *const Str) -> *const Bytes {
     unsafe { imre_bytes_literal(value.as_ptr(), value.len()) }
 }
 
-/// Renders Python's strict UTF-8 decode error from the invalid sequence bounds.
+/// A borrowed slice must become the immutable byte object in the exception arguments.
 pub(super) fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
-    decode_owned_error(Rc::new(value.to_vec()), error)
+    let mut bytes = match allocate(value.len()) {
+        Ok(bytes) => bytes,
+        Err(error) => return error,
+    };
+    bytes.extend_from_slice(value);
+    decode_owned_error(Rc::new(bytes), error)
 }
 
 /// Most decoders already own the immutable input. Retain it only on the failing path.
-fn decode_owned_error(value: Rc<Bytes>, error: std::str::Utf8Error) -> Error {
+pub(super) fn decode_owned_error(value: Rc<Bytes>, error: std::str::Utf8Error) -> Error {
     let start = error.valid_up_to();
     let end = error
         .error_len()

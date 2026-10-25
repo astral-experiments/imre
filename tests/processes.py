@@ -141,6 +141,10 @@ def seed(directory: Path, python: str) -> None:
     (directory / "executable-text").write_bytes(b"printf unexpected > fallback.txt\n")
     (directory / "executable-text").chmod(0o755)
     (directory / "directory" / "bin").mkdir(parents=True)
+    for name, status in (("exit-zero", 0), ("exit-one", 1)):
+        helper = directory / "directory" / name
+        helper.write_text(f"#!/bin/sh\nexit {status}\n")
+        helper.chmod(0o755)
     (directory / "directory" / "bin" / "imre-process-child").symlink_to(python)
     (directory / "directory" / "relative-executable").symlink_to(python)
 
