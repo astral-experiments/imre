@@ -4921,7 +4921,7 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        if let Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) = self.resolve(expression) {
+        if let Some(name) = self.collection_class_name(expression) {
             return Ok(annotations::class_value(name));
         }
         if let ast::Expr::Attribute(attr) = expression
