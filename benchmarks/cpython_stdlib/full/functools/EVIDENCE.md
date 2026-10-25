@@ -143,3 +143,18 @@ $PYT ../../suite_evidence.py reference-free-threading-linux.json evidence-free-t
 The reduce runner writes each individual result and returns nonzero on a
 test failure. The companion gate rejects a GIL-enabled
 interpreter instead of treating the package-level skip as four executions.
+
+## Development branches: the live `builtins.len` binding
+
+The two Linux builds reproduced the pinned CPython 3.14.5 references byte for byte. Each row applies to both `-O0` and `-O3`.
+
+| Tested source | Original suite | Reference passes | Native bodies with host fixtures | Host-driven native operations | Mixed | Failed | Blocked |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| [`8e8ce2b`](https://github.com/astral-sh/imre/actions/runs/40188541388/job/121154397915) | [test.test_functools](observations/8e8ce2b/evidence-linux.json) | 325 | 2 | 13 | 15 | 0 | 295 |
+| [`8e8ce2b`](https://github.com/astral-sh/imre/actions/runs/40188541388/job/121154397915) | [test.test_free_threading.test_functools](observations/8e8ce2b/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
+| [`af565ad`](https://github.com/astral-sh/imre/actions/runs/40189824549/job/121158245589) | [test.test_functools](observations/af565ad/evidence-linux.json) | 325 | 4 | 13 | 13 | 0 | 295 |
+| [`af565ad`](https://github.com/astral-sh/imre/actions/runs/40189824549/job/121158245589) | [test.test_free_threading.test_functools](observations/af565ad/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
+
+On the [fixture attribution branch](https://github.com/astral-sh/imre/pull/939), both `test_lru_reentrancy_with_len` occurrences replaced the real CPython builtin, made 13 lookups in the native cache, and invoked CPython’s original `len` on 10 misses. The supplemental cache snapshot was `(3, 10, 4, 4)` and the original binding was restored by identity. The host ran the method and its assertions.
+
+On the [native binding branch](https://github.com/astral-sh/imre/pull/949), the same two unchanged methods saved, replaced, called and restored Imre’s live `builtins.len`. The method bodies, assertions, cache and length operations all ran in Imre; the original unittest hooks ran on CPython. Neither source ran either suite with native fixtures, and both companion runs stopped at `random` before any native worker started. These source-specific observations do not replace the canonical reports.
