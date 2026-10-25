@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_inspect",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/inspect.py": "d3e406cae7d228ea44659b8f6a65b97fa3429bb5",
+    "Lib/test/test_inspect/__init__.py": "f2a39a3fe29c7f06cad288bab80039b8ab4df47b",
+    "Lib/test/test_inspect/inspect_deferred_annotations.py": "bb59ef1035b3c1f502b6847130cf4e964fe8e562",
+    "Lib/test/test_inspect/inspect_fodder.py": "febd54c86fe1d191b96c282eddd3decb992f851c",
+    "Lib/test/test_inspect/inspect_fodder2.py": "157e12167b5d270400e834146e42f2ccb2ef2808",
+    "Lib/test/test_inspect/inspect_stock_annotations.py": "d115a25b650346cb81864ac5672fd781fe017802",
+    "Lib/test/test_inspect/inspect_stringized_annotations.py": "a56fb050ead975fd81cc000f59601eff4627193a",
+    "Lib/test/test_inspect/inspect_stringized_annotations_2.py": "87206d5a646922c5040d933e878d394112a56c61",
+    "Lib/test/test_inspect/inspect_stringized_annotations_pep695.py": "39bfe2edb03f3069b1b374f909a2da3d86ce0dd1",
+    "Lib/test/test_inspect/test_inspect.py": "28acb2a45a31b75c43e82f9f0d64fcb9944915ec"
+  }
+}

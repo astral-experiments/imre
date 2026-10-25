@@ -20,16 +20,12 @@ use num_traits::ToPrimitive;
 use rustix::fs::{AtFlags, CWD, Dir, Mode, OFlags, fstat, openat, statat, unlinkat};
 
 fn path_error(path: &Path, error: io::Error) -> Error {
-    match filename(path) {
-        Ok(path) => errno_with_filenames(error, Some(path), None),
-        Err(e) => e,
-    }
+    errno_with_filenames(error, Some(filename(path)), None)
 }
 
-fn filename(path: &Path) -> Result<Filename> {
+fn filename(path: &Path) -> Filename {
     // CPython's fd-safe walker calls fsdecode even for a bytes input.
-    super::super::paths::path_utf8(path.as_os_str().to_owned())
-        .map(|s| Filename::Str(std::rc::Rc::new(s)))
+    Filename::from_fs_text(path.as_os_str().to_owned())
 }
 
 /// The failing Python operation; the fd-safe walk reports islink for a failed
@@ -144,7 +140,7 @@ where
         if !same {
             let error = Error::os_message_with_filename(
                 "Cannot call rmtree on a symbolic link",
-                filename(&path)?,
+                filename(&path),
             );
             return (self.onexc)(Operation::IsLink, &path, error);
         }
@@ -314,9 +310,7 @@ pub unsafe extern "C" fn imre_shutil_rmtree(
             return Ok(remove(path, dirfd, ignore != 0)?);
         };
         remove_with(path, dirfd, |op, path, error| {
-            let Filename::Str(path) = filename(path)? else {
-                unreachable!()
-            };
+            let path = Rc::new(super::super::paths::path_utf8(path.as_os_str().to_owned())?);
             error.raise();
             let exc = take_pending().expect("the walk just raised this error");
             let mut previous = Some(Rc::clone(&exc));

@@ -71,7 +71,9 @@ impl Builtin {
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
-            Self::ExceptionFieldRepr => Contract::new(false, PreservesOwners),
+            Self::ExceptionTupleView | Self::ExceptionFieldRepr => {
+                Contract::new(false, PreservesOwners)
+            }
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
@@ -131,6 +133,7 @@ impl Builtin {
                     | PathOperation::TemporaryDirectory
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
+                    | PathOperation::Walk
                     | PathOperation::Glob { .. } => true,
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
@@ -312,8 +315,8 @@ impl Builtin {
             | Self::JsonSelect(_)
             | Self::ListGet
             | Self::ListGetBounded { .. }
-            | Self::FunctionCacheProbe(..)
-            | Self::FunctionCacheInsert(..)
+            | Self::CacheProbe(_)
+            | Self::CacheInsert(_)
             | Self::ListGetI32
             | Self::ListSliceSum
             | Self::Slice
@@ -336,6 +339,9 @@ impl Builtin {
             | Self::CsvLineNumber
             | Self::Sha256Hex
             | Self::Sha256New
+            | Self::StrDescriptor(_)
+            | Self::NewPlainObject
+            | Self::InspectSentinel
             | Self::HashAvailable
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
@@ -355,9 +361,12 @@ impl Builtin {
             | Self::Len
             | Self::JsonEmptyObject
             | Self::WallTime
-            | Self::FunctionCache(_)
-            | Self::FunctionCacheStat(..)
-            | Self::FunctionCacheClear(_)
+            | Self::CacheNew
+            | Self::CacheTable
+            | Self::CacheStat(_)
+            | Self::CacheClear
+            | Self::CallableContext
+            | Self::ModuleCache(_)
             | Self::HashStr
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
@@ -370,7 +379,6 @@ impl Builtin {
             | Self::SequenceGetInBounds
             | Self::SetContains
             | Self::Split
-            | Self::StringListCopy
             | Self::StringListFilter(_)
             | Self::StringListNonempty
             | Self::Str
@@ -392,6 +400,7 @@ impl Builtin {
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
+            | Self::StringListCopy
             | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::BytesValidateUtf8
@@ -536,6 +545,31 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::CallableContext => {
+                matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
+            }
+            Self::CacheNew | Self::ModuleCache(_) => {
+                args.is_empty() && result.cache_table().is_some()
+            }
+            Self::CacheTable => matches!(args, [state] if state.ty.cache_table() == Some(result)),
+            Self::CacheProbe(capacity) => {
+                *capacity >= -1
+                    && matches!(args, [state, key] if state.ty.cache_table().and_then(|t| types.mapping(t)).is_some_and(|(k, _)| k == key.ty))
+                    && result == Type::Bool
+            }
+            Self::CacheInsert(capacity) => {
+                *capacity > 0
+                    && matches!(args, [state, key, value] if state.ty.cache_table().and_then(|t| types.mapping(t)) == Some((key.ty, value.ty)))
+                    && result == Type::None
+            }
+            Self::CacheStat(field) => {
+                matches!(field, 0 | 1 | 3)
+                    && matches!(args, [state] if state.ty.cache_table().is_some())
+                    && result == Type::Int
+            }
+            Self::CacheClear => {
+                matches!(args, [state] if state.ty.cache_table().is_some()) && result == Type::None
+            }
             Self::TupleCacheNew => args.is_empty() && matches!(result, Type::Tuple(_)),
             Self::TupleCacheResult => matches!(args, [value]
                 if matches!(value.kind, ExprKind::Local(_)) && matches!(result, Type::Tuple(_)) && value.ty == result),
@@ -840,6 +874,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_seq_repeat"
                 | "imre_str_repeat"
                 | "imre_seq_slice"
+                | "imre_str_list_copy"
                 | "imre_record_shallow_copy"
                 | "imre_dict_copy"
                 | "imre_dict_get"
