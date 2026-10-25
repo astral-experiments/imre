@@ -111,6 +111,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
           for opt in 0 3; do
             python3 -X utf8 benchmarks/cpython_stdlib/full/sys/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/test-sys-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/sys/argv_boundary.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt"
           done
       - name: Check pathlib file I/O under the original CPython fixtures
         run: |
@@ -137,6 +138,9 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_json.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
           python3 benchmarks/cpython_stdlib/native_json_values.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json-values.json"
           python3 benchmarks/cpython_stdlib/native_os.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
+          for runner in native_descriptors host_descriptors; do
+            python3 "benchmarks/cpython_stdlib/full/os/$runner.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level 3 --result "$RUNNER_TEMP/$runner.json"
+          done
           python3 benchmarks/cpython_stdlib/native_os_path.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-os-path.json"
           python3 benchmarks/cpython_stdlib/full/logging/native_timed.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/native_logging.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
@@ -164,7 +168,7 @@ jobs:
         run: |
           for opt in 0 3; do
             python3 benchmarks/cpython_stdlib/full/itertools/native.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" --result "$RUNNER_TEMP/itertools-O$opt.json"
-            for exercise in repeat sources; do
+            for exercise in repeat sources tee; do
               src="benchmarks/cpython_stdlib/full/itertools/$exercise.py"
               target/release/imre build "$src" --opt-level "$opt" -o "$RUNNER_TEMP/iterator"
               "$RUNNER_TEMP/iterator" > "$RUNNER_TEMP/iterator.native"

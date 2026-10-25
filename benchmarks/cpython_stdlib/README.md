@@ -87,7 +87,7 @@ This run records what upstream passes and skips on the host. Native compatibilit
 
 ## Native Counter cases
 
-`native_counter.py` compiles the complete CPython `TestCounter.test_total`, `test_invariant_for_the_in_operator` and `test_eq` methods into standalone executables. The typed assertion adapters compare both native operands and count every executed assertion. The three tests must execute 1, 6 and 2 assertions respectively. The manifest pins the entire upstream `test_collections.py` file. The typed subset uses integer counts, so the upstream `test_update`, which also stores `None`, is outside this gate.
+`native_counter.py` compiles seven complete CPython `TestCounter` methods into standalone executables: `test_total`, `test_invariant_for_the_in_operator` and the five comparison methods. The native assertion adapters count every executed assertion: one for the total, six for membership and two per comparison method. The manifest pins the entire upstream `test_collections.py` file. The typed subset uses integer counts, so the upstream `test_update`, which also stores `None`, is outside this gate.
 
 ```sh
 python3 benchmarks/cpython_stdlib/native_counter.py \

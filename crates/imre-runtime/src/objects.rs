@@ -21,6 +21,7 @@ mod itertools;
 mod json;
 mod logging;
 mod mappings;
+mod os;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
