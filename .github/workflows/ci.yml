@@ -17,6 +17,7 @@ on:
           - '033cb48f08e3877cc0003866086fd4a947109d36'
           - '45375ede540b8bd3912f95b1345a4fc586505673'
           - '8c29f1ac2d63f4040bd7cca2ab92d7d03337f08a'
+          - 'cc8a48c1c96509c299ecb38a2f9f2952a7c2fd3e'
 permissions:
   contents: read
 jobs:
@@ -71,6 +72,13 @@ jobs:
             /usr/bin/clang-18 --version
             sha256sum target/debug/imre target/debug/libimre_runtime.a
           } > "$RUNNER_TEMP/argparse-receipts/build.txt"
+      - name: Compare argparse process results and test the runtime
+        if: ${{ inputs.revision == 'cc8a48c1c96509c299ecb38a2f9f2952a7c2fd3e' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -j 2 -p imre-runtime --lib
+          python3 -B tests/argparse_cli.py --compiler "$GITHUB_WORKSPACE/target/debug/imre" --runtime "$GITHUB_WORKSPACE/target/debug/libimre_runtime.a" --python "$(command -v python3)" --clang /usr/bin/clang-18 --opt-levels 0 3
       - name: Run all 1893 occurrences at O0 and O3
         shell: bash
         run: |
