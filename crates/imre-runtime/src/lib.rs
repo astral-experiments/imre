@@ -528,14 +528,11 @@ fn fail(kind: &str, message: &str) -> ! {
     std::process::exit(1)
 }
 
-/// Flushes pending output before generated code returns from the process entry.
+/// Flush both standard streams and return the process's final exit status.
 #[unsafe(no_mangle)]
-pub extern "C" fn imre_flush_stdout() {
-    if flush_stdout().is_err() {
-        Error::new(Kind::OSError, "could not write standard output").raise();
-    } else if sys::flush_stderr().is_err() {
-        Error::new(Kind::OSError, "could not write standard error").raise();
-    }
+pub extern "C" fn imre_finish_stdio() -> i32 {
+    let stderr = sys::flush_stderr();
+    objects::exceptions::status_after_flush(0, flush_stdout(), stderr)
 }
 
 /// Reads a compiler-provided UTF-8 byte span without taking ownership.
