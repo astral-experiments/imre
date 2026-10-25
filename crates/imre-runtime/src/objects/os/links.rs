@@ -7,7 +7,10 @@ use rustix::fs::{AtFlags, CWD, linkat, readlinkat, symlinkat};
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 
-/// Read the stored target without following the link. The caller roots an exact Path.
+/// Read the stored target without following the link.
+///
+/// # Safety
+/// The caller roots an exact Path for the conversion and syscall.
 pub(in crate::objects) unsafe fn readlink(path: *const Object) -> Result<OsString> {
     // SAFETY: tag 2 selects the caller's rooted Path and its original text.
     let (path, name) = unsafe { syscall_path(path.cast(), 2, "readlink", "path") }?;
@@ -17,6 +20,8 @@ pub(in crate::objects) unsafe fn readlink(path: *const Object) -> Result<OsStrin
 }
 
 /// Convert both original filenames in order. CheckSymlink runs before a user flag's truth method.
+///
+/// # Safety
 /// The caller roots the destination Path and the source str, bytes, or tagged str | bytes.
 pub(in crate::objects) unsafe fn link(
     path: *const Object,
@@ -32,6 +37,7 @@ pub(in crate::objects) unsafe fn link(
     };
     // SAFETY: the compiler emits str (0) or bytes (1); the destination is always a Path (2).
     let (src, source) = unsafe { syscall_path(word as *const (), tag, function, "src") }?;
+    // SAFETY: the destination remains rooted and tag 2 selects an exact Path.
     let (dst, destination) = unsafe { syscall_path(path.cast(), 2, function, "dst") }?;
     match kind {
         0 => symlinkat(src.as_c_str(), CWD, dst.as_c_str()),
