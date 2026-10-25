@@ -772,6 +772,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_repeat"
                 | "imre_seq_slice"
                 | "imre_record_shallow_copy"
+                | "imre_dict_copy"
                 | "imre_dict_get"
                 | "imre_dict_gather_str_int"
                 | "imre_dict_gather_bytes_int"
