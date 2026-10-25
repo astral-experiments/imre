@@ -1,0 +1,24 @@
+{
+  "O0": {
+    "test.test_annotationlib.TestFormat.test_enum": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "410c36a4e88305d99beb2eb86e24cd4a644cff549e4713dd414f4508fcad2746"
+      }
+    ]
+  },
+  "O3": {
+    "test.test_annotationlib.TestFormat.test_enum": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "410c36a4e88305d99beb2eb86e24cd4a644cff549e4713dd414f4508fcad2746"
+      }
+    ]
+  }
+}

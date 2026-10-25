@@ -29,8 +29,40 @@ class NativeCase:
 
 def hierarchy_cases(toolchain, work):
     case_id = "test.test_logging.ChildLoggerTest.test_get_children"
-    return {case_id: native_method(toolchain, work, SOURCE, "ChildLoggerTest", case_id,
-        FIXTURE, operation=("imre", "Enumerate direct logger children by identity, excluding missing ancestors"))}
+    children = work / "children"
+    propagation = work / "propagation"
+    children.mkdir()
+    propagation.mkdir()
+    stopped_id = "test.test_logging.LoggerTest.test_has_handlers_no_propagate"
+    fixture = '''import logging
+import unittest
+
+def configure_root() -> bool:
+    logging.basicConfig(level=logging.DEBUG, format="%(name)s -> %(levelname)s: %(message)s")
+    return logging.getLogger().hasHandlers()
+
+class NativeCase(unittest.TestCase):
+    def __init__(self) -> None:
+        super().__init__()
+        assert configure_root()
+'''
+    execute = native_method(toolchain, propagation, SOURCE, "LoggerTest", stopped_id,
+        fixture, operation=("imre", "Stop handler lookup at the child before reaching a configured root"))
+
+    def stopped(case, method):
+        if case.root_hdlr not in case.root_logger.handlers or case.logger.parent is not None:
+            raise AssertionError("expected the original root handler and standalone Logger('blah')")
+        result = execute(case, method)
+        result["observation"]["evidence"]["fixture"] = (
+            "Original LoggerTest/BaseTest hooks on CPython; native basicConfig recreates the "
+            "observed root handler presence used by this method")
+        return result
+
+    return {
+        case_id: native_method(toolchain, children, SOURCE, "ChildLoggerTest", case_id,
+            FIXTURE, operation=("imre", "Enumerate direct logger children by identity, excluding missing ancestors")),
+        stopped_id: stopped,
+    }
 
 
 def main():

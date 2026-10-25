@@ -1,0 +1,32 @@
+{
+  "fixture_sha256": "7823ca6ec45c2d79c2c1227057b2357705eaeb41866905e48e4aa5d136033c6e",
+  "imre_sha256": "88f476803d2b33fe393a1c5acbf82412d317db18be45d7be974c2a7740d33b17",
+  "runtime_sha256": "f338a43750d2f86e6897afdef92367ade8094956dd415674d8de3e034d17b70f",
+  "reference": "None\n[-5, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, 0, 1]\nTrue\nNone\n[9]\n[1, 0, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, -5]\nNone\n[-5, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, 0, 1]\nNone\n[]\nNone\n['listed']\n['c', 'b', '\u03b1']\n['new']\nTrue\nTrue\n[2, 9]\n[1, 3, 2, 1]\n[4, 3, 2, 1]\nlist.reverse() takes no arguments (1 given)\n[1, 2]\n[4, 3, 2, 1]\nlist.reverse() takes no keyword arguments\n[1, 2]\nunbound method list.reverse() needs an argument\ndescriptor 'reverse' for 'list' objects doesn't apply to a 'int' object\n[1, 2, 2]\ndescriptor 'reverse' for 'list' objects doesn't apply to a 'set' object\nlist.reverse() takes no keyword arguments\n[1, 2, 2, 2]\n[4, 3, 2, 1]\n",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "None\n[-5, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, 0, 1]\nTrue\nNone\n[9]\n[1, 0, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, -5]\nNone\n[-5, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, 0, 1]\nNone\n[]\nNone\n['listed']\n['c', 'b', '\u03b1']\n['new']\nTrue\nTrue\n[2, 9]\n[1, 3, 2, 1]\n[4, 3, 2, 1]\nlist.reverse() takes no arguments (1 given)\n[1, 2]\n[4, 3, 2, 1]\nlist.reverse() takes no keyword arguments\n[1, 2]\nunbound method list.reverse() needs an argument\ndescriptor 'reverse' for 'list' objects doesn't apply to a 'int' object\n[1, 2, 2]\ndescriptor 'reverse' for 'list' objects doesn't apply to a 'set' object\nlist.reverse() takes no keyword arguments\n[1, 2, 2, 2]\n[4, 3, 2, 1]\n",
+      "stderr": ""
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "None\n[-5, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, 0, 1]\nTrue\nNone\n[9]\n[1, 0, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, -5]\nNone\n[-5, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, 0, 1]\nNone\n[]\nNone\n['listed']\n['c', 'b', '\u03b1']\n['new']\nTrue\nTrue\n[2, 9]\n[1, 3, 2, 1]\n[4, 3, 2, 1]\nlist.reverse() takes no arguments (1 given)\n[1, 2]\n[4, 3, 2, 1]\nlist.reverse() takes no keyword arguments\n[1, 2]\nunbound method list.reverse() needs an argument\ndescriptor 'reverse' for 'list' objects doesn't apply to a 'int' object\n[1, 2, 2]\ndescriptor 'reverse' for 'list' objects doesn't apply to a 'set' object\nlist.reverse() takes no keyword arguments\n[1, 2, 2, 2]\n[4, 3, 2, 1]\n",
+      "stderr": ""
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "None\n[-5, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, 0, 1]\nTrue\nNone\n[9]\n[1, 0, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, -5]\nNone\n[-5, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, 0, 1]\nNone\n[]\nNone\n['listed']\n['c', 'b', '\u03b1']\n['new']\nTrue\nTrue\n[2, 9]\n[1, 3, 2, 1]\n[4, 3, 2, 1]\nlist.reverse() takes no arguments (1 given)\n[1, 2]\n[4, 3, 2, 1]\nlist.reverse() takes no keyword arguments\n[1, 2]\nunbound method list.reverse() needs an argument\ndescriptor 'reverse' for 'list' objects doesn't apply to a 'int' object\n[1, 2, 2]\ndescriptor 'reverse' for 'list' objects doesn't apply to a 'set' object\nlist.reverse() takes no keyword arguments\n[1, 2, 2, 2]\n[4, 3, 2, 1]\n",
+      "stderr": ""
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "None\n[-5, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, 0, 1]\nTrue\nNone\n[9]\n[1, 0, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, -5]\nNone\n[-5, 100000000000000000000000000000000000000000000000000000000000000000000000000000000, 0, 1]\nNone\n[]\nNone\n['listed']\n['c', 'b', '\u03b1']\n['new']\nTrue\nTrue\n[2, 9]\n[1, 3, 2, 1]\n[4, 3, 2, 1]\nlist.reverse() takes no arguments (1 given)\n[1, 2]\n[4, 3, 2, 1]\nlist.reverse() takes no keyword arguments\n[1, 2]\nunbound method list.reverse() needs an argument\ndescriptor 'reverse' for 'list' objects doesn't apply to a 'int' object\n[1, 2, 2]\ndescriptor 'reverse' for 'list' objects doesn't apply to a 'set' object\nlist.reverse() takes no keyword arguments\n[1, 2, 2, 2]\n[4, 3, 2, 1]\n",
+      "stderr": ""
+    }
+  }
+}

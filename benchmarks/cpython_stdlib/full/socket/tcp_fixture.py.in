@@ -1,0 +1,96 @@
+import os
+import socket
+import sys
+import unittest
+
+# UPSTREAM_GLOBALS
+
+
+class NativeCase(unittest.TestCase):
+    def __init__(self, sock: socket.socket) -> None:
+        super().__init__()
+        self.cli_conn = sock
+        self.serv_conn = sock
+
+# NATIVE_BYTES_EQUALITY
+
+# UPSTREAM_TCP_METHODS
+
+
+class GeneralModuleTests(unittest.TestCase):
+# UPSTREAM_BACKLOG
+
+
+class NativeInheritance(unittest.TestCase):
+# NATIVE_BOOL_EQUALITY
+
+# UPSTREAM_INHERITANCE
+
+
+def options() -> None:
+    with socket.socket(int(sys.argv[2]), int(sys.argv[3])) as endpoint:
+        print("open")
+        sys.stdout.flush()
+        while True:
+            operation = input()
+            if operation == "close":
+                return
+            level = int(input())
+            option = int(input())
+            if operation == "get":
+                print(endpoint.getsockopt(level, option))
+            elif operation == "set":
+                endpoint.setsockopt(level, option, int(input()))
+                print("ok")
+            else:
+                raise ValueError(operation)
+            sys.stdout.flush()
+
+
+def main() -> None:
+    role = sys.argv[1]
+    if role == "wrong-cloexec":
+        with socket.socket() as sock:
+            os.set_inheritable(sock.fileno(), True)
+            NativeInheritance().assertEqual(sock.get_inheritable(), False)
+        return
+    if role == "descriptors":
+        checks = NativeInheritance()
+        if sys.argv[2] == "test_default_inheritable":
+            checks.test_default_inheritable()
+        elif sys.argv[2] == "test_set_inheritable":
+            checks.test_set_inheritable()
+        else:
+            checks.test_dup()
+        return
+    if role == "options":
+        options()
+        return
+    if role == "backlog":
+        GeneralModuleTests().test_listen_backlog()
+        return
+    method = sys.argv[2]
+    inherited = int(sys.argv[3])
+    # Keep all ownership in this process. The original host fixture still owns its fd.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as endpoint:
+        os.dup2(inherited, endpoint.fileno(), False)
+        os.close(inherited)
+        case = NativeCase(endpoint)
+        if role == "receiver":
+            if method == "testRecv":
+                case.testRecv()
+            elif method == "testOverFlowRecv":
+                case.testOverFlowRecv()
+            else:
+                case.testSendAll()
+        elif role == "wrong":
+            endpoint.sendall(b'wrong')
+        elif method == "testRecv":
+            case._testRecv()
+        elif method == "testOverFlowRecv":
+            case._testOverFlowRecv()
+        else:
+            case._testSendAll()
+
+
+main()

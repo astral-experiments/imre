@@ -13,11 +13,11 @@ import copyfile
 from copyfile import ERRORS, build, run
 from suite_inventory import cases as upstream_cases, load_suite
 from suite_evidence import roles
-from suite_native import NativeCompileError, Toolchain, native_method, run_in_fixtures
+from suite_native import Toolchain, native_method, run_in_fixtures
 
 HOST_CASES = {
     "test_copy": 1, "test_copy2": 1, "test_copy_dir": 3, "test_copy2_dir": 3,
-    "test_copy_symlinks": 2, "test_copy2_symlinks": 2, "test_copy_return_value": 4,
+    "test_copy_symlinks": 2, "test_copy2_symlinks": 2,
     "test_copy2_xattr": 1, "test_copyxattr_symlinks": 2,
     "test_copymode_follow_symlinks": 4, "test_copymode_symlink_to_symlink": 3,
     "test_copymode_symlink_to_symlink_wo_lchmod": 1,
@@ -28,6 +28,7 @@ MOCK_CASES = {
     "test_copyxattr": "replaces os.setxattr and os.listxattr in the host process",
 }
 OPERATIONS = ("copy", "copy2", "copyfile", "copymode", "copystat", "_copyxattr")
+NATIVE_RETURN_VALUE = "test_copy_return_value"
 
 
 def driver():
@@ -39,27 +40,41 @@ def driver():
         f"except {exc} as error:\n    print('{exc}')\n    print(repr(str(error)))\n" for exc in ERRORS)
 
 
-def return_value_body(tools, folder, suite, case):
-    # The original loop makes two independent source/destination pairs.
-    paths = [case.mkdtemp() for _ in range(4)]
-    fixture = f"""import os.path
+def native_path_fixture(case, count):
+    """Transfer directories created and cleaned by the original BaseTest."""
+    paths = [case.mkdtemp() for _ in range(count)]
+    return f"""import os.path
 import shutil
+import sys
+import unittest
+from shutil import Error, SameFileError
 
 def create_file(path: str, content: str) -> None:
     with open(path, 'xb') as stream:
         stream.write(content.encode())
 
-class NativeCase:
+def read_file(path: str) -> str:
+    with open(path, 'r', encoding='utf-8') as stream:
+        return stream.read()
+
+class NativeCase(unittest.TestCase):
     index: int
     def __init__(self) -> None:
+        super().__init__()
         self.index = 0
     def mkdtemp(self) -> str:
         self.index += 1
         return {paths!r}[self.index - 1]
-    def assertEqual(self, actual: str, expected: str) -> None:
-        assert actual == expected
 """
-    return native_method(tools, folder, Path(suite.__file__), "TestCopy", case.id(), fixture,
+
+
+def return_value_fixture(case):
+    # The original loop makes two independent source/destination pairs.
+    return native_path_fixture(case, 4)
+
+
+def return_value_body(tools, folder, suite, case):
+    return native_method(tools, folder, Path(suite.__file__), "TestCopy", case.id(), return_value_fixture(case),
                          operation=("imre", "shutil.copy and shutil.copy2"))
 
 
@@ -71,21 +86,14 @@ def executors(args, suite, directory, level, *, with_roles=False):
         name = case._testMethodName
         if name in MOCK_CASES:
             return {"status": "blocked", "reason": MOCK_CASES[name]}
-        method_blocker = {}
-        if with_roles and name == "test_copy_return_value":
+        if name == NATIVE_RETURN_VALUE:
             folder = directory / name
             folder.mkdir()
             tools = Toolchain(args.imre, args.runtime, args.clang, level)
-            try:
-                execute = return_value_body(tools, folder, suite, case)
-            except NativeCompileError as exc:
-                message = str(exc).split("Imre: ", 1)[-1].strip()
-                if message != "name is not a local value; globals and first-class functions are unsupported":
-                    raise
-                method_blocker["native_body_blocker"] = (
-                    "for fn in (shutil.copy, shutil.copy2): " + message)
-            else:
-                return execute(case, original)
+            record = return_value_body(tools, folder, suite, case)(case, original)
+            if with_roles:
+                return record
+            return {"status": "native_body_host_fixture", **record}
         counts = {}
         def adapter(op):
             def invoke(src, dst, *, follow_symlinks=True):
@@ -106,7 +114,7 @@ def executors(args, suite, directory, level, *, with_roles=False):
         if with_roles:
             return {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
                     "evidence": {"operation": ", ".join("shutil." + op for op in counts),
-                                 "native_calls": calls, "calls_by_operation": counts, "opt_level": level, **method_blocker,
+                                 "native_calls": calls, "calls_by_operation": counts, "opt_level": level,
                                  "fixture": "original TestCopy temporary paths, filesystem assertions, and cleanup in CPython"}}
         return {"status": "host_driven_native", "native_calls": calls}
 
@@ -123,7 +131,9 @@ def executors(args, suite, directory, level, *, with_roles=False):
         else:
             run([exe, "copy2", src, dst, "1"])
             assert os.getxattr(src, "user.shutil_probe") == os.getxattr(dst, "user.shutil_probe")
-    names = HOST_CASES.keys() if with_roles else HOST_CASES.keys() | MOCK_CASES.keys()
+    names = HOST_CASES.keys() | {NATIVE_RETURN_VALUE}
+    if not with_roles:
+        names |= MOCK_CASES.keys()
     return {suite.TestCopy(name).id(): host for name in names}
 
 
