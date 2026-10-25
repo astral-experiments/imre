@@ -268,6 +268,7 @@ impl Formatter {
                     format_spec,
                 } => {
                     let stem = field_name.find(['[', '.']).unwrap_or(field_name.len());
+                    super::super::stdlib::check_keyword_field(&field_name[..stem])?;
                     let mut v = self.get(r, &field_name[..stem])?;
                     let mut parts = &field_name[stem..];
                     while !parts.is_empty() {
@@ -275,15 +276,7 @@ impl Formatter {
                             let (sub, rest) = rest
                                 .split_once(']')
                                 .ok_or_else(|| error("Missing ']' in format string"))?;
-                            v = if let Some(n) = record::tuple_len(&v) {
-                                let index =
-                                    sub.parse::<usize>().ok().filter(|i| *i < n).ok_or_else(
-                                        || Error::new(Kind::IndexError, "tuple index out of range"),
-                                    )?;
-                                record::tuple_item(&v, index)
-                            } else {
-                                record::dict_item(&v, sub)?
-                            };
+                            v = record::brace_item(&v, sub)?;
                             parts = rest;
                         } else {
                             return Err(Error::new(
