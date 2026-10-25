@@ -19,7 +19,7 @@ impl Checker<'_> {
     /// A binding can strongly retain its payload for the life of a task. A
     /// token, context, or opaque callable can point back into that same state.
     /// Until the native heap can collect such cycles, admit checked data layouts.
-    fn supported_context_payload(&self, ty: Type) -> bool {
+    fn supported_context_payload(&self, ty: Type, has_default: bool) -> bool {
         let mut pending = vec![ty];
         let mut seen = std::collections::HashSet::new();
         while let Some(ty) = pending.pop() {
@@ -40,6 +40,10 @@ impl Checker<'_> {
                 | Type::PurePath(_)
                 | Type::PlainObject => {}
                 Type::Class(id) => {
+                    // The runtime formatter cannot invoke user repr on constructor defaults.
+                    if has_default && self.classes.methods[id].contains_key("__repr__") {
+                        return false;
+                    }
                     pending.extend_from_slice(&self.classes.fields[id]);
                     pending.extend_from_slice(&self.types.concrete_subclasses(id));
                 }
@@ -104,11 +108,11 @@ impl Checker<'_> {
         } else {
             expected.unwrap_or(Type::ObjectValue)
         };
-        if !self.supported_context_payload(ty) {
+        if !self.supported_context_payload(ty, default.is_some()) {
             return Err(error(
                 self.source,
                 call,
-                "ContextVar bindings require a concrete data layout that cannot retain the context",
+                "ContextVar bindings require an acyclic data layout and a default with native repr",
             ));
         }
         Ok(op(Op::Var, self.types.context_var(ty), args))
@@ -200,6 +204,69 @@ impl Checker<'_> {
         Ok(None)
     }
 
+    /// Format invalid keys after evaluating every operand, including the fallback.
+    pub(super) fn context_key_error(
+        &mut self,
+        ctx: Expr,
+        key: Expr,
+        fallback: Option<Expr>,
+        key_first: bool,
+        ty: Type,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        if !self.boxable_value(key.ty) {
+            return Err(error(
+                self.source,
+                node,
+                "Context keys require a ContextVar or a scalar with native repr",
+            ));
+        }
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        let key = if key_first {
+            let key = self.bind_context_operand(key, &mut body, &mut clear);
+            self.bind_context_operand(ctx, &mut body, &mut clear);
+            key
+        } else {
+            self.bind_context_operand(ctx, &mut body, &mut clear);
+            self.bind_context_operand(key, &mut body, &mut clear)
+        };
+        if let Some(fallback) = fallback {
+            self.bind_context_operand(fallback, &mut body, &mut clear);
+        }
+        let repr = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::Repr, vec![key]),
+        };
+        let message = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Binary(
+                Binary::Concat,
+                Box::new(unpacking::string("a ContextVar key was expected, got ")),
+                Box::new(repr),
+            ),
+        };
+        let exc = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(message)),
+            },
+        };
+        let value = Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::RaiseException, vec![exc]),
+        };
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                clear,
+                value: Box::new(value),
+            },
+        })
+    }
+
     /// Evaluate the eager fallback before looking up the binding: it can set the variable.
     fn context_get(
         &mut self,
@@ -209,6 +276,16 @@ impl Checker<'_> {
         node: &impl Ranged,
     ) -> Result<Expr, String> {
         let Type::ContextVar(_) = key.ty else {
+            if let Some(receiver) = receiver {
+                return self.context_key_error(
+                    receiver,
+                    key,
+                    fallback,
+                    false,
+                    Type::ObjectValue,
+                    node,
+                );
+            }
             return Err(error(
                 self.source,
                 node,
@@ -328,7 +405,19 @@ impl Checker<'_> {
     }
     fn context_run(&mut self, ctx: Expr, call: &ast::ExprCall) -> Result<Expr, String> {
         let [fn_node, args @ ..] = call.arguments.args.as_ref() else {
-            return Err(error(self.source, call, "Context.run requires a callable"));
+            let failure = self.sys_type_error(
+                call,
+                Type::None,
+                "run() missing 1 required positional argument".to_string(),
+            )?;
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(ctx)],
+                    value: Box::new(failure),
+                    clear: vec![],
+                },
+            });
         };
         if !call.arguments.keywords.is_empty() {
             return Err(error(

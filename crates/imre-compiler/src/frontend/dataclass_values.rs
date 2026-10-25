@@ -81,6 +81,10 @@ pub(super) fn can_format(ty: Type, types: &Types, classes: &ClassInfo) -> bool {
                     .zip(&classes.fields[id])
                     .all(|(field, &ty)| !field.repr || check(ty, types, classes, seen));
         }
+        // The runtime formatter knows this boxed scalar or tuple default.
+        if types.context_value(ty) == Some(Type::ObjectValue) {
+            return true;
+        }
         repr_supported(ty, types)
             && types
                 .children(ty)

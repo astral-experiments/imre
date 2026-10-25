@@ -5365,6 +5365,16 @@ impl<'a> Checker<'a> {
                 {
                     let key = self.expr(&compare.operands[0])?;
                     let receiver = Self::string_value(self.expr(&compare.operands[1])?);
+                    if receiver.ty == Type::Context && !matches!(key.ty, Type::ContextVar(_)) {
+                        return self.context_key_error(
+                            receiver,
+                            key,
+                            None,
+                            true,
+                            Type::Bool,
+                            expression,
+                        );
+                    }
                     if receiver.ty == Type::Context && matches!(key.ty, Type::ContextVar(_)) {
                         let found = contextvars::op(
                             ir::ContextOperation::ContextContains,
@@ -7982,6 +7992,10 @@ impl<'a> Checker<'a> {
                     args[0].ty,
                     Type::Class(_)
                         | Type::CompletedProcess(..)
+                        | Type::Context
+                        | Type::ContextMissing
+                        | Type::ContextVar(_)
+                        | Type::ContextToken(_)
                         | Type::ForwardRef(_)
                         | Type::SimpleNamespace(_)
                         | Type::Dict(_)

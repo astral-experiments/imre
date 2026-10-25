@@ -331,16 +331,10 @@ pub unsafe extern "C" fn imre_contextvars_old(tok: *const Object) -> *const Obje
     token(unsafe { object(tok) }, |t| match &t.old {
         None => missing(),
         Some(v) => {
-            // Already-boxed values preserve their original Python owner.
-            if v.kind.raw() == 5
-                // SAFETY: kind 5 identifies an owned object rooted by this token.
-                && unsafe {
-                    object(v.word as *const Object)
-                        .0
-                        .with(|s| matches!(s, Storage::ObjectValue(_)))
-                }
-            {
-                // SAFETY: the checked storage is a live boxed Python owner.
+            // Only scalars, tuples and existing ObjectValue views reach this ABI.
+            // For kind 5 preserve that existing view, including module attributes.
+            if v.kind.raw() == 5 {
+                // SAFETY: the token roots the checked view.
                 return Rc::into_raw(unsafe { acquire_rc(v.word) });
             }
             // SAFETY: the token retains this compiler-checked scalar or tuple.
