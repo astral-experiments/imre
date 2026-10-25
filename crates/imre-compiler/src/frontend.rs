@@ -5125,6 +5125,20 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Cast)) => {
+                self.reject_builtin_keywords(call)?;
+                let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "typing.cast requires a quoted type and a value",
+                    ));
+                };
+                // cast returns its second argument verbatim. The quoted type is a
+                // runtime string constant; it does not check or change the value.
+                check_string(target, self.source)?;
+                return self.typed_expr(value);
+            }
             Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
