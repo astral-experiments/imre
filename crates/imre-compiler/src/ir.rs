@@ -78,6 +78,7 @@ pub(crate) enum Type {
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
     ZipInfo,
+    CsvReader,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
@@ -190,6 +191,7 @@ impl std::fmt::Display for Type {
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
+            Self::CsvReader => "CSV reader",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
@@ -450,6 +452,18 @@ pub(crate) enum Compare {
     GreaterEqual,
 }
 
+/// Native multiset arithmetic over integer counts. Values match the runtime ABI.
+#[repr(u32)]
+#[derive(Clone, Copy)]
+pub(crate) enum CounterOp {
+    Add,
+    Subtract,
+    Union,
+    Intersection,
+    Positive,
+    Negative,
+}
+
 /// Public ZIP entry metadata read from the central directory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ZipField {
@@ -527,6 +541,9 @@ pub(crate) enum Builtin {
     Formatter(FormatterOperation),
     Input,
     Chr,
+    IntegerPower,
+    ModularPower,
+    NegativeIntegerPower,
     Int,
     Float,
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
@@ -700,6 +717,16 @@ pub(crate) enum Builtin {
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
     ExactRecord(usize),
+    CsvReader {
+        delimiter: char,
+        quote: Option<char>,
+        escape: Option<char>,
+        flags: u32,
+    },
+    CsvNext {
+        required: bool,
+    },
+    CsvLineNumber,
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
     JsonLoads,
@@ -765,11 +792,16 @@ pub(crate) enum Builtin {
     TextClosed,
     FileFileno,
     DictGet,
+    DictCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
     CounterNew,
     CounterTotal,
     CounterUpdate,
+    CounterMath {
+        op: CounterOp,
+        inplace: bool,
+    },
     DictSumValues,
     /// Widens a defaultdict owner to its ordinary dictionary interface.
     DictAsBase,

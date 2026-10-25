@@ -1,0 +1,2166 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 216,
+  "unittest_occurrences": 212,
+  "doctest_occurrences": 4,
+  "sha256": {
+    "imre": "5f7513e68e11eca8b742a762c394754b6f5a366921ea381f79c7a6161dfac691",
+    "runtime": "0ab3a27da2720fae4070ec1f31cf64545f07eeeda16cec38b74d4382b9874227"
+  },
+  "levels": {
+    "0": {
+      "test.test_json.TestPyTest.test_pyjson": {
+        "fixture_ids": [
+          "test.test_json.TestPyTest.test_pyjson",
+          "test.test_json.TestPyTest.test_pyjson"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.TestCTest.test_cjson": {
+        "fixture_ids": [
+          "test.test_json.TestCTest.test_cjson",
+          "test.test_json.TestCTest.test_cjson"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_decode.TestDecode.test_bytes": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_bytes",
+          "test.test_json.test_decode.TestPyDecode.test_bytes"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_decode.TestCDecode.test_bytes": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "939b1fdada99a994d290cf38aa265264e408d31cd7babfab605cdbdd87526416"
+            }
+          ],
+          "test.test_json.test_decode.TestPyDecode.test_bytes": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "939b1fdada99a994d290cf38aa265264e408d31cd7babfab605cdbdd87526416"
+            }
+          ]
+        }
+      },
+      "test.test_json.test_decode.TestDecode.test_constant_invalid_case": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_constant_invalid_case",
+          "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:12:18: Imre: unknown class method"
+      },
+      "test.test_json.test_decode.TestDecode.test_decimal": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_decimal",
+          "test.test_json.test_decode.TestPyDecode.test_decimal"
+        ],
+        "fixture_sha256": "1e6126f6ec82b8d358975858e5f271b53384bff4b16562c9d9c4b986ac64cba2",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\""
+      },
+      "test.test_json.test_decode.TestDecode.test_decoder_optimizations": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_decoder_optimizations",
+          "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:12:32: Imre: expected int, got dict[str, str]; annotations are enforced contracts"
+      },
+      "test.test_json.test_decode.TestDecode.test_empty_objects": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_empty_objects",
+          "test.test_json.test_decode.TestPyDecode.test_empty_objects"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:44: Imre: an empty dictionary requires a concrete dict[K, V] context"
+      },
+      "test.test_json.test_decode.TestDecode.test_extra_data": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_extra_data",
+          "test.test_json.test_decode.TestPyDecode.test_extra_data"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:9: Imre: unknown class method"
+      },
+      "test.test_json.test_decode.TestDecode.test_float": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_float",
+          "test.test_json.test_decode.TestPyDecode.test_float"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:16: Imre: keyword arguments are unsupported for this builtin"
+      },
+      "test.test_json.test_decode.TestDecode.test_invalid_escape": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_invalid_escape",
+          "test.test_json.test_decode.TestPyDecode.test_invalid_escape"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:9: Imre: unknown class method"
+      },
+      "test.test_json.test_decode.TestDecode.test_invalid_input_type": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_invalid_input_type",
+          "test.test_json.test_decode.TestPyDecode.test_invalid_input_type"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:26: Imre: expected int, got float; annotations are enforced contracts"
+      },
+      "test.test_json.test_decode.TestDecode.test_keys_reuse": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_keys_reuse",
+          "test.test_json.test_decode.TestPyDecode.test_keys_reuse"
+        ],
+        "fixture_sha256": "3041c9e6bad98ef1367756dacf90bb47e687b403c0b604ebe0b4897286cf7b09",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:6:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      "test.test_json.test_decode.TestDecode.test_limit_int": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_limit_int",
+          "test.test_json.test_decode.TestPyDecode.test_limit_int"
+        ],
+        "fixture_sha256": "73f7b09fb206e8ba2a26a2d67cfd39795078da572caf5f27936cb2e50f8f94bf",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_decode.TestDecode.test_negative_index": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_negative_index",
+          "test.test_json.test_decode.TestPyDecode.test_negative_index"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:13: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_decode.TestDecode.test_nonascii_digits_rejected": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected",
+          "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:18: Imre: unknown class method"
+      },
+      "test.test_json.test_decode.TestDecode.test_object_pairs_hook": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_object_pairs_hook",
+          "test.test_json.test_decode.TestPyDecode.test_object_pairs_hook"
+        ],
+        "fixture_sha256": "73cac9d612ede1efb176d008a18cbd2a5e38a79851e94803200bf13e9c1a81d7",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export io.StringIO"
+      },
+      "test.test_json.test_decode.TestDecode.test_parse_constant": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_parse_constant",
+          "test.test_json.test_decode.TestPyDecode.test_parse_constant"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:14:17: Imre: keyword arguments are unsupported for this builtin"
+      },
+      "test.test_json.test_decode.TestDecode.test_string_with_utf8_bom": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom",
+          "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom"
+        ],
+        "fixture_sha256": "75c9e0123fd678c5a343d654acf54c1875b949257642b1d7c069a59753f9652c",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export io.StringIO"
+      },
+      "test.test_json.test_default.TestDefault.test_bad_default": {
+        "fixture_ids": [
+          "test.test_json.test_default.TestCDefault.test_bad_default",
+          "test.test_json.test_default.TestPyDefault.test_bad_default"
+        ],
+        "fixture_sha256": "86f30ec59eb852cc8edea5db6dfa03095233bc23668ce70d15b1abdde95ff43f",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:9: Imre: local functions require annotated parameters and return types"
+      },
+      "test.test_json.test_default.TestDefault.test_default": {
+        "fixture_ids": [
+          "test.test_json.test_default.TestCDefault.test_default",
+          "test.test_json.test_default.TestPyDefault.test_default"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:30: Imre: unsupported or repeated JSON encoding option"
+      },
+      "test.test_json.test_default.TestDefault.test_ordereddict": {
+        "fixture_ids": [
+          "test.test_json.test_default.TestCDefault.test_ordereddict",
+          "test.test_json.test_default.TestPyDefault.test_ordereddict"
+        ],
+        "fixture_sha256": "86f30ec59eb852cc8edea5db6dfa03095233bc23668ce70d15b1abdde95ff43f",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:14: Imre: name is not a local value; globals and first-class functions are unsupported"
+      },
+      "test.test_json.test_dump.TestDump.test_dump": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_dump",
+          "test.test_json.test_dump.TestPyDump.test_dump"
+        ],
+        "fixture_sha256": "9746627a9c8dab4fc18b1c14088c7513a01f9bb2a0b8ce1313703bcd48357f63",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export io.StringIO"
+      },
+      "test.test_json.test_dump.TestDump.test_dump_skipkeys": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_dump_skipkeys",
+          "test.test_json.test_dump.TestPyDump.test_dump_skipkeys"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:37: Imre: expected bytes, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_dump.TestDump.test_dump_skipkeys_indent_empty": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_dump_skipkeys_indent_empty",
+          "test.test_json.test_dump.TestPyDump.test_dump_skipkeys_indent_empty"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:45: Imre: unsupported or repeated JSON encoding option"
+      },
+      "test.test_json.test_dump.TestDump.test_dumps": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_dumps",
+          "test.test_json.test_dump.TestPyDump.test_dumps"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_dump.TestDump.test_encode_evil_dict": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_encode_evil_dict",
+          "test.test_json.test_dump.TestPyDump.test_encode_evil_dict"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
+      },
+      "test.test_json.test_dump.TestDump.test_encode_mutated": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_encode_mutated",
+          "test.test_json.test_dump.TestPyDump.test_encode_mutated"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:14: Imre: unknown function or unsupported builtin arguments"
+      },
+      "test.test_json.test_dump.TestDump.test_encode_truefalse": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_encode_truefalse",
+          "test.test_json.test_dump.TestPyDump.test_encode_truefalse"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:46: Imre: unsupported or repeated JSON encoding option"
+      },
+      "test.test_json.test_dump.TestCDump.test_large_list": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_large_list"
+        ],
+        "fixture_sha256": "dc424f62326139144ff766ab4acc3a2f146110c7278521d0a4713c199d60347f",
+        "outcome": "blocked",
+        "reason": "TestCDump.test_large_list needs its upstream method decorator"
+      },
+      "test.test_json.test_dump.TestDump.test_skipkeys_indent": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_skipkeys_indent",
+          "test.test_json.test_dump.TestPyDump.test_skipkeys_indent"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:37: Imre: expected bytes, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_encode_basestring_ascii.TestEncodeBasestringAscii.test_encode_basestring_ascii": {
+        "fixture_ids": [
+          "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_encode_basestring_ascii",
+          "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_encode_basestring_ascii"
+        ],
+        "fixture_sha256": "498372d2d8e7cc26416b6ac69b784c77e2b504d374f1a59902d53b7d95e319d6",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:21:17: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_encode_basestring_ascii.TestEncodeBasestringAscii.test_ordered_dict": {
+        "fixture_ids": [
+          "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_ordered_dict",
+          "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_ordered_dict"
+        ],
+        "fixture_sha256": "17928684565675a2b0d516fa095a58d5fc5e78c24ba922ebd7e18d4cccb264a1",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export collections.OrderedDict"
+      },
+      "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_overflow": {
+        "fixture_ids": [
+          "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_overflow"
+        ],
+        "outcome": "reference-skip",
+        "reason": "pinned upstream bigaddrspacetest memory gate"
+      },
+      "test.test_json.test_encode_basestring_ascii.TestEncodeBasestringAscii.test_sorted_dict": {
+        "fixture_ids": [
+          "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict",
+          "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:37: Imre: unsupported or repeated JSON encoding option"
+      },
+      "test.test_json.test_enum.TestEnum.test_dict_keys": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_dict_keys",
+          "test.test_json.test_enum.TestPyEnum.test_dict_keys"
+        ],
+        "fixture_sha256": "c8b4ad753af2ef24508dc0958870acb05fde1d2240b8c0d6070185997a65b41b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_enum.TestEnum.test_dict_values": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_dict_values",
+          "test.test_json.test_enum.TestPyEnum.test_dict_values"
+        ],
+        "fixture_sha256": "272249eb246efed317a21b4342142bc8d60a435babae37e9f09e0139a23831b7",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_enum.TestEnum.test_floats": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_floats",
+          "test.test_json.test_enum.TestPyEnum.test_floats"
+        ],
+        "fixture_sha256": "84bd54e9005db16b60f82f347a2e60d51c72183d5833dab27f9559c19d1568b7",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_enum.TestEnum.test_ints": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_ints",
+          "test.test_json.test_enum.TestPyEnum.test_ints"
+        ],
+        "fixture_sha256": "c7df8b50a91588e0b25e954fe9ab94aa0ba2d60af94ea01940b1af83ab99e693",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_enum.TestEnum.test_list": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_list",
+          "test.test_json.test_enum.TestPyEnum.test_list"
+        ],
+        "fixture_sha256": "272249eb246efed317a21b4342142bc8d60a435babae37e9f09e0139a23831b7",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_enum.TestEnum.test_weird_floats": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_weird_floats",
+          "test.test_json.test_enum.TestPyEnum.test_weird_floats"
+        ],
+        "fixture_sha256": "79bc89aded791cc47cc2f4bb085739b35f5adeea56a7e0b4acbe93ff36701faa",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_fail.TestFail.test_extra_data": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_extra_data",
+          "test.test_json.test_fail.TestPyFail.test_extra_data"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:15:9: Imre: arithmetic requires int or float operands"
+      },
+      "test.test_json.test_fail.TestFail.test_failures": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_failures",
+          "test.test_json.test_fail.TestPyFail.test_failures"
+        ],
+        "fixture_sha256": "21939b4891bf48f1c92c08bc44383f9486e0a50faa5e72eb09821d87dd264219",
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_fail.TestCFail.test_failures": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "c57a5d1ce5237381f04ee3741a144881e55dd3d788d167ab83503347741e00c6"
+            }
+          ],
+          "test.test_json.test_fail.TestPyFail.test_failures": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "c57a5d1ce5237381f04ee3741a144881e55dd3d788d167ab83503347741e00c6"
+            }
+          ]
+        }
+      },
+      "test.test_json.test_fail.TestFail.test_linecol": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_linecol",
+          "test.test_json.test_fail.TestPyFail.test_linecol"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:16:18: Imre: unknown class method"
+      },
+      "test.test_json.test_fail.TestFail.test_non_string_keys_dict": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_non_string_keys_dict",
+          "test.test_json.test_fail.TestPyFail.test_non_string_keys_dict"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: expected str, got tuple[int, int]; annotations are enforced contracts"
+      },
+      "test.test_json.test_fail.TestFail.test_not_serializable": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_not_serializable",
+          "test.test_json.test_fail.TestPyFail.test_not_serializable"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
+      },
+      "test.test_json.test_fail.TestFail.test_truncated_input": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_truncated_input",
+          "test.test_json.test_fail.TestPyFail.test_truncated_input"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:26:9: Imre: arithmetic requires int or float operands"
+      },
+      "test.test_json.test_fail.TestFail.test_unexpected_data": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_unexpected_data",
+          "test.test_json.test_fail.TestPyFail.test_unexpected_data"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:35:18: Imre: unknown class method"
+      },
+      "test.test_json.test_float.TestFloat.test_allow_nan": {
+        "fixture_ids": [
+          "test.test_json.test_float.TestCFloat.test_allow_nan",
+          "test.test_json.test_float.TestPyFloat.test_allow_nan"
+        ],
+        "fixture_sha256": "1e5a78c2df9d392c06067c6e91a3a9ef111eb0dae8f08aeb95e4b59bd61b3fb3",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:12:51: Imre: expected int, got list[float]; annotations are enforced contracts"
+      },
+      "test.test_json.test_float.TestFloat.test_floats": {
+        "fixture_ids": [
+          "test.test_json.test_float.TestCFloat.test_floats",
+          "test.test_json.test_float.TestPyFloat.test_floats"
+        ],
+        "fixture_sha256": "6b29edc665c5f36f66760e7d4083cf0f48b42cfc6fa49411c14cb74d5fbbcb50",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"math\""
+      },
+      "test.test_json.test_float.TestFloat.test_ints": {
+        "fixture_ids": [
+          "test.test_json.test_float.TestCFloat.test_ints",
+          "test.test_json.test_float.TestPyFloat.test_ints"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:30: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_float.TestFloat.test_out_of_range": {
+        "fixture_ids": [
+          "test.test_json.test_float.TestCFloat.test_out_of_range",
+          "test.test_json.test_float.TestPyFloat.test_out_of_range"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:59: Imre: expected int, got list[float]; annotations are enforced contracts"
+      },
+      "test.test_json.test_indent.TestIndent.test_indent": {
+        "fixture_ids": [
+          "test.test_json.test_indent.TestCIndent.test_indent",
+          "test.test_json.test_indent.TestPyIndent.test_indent"
+        ],
+        "fixture_sha256": "3b4e06d1d074e8c4a9b8dace0862a7d768ce17362b49a77c3ec46a4a49d00f42",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:39: Imre: expected list[str], got list[int]; annotations are enforced contracts"
+      },
+      "test.test_json.test_indent.TestIndent.test_indent0": {
+        "fixture_ids": [
+          "test.test_json.test_indent.TestCIndent.test_indent0",
+          "test.test_json.test_indent.TestPyIndent.test_indent0"
+        ],
+        "fixture_sha256": "2f9506099cd65cad661085e733732a2065c600fe99991d351652cd6984a1c25a",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export io.StringIO"
+      },
+      "test.test_json.test_pass1.TestPass1.test_parse": {
+        "fixture_ids": [
+          "test.test_json.test_pass1.TestCPass1.test_parse",
+          "test.test_json.test_pass1.TestPyPass1.test_parse"
+        ],
+        "fixture_sha256": "48d43c78ee4bb77da297e8289a9d536bc261bed29f8a7badff8a73160fe0d99c",
+        "outcome": "failed",
+        "executions": {
+          "test.test_json.test_pass1.TestCPass1.test_parse": [],
+          "test.test_json.test_pass1.TestPyPass1.test_parse": []
+        },
+        "errors": [
+          [
+            "test.test_json.test_pass1.TestCPass1.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          ],
+          [
+            "test.test_json.test_pass1.TestPyPass1.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          ]
+        ],
+        "skips": []
+      },
+      "test.test_json.test_pass2.TestPass2.test_parse": {
+        "fixture_ids": [
+          "test.test_json.test_pass2.TestCPass2.test_parse",
+          "test.test_json.test_pass2.TestPyPass2.test_parse"
+        ],
+        "fixture_sha256": "380b1ab90b2013035570cf64dc735340ee12b8821347c1cc3ed9b90b52ac4305",
+        "outcome": "failed",
+        "executions": {
+          "test.test_json.test_pass2.TestCPass2.test_parse": [],
+          "test.test_json.test_pass2.TestPyPass2.test_parse": []
+        },
+        "errors": [
+          [
+            "test.test_json.test_pass2.TestCPass2.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          ],
+          [
+            "test.test_json.test_pass2.TestPyPass2.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          ]
+        ],
+        "skips": []
+      },
+      "test.test_json.test_pass3.TestPass3.test_parse": {
+        "fixture_ids": [
+          "test.test_json.test_pass3.TestCPass3.test_parse",
+          "test.test_json.test_pass3.TestPyPass3.test_parse"
+        ],
+        "fixture_sha256": "79939c9b8b0bb607ad0e5c0888d3d8b8aabff4230dd5b118ae4b186b059a60ee",
+        "outcome": "failed",
+        "executions": {
+          "test.test_json.test_pass3.TestCPass3.test_parse": [],
+          "test.test_json.test_pass3.TestPyPass3.test_parse": []
+        },
+        "errors": [
+          [
+            "test.test_json.test_pass3.TestCPass3.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got dict from JSON\\n'"
+          ],
+          [
+            "test.test_json.test_pass3.TestPyPass3.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got dict from JSON\\n'"
+          ]
+        ],
+        "skips": []
+      },
+      "test.test_json.test_recursion.TestRecursion.test_defaultrecursion": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_defaultrecursion",
+          "test.test_json.test_recursion.TestPyRecursion.test_defaultrecursion"
+        ],
+        "fixture_sha256": "d79032683bf609319307a1d19acbe6e19c9275217b1b7d988263e052aa2f4aa2",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:9: Imre: unsupported statement in the Imre subset"
+      },
+      "test.test_json.test_recursion.TestRecursion.test_dictrecursion": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_dictrecursion",
+          "test.test_json.test_recursion.TestPyRecursion.test_dictrecursion"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:13: Imre: an empty dictionary requires a concrete dict[K, V] context"
+      },
+      "test.test_json.test_recursion.TestRecursion.test_endless_recursion": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_endless_recursion",
+          "test.test_json.test_recursion.TestPyRecursion.test_endless_recursion"
+        ],
+        "fixture_sha256": "3b8c3651dd1d3b8a5b8fb373888779ca4d26f58483bd99c0c3e7a01549df11da",
+        "outcome": "blocked",
+        "reason": "TestRecursion.test_endless_recursion needs its upstream method decorator"
+      },
+      "test.test_json.test_recursion.TestRecursion.test_highly_nested_objects_decoding": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding",
+          "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding"
+        ],
+        "fixture_sha256": "73f7b09fb206e8ba2a26a2d67cfd39795078da572caf5f27936cb2e50f8f94bf",
+        "outcome": "blocked",
+        "reason": "TestRecursion.test_highly_nested_objects_decoding needs its upstream method decorator"
+      },
+      "test.test_json.test_recursion.TestRecursion.test_highly_nested_objects_encoding": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_encoding",
+          "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_encoding"
+        ],
+        "fixture_sha256": "41bf058a6a2402df5abeb9fcc8df778ada7baf58e0c706ad165ca54d20410b09",
+        "outcome": "blocked",
+        "reason": "TestRecursion.test_highly_nested_objects_encoding needs its upstream method decorator"
+      },
+      "test.test_json.test_recursion.TestRecursion.test_listrecursion": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_listrecursion",
+          "test.test_json.test_recursion.TestPyRecursion.test_listrecursion"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:18: Imre: expected int, got list[int]; annotations are enforced contracts"
+      },
+      "test.test_json.test_scanstring.TestScanstring.test_bad_escapes": {
+        "fixture_ids": [
+          "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes",
+          "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes"
+        ],
+        "fixture_sha256": "aec1ad22f0513a57a72c0e59185e4bb02b29f52d440fea3f8a019bcd2e44dd86",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:6:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      "test.test_json.test_scanstring.TestScanstring.test_overflow": {
+        "fixture_ids": [
+          "test.test_json.test_scanstring.TestCScanstring.test_overflow",
+          "test.test_json.test_scanstring.TestPyScanstring.test_overflow"
+        ],
+        "fixture_sha256": "621c342090301ff7171c1046d4117d96c241bf23113273e72fc6c32133020cd1",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:14: Imre: unknown class method"
+      },
+      "test.test_json.test_scanstring.TestScanstring.test_scanstring": {
+        "fixture_ids": [
+          "test.test_json.test_scanstring.TestCScanstring.test_scanstring",
+          "test.test_json.test_scanstring.TestPyScanstring.test_scanstring"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:22: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_scanstring.TestScanstring.test_surrogates": {
+        "fixture_ids": [
+          "test.test_json.test_scanstring.TestCScanstring.test_surrogates",
+          "test.test_json.test_scanstring.TestPyScanstring.test_surrogates"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:22: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_separators.TestSeparators.test_illegal_separators": {
+        "fixture_ids": [
+          "test.test_json.test_separators.TestCSeparators.test_illegal_separators",
+          "test.test_json.test_separators.TestPySeparators.test_illegal_separators"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:9: Imre: unknown class method"
+      },
+      "test.test_json.test_separators.TestSeparators.test_separators": {
+        "fixture_ids": [
+          "test.test_json.test_separators.TestCSeparators.test_separators",
+          "test.test_json.test_separators.TestPySeparators.test_separators"
+        ],
+        "fixture_sha256": "3b4e06d1d074e8c4a9b8dace0862a7d768ce17362b49a77c3ec46a4a49d00f42",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:39: Imre: expected list[str], got list[int]; annotations are enforced contracts"
+      },
+      "test.test_json.test_speedups.TestDecode.test_bad_bool_args": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestDecode.test_bad_bool_args"
+        ],
+        "fixture_sha256": "b427cc5207cadf164c48546cbf1c165e014e72fb6a87c00471730fcbf92a0842",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:12:9: Imre: local functions require annotated parameters and return types"
+      },
+      "test.test_json.test_speedups.TestDecode.test_make_scanner": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestDecode.test_make_scanner"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:9: Imre: unknown class method"
+      },
+      "test.test_json.test_speedups.TestEncode.test_bad_bool_args": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_bad_bool_args"
+        ],
+        "fixture_sha256": "b427cc5207cadf164c48546cbf1c165e014e72fb6a87c00471730fcbf92a0842",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:12:9: Imre: local functions require annotated parameters and return types"
+      },
+      "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:14: Imre: unknown class method"
+      },
+      "test.test_json.test_speedups.TestEncode.test_bad_str_encoder": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_bad_str_encoder"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:9: Imre: local functions require annotated parameters and return types"
+      },
+      "test.test_json.test_speedups.TestEncode.test_current_indent_level": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_current_indent_level"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:15: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_speedups.TestEncode.test_make_encoder": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_make_encoder"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:9: Imre: unknown class method"
+      },
+      "test.test_json.test_speedups.TestEncode.test_unsortable_keys": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_unsortable_keys"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:14: Imre: unknown class method"
+      },
+      "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_speedups.TestSpeedups.test_scanstring": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestSpeedups.test_scanstring"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_broken_pipe_error": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_broken_pipe_error",
+          "test.test_json.test_tool.TestTool.test_broken_pipe_error"
+        ],
+        "fixture_sha256": "9fdafc76832f2d8189678a65652ffe4b027c88afc06a46090ee9495d67ee5f28",
+        "outcome": "blocked",
+        "reason": "TestMain.test_broken_pipe_error needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_colors": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_colors",
+          "test.test_json.test_tool.TestTool.test_colors"
+        ],
+        "fixture_sha256": "940692a88330873e92023f8974b8401bbf9881cc46e4f63813bed7a41f6c3128",
+        "outcome": "blocked",
+        "reason": "TestMain.test_colors needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_compact": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_compact",
+          "test.test_json.test_tool.TestTool.test_compact"
+        ],
+        "fixture_sha256": "56e6655792e46ed5a9c1c7b6cc955b3abf59a468334a11ef011533f136e7c871",
+        "outcome": "blocked",
+        "reason": "TestMain.test_compact needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_ensure_ascii_default": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_ensure_ascii_default",
+          "test.test_json.test_tool.TestTool.test_ensure_ascii_default"
+        ],
+        "fixture_sha256": "54795db82f8ef204d3fe7bb9c32fba58b7bb91a9be4dd6a700567ce7cb5ad747",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:5:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_help_flag": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_help_flag",
+          "test.test_json.test_tool.TestTool.test_help_flag"
+        ],
+        "fixture_sha256": "fcec9c8c7827eae96e3427c51b2970741f6c865492da9823ae64fa4821217919",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_indent": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_indent",
+          "test.test_json.test_tool.TestTool.test_indent"
+        ],
+        "fixture_sha256": "c37e8b7f03570fb8943768d330cc800377a8056c4347f75dc07aaae604a14642",
+        "outcome": "blocked",
+        "reason": "TestMain.test_indent needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_infile_outfile": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_infile_outfile",
+          "test.test_json.test_tool.TestTool.test_infile_outfile"
+        ],
+        "fixture_sha256": "1dea1c1e89417e7fdf083aa074667c34cc86b417d17bddb450c05774a379c784",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:7:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_infile_stdout": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_infile_stdout",
+          "test.test_json.test_tool.TestTool.test_infile_stdout"
+        ],
+        "fixture_sha256": "1dea1c1e89417e7fdf083aa074667c34cc86b417d17bddb450c05774a379c784",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:7:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_jsonlines": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_jsonlines",
+          "test.test_json.test_tool.TestTool.test_jsonlines"
+        ],
+        "fixture_sha256": "510050f6df79344bc0181e1681b8b4987585c437f1b73fd836fed425f4eba13b",
+        "outcome": "blocked",
+        "reason": "TestMain.test_jsonlines needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_jsonlines_from_file": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_jsonlines_from_file",
+          "test.test_json.test_tool.TestTool.test_jsonlines_from_file"
+        ],
+        "fixture_sha256": "ffe8920ee74ce4ada3272be8666435d6b7c8783872a6dbb838d2f638efb1213a",
+        "outcome": "blocked",
+        "reason": "TestMain.test_jsonlines_from_file needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_no_ensure_ascii_flag": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_no_ensure_ascii_flag",
+          "test.test_json.test_tool.TestTool.test_no_ensure_ascii_flag"
+        ],
+        "fixture_sha256": "54795db82f8ef204d3fe7bb9c32fba58b7bb91a9be4dd6a700567ce7cb5ad747",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:5:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_no_indent": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_no_indent",
+          "test.test_json.test_tool.TestTool.test_no_indent"
+        ],
+        "fixture_sha256": "56e6655792e46ed5a9c1c7b6cc955b3abf59a468334a11ef011533f136e7c871",
+        "outcome": "blocked",
+        "reason": "TestMain.test_no_indent needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_non_ascii_infile": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_non_ascii_infile",
+          "test.test_json.test_tool.TestTool.test_non_ascii_infile"
+        ],
+        "fixture_sha256": "05232ae8a00b01ce0dcf735ca439955bf1f25f3318419060496e8ab178f44fc4",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:7:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_sort_keys_flag": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_sort_keys_flag",
+          "test.test_json.test_tool.TestTool.test_sort_keys_flag"
+        ],
+        "fixture_sha256": "e59412520bfecea673080f1dcc6d98b0d9edf2b776b3ede85a420c1c6aa950bc",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:7:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_stdin_stdout": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_stdin_stdout",
+          "test.test_json.test_tool.TestTool.test_stdin_stdout"
+        ],
+        "fixture_sha256": "7877aee148f719ec6fc43546d558c7c1a527f6eb508792128612ae15759ecbd0",
+        "outcome": "blocked",
+        "reason": "TestMain.test_stdin_stdout needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_tab": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_tab",
+          "test.test_json.test_tool.TestTool.test_tab"
+        ],
+        "fixture_sha256": "56e6655792e46ed5a9c1c7b6cc955b3abf59a468334a11ef011533f136e7c871",
+        "outcome": "blocked",
+        "reason": "TestMain.test_tab needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_writing_in_place": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_writing_in_place",
+          "test.test_json.test_tool.TestTool.test_writing_in_place"
+        ],
+        "fixture_sha256": "1dea1c1e89417e7fdf083aa074667c34cc86b417d17bddb450c05774a379c784",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:7:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_encode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode",
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_big_unicode_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:48: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_big_unicode_encode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode",
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_bytes_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_bytes_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode"
+        ],
+        "fixture_sha256": "f189974576654914bc0b1a1693560a8d383ea562339d4019e45af673567a84d0",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"codecs\""
+      },
+      "test.test_json.test_unicode.TestUnicode.test_bytes_encode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_bytes_encode",
+          "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:9: Imre: unknown class method"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_encoding3": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding3",
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding3"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_encoding4": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding4",
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding4"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_encoding5": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding5",
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding5"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_encoding6": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding6",
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding6"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_encoding7": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding7",
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding7"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_escaped_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_escaped_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:59: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_object_pairs_hook_with_unicode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode",
+          "test.test_json.test_unicode.TestPyUnicode.test_object_pairs_hook_with_unicode"
+        ],
+        "fixture_sha256": "8864fb0cc3ecbfcaaf5fd03bda7a09c5f5c33cfc416a7b117ee8b9d9bf00889b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export collections.OrderedDict"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_single_surrogate_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:38: Imre: surrogate string escapes are unsupported; strings must be valid UTF-8"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_single_surrogate_encode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode",
+          "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:38: Imre: surrogate string escapes are unsupported; strings must be valid UTF-8"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_unicode_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_unicode_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:45: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_unicode_preservation": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation",
+          "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: unknown function or unsupported builtin arguments"
+      }
+    },
+    "3": {
+      "test.test_json.TestPyTest.test_pyjson": {
+        "fixture_ids": [
+          "test.test_json.TestPyTest.test_pyjson",
+          "test.test_json.TestPyTest.test_pyjson"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.TestCTest.test_cjson": {
+        "fixture_ids": [
+          "test.test_json.TestCTest.test_cjson",
+          "test.test_json.TestCTest.test_cjson"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_decode.TestDecode.test_bytes": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_bytes",
+          "test.test_json.test_decode.TestPyDecode.test_bytes"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_decode.TestCDecode.test_bytes": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "939b1fdada99a994d290cf38aa265264e408d31cd7babfab605cdbdd87526416"
+            }
+          ],
+          "test.test_json.test_decode.TestPyDecode.test_bytes": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "939b1fdada99a994d290cf38aa265264e408d31cd7babfab605cdbdd87526416"
+            }
+          ]
+        }
+      },
+      "test.test_json.test_decode.TestDecode.test_constant_invalid_case": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_constant_invalid_case",
+          "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:12:18: Imre: unknown class method"
+      },
+      "test.test_json.test_decode.TestDecode.test_decimal": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_decimal",
+          "test.test_json.test_decode.TestPyDecode.test_decimal"
+        ],
+        "fixture_sha256": "1e6126f6ec82b8d358975858e5f271b53384bff4b16562c9d9c4b986ac64cba2",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"decimal\""
+      },
+      "test.test_json.test_decode.TestDecode.test_decoder_optimizations": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_decoder_optimizations",
+          "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:12:32: Imre: expected int, got dict[str, str]; annotations are enforced contracts"
+      },
+      "test.test_json.test_decode.TestDecode.test_empty_objects": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_empty_objects",
+          "test.test_json.test_decode.TestPyDecode.test_empty_objects"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:44: Imre: an empty dictionary requires a concrete dict[K, V] context"
+      },
+      "test.test_json.test_decode.TestDecode.test_extra_data": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_extra_data",
+          "test.test_json.test_decode.TestPyDecode.test_extra_data"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:9: Imre: unknown class method"
+      },
+      "test.test_json.test_decode.TestDecode.test_float": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_float",
+          "test.test_json.test_decode.TestPyDecode.test_float"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:16: Imre: keyword arguments are unsupported for this builtin"
+      },
+      "test.test_json.test_decode.TestDecode.test_invalid_escape": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_invalid_escape",
+          "test.test_json.test_decode.TestPyDecode.test_invalid_escape"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:9: Imre: unknown class method"
+      },
+      "test.test_json.test_decode.TestDecode.test_invalid_input_type": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_invalid_input_type",
+          "test.test_json.test_decode.TestPyDecode.test_invalid_input_type"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:26: Imre: expected int, got float; annotations are enforced contracts"
+      },
+      "test.test_json.test_decode.TestDecode.test_keys_reuse": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_keys_reuse",
+          "test.test_json.test_decode.TestPyDecode.test_keys_reuse"
+        ],
+        "fixture_sha256": "3041c9e6bad98ef1367756dacf90bb47e687b403c0b604ebe0b4897286cf7b09",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:6:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      "test.test_json.test_decode.TestDecode.test_limit_int": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_limit_int",
+          "test.test_json.test_decode.TestPyDecode.test_limit_int"
+        ],
+        "fixture_sha256": "73f7b09fb206e8ba2a26a2d67cfd39795078da572caf5f27936cb2e50f8f94bf",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_decode.TestDecode.test_negative_index": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_negative_index",
+          "test.test_json.test_decode.TestPyDecode.test_negative_index"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:13: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_decode.TestDecode.test_nonascii_digits_rejected": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected",
+          "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:18: Imre: unknown class method"
+      },
+      "test.test_json.test_decode.TestDecode.test_object_pairs_hook": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_object_pairs_hook",
+          "test.test_json.test_decode.TestPyDecode.test_object_pairs_hook"
+        ],
+        "fixture_sha256": "73cac9d612ede1efb176d008a18cbd2a5e38a79851e94803200bf13e9c1a81d7",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export io.StringIO"
+      },
+      "test.test_json.test_decode.TestDecode.test_parse_constant": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_parse_constant",
+          "test.test_json.test_decode.TestPyDecode.test_parse_constant"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:14:17: Imre: keyword arguments are unsupported for this builtin"
+      },
+      "test.test_json.test_decode.TestDecode.test_string_with_utf8_bom": {
+        "fixture_ids": [
+          "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom",
+          "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom"
+        ],
+        "fixture_sha256": "75c9e0123fd678c5a343d654acf54c1875b949257642b1d7c069a59753f9652c",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export io.StringIO"
+      },
+      "test.test_json.test_default.TestDefault.test_bad_default": {
+        "fixture_ids": [
+          "test.test_json.test_default.TestCDefault.test_bad_default",
+          "test.test_json.test_default.TestPyDefault.test_bad_default"
+        ],
+        "fixture_sha256": "86f30ec59eb852cc8edea5db6dfa03095233bc23668ce70d15b1abdde95ff43f",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:9: Imre: local functions require annotated parameters and return types"
+      },
+      "test.test_json.test_default.TestDefault.test_default": {
+        "fixture_ids": [
+          "test.test_json.test_default.TestCDefault.test_default",
+          "test.test_json.test_default.TestPyDefault.test_default"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:30: Imre: unsupported or repeated JSON encoding option"
+      },
+      "test.test_json.test_default.TestDefault.test_ordereddict": {
+        "fixture_ids": [
+          "test.test_json.test_default.TestCDefault.test_ordereddict",
+          "test.test_json.test_default.TestPyDefault.test_ordereddict"
+        ],
+        "fixture_sha256": "86f30ec59eb852cc8edea5db6dfa03095233bc23668ce70d15b1abdde95ff43f",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:14: Imre: name is not a local value; globals and first-class functions are unsupported"
+      },
+      "test.test_json.test_dump.TestDump.test_dump": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_dump",
+          "test.test_json.test_dump.TestPyDump.test_dump"
+        ],
+        "fixture_sha256": "9746627a9c8dab4fc18b1c14088c7513a01f9bb2a0b8ce1313703bcd48357f63",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export io.StringIO"
+      },
+      "test.test_json.test_dump.TestDump.test_dump_skipkeys": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_dump_skipkeys",
+          "test.test_json.test_dump.TestPyDump.test_dump_skipkeys"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:37: Imre: expected bytes, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_dump.TestDump.test_dump_skipkeys_indent_empty": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_dump_skipkeys_indent_empty",
+          "test.test_json.test_dump.TestPyDump.test_dump_skipkeys_indent_empty"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:45: Imre: unsupported or repeated JSON encoding option"
+      },
+      "test.test_json.test_dump.TestDump.test_dumps": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_dumps",
+          "test.test_json.test_dump.TestPyDump.test_dumps"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_dump.TestDump.test_encode_evil_dict": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_encode_evil_dict",
+          "test.test_json.test_dump.TestPyDump.test_encode_evil_dict"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
+      },
+      "test.test_json.test_dump.TestDump.test_encode_mutated": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_encode_mutated",
+          "test.test_json.test_dump.TestPyDump.test_encode_mutated"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:14: Imre: unknown function or unsupported builtin arguments"
+      },
+      "test.test_json.test_dump.TestDump.test_encode_truefalse": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_encode_truefalse",
+          "test.test_json.test_dump.TestPyDump.test_encode_truefalse"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:46: Imre: unsupported or repeated JSON encoding option"
+      },
+      "test.test_json.test_dump.TestCDump.test_large_list": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_large_list"
+        ],
+        "fixture_sha256": "dc424f62326139144ff766ab4acc3a2f146110c7278521d0a4713c199d60347f",
+        "outcome": "blocked",
+        "reason": "TestCDump.test_large_list needs its upstream method decorator"
+      },
+      "test.test_json.test_dump.TestDump.test_skipkeys_indent": {
+        "fixture_ids": [
+          "test.test_json.test_dump.TestCDump.test_skipkeys_indent",
+          "test.test_json.test_dump.TestPyDump.test_skipkeys_indent"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:37: Imre: expected bytes, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_encode_basestring_ascii.TestEncodeBasestringAscii.test_encode_basestring_ascii": {
+        "fixture_ids": [
+          "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_encode_basestring_ascii",
+          "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_encode_basestring_ascii"
+        ],
+        "fixture_sha256": "498372d2d8e7cc26416b6ac69b784c77e2b504d374f1a59902d53b7d95e319d6",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:21:17: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_encode_basestring_ascii.TestEncodeBasestringAscii.test_ordered_dict": {
+        "fixture_ids": [
+          "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_ordered_dict",
+          "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_ordered_dict"
+        ],
+        "fixture_sha256": "17928684565675a2b0d516fa095a58d5fc5e78c24ba922ebd7e18d4cccb264a1",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export collections.OrderedDict"
+      },
+      "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_overflow": {
+        "fixture_ids": [
+          "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_overflow"
+        ],
+        "outcome": "reference-skip",
+        "reason": "pinned upstream bigaddrspacetest memory gate"
+      },
+      "test.test_json.test_encode_basestring_ascii.TestEncodeBasestringAscii.test_sorted_dict": {
+        "fixture_ids": [
+          "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict",
+          "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:37: Imre: unsupported or repeated JSON encoding option"
+      },
+      "test.test_json.test_enum.TestEnum.test_dict_keys": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_dict_keys",
+          "test.test_json.test_enum.TestPyEnum.test_dict_keys"
+        ],
+        "fixture_sha256": "c8b4ad753af2ef24508dc0958870acb05fde1d2240b8c0d6070185997a65b41b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_enum.TestEnum.test_dict_values": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_dict_values",
+          "test.test_json.test_enum.TestPyEnum.test_dict_values"
+        ],
+        "fixture_sha256": "272249eb246efed317a21b4342142bc8d60a435babae37e9f09e0139a23831b7",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_enum.TestEnum.test_floats": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_floats",
+          "test.test_json.test_enum.TestPyEnum.test_floats"
+        ],
+        "fixture_sha256": "84bd54e9005db16b60f82f347a2e60d51c72183d5833dab27f9559c19d1568b7",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_enum.TestEnum.test_ints": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_ints",
+          "test.test_json.test_enum.TestPyEnum.test_ints"
+        ],
+        "fixture_sha256": "c7df8b50a91588e0b25e954fe9ab94aa0ba2d60af94ea01940b1af83ab99e693",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_enum.TestEnum.test_list": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_list",
+          "test.test_json.test_enum.TestPyEnum.test_list"
+        ],
+        "fixture_sha256": "272249eb246efed317a21b4342142bc8d60a435babae37e9f09e0139a23831b7",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_enum.TestEnum.test_weird_floats": {
+        "fixture_ids": [
+          "test.test_json.test_enum.TestCEnum.test_weird_floats",
+          "test.test_json.test_enum.TestPyEnum.test_weird_floats"
+        ],
+        "fixture_sha256": "79bc89aded791cc47cc2f4bb085739b35f5adeea56a7e0b4acbe93ff36701faa",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export enum.IntEnum"
+      },
+      "test.test_json.test_fail.TestFail.test_extra_data": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_extra_data",
+          "test.test_json.test_fail.TestPyFail.test_extra_data"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:15:9: Imre: arithmetic requires int or float operands"
+      },
+      "test.test_json.test_fail.TestFail.test_failures": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_failures",
+          "test.test_json.test_fail.TestPyFail.test_failures"
+        ],
+        "fixture_sha256": "21939b4891bf48f1c92c08bc44383f9486e0a50faa5e72eb09821d87dd264219",
+        "outcome": "body-completed",
+        "executions": {
+          "test.test_json.test_fail.TestCFail.test_failures": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "c57a5d1ce5237381f04ee3741a144881e55dd3d788d167ab83503347741e00c6"
+            }
+          ],
+          "test.test_json.test_fail.TestPyFail.test_failures": [
+            {
+              "execution": "native-body",
+              "body": "Imre",
+              "assertions": "Imre",
+              "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+              "method_sha256": "c57a5d1ce5237381f04ee3741a144881e55dd3d788d167ab83503347741e00c6"
+            }
+          ]
+        }
+      },
+      "test.test_json.test_fail.TestFail.test_linecol": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_linecol",
+          "test.test_json.test_fail.TestPyFail.test_linecol"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:16:18: Imre: unknown class method"
+      },
+      "test.test_json.test_fail.TestFail.test_non_string_keys_dict": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_non_string_keys_dict",
+          "test.test_json.test_fail.TestPyFail.test_non_string_keys_dict"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: expected str, got tuple[int, int]; annotations are enforced contracts"
+      },
+      "test.test_json.test_fail.TestFail.test_not_serializable": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_not_serializable",
+          "test.test_json.test_fail.TestPyFail.test_not_serializable"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:9: Imre: unsupported statement in the Imre subset"
+      },
+      "test.test_json.test_fail.TestFail.test_truncated_input": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_truncated_input",
+          "test.test_json.test_fail.TestPyFail.test_truncated_input"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:26:9: Imre: arithmetic requires int or float operands"
+      },
+      "test.test_json.test_fail.TestFail.test_unexpected_data": {
+        "fixture_ids": [
+          "test.test_json.test_fail.TestCFail.test_unexpected_data",
+          "test.test_json.test_fail.TestPyFail.test_unexpected_data"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:35:18: Imre: unknown class method"
+      },
+      "test.test_json.test_float.TestFloat.test_allow_nan": {
+        "fixture_ids": [
+          "test.test_json.test_float.TestCFloat.test_allow_nan",
+          "test.test_json.test_float.TestPyFloat.test_allow_nan"
+        ],
+        "fixture_sha256": "1e5a78c2df9d392c06067c6e91a3a9ef111eb0dae8f08aeb95e4b59bd61b3fb3",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:12:51: Imre: expected int, got list[float]; annotations are enforced contracts"
+      },
+      "test.test_json.test_float.TestFloat.test_floats": {
+        "fixture_ids": [
+          "test.test_json.test_float.TestCFloat.test_floats",
+          "test.test_json.test_float.TestPyFloat.test_floats"
+        ],
+        "fixture_sha256": "6b29edc665c5f36f66760e7d4083cf0f48b42cfc6fa49411c14cb74d5fbbcb50",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"math\""
+      },
+      "test.test_json.test_float.TestFloat.test_ints": {
+        "fixture_ids": [
+          "test.test_json.test_float.TestCFloat.test_ints",
+          "test.test_json.test_float.TestPyFloat.test_ints"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:30: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_float.TestFloat.test_out_of_range": {
+        "fixture_ids": [
+          "test.test_json.test_float.TestCFloat.test_out_of_range",
+          "test.test_json.test_float.TestPyFloat.test_out_of_range"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:59: Imre: expected int, got list[float]; annotations are enforced contracts"
+      },
+      "test.test_json.test_indent.TestIndent.test_indent": {
+        "fixture_ids": [
+          "test.test_json.test_indent.TestCIndent.test_indent",
+          "test.test_json.test_indent.TestPyIndent.test_indent"
+        ],
+        "fixture_sha256": "3b4e06d1d074e8c4a9b8dace0862a7d768ce17362b49a77c3ec46a4a49d00f42",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:39: Imre: expected list[str], got list[int]; annotations are enforced contracts"
+      },
+      "test.test_json.test_indent.TestIndent.test_indent0": {
+        "fixture_ids": [
+          "test.test_json.test_indent.TestCIndent.test_indent0",
+          "test.test_json.test_indent.TestPyIndent.test_indent0"
+        ],
+        "fixture_sha256": "2f9506099cd65cad661085e733732a2065c600fe99991d351652cd6984a1c25a",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export io.StringIO"
+      },
+      "test.test_json.test_pass1.TestPass1.test_parse": {
+        "fixture_ids": [
+          "test.test_json.test_pass1.TestCPass1.test_parse",
+          "test.test_json.test_pass1.TestPyPass1.test_parse"
+        ],
+        "fixture_sha256": "48d43c78ee4bb77da297e8289a9d536bc261bed29f8a7badff8a73160fe0d99c",
+        "outcome": "failed",
+        "executions": {
+          "test.test_json.test_pass1.TestCPass1.test_parse": [],
+          "test.test_json.test_pass1.TestPyPass1.test_parse": []
+        },
+        "errors": [
+          [
+            "test.test_json.test_pass1.TestCPass1.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          ],
+          [
+            "test.test_json.test_pass1.TestPyPass1.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          ]
+        ],
+        "skips": []
+      },
+      "test.test_json.test_pass2.TestPass2.test_parse": {
+        "fixture_ids": [
+          "test.test_json.test_pass2.TestCPass2.test_parse",
+          "test.test_json.test_pass2.TestPyPass2.test_parse"
+        ],
+        "fixture_sha256": "380b1ab90b2013035570cf64dc735340ee12b8821347c1cc3ed9b90b52ac4305",
+        "outcome": "failed",
+        "executions": {
+          "test.test_json.test_pass2.TestCPass2.test_parse": [],
+          "test.test_json.test_pass2.TestPyPass2.test_parse": []
+        },
+        "errors": [
+          [
+            "test.test_json.test_pass2.TestCPass2.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          ],
+          [
+            "test.test_json.test_pass2.TestPyPass2.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got list from JSON\\n'"
+          ]
+        ],
+        "skips": []
+      },
+      "test.test_json.test_pass3.TestPass3.test_parse": {
+        "fixture_ids": [
+          "test.test_json.test_pass3.TestCPass3.test_parse",
+          "test.test_json.test_pass3.TestPyPass3.test_parse"
+        ],
+        "fixture_sha256": "79939c9b8b0bb607ad0e5c0888d3d8b8aabff4230dd5b118ae4b186b059a60ee",
+        "outcome": "failed",
+        "executions": {
+          "test.test_json.test_pass3.TestCPass3.test_parse": [],
+          "test.test_json.test_pass3.TestPyPass3.test_parse": []
+        },
+        "errors": [
+          [
+            "test.test_json.test_pass3.TestCPass3.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got dict from JSON\\n'"
+          ],
+          [
+            "test.test_json.test_pass3.TestPyPass3.test_parse",
+            "AssertionError: native exit 1: '' 'TypeError: expected int, got dict from JSON\\n'"
+          ]
+        ],
+        "skips": []
+      },
+      "test.test_json.test_recursion.TestRecursion.test_defaultrecursion": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_defaultrecursion",
+          "test.test_json.test_recursion.TestPyRecursion.test_defaultrecursion"
+        ],
+        "fixture_sha256": "d79032683bf609319307a1d19acbe6e19c9275217b1b7d988263e052aa2f4aa2",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:9: Imre: unsupported statement in the Imre subset"
+      },
+      "test.test_json.test_recursion.TestRecursion.test_dictrecursion": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_dictrecursion",
+          "test.test_json.test_recursion.TestPyRecursion.test_dictrecursion"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:13: Imre: an empty dictionary requires a concrete dict[K, V] context"
+      },
+      "test.test_json.test_recursion.TestRecursion.test_endless_recursion": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_endless_recursion",
+          "test.test_json.test_recursion.TestPyRecursion.test_endless_recursion"
+        ],
+        "fixture_sha256": "3b8c3651dd1d3b8a5b8fb373888779ca4d26f58483bd99c0c3e7a01549df11da",
+        "outcome": "blocked",
+        "reason": "TestRecursion.test_endless_recursion needs its upstream method decorator"
+      },
+      "test.test_json.test_recursion.TestRecursion.test_highly_nested_objects_decoding": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding",
+          "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding"
+        ],
+        "fixture_sha256": "73f7b09fb206e8ba2a26a2d67cfd39795078da572caf5f27936cb2e50f8f94bf",
+        "outcome": "blocked",
+        "reason": "TestRecursion.test_highly_nested_objects_decoding needs its upstream method decorator"
+      },
+      "test.test_json.test_recursion.TestRecursion.test_highly_nested_objects_encoding": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_encoding",
+          "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_encoding"
+        ],
+        "fixture_sha256": "41bf058a6a2402df5abeb9fcc8df778ada7baf58e0c706ad165ca54d20410b09",
+        "outcome": "blocked",
+        "reason": "TestRecursion.test_highly_nested_objects_encoding needs its upstream method decorator"
+      },
+      "test.test_json.test_recursion.TestRecursion.test_listrecursion": {
+        "fixture_ids": [
+          "test.test_json.test_recursion.TestCRecursion.test_listrecursion",
+          "test.test_json.test_recursion.TestPyRecursion.test_listrecursion"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:18: Imre: expected int, got list[int]; annotations are enforced contracts"
+      },
+      "test.test_json.test_scanstring.TestScanstring.test_bad_escapes": {
+        "fixture_ids": [
+          "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes",
+          "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes"
+        ],
+        "fixture_sha256": "aec1ad22f0513a57a72c0e59185e4bb02b29f52d440fea3f8a019bcd2e44dd86",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:6:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+      },
+      "test.test_json.test_scanstring.TestScanstring.test_overflow": {
+        "fixture_ids": [
+          "test.test_json.test_scanstring.TestCScanstring.test_overflow",
+          "test.test_json.test_scanstring.TestPyScanstring.test_overflow"
+        ],
+        "fixture_sha256": "621c342090301ff7171c1046d4117d96c241bf23113273e72fc6c32133020cd1",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:14: Imre: unknown class method"
+      },
+      "test.test_json.test_scanstring.TestScanstring.test_scanstring": {
+        "fixture_ids": [
+          "test.test_json.test_scanstring.TestCScanstring.test_scanstring",
+          "test.test_json.test_scanstring.TestPyScanstring.test_scanstring"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:22: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_scanstring.TestScanstring.test_surrogates": {
+        "fixture_ids": [
+          "test.test_json.test_scanstring.TestCScanstring.test_surrogates",
+          "test.test_json.test_scanstring.TestPyScanstring.test_surrogates"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:22: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_separators.TestSeparators.test_illegal_separators": {
+        "fixture_ids": [
+          "test.test_json.test_separators.TestCSeparators.test_illegal_separators",
+          "test.test_json.test_separators.TestPySeparators.test_illegal_separators"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:9: Imre: unknown class method"
+      },
+      "test.test_json.test_separators.TestSeparators.test_separators": {
+        "fixture_ids": [
+          "test.test_json.test_separators.TestCSeparators.test_separators",
+          "test.test_json.test_separators.TestPySeparators.test_separators"
+        ],
+        "fixture_sha256": "3b4e06d1d074e8c4a9b8dace0862a7d768ce17362b49a77c3ec46a4a49d00f42",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:39: Imre: expected list[str], got list[int]; annotations are enforced contracts"
+      },
+      "test.test_json.test_speedups.TestDecode.test_bad_bool_args": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestDecode.test_bad_bool_args"
+        ],
+        "fixture_sha256": "b427cc5207cadf164c48546cbf1c165e014e72fb6a87c00471730fcbf92a0842",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:12:9: Imre: local functions require annotated parameters and return types"
+      },
+      "test.test_json.test_speedups.TestDecode.test_make_scanner": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestDecode.test_make_scanner"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:9: Imre: unknown class method"
+      },
+      "test.test_json.test_speedups.TestEncode.test_bad_bool_args": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_bad_bool_args"
+        ],
+        "fixture_sha256": "b427cc5207cadf164c48546cbf1c165e014e72fb6a87c00471730fcbf92a0842",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:12:9: Imre: local functions require annotated parameters and return types"
+      },
+      "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:14: Imre: unknown class method"
+      },
+      "test.test_json.test_speedups.TestEncode.test_bad_str_encoder": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_bad_str_encoder"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:9: Imre: local functions require annotated parameters and return types"
+      },
+      "test.test_json.test_speedups.TestEncode.test_current_indent_level": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_current_indent_level"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:15: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_speedups.TestEncode.test_make_encoder": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_make_encoder"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:9: Imre: unknown class method"
+      },
+      "test.test_json.test_speedups.TestEncode.test_unsortable_keys": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestEncode.test_unsortable_keys"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:14: Imre: unknown class method"
+      },
+      "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_speedups.TestSpeedups.test_scanstring": {
+        "fixture_ids": [
+          "test.test_json.test_speedups.TestSpeedups.test_scanstring"
+        ],
+        "fixture_sha256": "6dd1e1f4ed27d2d52ce041782ad484c246c58bb067c10f4707390510e5c6277b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: unknown field; dynamic attributes and first-class methods are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_broken_pipe_error": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_broken_pipe_error",
+          "test.test_json.test_tool.TestTool.test_broken_pipe_error"
+        ],
+        "fixture_sha256": "9fdafc76832f2d8189678a65652ffe4b027c88afc06a46090ee9495d67ee5f28",
+        "outcome": "blocked",
+        "reason": "TestMain.test_broken_pipe_error needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_colors": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_colors",
+          "test.test_json.test_tool.TestTool.test_colors"
+        ],
+        "fixture_sha256": "940692a88330873e92023f8974b8401bbf9881cc46e4f63813bed7a41f6c3128",
+        "outcome": "blocked",
+        "reason": "TestMain.test_colors needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_compact": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_compact",
+          "test.test_json.test_tool.TestTool.test_compact"
+        ],
+        "fixture_sha256": "56e6655792e46ed5a9c1c7b6cc955b3abf59a468334a11ef011533f136e7c871",
+        "outcome": "blocked",
+        "reason": "TestMain.test_compact needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_ensure_ascii_default": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_ensure_ascii_default",
+          "test.test_json.test_tool.TestTool.test_ensure_ascii_default"
+        ],
+        "fixture_sha256": "54795db82f8ef204d3fe7bb9c32fba58b7bb91a9be4dd6a700567ce7cb5ad747",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:5:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_help_flag": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_help_flag",
+          "test.test_json.test_tool.TestTool.test_help_flag"
+        ],
+        "fixture_sha256": "fcec9c8c7827eae96e3427c51b2970741f6c865492da9823ae64fa4821217919",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_indent": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_indent",
+          "test.test_json.test_tool.TestTool.test_indent"
+        ],
+        "fixture_sha256": "c37e8b7f03570fb8943768d330cc800377a8056c4347f75dc07aaae604a14642",
+        "outcome": "blocked",
+        "reason": "TestMain.test_indent needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_infile_outfile": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_infile_outfile",
+          "test.test_json.test_tool.TestTool.test_infile_outfile"
+        ],
+        "fixture_sha256": "1dea1c1e89417e7fdf083aa074667c34cc86b417d17bddb450c05774a379c784",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:7:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_infile_stdout": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_infile_stdout",
+          "test.test_json.test_tool.TestTool.test_infile_stdout"
+        ],
+        "fixture_sha256": "1dea1c1e89417e7fdf083aa074667c34cc86b417d17bddb450c05774a379c784",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:7:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_jsonlines": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_jsonlines",
+          "test.test_json.test_tool.TestTool.test_jsonlines"
+        ],
+        "fixture_sha256": "510050f6df79344bc0181e1681b8b4987585c437f1b73fd836fed425f4eba13b",
+        "outcome": "blocked",
+        "reason": "TestMain.test_jsonlines needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_jsonlines_from_file": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_jsonlines_from_file",
+          "test.test_json.test_tool.TestTool.test_jsonlines_from_file"
+        ],
+        "fixture_sha256": "ffe8920ee74ce4ada3272be8666435d6b7c8783872a6dbb838d2f638efb1213a",
+        "outcome": "blocked",
+        "reason": "TestMain.test_jsonlines_from_file needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_no_ensure_ascii_flag": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_no_ensure_ascii_flag",
+          "test.test_json.test_tool.TestTool.test_no_ensure_ascii_flag"
+        ],
+        "fixture_sha256": "54795db82f8ef204d3fe7bb9c32fba58b7bb91a9be4dd6a700567ce7cb5ad747",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:5:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_no_indent": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_no_indent",
+          "test.test_json.test_tool.TestTool.test_no_indent"
+        ],
+        "fixture_sha256": "56e6655792e46ed5a9c1c7b6cc955b3abf59a468334a11ef011533f136e7c871",
+        "outcome": "blocked",
+        "reason": "TestMain.test_no_indent needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_non_ascii_infile": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_non_ascii_infile",
+          "test.test_json.test_tool.TestTool.test_non_ascii_infile"
+        ],
+        "fixture_sha256": "05232ae8a00b01ce0dcf735ca439955bf1f25f3318419060496e8ab178f44fc4",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:7:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_sort_keys_flag": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_sort_keys_flag",
+          "test.test_json.test_tool.TestTool.test_sort_keys_flag"
+        ],
+        "fixture_sha256": "e59412520bfecea673080f1dcc6d98b0d9edf2b776b3ede85a420c1c6aa950bc",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:7:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_tool.TestMain.test_stdin_stdout": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_stdin_stdout",
+          "test.test_json.test_tool.TestTool.test_stdin_stdout"
+        ],
+        "fixture_sha256": "7877aee148f719ec6fc43546d558c7c1a527f6eb508792128612ae15759ecbd0",
+        "outcome": "blocked",
+        "reason": "TestMain.test_stdin_stdout needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_tab": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_tab",
+          "test.test_json.test_tool.TestTool.test_tab"
+        ],
+        "fixture_sha256": "56e6655792e46ed5a9c1c7b6cc955b3abf59a468334a11ef011533f136e7c871",
+        "outcome": "blocked",
+        "reason": "TestMain.test_tab needs its upstream method decorator"
+      },
+      "test.test_json.test_tool.TestMain.test_writing_in_place": {
+        "fixture_ids": [
+          "test.test_json.test_tool.TestMain.test_writing_in_place",
+          "test.test_json.test_tool.TestTool.test_writing_in_place"
+        ],
+        "fixture_sha256": "1dea1c1e89417e7fdf083aa074667c34cc86b417d17bddb450c05774a379c784",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:7:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_ascii_non_printable_encode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode",
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_big_unicode_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:48: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_big_unicode_encode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode",
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_bytes_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_bytes_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode"
+        ],
+        "fixture_sha256": "f189974576654914bc0b1a1693560a8d383ea562339d4019e45af673567a84d0",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"codecs\""
+      },
+      "test.test_json.test_unicode.TestUnicode.test_bytes_encode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_bytes_encode",
+          "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:9: Imre: unknown class method"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_encoding3": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding3",
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding3"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_encoding4": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding4",
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding4"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_encoding5": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding5",
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding5"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_encoding6": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding6",
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding6"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_encoding7": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding7",
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding7"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:10:26: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_escaped_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_escaped_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode"
+        ],
+        "fixture_sha256": "c436fd787ba0d817ff3a16b9d73283cd8dac122b4064393c246c80423555cded",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:9:59: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_object_pairs_hook_with_unicode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode",
+          "test.test_json.test_unicode.TestPyUnicode.test_object_pairs_hook_with_unicode"
+        ],
+        "fixture_sha256": "8864fb0cc3ecbfcaaf5fd03bda7a09c5f5c33cfc416a7b117ee8b9d9bf00889b",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:3:1: Imre: unsupported sealed standard-library export collections.OrderedDict"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_single_surrogate_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:38: Imre: surrogate string escapes are unsupported; strings must be valid UTF-8"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_single_surrogate_encode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode",
+          "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode"
+        ],
+        "fixture_sha256": "83c9408f0470a8b54d4f3ce6c3f85b7b631ed0837a7a9c416b469d02f3dac15d",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:38: Imre: surrogate string escapes are unsupported; strings must be valid UTF-8"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_unicode_decode": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_unicode_decode",
+          "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:11:45: Imre: expected int, got str; annotations are enforced contracts"
+      },
+      "test.test_json.test_unicode.TestUnicode.test_unicode_preservation": {
+        "fixture_ids": [
+          "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation",
+          "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation"
+        ],
+        "fixture_sha256": "986ea0b55321f7fdc3876d61b9f838cfcd661410422e869a348b3008e1887bf5",
+        "outcome": "blocked",
+        "reason": "<case>/case.py:8:26: Imre: unknown function or unsupported builtin arguments"
+      }
+    }
+  }
+}

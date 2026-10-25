@@ -1,0 +1,493 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "fixture": "original CPython fixtures, body and assertions",
+  "operation": "Imre standard json",
+  "levels": {
+    "0": {
+      "ids": {
+        "test.test_json.test_dump.TestCDump.test_large_list": [
+          {
+            "source": "test_dump.TestCDump.test_large_list",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "05abfc1aba83600190543477792463332abe4c68743d663842d8fcb3821b2acc",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict": [
+          {
+            "source": "test_encode_basestring_ascii.TestEncodeBasestringAscii.test_sorted_dict",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "aa88d27693ac2b28d5d522c4328c6d4806eb45e19e0c9fc5c2caf2c8a1ed9bff",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict": [
+          {
+            "source": "test_encode_basestring_ascii.TestEncodeBasestringAscii.test_sorted_dict",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "aa88d27693ac2b28d5d522c4328c6d4806eb45e19e0c9fc5c2caf2c8a1ed9bff",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_indent.TestCIndent.test_indent": [
+          {
+            "source": "test_indent.TestIndent.test_indent",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "60623b489b2453068423b23dfd94b3bc4585cf03fb120a84b569aa5b7adabedc",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "bcb2d2c58c175083aca11fc586c8e99974b61c03497f6fdb8941318ac36827f5",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "87cbb921d980d69b3add43fb562b7a2beba023945348e5c03fbda9f37968604a",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "abd491d8a0eec89209824bf3f469a502d9d6b31fbfbb643d953dfad57ed531be",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "f9567c2f74f7a2a89335f38e9c6ffb292305a628a1e6e9cc288d2535cbc546b3",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "9be3ca3713fe6149fc87f80dfcc240576c25a5f7b15557495310802e3dc5de91",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "8a824c557375e50bfb3ebc2c1cf37ca3bf16bb3630c116ccd15aeb0d39b819d7",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "e94dcbd41c1e13ba592b0ae01f4abe63851c7d3e50f7e111f5f1f5305f03467c",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_indent.TestPyIndent.test_indent": [
+          {
+            "source": "test_indent.TestIndent.test_indent",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "60623b489b2453068423b23dfd94b3bc4585cf03fb120a84b569aa5b7adabedc",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "bcb2d2c58c175083aca11fc586c8e99974b61c03497f6fdb8941318ac36827f5",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "87cbb921d980d69b3add43fb562b7a2beba023945348e5c03fbda9f37968604a",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "abd491d8a0eec89209824bf3f469a502d9d6b31fbfbb643d953dfad57ed531be",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "f9567c2f74f7a2a89335f38e9c6ffb292305a628a1e6e9cc288d2535cbc546b3",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "9be3ca3713fe6149fc87f80dfcc240576c25a5f7b15557495310802e3dc5de91",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "8a824c557375e50bfb3ebc2c1cf37ca3bf16bb3630c116ccd15aeb0d39b819d7",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "e94dcbd41c1e13ba592b0ae01f4abe63851c7d3e50f7e111f5f1f5305f03467c",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_separators.TestCSeparators.test_illegal_separators": [
+          {
+            "source": "test_separators.TestSeparators.test_illegal_separators",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "fc0276ce18f7d77573bc01eb4a60537456bb05ef93e0035b8de81d0b7ff570b3",
+                "status": "TypeError"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "dcdcf55c31655de6c73b12113f6a6050cc6bbd7d98daff086449a1f04082961c",
+                "status": "TypeError"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "63f1d3b232217230f045866a7968a7c21e207d50a6c51efe3f428cca9c81de27",
+                "status": "TypeError"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_separators.TestCSeparators.test_separators": [
+          {
+            "source": "test_separators.TestSeparators.test_separators",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "60623b489b2453068423b23dfd94b3bc4585cf03fb120a84b569aa5b7adabedc",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "8b13e6d141518c80e39f4744cc73177678fad12bece29e3f5fdbc262d1a51b10",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "9be3ca3713fe6149fc87f80dfcc240576c25a5f7b15557495310802e3dc5de91",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "3aa46d3a0d55a0c1be0176eab9907a26bf993f3f4c2c34b95d238323f4838c08",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_separators.TestPySeparators.test_illegal_separators": [
+          {
+            "source": "test_separators.TestSeparators.test_illegal_separators",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "fc0276ce18f7d77573bc01eb4a60537456bb05ef93e0035b8de81d0b7ff570b3",
+                "status": "TypeError"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "dcdcf55c31655de6c73b12113f6a6050cc6bbd7d98daff086449a1f04082961c",
+                "status": "TypeError"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "63f1d3b232217230f045866a7968a7c21e207d50a6c51efe3f428cca9c81de27",
+                "status": "TypeError"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_separators.TestPySeparators.test_separators": [
+          {
+            "source": "test_separators.TestSeparators.test_separators",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "60623b489b2453068423b23dfd94b3bc4585cf03fb120a84b569aa5b7adabedc",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "8b13e6d141518c80e39f4744cc73177678fad12bece29e3f5fdbc262d1a51b10",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "9be3ca3713fe6149fc87f80dfcc240576c25a5f7b15557495310802e3dc5de91",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "3aa46d3a0d55a0c1be0176eab9907a26bf993f3f4c2c34b95d238323f4838c08",
+                "status": "OK"
+              }
+            ]
+          }
+        ]
+      },
+      "failures": [],
+      "skips": []
+    },
+    "3": {
+      "ids": {
+        "test.test_json.test_dump.TestCDump.test_large_list": [
+          {
+            "source": "test_dump.TestCDump.test_large_list",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "05abfc1aba83600190543477792463332abe4c68743d663842d8fcb3821b2acc",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict": [
+          {
+            "source": "test_encode_basestring_ascii.TestEncodeBasestringAscii.test_sorted_dict",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "aa88d27693ac2b28d5d522c4328c6d4806eb45e19e0c9fc5c2caf2c8a1ed9bff",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict": [
+          {
+            "source": "test_encode_basestring_ascii.TestEncodeBasestringAscii.test_sorted_dict",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "aa88d27693ac2b28d5d522c4328c6d4806eb45e19e0c9fc5c2caf2c8a1ed9bff",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_indent.TestCIndent.test_indent": [
+          {
+            "source": "test_indent.TestIndent.test_indent",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "60623b489b2453068423b23dfd94b3bc4585cf03fb120a84b569aa5b7adabedc",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "bcb2d2c58c175083aca11fc586c8e99974b61c03497f6fdb8941318ac36827f5",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "87cbb921d980d69b3add43fb562b7a2beba023945348e5c03fbda9f37968604a",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "abd491d8a0eec89209824bf3f469a502d9d6b31fbfbb643d953dfad57ed531be",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "f9567c2f74f7a2a89335f38e9c6ffb292305a628a1e6e9cc288d2535cbc546b3",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "9be3ca3713fe6149fc87f80dfcc240576c25a5f7b15557495310802e3dc5de91",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "8a824c557375e50bfb3ebc2c1cf37ca3bf16bb3630c116ccd15aeb0d39b819d7",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "e94dcbd41c1e13ba592b0ae01f4abe63851c7d3e50f7e111f5f1f5305f03467c",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_indent.TestPyIndent.test_indent": [
+          {
+            "source": "test_indent.TestIndent.test_indent",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "60623b489b2453068423b23dfd94b3bc4585cf03fb120a84b569aa5b7adabedc",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "bcb2d2c58c175083aca11fc586c8e99974b61c03497f6fdb8941318ac36827f5",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "87cbb921d980d69b3add43fb562b7a2beba023945348e5c03fbda9f37968604a",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "abd491d8a0eec89209824bf3f469a502d9d6b31fbfbb643d953dfad57ed531be",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "f9567c2f74f7a2a89335f38e9c6ffb292305a628a1e6e9cc288d2535cbc546b3",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "9be3ca3713fe6149fc87f80dfcc240576c25a5f7b15557495310802e3dc5de91",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "8a824c557375e50bfb3ebc2c1cf37ca3bf16bb3630c116ccd15aeb0d39b819d7",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "e94dcbd41c1e13ba592b0ae01f4abe63851c7d3e50f7e111f5f1f5305f03467c",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_separators.TestCSeparators.test_illegal_separators": [
+          {
+            "source": "test_separators.TestSeparators.test_illegal_separators",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "fc0276ce18f7d77573bc01eb4a60537456bb05ef93e0035b8de81d0b7ff570b3",
+                "status": "TypeError"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "dcdcf55c31655de6c73b12113f6a6050cc6bbd7d98daff086449a1f04082961c",
+                "status": "TypeError"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "63f1d3b232217230f045866a7968a7c21e207d50a6c51efe3f428cca9c81de27",
+                "status": "TypeError"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_separators.TestCSeparators.test_separators": [
+          {
+            "source": "test_separators.TestSeparators.test_separators",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "60623b489b2453068423b23dfd94b3bc4585cf03fb120a84b569aa5b7adabedc",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "8b13e6d141518c80e39f4744cc73177678fad12bece29e3f5fdbc262d1a51b10",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "9be3ca3713fe6149fc87f80dfcc240576c25a5f7b15557495310802e3dc5de91",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "3aa46d3a0d55a0c1be0176eab9907a26bf993f3f4c2c34b95d238323f4838c08",
+                "status": "OK"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_separators.TestPySeparators.test_illegal_separators": [
+          {
+            "source": "test_separators.TestSeparators.test_illegal_separators",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "fc0276ce18f7d77573bc01eb4a60537456bb05ef93e0035b8de81d0b7ff570b3",
+                "status": "TypeError"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "dcdcf55c31655de6c73b12113f6a6050cc6bbd7d98daff086449a1f04082961c",
+                "status": "TypeError"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "63f1d3b232217230f045866a7968a7c21e207d50a6c51efe3f428cca9c81de27",
+                "status": "TypeError"
+              }
+            ]
+          }
+        ],
+        "test.test_json.test_separators.TestPySeparators.test_separators": [
+          {
+            "source": "test_separators.TestSeparators.test_separators",
+            "execution": "host-driven",
+            "native_calls": [
+              {
+                "method": "dumps",
+                "source_sha256": "60623b489b2453068423b23dfd94b3bc4585cf03fb120a84b569aa5b7adabedc",
+                "status": "OK"
+              },
+              {
+                "method": "dumps",
+                "source_sha256": "8b13e6d141518c80e39f4744cc73177678fad12bece29e3f5fdbc262d1a51b10",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "9be3ca3713fe6149fc87f80dfcc240576c25a5f7b15557495310802e3dc5de91",
+                "status": "OK"
+              },
+              {
+                "method": "loads",
+                "source_sha256": "3aa46d3a0d55a0c1be0176eab9907a26bf993f3f4c2c34b95d238323f4838c08",
+                "status": "OK"
+              }
+            ]
+          }
+        ]
+      },
+      "failures": [],
+      "skips": []
+    }
+  }
+}

@@ -97,7 +97,7 @@ impl Checker<'_> {
                 )?;
                 let (op, ty) = match args.values[0].ty {
                     Type::Int => (Log::LevelName, Type::Str),
-                    Type::Str => (Log::LevelForName, self.types.logging_level_result()),
+                    Type::Str => (Log::LevelForName, self.types.string_or_int()),
                     _ => {
                         return Err(error(
                             self.source,
