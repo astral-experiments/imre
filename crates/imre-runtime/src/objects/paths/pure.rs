@@ -60,53 +60,99 @@ fn windows_lower(source: &str) -> Str {
     lowercase(source).expect("failed to allocate lowercase Windows path")
 }
 
-fn win_join(raw: &[Rc<Str>]) -> String {
-    let (mut drive, mut root, mut tail) = ("", "", String::new());
+fn replace_separator(source: &str, from: char, to: char) -> Result<Str> {
+    // Both separators are single-byte ASCII, so the result has exactly the input length.
+    let mut text = Str::try_with_capacity(source.len()).map_err(|_| Error::allocation())?;
+    for piece in source.split_inclusive(from) {
+        if let Some(piece) = piece.strip_suffix(from) {
+            text.push_str(piece);
+            text.push(to);
+        } else {
+            text.push_str(piece);
+        }
+    }
+    Ok(text)
+}
+
+fn append_segment(text: &mut Str, separator: &str, part: &str) -> Result<()> {
+    text.try_reserve(separator.len().saturating_add(part.len()))
+        .map_err(|_| Error::allocation())?;
+    text.push_str(separator);
+    text.push_str(part);
+    Ok(())
+}
+
+fn copy_components<'a>(parts: impl Iterator<Item = &'a str>) -> Result<Vec<Str>> {
+    let mut tail = Vec::new();
+    for part in parts {
+        tail.try_reserve(1).map_err(|_| Error::allocation())?;
+        tail.push(Str::try_new(part).map_err(|_| Error::allocation())?);
+    }
+    Ok(tail)
+}
+
+fn win_join(raw: &[Rc<Str>]) -> Result<Str> {
+    let (mut drive, mut root, mut tail) = ("", "", Str::default());
     for part in raw {
-        let input = part.replace('/', "\\");
+        let input = replace_separator(part, '/', '\\')?;
         let (d, r, t) = win_split(&input);
         // ntpath.join compares the original drive spellings, including separators.
         let d = &part[..d.len()];
         if !r.is_empty()
-            || (!d.is_empty() && d != drive && windows_lower(d) != windows_lower(drive))
+            || (!d.is_empty()
+                && d != drive
+                && lowercase(d).map_err(|_| Error::allocation())?
+                    != lowercase(drive).map_err(|_| Error::allocation())?)
         {
             if !d.is_empty() || drive.is_empty() {
                 drive = d;
             }
             root = if r.is_empty() { "" } else { "\\" };
-            tail = t.to_owned();
+            tail.clear();
+            append_segment(&mut tail, "", t)?;
         } else {
             if !d.is_empty() {
                 drive = d;
             }
-            if !tail.is_empty() && !tail.ends_with('\\') {
-                tail.push('\\');
-            }
-            tail.push_str(t);
+            let sep = if !tail.is_empty() && !tail.ends_with('\\') {
+                "\\"
+            } else {
+                ""
+            };
+            append_segment(&mut tail, sep, t)?;
         }
     }
-    let mut path = drive.replace('/', "\\");
-    if !tail.is_empty() && root.is_empty() && !path.is_empty() && !path.ends_with([':', '\\']) {
-        path.push('\\');
-    }
-    path.push_str(root);
-    path.push_str(&tail);
-    path
+    let mut path = replace_separator(drive, '/', '\\')?;
+    let sep = if !tail.is_empty()
+        && root.is_empty()
+        && !path.is_empty()
+        && !path.ends_with([':', '\\'])
+    {
+        "\\"
+    } else {
+        ""
+    };
+    append_segment(&mut path, sep, root)?;
+    append_segment(&mut path, "", &tail)?;
+    Ok(path)
 }
 
 impl PurePath {
-    pub(super) fn new(windows: bool, raw: Vec<Rc<Str>>) -> Self {
+    pub(super) fn new(windows: bool, raw: Vec<Rc<Str>>) -> Result<Self> {
         let input = if windows {
-            win_join(&raw)
+            win_join(&raw)?
         } else {
-            let mut input = String::new();
+            let mut input = Str::default();
             for part in &raw {
                 if part.starts_with('/') {
                     input.clear();
-                } else if !input.is_empty() && !input.ends_with('/') {
-                    input.push('/');
                 }
-                input.push_str(part);
+                let sep = if !input.is_empty() && !input.ends_with('/') {
+                    "/"
+                } else {
+                    ""
+                };
+                append_segment(&mut input, sep, part)?;
             }
             input
         };
@@ -134,31 +180,31 @@ impl PurePath {
                 _ => {}
             }
         }
-        let tail = rest
-            .split(sep)
-            .filter(|p| !p.is_empty() && *p != ".")
-            .map(Str::from)
-            .collect();
-        Self::parsed(windows, raw, drive.into(), root.into(), tail)
+        let tail = copy_components(rest.split(sep).filter(|p| !p.is_empty() && *p != "."))?;
+        let drive = Str::try_new(drive).map_err(|_| Error::allocation())?;
+        Self::parsed(windows, raw, drive, root.into(), tail)
     }
 
-    fn parsed(windows: bool, raw: Vec<Rc<Str>>, drive: Str, root: Str, tail: Vec<Str>) -> Self {
-        let mut text = drive.clone();
-        text.push_str(&root);
-        let sep = if windows { '\\' } else { '/' };
+    fn parsed(
+        windows: bool,
+        raw: Vec<Rc<Str>>,
+        drive: Str,
+        root: Str,
+        tail: Vec<Str>,
+    ) -> Result<Self> {
+        let mut text = Str::try_new(&drive).map_err(|_| Error::allocation())?;
+        append_segment(&mut text, "", &root)?;
+        let sep = if windows { "\\" } else { "/" };
         if windows && text.is_empty() && tail.first().is_some_and(|p| !win_split(p).0.is_empty()) {
-            text.push_str(".\\");
+            append_segment(&mut text, "", ".\\")?;
         }
         for (index, part) in tail.iter().enumerate() {
-            if index != 0 {
-                text.push(sep);
-            }
-            text.push_str(part);
+            append_segment(&mut text, if index == 0 { "" } else { sep }, part)?;
         }
         if text.is_empty() {
             text.push('.');
         }
-        Self {
+        Ok(Self {
             windows,
             raw,
             drive,
@@ -167,29 +213,36 @@ impl PurePath {
             text: Rc::new(text),
             folded: OnceCell::new(),
             name: OnceCell::new(),
-        }
+        })
     }
 
-    pub(super) fn join(&self, extra: impl IntoIterator<Item = Rc<Str>>) -> Self {
-        let mut raw = self.raw.clone();
+    pub(super) fn join(&self, extra: impl ExactSizeIterator<Item = Rc<Str>>) -> Result<Self> {
+        let mut raw = Vec::new();
+        raw.try_reserve_exact(self.raw.len().saturating_add(extra.len()))
+            .map_err(|_| Error::allocation())?;
+        raw.extend(self.raw.iter().cloned());
         raw.extend(extra);
         Self::new(self.windows, raw)
     }
 
-    fn with_tail(&self, tail: Vec<Str>) -> Self {
+    fn with_tail(&self, tail: Vec<Str>) -> Result<Self> {
         let mut p = Self::parsed(
             self.windows,
             vec![],
-            self.drive.clone(),
+            Str::try_new(&self.drive).map_err(|_| Error::allocation())?,
             self.root.clone(),
             tail,
-        );
+        )?;
         p.raw.push(Rc::clone(&p.text));
-        p
+        Ok(p)
     }
 
-    pub(super) fn parent(&self) -> Self {
-        self.with_tail(self.tail[..self.tail.len().saturating_sub(1)].to_vec())
+    pub(super) fn parent(&self) -> Result<Self> {
+        self.with_tail(copy_components(
+            self.tail[..self.tail.len().saturating_sub(1)]
+                .iter()
+                .map(Str::as_str),
+        )?)
     }
 
     /// Return the same normalized spelling used for Windows path equality.
@@ -299,10 +352,11 @@ impl PurePath {
                 ),
             )
         })?;
-        let tail = std::iter::repeat_n(Str::from(".."), other.tail.len() - common)
-            .chain(self.tail.iter().skip(common).cloned())
-            .collect();
-        let mut path = Self::parsed(self.windows, vec![], Str::default(), Str::default(), tail);
+        let tail = copy_components(
+            std::iter::repeat_n("..", other.tail.len() - common)
+                .chain(self.tail.iter().skip(common).map(Str::as_str)),
+        )?;
+        let mut path = Self::parsed(self.windows, vec![], Str::default(), Str::default(), tail)?;
         path.raw.push(Rc::clone(&path.text));
         Ok(path)
     }
@@ -341,7 +395,7 @@ impl PurePath {
                 format!("Invalid name {}", string_repr(name)),
             ));
         }
-        let mut tail = self.tail.clone();
+        let mut tail = copy_components(self.tail.iter().map(Str::as_str))?;
         let Some(last) = tail.last_mut() else {
             return Err(Error::new(
                 Kind::ValueError,
@@ -352,8 +406,8 @@ impl PurePath {
                 ),
             ));
         };
-        *last = name.clone();
-        Ok(self.with_tail(tail).into_object())
+        *last = Str::try_new(name).map_err(|_| Error::allocation())?;
+        Ok(self.with_tail(tail)?.into_object())
     }
 
     pub(super) fn as_posix(&self) -> Str {
@@ -409,7 +463,10 @@ impl Storage {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_pure_path_new(windows: u32) -> *const Object {
-    PurePath::new(windows != 0, vec![]).into_object()
+    super::finish(
+        PurePath::new(windows != 0, vec![]).map(PurePath::into_object),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety
@@ -425,16 +482,22 @@ pub unsafe extern "C" fn imre_path_join_object(
         object(left).0.with(|a| {
             object(right).0.with(|b| match (a, b) {
                 (Storage::PurePath(a), Storage::PurePath(b)) if a.windows == b.windows => {
-                    Ok(a.join(b.raw.iter().cloned()).into_object())
+                    a.join(b.raw.iter().cloned()).map(PurePath::into_object)
                 }
-                _ => Err(b.posix_spelling()),
+                _ => {
+                    let child = match b {
+                        Storage::PurePath(p) if p.windows => {
+                            Rc::new(replace_separator(&p.text, '\\', '/')?)
+                        }
+                        _ => Rc::clone(b.path_text()),
+                    };
+                    // SAFETY: the local Rc roots the spelling while the original path stays live.
+                    Ok(super::imre_path_join(left, Rc::as_ptr(&child)))
+                }
             })
         })
     };
-    result.unwrap_or_else(|child| {
-        // SAFETY: the local Rc roots the spelling while the original path stays live.
-        unsafe { super::imre_path_join(left, Rc::as_ptr(&child)) }
-    })
+    super::finish(result, std::ptr::null())
 }
 
 /// # Safety
