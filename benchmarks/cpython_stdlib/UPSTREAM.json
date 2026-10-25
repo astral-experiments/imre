@@ -4,7 +4,9 @@
   "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
   "files": {
     "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_base64.py": "9fe69f4f692d8f5782bdf33270d08070a0a580ad",
     "Lib/test/test_collections.py": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
+    "Lib/test/test_csv.py": "a0a1e91777d89345d543b27ee23049162cf3a0a3",
     "Lib/test/test_genericpath.py": "1a44cedcd360b11f2924bf7effca09a04c5e259a",
     "Lib/test/test_hashlib.py": "c7d7b801ac732a34f887460fb61b382787dd116e",
     "Lib/test/test_json/__init__.py": "74b64ed86a3183db5a54166d89cf2fb227281e06",
@@ -42,8 +44,11 @@
     "Lib/test/test_pathlib/test_read.py": "482203c290a3c4e136d11ae04ad52b1f15a2b277",
     "Lib/test/test_pathlib/test_write.py": "15054e804ec9fdf86c8b0b736b66242599579e92",
     "Lib/test/test_posixpath.py": "21f06712548d888ddf999ae127881420011d881e",
+    "Lib/test/test_re.py": "f6e797b3785dbeb21c2e3bd94ebffed10f043b54",
     "Lib/test/test_shutil.py": "fb1a7d876a617e17bcecbb8d8b654a2a87dafe48",
     "Lib/test/test_subprocess.py": "7e04934c317a91d1f5f1a284929d5f35c9cf5a58",
-    "Lib/test/test_sys.py": "0db0369500a7c7c965386bda5646046978fec3c7"
+    "Lib/test/test_sys.py": "0db0369500a7c7c965386bda5646046978fec3c7",
+    "Lib/test/test_zipfile/__init__.py": "4b16ecc31156a512db4a28fe272e5339994a4538",
+    "Lib/test/test_zipfile/test_core.py": "0d407371f40a0f785558a829c1f1805ac5b6e3ed"
   }
 }

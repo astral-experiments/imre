@@ -1,0 +1,122 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "method": "test.test_json.test_decode.TestDecode.test_keys_reuse",
+  "method_sha256": "1a1e5a4bffdfb1845de2a717074560fc1c330be8d1fb7c918c5d2a84edd2d22f",
+  "fixture": "CPython module, class, instance, unmodified method, sorted and identity assertions",
+  "operation": "one Imre json.loads; key owner comparisons in Imre",
+  "distinct-owner-negative-control": "passed",
+  "levels": {
+    "0": {
+      "repr": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_key_owners": []
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_key_owners": []
+        }
+      },
+      "native-owners": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "blocked",
+          "reason": "No native driver binding for json.decoder.JSONDecoder",
+          "repr_calls": [],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "blocked",
+          "reason": "No native driver binding for json.decoder.JSONDecoder",
+          "repr_calls": [],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    "3": {
+      "repr": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_key_owners": []
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_key_owners": []
+        }
+      },
+      "native-owners": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "blocked",
+          "reason": "No native driver binding for json.decoder.JSONDecoder",
+          "repr_calls": [],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "blocked",
+          "reason": "No native driver binding for json.decoder.JSONDecoder",
+          "repr_calls": [],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    }
+  }
+}

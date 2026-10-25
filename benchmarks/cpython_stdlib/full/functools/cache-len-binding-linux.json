@@ -1,0 +1,705 @@
+{
+  "module": "test.test_functools",
+  "denominator": 325,
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "optimization_levels": {
+    "0": {
+      "test.test_functools.TestCacheC.test_cache": {
+        "status": "host_driven_native_operation",
+        "lookups": 44,
+        "callback_calls": 16,
+        "snapshots": 2,
+        "clears": 1
+      },
+      "test.test_functools.TestCachePy.test_cache": {
+        "status": "host_driven_native_operation",
+        "lookups": 44,
+        "callback_calls": 16,
+        "snapshots": 2,
+        "clears": 1
+      },
+      "test.test_functools.TestLRUC.test_common_signatures": {
+        "status": "blocked",
+        "host_wrapper_metadata": 2,
+        "diagnostic": "UnsupportedFixture: no native cache operation executed"
+      },
+      "test.test_functools.TestLRUC.test_copy": {
+        "status": "blocked",
+        "diagnostic": "copy of pre-existing cache wrappers and a partial requires native callable identity"
+      },
+      "test.test_functools.TestLRUC.test_deepcopy": {
+        "status": "blocked",
+        "diagnostic": "deepcopy of pre-existing cache wrappers and a partial requires native callable identity"
+      },
+      "test.test_functools.TestLRUC.test_get_annotations": {
+        "status": "blocked",
+        "diagnostic": "annotationlib reads native wrapper metadata; host proxy metadata is not evidence"
+      },
+      "test.test_functools.TestLRUC.test_get_annotations_with_forwardref": {
+        "status": "blocked",
+        "diagnostic": "deferred annotation callbacks and annotationlib.ForwardRef are not native"
+      },
+      "test.test_functools.TestLRUC.test_kwargs_order": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUC.test_lru": {
+        "status": "mixed",
+        "snapshots": 11,
+        "lookups": 1027,
+        "callback_calls": 216,
+        "clears": 1,
+        "host_wrapper_metadata": 2,
+        "host_named_fields": 3
+      },
+      "test.test_functools.TestLRUC.test_lru_bug_35780": {
+        "status": "mixed",
+        "lookups": 17,
+        "callback_calls": 17,
+        "snapshots": 2,
+        "host_named_fields": 2
+      },
+      "test.test_functools.TestLRUC.test_lru_bug_36650": {
+        "status": "mixed",
+        "lookups": 2,
+        "callback_calls": 1,
+        "snapshots": 1,
+        "host_named_fields": 1
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_decoration": {
+        "status": "blocked",
+        "diagnostic": "assigned wrapper metadata requires native update_wrapper"
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_parameters": {
+        "status": "host_driven_native_operation",
+        "parameter_reads": 2
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_threaded": {
+        "status": "blocked",
+        "diagnostic": "native cache state is thread-local; suite requires one cache shared across threads"
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_threaded2": {
+        "status": "blocked",
+        "diagnostic": "simultaneous misses in one shared cache require native cross-thread state"
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_threaded3": {
+        "status": "blocked",
+        "diagnostic": "simultaneous misses and eviction require native cross-thread state"
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_typed_is_not_recursive": {
+        "status": "blocked",
+        "lookups": 1,
+        "callback_calls": 1,
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'bool'>,)"
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_weakrefable": {
+        "status": "blocked",
+        "diagnostic": "weak references to function/method wrappers would target the host proxy"
+      },
+      "test.test_functools.TestLRUC.test_lru_hash_only_once": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'unittest.mock.Mock'>, <class 'int'>)"
+      },
+      "test.test_functools.TestLRUC.test_lru_method": {
+        "status": "blocked",
+        "diagnostic": "native method descriptors and int subclass cache keys are not yet supported"
+      },
+      "test.test_functools.TestLRUC.test_lru_no_args": {
+        "status": "mixed",
+        "lookups": 3,
+        "callback_calls": 2,
+        "snapshots": 4,
+        "host_named_fields": 4
+      },
+      "test.test_functools.TestLRUC.test_lru_recursion": {
+        "status": "blocked",
+        "diagnostic": "the C variant asserts a native recursion limit; host stack exhaustion is not evidence"
+      },
+      "test.test_functools.TestLRUC.test_lru_reentrancy_with_len": {
+        "status": "mixed",
+        "host_len_binding_calls": 13,
+        "lookups": 13,
+        "callback_calls": 10,
+        "binding_observations": [
+          {
+            "binding": "builtins.len",
+            "calls_while_replaced": 13,
+            "cache_info_before_teardown": [
+              3,
+              10,
+              4,
+              4
+            ],
+            "original_is_callback": true,
+            "original_identity_restored": true
+          }
+        ]
+      },
+      "test.test_functools.TestLRUC.test_lru_star_arg_handling": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls require a fixed positional argument list"
+      },
+      "test.test_functools.TestLRUC.test_lru_type_error": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'list'>,)"
+      },
+      "test.test_functools.TestLRUC.test_lru_with_exceptions": {
+        "status": "mixed",
+        "lookups": 6,
+        "callback_calls": 6,
+        "host_exception_state": 4
+      },
+      "test.test_functools.TestLRUC.test_lru_with_keyword_args": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUC.test_lru_with_keyword_args_maxsize_none": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUC.test_lru_with_maxsize_negative": {
+        "status": "host_driven_native_operation",
+        "lookups": 300,
+        "callback_calls": 300,
+        "snapshots": 1
+      },
+      "test.test_functools.TestLRUC.test_lru_with_maxsize_none": {
+        "status": "host_driven_native_operation",
+        "lookups": 44,
+        "callback_calls": 16,
+        "snapshots": 2,
+        "clears": 1
+      },
+      "test.test_functools.TestLRUC.test_lru_with_types": {
+        "status": "blocked",
+        "lookups": 2,
+        "callback_calls": 1,
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'float'>,)"
+      },
+      "test.test_functools.TestLRUC.test_need_for_rlock": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'test.test_functools.TestLRU.test_need_for_rlock.<locals>.DoubleEq'>,)"
+      },
+      "test.test_functools.TestLRUC.test_pickle": {
+        "status": "blocked",
+        "diagnostic": "pickle of module/class-level cached functions requires native global callable identity"
+      },
+      "test.test_functools.TestLRUPy.test_common_signatures": {
+        "status": "blocked",
+        "host_wrapper_metadata": 2,
+        "diagnostic": "UnsupportedFixture: no native cache operation executed"
+      },
+      "test.test_functools.TestLRUPy.test_copy": {
+        "status": "blocked",
+        "diagnostic": "copy of pre-existing cache wrappers and a partial requires native callable identity"
+      },
+      "test.test_functools.TestLRUPy.test_deepcopy": {
+        "status": "blocked",
+        "diagnostic": "deepcopy of pre-existing cache wrappers and a partial requires native callable identity"
+      },
+      "test.test_functools.TestLRUPy.test_get_annotations": {
+        "status": "blocked",
+        "diagnostic": "annotationlib reads native wrapper metadata; host proxy metadata is not evidence"
+      },
+      "test.test_functools.TestLRUPy.test_get_annotations_with_forwardref": {
+        "status": "blocked",
+        "diagnostic": "deferred annotation callbacks and annotationlib.ForwardRef are not native"
+      },
+      "test.test_functools.TestLRUPy.test_kwargs_order": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUPy.test_lru": {
+        "status": "mixed",
+        "snapshots": 11,
+        "lookups": 1027,
+        "callback_calls": 212,
+        "clears": 1,
+        "host_wrapper_metadata": 2,
+        "host_named_fields": 3
+      },
+      "test.test_functools.TestLRUPy.test_lru_bug_35780": {
+        "status": "mixed",
+        "lookups": 17,
+        "callback_calls": 17,
+        "snapshots": 2,
+        "host_named_fields": 2
+      },
+      "test.test_functools.TestLRUPy.test_lru_bug_36650": {
+        "status": "mixed",
+        "lookups": 2,
+        "callback_calls": 1,
+        "snapshots": 1,
+        "host_named_fields": 1
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_decoration": {
+        "status": "blocked",
+        "diagnostic": "assigned wrapper metadata requires native update_wrapper"
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_parameters": {
+        "status": "host_driven_native_operation",
+        "parameter_reads": 2
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_threaded": {
+        "status": "blocked",
+        "diagnostic": "native cache state is thread-local; suite requires one cache shared across threads"
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_threaded2": {
+        "status": "blocked",
+        "diagnostic": "simultaneous misses in one shared cache require native cross-thread state"
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_threaded3": {
+        "status": "blocked",
+        "diagnostic": "simultaneous misses and eviction require native cross-thread state"
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_typed_is_not_recursive": {
+        "status": "blocked",
+        "lookups": 1,
+        "callback_calls": 1,
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'bool'>,)"
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_weakrefable": {
+        "status": "blocked",
+        "diagnostic": "weak references to function/method wrappers would target the host proxy"
+      },
+      "test.test_functools.TestLRUPy.test_lru_hash_only_once": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'unittest.mock.Mock'>, <class 'int'>)"
+      },
+      "test.test_functools.TestLRUPy.test_lru_method": {
+        "status": "blocked",
+        "diagnostic": "native method descriptors and int subclass cache keys are not yet supported"
+      },
+      "test.test_functools.TestLRUPy.test_lru_no_args": {
+        "status": "mixed",
+        "lookups": 3,
+        "callback_calls": 2,
+        "snapshots": 4,
+        "host_named_fields": 4
+      },
+      "test.test_functools.TestLRUPy.test_lru_recursion": {
+        "status": "host_driven_native_operation",
+        "lookups": 199,
+        "callback_calls": 101
+      },
+      "test.test_functools.TestLRUPy.test_lru_reentrancy_with_len": {
+        "status": "mixed",
+        "host_len_binding_calls": 13,
+        "lookups": 13,
+        "callback_calls": 10,
+        "binding_observations": [
+          {
+            "binding": "builtins.len",
+            "calls_while_replaced": 13,
+            "cache_info_before_teardown": [
+              3,
+              10,
+              4,
+              4
+            ],
+            "original_is_callback": true,
+            "original_identity_restored": true
+          }
+        ]
+      },
+      "test.test_functools.TestLRUPy.test_lru_star_arg_handling": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls require a fixed positional argument list"
+      },
+      "test.test_functools.TestLRUPy.test_lru_type_error": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'list'>,)"
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_exceptions": {
+        "status": "mixed",
+        "lookups": 6,
+        "callback_calls": 6,
+        "host_exception_state": 4
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_keyword_args": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_keyword_args_maxsize_none": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_maxsize_negative": {
+        "status": "host_driven_native_operation",
+        "lookups": 300,
+        "callback_calls": 300,
+        "snapshots": 1
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_maxsize_none": {
+        "status": "host_driven_native_operation",
+        "lookups": 44,
+        "callback_calls": 16,
+        "snapshots": 2,
+        "clears": 1
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_types": {
+        "status": "blocked",
+        "lookups": 2,
+        "callback_calls": 1,
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'float'>,)"
+      },
+      "test.test_functools.TestLRUPy.test_need_for_rlock": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'test.test_functools.TestLRU.test_need_for_rlock.<locals>.DoubleEq'>,)"
+      },
+      "test.test_functools.TestLRUPy.test_pickle": {
+        "status": "blocked",
+        "diagnostic": "pickle of module/class-level cached functions requires native global callable identity"
+      }
+    },
+    "3": {
+      "test.test_functools.TestCacheC.test_cache": {
+        "status": "host_driven_native_operation",
+        "lookups": 44,
+        "callback_calls": 16,
+        "snapshots": 2,
+        "clears": 1
+      },
+      "test.test_functools.TestCachePy.test_cache": {
+        "status": "host_driven_native_operation",
+        "lookups": 44,
+        "callback_calls": 16,
+        "snapshots": 2,
+        "clears": 1
+      },
+      "test.test_functools.TestLRUC.test_common_signatures": {
+        "status": "blocked",
+        "host_wrapper_metadata": 2,
+        "diagnostic": "UnsupportedFixture: no native cache operation executed"
+      },
+      "test.test_functools.TestLRUC.test_copy": {
+        "status": "blocked",
+        "diagnostic": "copy of pre-existing cache wrappers and a partial requires native callable identity"
+      },
+      "test.test_functools.TestLRUC.test_deepcopy": {
+        "status": "blocked",
+        "diagnostic": "deepcopy of pre-existing cache wrappers and a partial requires native callable identity"
+      },
+      "test.test_functools.TestLRUC.test_get_annotations": {
+        "status": "blocked",
+        "diagnostic": "annotationlib reads native wrapper metadata; host proxy metadata is not evidence"
+      },
+      "test.test_functools.TestLRUC.test_get_annotations_with_forwardref": {
+        "status": "blocked",
+        "diagnostic": "deferred annotation callbacks and annotationlib.ForwardRef are not native"
+      },
+      "test.test_functools.TestLRUC.test_kwargs_order": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUC.test_lru": {
+        "status": "mixed",
+        "snapshots": 11,
+        "lookups": 1027,
+        "callback_calls": 216,
+        "clears": 1,
+        "host_wrapper_metadata": 2,
+        "host_named_fields": 3
+      },
+      "test.test_functools.TestLRUC.test_lru_bug_35780": {
+        "status": "mixed",
+        "lookups": 17,
+        "callback_calls": 17,
+        "snapshots": 2,
+        "host_named_fields": 2
+      },
+      "test.test_functools.TestLRUC.test_lru_bug_36650": {
+        "status": "mixed",
+        "lookups": 2,
+        "callback_calls": 1,
+        "snapshots": 1,
+        "host_named_fields": 1
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_decoration": {
+        "status": "blocked",
+        "diagnostic": "assigned wrapper metadata requires native update_wrapper"
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_parameters": {
+        "status": "host_driven_native_operation",
+        "parameter_reads": 2
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_threaded": {
+        "status": "blocked",
+        "diagnostic": "native cache state is thread-local; suite requires one cache shared across threads"
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_threaded2": {
+        "status": "blocked",
+        "diagnostic": "simultaneous misses in one shared cache require native cross-thread state"
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_threaded3": {
+        "status": "blocked",
+        "diagnostic": "simultaneous misses and eviction require native cross-thread state"
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_typed_is_not_recursive": {
+        "status": "blocked",
+        "lookups": 1,
+        "callback_calls": 1,
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'bool'>,)"
+      },
+      "test.test_functools.TestLRUC.test_lru_cache_weakrefable": {
+        "status": "blocked",
+        "diagnostic": "weak references to function/method wrappers would target the host proxy"
+      },
+      "test.test_functools.TestLRUC.test_lru_hash_only_once": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'unittest.mock.Mock'>, <class 'int'>)"
+      },
+      "test.test_functools.TestLRUC.test_lru_method": {
+        "status": "blocked",
+        "diagnostic": "native method descriptors and int subclass cache keys are not yet supported"
+      },
+      "test.test_functools.TestLRUC.test_lru_no_args": {
+        "status": "mixed",
+        "lookups": 3,
+        "callback_calls": 2,
+        "snapshots": 4,
+        "host_named_fields": 4
+      },
+      "test.test_functools.TestLRUC.test_lru_recursion": {
+        "status": "blocked",
+        "diagnostic": "the C variant asserts a native recursion limit; host stack exhaustion is not evidence"
+      },
+      "test.test_functools.TestLRUC.test_lru_reentrancy_with_len": {
+        "status": "mixed",
+        "host_len_binding_calls": 13,
+        "lookups": 13,
+        "callback_calls": 10,
+        "binding_observations": [
+          {
+            "binding": "builtins.len",
+            "calls_while_replaced": 13,
+            "cache_info_before_teardown": [
+              3,
+              10,
+              4,
+              4
+            ],
+            "original_is_callback": true,
+            "original_identity_restored": true
+          }
+        ]
+      },
+      "test.test_functools.TestLRUC.test_lru_star_arg_handling": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls require a fixed positional argument list"
+      },
+      "test.test_functools.TestLRUC.test_lru_type_error": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'list'>,)"
+      },
+      "test.test_functools.TestLRUC.test_lru_with_exceptions": {
+        "status": "mixed",
+        "lookups": 6,
+        "callback_calls": 6,
+        "host_exception_state": 4
+      },
+      "test.test_functools.TestLRUC.test_lru_with_keyword_args": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUC.test_lru_with_keyword_args_maxsize_none": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUC.test_lru_with_maxsize_negative": {
+        "status": "host_driven_native_operation",
+        "lookups": 300,
+        "callback_calls": 300,
+        "snapshots": 1
+      },
+      "test.test_functools.TestLRUC.test_lru_with_maxsize_none": {
+        "status": "host_driven_native_operation",
+        "lookups": 44,
+        "callback_calls": 16,
+        "snapshots": 2,
+        "clears": 1
+      },
+      "test.test_functools.TestLRUC.test_lru_with_types": {
+        "status": "blocked",
+        "lookups": 2,
+        "callback_calls": 1,
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'float'>,)"
+      },
+      "test.test_functools.TestLRUC.test_need_for_rlock": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'test.test_functools.TestLRU.test_need_for_rlock.<locals>.DoubleEq'>,)"
+      },
+      "test.test_functools.TestLRUC.test_pickle": {
+        "status": "blocked",
+        "diagnostic": "pickle of module/class-level cached functions requires native global callable identity"
+      },
+      "test.test_functools.TestLRUPy.test_common_signatures": {
+        "status": "blocked",
+        "host_wrapper_metadata": 2,
+        "diagnostic": "UnsupportedFixture: no native cache operation executed"
+      },
+      "test.test_functools.TestLRUPy.test_copy": {
+        "status": "blocked",
+        "diagnostic": "copy of pre-existing cache wrappers and a partial requires native callable identity"
+      },
+      "test.test_functools.TestLRUPy.test_deepcopy": {
+        "status": "blocked",
+        "diagnostic": "deepcopy of pre-existing cache wrappers and a partial requires native callable identity"
+      },
+      "test.test_functools.TestLRUPy.test_get_annotations": {
+        "status": "blocked",
+        "diagnostic": "annotationlib reads native wrapper metadata; host proxy metadata is not evidence"
+      },
+      "test.test_functools.TestLRUPy.test_get_annotations_with_forwardref": {
+        "status": "blocked",
+        "diagnostic": "deferred annotation callbacks and annotationlib.ForwardRef are not native"
+      },
+      "test.test_functools.TestLRUPy.test_kwargs_order": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUPy.test_lru": {
+        "status": "mixed",
+        "snapshots": 11,
+        "lookups": 1027,
+        "callback_calls": 212,
+        "clears": 1,
+        "host_wrapper_metadata": 2,
+        "host_named_fields": 3
+      },
+      "test.test_functools.TestLRUPy.test_lru_bug_35780": {
+        "status": "mixed",
+        "lookups": 17,
+        "callback_calls": 17,
+        "snapshots": 2,
+        "host_named_fields": 2
+      },
+      "test.test_functools.TestLRUPy.test_lru_bug_36650": {
+        "status": "mixed",
+        "lookups": 2,
+        "callback_calls": 1,
+        "snapshots": 1,
+        "host_named_fields": 1
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_decoration": {
+        "status": "blocked",
+        "diagnostic": "assigned wrapper metadata requires native update_wrapper"
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_parameters": {
+        "status": "host_driven_native_operation",
+        "parameter_reads": 2
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_threaded": {
+        "status": "blocked",
+        "diagnostic": "native cache state is thread-local; suite requires one cache shared across threads"
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_threaded2": {
+        "status": "blocked",
+        "diagnostic": "simultaneous misses in one shared cache require native cross-thread state"
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_threaded3": {
+        "status": "blocked",
+        "diagnostic": "simultaneous misses and eviction require native cross-thread state"
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_typed_is_not_recursive": {
+        "status": "blocked",
+        "lookups": 1,
+        "callback_calls": 1,
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'bool'>,)"
+      },
+      "test.test_functools.TestLRUPy.test_lru_cache_weakrefable": {
+        "status": "blocked",
+        "diagnostic": "weak references to function/method wrappers would target the host proxy"
+      },
+      "test.test_functools.TestLRUPy.test_lru_hash_only_once": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'unittest.mock.Mock'>, <class 'int'>)"
+      },
+      "test.test_functools.TestLRUPy.test_lru_method": {
+        "status": "blocked",
+        "diagnostic": "native method descriptors and int subclass cache keys are not yet supported"
+      },
+      "test.test_functools.TestLRUPy.test_lru_no_args": {
+        "status": "mixed",
+        "lookups": 3,
+        "callback_calls": 2,
+        "snapshots": 4,
+        "host_named_fields": 4
+      },
+      "test.test_functools.TestLRUPy.test_lru_recursion": {
+        "status": "host_driven_native_operation",
+        "lookups": 199,
+        "callback_calls": 101
+      },
+      "test.test_functools.TestLRUPy.test_lru_reentrancy_with_len": {
+        "status": "mixed",
+        "host_len_binding_calls": 13,
+        "lookups": 13,
+        "callback_calls": 10,
+        "binding_observations": [
+          {
+            "binding": "builtins.len",
+            "calls_while_replaced": 13,
+            "cache_info_before_teardown": [
+              3,
+              10,
+              4,
+              4
+            ],
+            "original_is_callback": true,
+            "original_identity_restored": true
+          }
+        ]
+      },
+      "test.test_functools.TestLRUPy.test_lru_star_arg_handling": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls require a fixed positional argument list"
+      },
+      "test.test_functools.TestLRUPy.test_lru_type_error": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'list'>,)"
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_exceptions": {
+        "status": "mixed",
+        "lookups": 6,
+        "callback_calls": 6,
+        "host_exception_state": 4
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_keyword_args": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_keyword_args_maxsize_none": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cached calls do not yet retain keyword order and names"
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_maxsize_negative": {
+        "status": "host_driven_native_operation",
+        "lookups": 300,
+        "callback_calls": 300,
+        "snapshots": 1
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_maxsize_none": {
+        "status": "host_driven_native_operation",
+        "lookups": 44,
+        "callback_calls": 16,
+        "snapshots": 2,
+        "clears": 1
+      },
+      "test.test_functools.TestLRUPy.test_lru_with_types": {
+        "status": "blocked",
+        "lookups": 2,
+        "callback_calls": 1,
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'float'>,)"
+      },
+      "test.test_functools.TestLRUPy.test_need_for_rlock": {
+        "status": "blocked",
+        "diagnostic": "UnsupportedFixture: native cache fixture needs exact integer or string keys: (<class 'test.test_functools.TestLRU.test_need_for_rlock.<locals>.DoubleEq'>,)"
+      },
+      "test.test_functools.TestLRUPy.test_pickle": {
+        "status": "blocked",
+        "diagnostic": "pickle of module/class-level cached functions requires native global callable identity"
+      }
+    }
+  }
+}

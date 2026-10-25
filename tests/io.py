@@ -25,8 +25,28 @@ print(0)
 print(-17)
 print(1000000000000000000000000000000000000000000000000000000000001)
 ''',
-    "large": "print(" + repr("prefix\0" + "éλ🙂" * 8192 + "\0suffix") + ")\n"
+    # Exceed the 128 KiB binary buffer CPython 3.14 uses for a pipe.
+    "large": "print(" + repr("prefix\0" + "éλ🙂" * 32768 + "\0suffix") + ")\n"
     'for index in range(160):\n    print(index)\nprint("large output finished")\n',
+    "print_errno": """import os
+import sys
+for fd in [1, 2]:
+    saved = os.dup(fd)
+    os.dup2(int(sys.argv[1]), fd)
+    try:
+        if fd == 1:
+            print("x" * 131072)
+        else:
+            print("x", file=sys.stderr)
+    except OSError as error:
+        code = repr(error.errno)
+    else:
+        code = "missing error"
+    finally:
+        os.dup2(saved, fd)
+        os.close(saved)
+    print(code)
+""",
     "division_error": '''print("before division error")
 print(1000000000000000000000000000000000000000000000000000000000001)
 zero = int("0")
@@ -376,11 +396,25 @@ def main() -> None:
             )
             passed += 1
 
-            # CPython may report status 120 during shutdown. Imre's contract is OSError/1.
-            for name, category in [
-                ("small", b"OSError"),
-                ("large", b"OSError"),
-                ("division_error", b"ZeroDivisionError"),
+            # A caught print failure on either stream retains the pipe errno.
+            reader, writer = os.pipe()
+            os.close(reader)
+            with os.fdopen(writer, "wb", buffering=0):
+                commands = ([args.python, "-I", str(sources["print_errno"])], [binaries["print_errno"]])
+                reference_run, native_run = [run([*cmd, str(writer)], pass_fds=(writer,)) for cmd in commands]
+                assert reference_run.returncode == native_run.returncode == 0
+                same_output(reference_run.stdout, (str(errno.EPIPE) + "\n").encode() * 2, "reference errno")
+                same_output(native_run.stdout, reference_run.stdout, "print errno")
+                same_output(native_run.stderr, reference_run.stderr, "retained stderr")
+            passed += 1
+
+            # The large print writes immediately. The smaller buffered writes fail
+            # during shutdown, including after an unhandled division error.
+            shutdown = b"Exception ignored while flushing sys.stdout:\nBrokenPipeError:"
+            for name, status, prefix, lines in [
+                ("small", 120, shutdown, 2),
+                ("large", 1, b"OSError:", 1),
+                ("division_error", 120, b"ZeroDivisionError:", 3),
             ]:
                 reader, writer = os.pipe()
                 os.close(reader)
@@ -389,10 +423,12 @@ def main() -> None:
                         [binaries[name]], stdin=subprocess.DEVNULL, stdout=sink,
                         stderr=subprocess.PIPE, timeout=60, check=False, env=environment(),
                     )
-                assert result.returncode == 1 and result.stderr.startswith(category + b":"), (
+                assert result.returncode == status and result.stderr.startswith(prefix), (
                     "broken pipe", name, level, result.returncode, result.stderr[:2000],
                 )
-                assert result.stderr.count(b"\n") == 1 and result.stderr.endswith(b"\n"), (
+                if status == 120:
+                    assert shutdown in result.stderr, (name, level, result.stderr[:2000])
+                assert result.stderr.count(b"\n") == lines and result.stderr.endswith(b"\n"), (
                     "broken pipe", name, level, result.stderr[:2000],
                 )
                 passed += 1

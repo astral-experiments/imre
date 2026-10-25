@@ -1,8 +1,12 @@
-//! Closed text unions reuse two alignment bits of their exact Rc payload.
+//! Closed unions use three alignment bits of their exact Rc payload.
 //! Zero is reserved for absent optionals and partially initialized storage.
+//! Words one and two represent the bool singletons; other nonzero words carry a member tag.
 
 use super::words::WordKind;
-use super::{Bytes, Object, Str, object};
+use super::{Bytes, Int, Object, Str, object};
+use num_bigint::BigInt;
+use num_traits::{ToPrimitive, Zero};
+use std::rc::Rc;
 
 const _: () = assert!(
     align_of::<Str>() >= 8
@@ -13,6 +17,11 @@ const _: () = assert!(
 
 /// Recovers the original address and the runtime descriptor for its owner.
 pub(super) fn member(value: usize) -> (usize, WordKind) {
+    // No live allocation has a null address. These otherwise unused tagged
+    // words encode Python's two bool singletons, just like nullable bool.
+    if matches!(value, 1 | 2) {
+        return (value - 1, WordKind::new(1));
+    }
     let kind = match value & 7 {
         0 => 3,                                      // str
         1 => 8,                                      // bytes
@@ -21,9 +30,44 @@ pub(super) fn member(value: usize) -> (usize, WordKind) {
         4 => 6,                                      // fixed record
         6 => 5,                                      // pathlib.Path
         5 => return (value >> 3, WordKind::new(10)), // ordinary Enum tag
-        _ => unreachable!("invalid text union tag"),
+        7 => 2, // aligned Rc<BigInt>, even for an ordinary immediate integer
+        _ => unreachable!(),
     };
     (value & !7, WordKind::new(kind))
+}
+
+/// An immediate integer already uses its low bit. Give it aligned storage
+/// inside the union; an existing large integer transfers its allocation.
+pub(super) fn integer(value: Int) -> usize {
+    let word = match value.as_small() {
+        Some(small) => Rc::into_raw(Rc::new(BigInt::from(small))) as usize,
+        None => value.into_raw(),
+    };
+    word | 7
+}
+
+/// # Safety
+/// Takes ownership of an exact integer word, or zero for an absent optional.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_union_from_int(word: usize) -> usize {
+    if word == 0 { 0 } else { integer(Int(word)) }
+}
+
+/// # Safety
+/// Takes ownership of a present bool or integer member; restores the canonical
+/// immediate representation before it is used as an integer or dictionary key.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_union_into_int(word: usize) -> usize {
+    if matches!(word, 1 | 2) {
+        return Int::small(i64::from(word == 2)).unwrap().into_raw();
+    }
+    let value = Int(word & !7);
+    value
+        .big()
+        .to_i64()
+        .and_then(Int::small)
+        .unwrap_or(value)
+        .into_raw()
 }
 
 /// # Safety
@@ -48,8 +92,8 @@ pub unsafe extern "C" fn imre_union_release(value: usize) {
 /// Borrows the exact rooted union member. Zero is false.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_union_truthy(value: usize) -> u32 {
-    if value == 0 {
-        return 0;
+    if value <= 2 {
+        return u32::from(value == 2);
     }
     let (word, _) = member(value);
     // SAFETY: the caller roots the selected member and no user code runs here.
@@ -60,9 +104,54 @@ pub unsafe extern "C" fn imre_union_truthy(value: usize) -> u32 {
             2 => object(word as *const Object)
                 .0
                 .with(|s| !s.sequence().values.is_empty()),
+            7 => !(*(word as *const BigInt)).is_zero(),
             _ => true,
         })
     }
+}
+
+/// Reads the list or tuple length without copying its elements.
+///
+/// # Safety
+/// The caller roots a tagged str list (2) or a tuple of strs (4).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_string_iterable_len(value: usize) -> usize {
+    let (word, _) = member(value);
+    if value & 7 == 2 {
+        // SAFETY: the original list is rooted throughout this length read.
+        return unsafe { super::imre_seq_len(word as *const Object) };
+    }
+    debug_assert_eq!(value & 7, 4);
+    // SAFETY: the tuple owns a live descriptor with its fixed, bounded arity.
+    (unsafe { super::records::descriptor(word as *const usize).length } << 1) | 1
+}
+
+/// Returns the original list for live iteration, or copies immutable tuple field references.
+/// The tuple itself remains available wherever the Iterable is stored or formatted.
+///
+/// # Safety
+/// The caller roots an exact list of strings (tag 2) or a tuple containing only strings (tag 4).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_string_iterable_list(value: usize) -> *const Object {
+    let (word, _) = member(value);
+    if value & 7 == 2 {
+        // SAFETY: the tagged value roots this live sequence handle.
+        return std::rc::Rc::into_raw(unsafe { super::acquire_rc::<Object>(word) });
+    }
+    debug_assert_eq!(value & 7, 4);
+    let fields = word as *const usize;
+    // SAFETY: the descriptor describes the rooted tuple payload and all its initialized str fields.
+    let entries =
+        unsafe { std::slice::from_raw_parts(fields, super::records::descriptor(fields).length) };
+    let mut words = super::Words::new(3);
+    if words.values.try_reserve_exact(entries.len()).is_err() {
+        return super::finish(Err(super::Error::allocation()), std::ptr::null());
+    }
+    words.values.extend(entries.iter().map(|&entry| {
+        // SAFETY: the immutable tuple keeps this str alive while taking the list's own reference.
+        unsafe { WordKind::new(3).acquire(entry) }.into_word()
+    }));
+    std::rc::Rc::into_raw(words.into_object())
 }
 
 #[cfg(test)]

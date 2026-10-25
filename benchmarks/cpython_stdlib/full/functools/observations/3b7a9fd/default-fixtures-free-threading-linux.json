@@ -1,0 +1,390 @@
+{
+  "compiler_commit": "3b7a9fd34d468b4f2ee8dd3e671aa2b6c943140f",
+  "binary_sha256": {
+    "imre": "2f723198ba377521ba74d8b87dab6850b6cb24982b139192e289d2d2af1328b3",
+    "libimre_runtime.a": "0bab331746d1c84546eb31c360272bf0b92c2e27c971cd804d57dd364c123921"
+  },
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "modes": {
+    "ordinary": [
+      {
+        "schema": "imre.cpython-stdlib.native-evidence/v1",
+        "suite": "test.test_free_threading.test_functools",
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "platform": "linux",
+        "opt_level": 0,
+        "denominator": 4,
+        "distinct_ids": 4,
+        "counts": {
+          "blocked": 4
+        },
+        "records": [
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_bounded",
+            "occurrence": 1,
+            "opt_level": 0,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_bounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_unbounded",
+            "occurrence": 1,
+            "opt_level": 0,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_unbounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_bounded",
+            "occurrence": 1,
+            "opt_level": 0,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_bounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_unbounded",
+            "occurrence": 1,
+            "opt_level": 0,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_unbounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          }
+        ]
+      },
+      {
+        "schema": "imre.cpython-stdlib.native-evidence/v1",
+        "suite": "test.test_free_threading.test_functools",
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "platform": "linux",
+        "opt_level": 3,
+        "denominator": 4,
+        "distinct_ids": 4,
+        "counts": {
+          "blocked": 4
+        },
+        "records": [
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_bounded",
+            "occurrence": 1,
+            "opt_level": 3,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_bounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_unbounded",
+            "occurrence": 1,
+            "opt_level": 3,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_unbounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_bounded",
+            "occurrence": 1,
+            "opt_level": 3,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_bounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_unbounded",
+            "occurrence": 1,
+            "opt_level": 3,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_unbounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          }
+        ]
+      }
+    ],
+    "reachable": [
+      {
+        "schema": "imre.cpython-stdlib.native-evidence/v1",
+        "suite": "test.test_free_threading.test_functools",
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "platform": "linux",
+        "opt_level": 0,
+        "denominator": 4,
+        "distinct_ids": 4,
+        "counts": {
+          "blocked": 4
+        },
+        "records": [
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_bounded",
+            "occurrence": 1,
+            "opt_level": 0,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_bounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_unbounded",
+            "occurrence": 1,
+            "opt_level": 0,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_unbounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_bounded",
+            "occurrence": 1,
+            "opt_level": 0,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_bounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_unbounded",
+            "occurrence": 1,
+            "opt_level": 0,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_unbounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          }
+        ]
+      },
+      {
+        "schema": "imre.cpython-stdlib.native-evidence/v1",
+        "suite": "test.test_free_threading.test_functools",
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "platform": "linux",
+        "opt_level": 3,
+        "denominator": 4,
+        "distinct_ids": 4,
+        "counts": {
+          "blocked": 4
+        },
+        "records": [
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_bounded",
+            "occurrence": 1,
+            "opt_level": 3,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_bounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_unbounded",
+            "occurrence": 1,
+            "opt_level": 3,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_unbounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_bounded",
+            "occurrence": 1,
+            "opt_level": 3,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_bounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          },
+          {
+            "id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_unbounded",
+            "occurrence": 1,
+            "opt_level": 3,
+            "fixture_variant": "TestLRUCache",
+            "reference": "pass",
+            "outcome": "blocked",
+            "reason": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_unbounded: decorated or configured class/method needs its original fixture",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "a442fe056cef159475f801af982c2efdd4f959ad"
+            },
+            "classification": "blocked"
+          }
+        ]
+      }
+    ]
+  }
+}

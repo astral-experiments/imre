@@ -6,6 +6,10 @@ use super::*;
 /// A callable signature is not a storage edge, but a callable value may own a
 /// bound receiver. Such values cannot enter heap aggregates in this milestone.
 pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
+    // The declaration reader boxes only owners it has proven to be noncapturing.
+    if matches!(ty, Type::AnnotationValue(_)) {
+        return false;
+    }
     matches!(ty, Type::Callable(_))
         || types
             .children(ty)
@@ -14,7 +18,11 @@ pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
 }
 
 fn invalid_aggregate(ty: Type, types: &Types) -> bool {
-    if matches!(ty, Type::Callable(_)) {
+    if matches!(
+        ty,
+        Type::Callable(_) | Type::ForwardRef(_) | Type::AnnotationValue(_)
+    ) || types.is_partial_frame(ty)
+    {
         false
     } else if let Some(payload) = types.payload(ty) {
         invalid_aggregate(payload, types)
@@ -102,6 +110,65 @@ pub(super) fn targets(
 }
 
 impl Checker<'_> {
+    /// Expose str.join or a bound string's join as an exact native callback.
+    pub(super) fn string_join_value(&mut self, receiver: Option<Expr>, site: &impl Ranged) -> Expr {
+        let list = self.types.list(Type::Str);
+        let context = receiver.map(|value| Expr {
+            ty: self.types.tuple(vec![Type::Str]),
+            kind: ExprKind::Tuple(vec![value]),
+        });
+        let first = context.as_ref().map_or(Type::Str, |c| c.ty);
+        let local = |slot, ty| Expr {
+            ty,
+            kind: ExprKind::Local(slot),
+        };
+        let separator = if context.is_some() {
+            Expr {
+                ty: Type::Str,
+                kind: ExprKind::Field(Box::new(local(0, first)), 0),
+            }
+        } else {
+            local(0, Type::Str)
+        };
+        let id = self.helpers.reserve();
+        self.helpers.finish(
+            id,
+            comprehensions::Helper {
+                module: self.module,
+                calls: HashSet::new(),
+                class_reads: HashSet::new(),
+                recursion_error: self.graph.modules[self.module]
+                    .error(site, "recursive calls through str.join are unsupported"),
+                function: ir::Function {
+                    params: vec![0, 1],
+                    locals: vec![first, list],
+                    returns: Type::Str,
+                    body: vec![Statement::Return(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::StringJoin,
+                            vec![separator, local(1, list)],
+                        ),
+                    })],
+                },
+            },
+        );
+        Expr {
+            ty: self.types.callable(
+                if context.is_some() {
+                    vec![list]
+                } else {
+                    vec![Type::Str, list]
+                },
+                Type::Str,
+            ),
+            kind: ExprKind::Callable {
+                function: id,
+                receiver: context.map(Box::new),
+            },
+        }
+    }
+
     /// Converts a fixed definition or bound method into its exact positional ABI.
     pub(super) fn callable_value(
         &mut self,
@@ -110,11 +177,20 @@ impl Checker<'_> {
         expected: Option<Type>,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if self.classes.producer_items.contains_key(&signature.id) {
+            return Err(error(
+                self.source,
+                node,
+                "generator functions require direct iteration",
+            ));
+        }
         let skip = usize::from(receiver.is_some());
-        if signature.params[skip..]
-            .iter()
-            .any(|parameter| parameter.kind == ParameterKind::KeywordOnly)
-        {
+        if signature.params[skip..].iter().any(|parameter| {
+            matches!(
+                parameter.kind,
+                ParameterKind::KeywordOnly | ParameterKind::KeywordRest
+            )
+        }) {
             return Err(error(
                 self.source,
                 node,
@@ -152,22 +228,52 @@ impl Checker<'_> {
                 signature.returns
             },
         );
-        Ok(Expr {
+        let unbound = receiver.is_none();
+        let ty = if unbound && let Some(&policy) = self.classes.cached.get(&signature.id) {
+            self.types.declared_cache(ty, signature.id, policy)
+        } else {
+            ty
+        };
+        let value = Expr {
             ty,
             kind: ExprKind::Callable {
                 function: signature.id,
                 receiver: receiver.map(Box::new),
             },
+        };
+        Ok(if unbound {
+            Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::StaticFunction(signature.id), vec![value]),
+            }
+        } else {
+            value
         })
     }
 
-    /// The fresh checker contains only parameters: every enclosing local read,
-    /// even in an inactive branch, fails rather than silently becoming a capture.
+    /// An escaping callable has no environment to store enclosing locals.
     pub(super) fn lambda_value(
         &mut self,
         lambda: &ast::ExprLambda,
         parameters: Option<Vec<Type>>,
         returns: Option<Type>,
+    ) -> Result<Expr, String> {
+        self.lower_lambda(lambda, parameters, returns, false)
+    }
+
+    /// An immediate iterator invokes its lambda in a fresh lexical frame on every
+    /// pull. Its private arguments read enclosing slots at that point, so later
+    /// rebinding is visible without creating an escaping closure.
+    pub(super) fn pull_lambda(&mut self, lambda: &ast::ExprLambda) -> Result<Expr, String> {
+        self.lower_lambda(lambda, Some(Vec::new()), None, true)
+    }
+
+    fn lower_lambda(
+        &mut self,
+        lambda: &ast::ExprLambda,
+        parameters: Option<Vec<Type>>,
+        returns: Option<Type>,
+        pull: bool,
     ) -> Result<Expr, String> {
         let declared = lambda.parameters.as_deref();
         if declared.is_some_and(|parameters| {
@@ -206,10 +312,11 @@ impl Checker<'_> {
         }
         let mut bound = narrowing::expression_assignments(&lambda.body);
         bound.extend(names.iter().map(|parameter| parameter.name().to_string()));
-        if comprehensions::free_reads(&lambda.body, bound.clone())
-            .iter()
-            .any(|name| self.names.contains_key(name))
-        {
+        let mut captures = comprehensions::free_reads(&lambda.body, bound.clone())
+            .into_iter()
+            .filter_map(|name| self.names.get(&name).map(|&slot| (slot, name)))
+            .collect::<Vec<_>>();
+        if !pull && !captures.is_empty() {
             return Err(error(
                 self.source,
                 lambda,
@@ -217,6 +324,7 @@ impl Checker<'_> {
             ));
         }
         let id = self.helpers.reserve();
+        let omitted_free = self.unbound_assert_captures();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -226,7 +334,9 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
+        helper.local_iter = bound.contains("iter");
         helper.class = self.class;
         helper.class_receiver = self
             .class_receiver
@@ -237,6 +347,23 @@ impl Checker<'_> {
             let slot = helper.declare(parameter.name().as_str(), ty, *parameter)?;
             helper.assigned.insert(slot);
             params.push(slot);
+        }
+        let mut args = Vec::with_capacity(captures.len());
+        captures.sort_unstable_by_key(|(slot, _)| *slot);
+        for (source, name) in captures {
+            if !self.assigned.contains(&source) {
+                return Err(error(
+                    self.source,
+                    lambda,
+                    "captured local may be uninitialized",
+                ));
+            }
+            // A later pull may see a different optional or union arm.
+            let value = self.local(source);
+            let slot = helper.declare(&name, value.ty, lambda)?;
+            helper.assigned.insert(slot);
+            params.push(slot);
+            args.push(value);
         }
         let body = if let Some(returns) = returns {
             helper.expr_expected(&lambda.body, returns)?
@@ -260,6 +387,13 @@ impl Checker<'_> {
                     .error(lambda, "recursive calls are unsupported in this prototype"),
             },
         );
+        if pull {
+            self.calls.insert(id);
+            return Ok(Expr {
+                ty: returns,
+                kind: ExprKind::Call(id, ir::CallArgs::positional(args)),
+            });
+        }
         Ok(Expr {
             ty: self.types.callable(parameters, returns),
             kind: ExprKind::Callable {
@@ -271,6 +405,17 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if let Type::StrDescriptor(method) = callable.ty {
+            return self.invoke_descriptor(call, callable, method);
+        }
+        if let Type::Class(class) = callable.ty
+            && self.native_mock(class)
+        {
+            return self.mock_arguments(call, class, callable, "_record");
+        }
+        if let Some(result) = self.invoke_bound_unittest(call, &callable)? {
+            return Ok(result);
+        }
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(
                 self.source,

@@ -2,6 +2,13 @@
 
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum JoinStyle {
+    Plain,
+    Shell,
+    WindowsCommand,
+}
+
 /// All leaves must be plain local reads so no later operand can change the
 /// keys captured by an earlier union. Bound the number of membership probes.
 fn local_key_union(expr: &Expr, dictionaries: &mut Vec<Expr>) -> bool {
@@ -335,12 +342,57 @@ impl Checker<'_> {
                 "str.join requires one string iterable",
             ));
         };
-        let input = self.expansion_input(source, Some(Type::Str))?;
+        self.join_parts(receiver, source, call, JoinStyle::Plain)
+    }
+
+    /// Quote or convert each yielded item before asking for the next one.
+    pub(super) fn join_parts(
+        &mut self,
+        receiver: Expr,
+        source: &ast::Expr,
+        call: &ast::ExprCall,
+        style: JoinStyle,
+    ) -> Result<Expr, String> {
+        let input = if style == JoinStyle::WindowsCommand
+            && let ast::Expr::List(display) = source
+            && !display
+                .elts
+                .iter()
+                .any(|item| matches!(item, ast::Expr::Starred(_)))
+        {
+            Iteration::Container {
+                iterable: self.process_argument_list(display)?,
+                items: false,
+                start: None,
+            }
+        } else {
+            self.expansion_input(source, (style == JoinStyle::Plain).then_some(Type::Str))?
+        };
+        if style == JoinStyle::WindowsCommand
+            && let Iteration::Container { iterable, .. } = &input
+            && let Some(name) = match iterable.ty {
+                Type::None => Some("NoneType"),
+                Type::Int => Some("int"),
+                Type::Bool => Some("bool"),
+                Type::Float => Some("float"),
+                Type::Path => Some("PosixPath"),
+                Type::PurePath(ir::PathFlavor::Posix) => Some("PurePosixPath"),
+                Type::PurePath(ir::PathFlavor::Windows) => Some("PureWindowsPath"),
+                _ => None,
+            }
+        {
+            return self.sys_type_error(
+                call,
+                Type::Str,
+                format!("'{name}' object is not iterable"),
+            );
+        }
         if let Iteration::Container {
             iterable,
             items: false,
             start: None,
         } = &input
+            && style == JoinStyle::Plain
             && matches!(
                 self.types.element(iterable.ty),
                 Some(Type::Str | Type::StrLiteral(_))
@@ -367,7 +419,20 @@ impl Checker<'_> {
             ),
         ];
         body.extend(self.expand_items(input, call, |checker, value| {
-            let value = checker.coerce(value, Type::Str, call)?;
+            let value = match style {
+                JoinStyle::Plain => checker.coerce(value, Type::Str, call)?,
+                JoinStyle::Shell => checker.shlex_quote_value(value, call)?,
+                JoinStyle::WindowsCommand => {
+                    let path = Self::string_value(checker.fspath(value, source)?);
+                    Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::QuoteCommandArgument),
+                            vec![path],
+                        ),
+                    }
+                }
+            };
             Ok(vec![Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::Append, vec![checker.local(parts), value]),
@@ -516,6 +581,11 @@ impl Checker<'_> {
                 specification.push_str(&literal.value);
             }
         }
+        if specification.is_empty()
+            && let Some(text) = self.unittest_failure_repr(&field.expression)?
+        {
+            return Ok(text);
+        }
         let mut value = self.expr(&field.expression)?;
         if field.conversion != ast::ConversionFlag::Repr {
             value = if matches!(value.ty, Type::Enum(_)) {
@@ -528,6 +598,42 @@ impl Checker<'_> {
             };
         }
         if !specification.is_empty() {
+            if let Some(digits) = specification.strip_suffix(['x', 'X'])
+                && digits.bytes().all(|b| b.is_ascii_digit())
+                && let Some(width) = if digits.is_empty() {
+                    Some(0)
+                } else {
+                    digits.parse::<u32>().ok()
+                }
+                && width <= 1000
+            {
+                if field.conversion != ast::ConversionFlag::None
+                    || !matches!(value.ty, Type::Int | Type::Bool)
+                {
+                    return Err(error(
+                        self.source,
+                        field,
+                        "hexadecimal formats require an unconverted int or bool",
+                    ));
+                }
+                if value.ty == Type::Bool {
+                    value = Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                    };
+                }
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(
+                        Builtin::HexFormat {
+                            width,
+                            zero: digits.starts_with('0'),
+                            upper: specification.ends_with('X'),
+                        },
+                        vec![value],
+                    ),
+                });
+            }
             let sign = specification.strip_suffix('d').unwrap_or(&specification);
             if matches!(sign, "" | "-" | "+" | " ") {
                 if field.conversion != ast::ConversionFlag::None
@@ -580,15 +686,38 @@ impl Checker<'_> {
                 ),
             });
         }
+        if matches!(
+            value.ty,
+            Type::Exception | Type::ImportException | Type::NamedException(_)
+        ) {
+            let op = if field.conversion == ast::ConversionFlag::Repr {
+                Builtin::ExceptionRepr
+            } else {
+                Builtin::ExceptionMessage
+            };
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(op, vec![value]),
+            });
+        }
         if field.conversion != ast::ConversionFlag::Repr
-            && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(_))
+            && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(..))
         {
             return self.record_text(value, field);
+        }
+        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::ExceptionFieldRepr, vec![value]),
+            });
         }
         if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Document(_)) {
             return Ok(documents::op(ir::DocumentOp::Repr, Type::Str, vec![value]));
         }
-        if field.conversion == ast::ConversionFlag::Repr || self.types.element(value.ty).is_some() {
+        if field.conversion == ast::ConversionFlag::Repr
+            || self.types.element(value.ty).is_some()
+            || matches!(value.ty, Type::Set(_))
+        {
             if !dataclass_values::can_format(value.ty, self.types, self.classes) {
                 return Err(error(
                     self.source,
@@ -601,7 +730,7 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::Repr, vec![value]),
             });
         }
-        if value.ty == Type::Path {
+        if value.ty.is_path() {
             return Ok(paths::operation(
                 ir::PathOperation::Text,
                 Type::Str,
@@ -648,7 +777,8 @@ impl Checker<'_> {
                 | Type::Bytes
                 | Type::None
                 | Type::Exception
-                | Type::ExitCode
+                | Type::ObjectValue
+                | Type::ImportException
                 | Type::TimeoutExpired
         ) {
             return Err(error(
