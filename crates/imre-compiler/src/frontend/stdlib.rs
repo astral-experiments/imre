@@ -475,43 +475,6 @@ impl Checker<'_> {
         })
     }
 
-    /// Keep the argument evaluated once; only literal text and %% surround one %s slot.
-    pub(super) fn percent_string(&self, pattern: &str, argument: Expr) -> Option<Expr> {
-        let mut prefix = String::new();
-        let mut suffix = String::new();
-        let mut slot = false;
-        let mut chars = pattern.chars();
-        while let Some(c) = chars.next() {
-            let out = if slot { &mut suffix } else { &mut prefix };
-            if c != '%' {
-                out.push(c);
-                continue;
-            }
-            match chars.next()? {
-                '%' => out.push('%'),
-                's' if !slot => slot = true,
-                _ => return None,
-            }
-        }
-        if !slot {
-            return None;
-        }
-        let arg = Self::string_value(argument);
-        let add = |a: Expr, b: Expr| Expr {
-            ty: Type::Str,
-            kind: ExprKind::Binary(Binary::Concat, Box::new(a), Box::new(b)),
-        };
-        let mut result = if prefix.is_empty() {
-            arg
-        } else {
-            add(unpacking::string(&prefix), arg)
-        };
-        if !suffix.is_empty() {
-            result = add(result, unpacking::string(&suffix));
-        }
-        Some(result)
-    }
-
     pub(super) fn abs_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let [value] = call.arguments.args.as_ref() else {
@@ -693,7 +656,7 @@ impl Checker<'_> {
         {
             return self.record_text(value, field);
         }
-        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ExceptionField {
+        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
             return Ok(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::ExceptionFieldRepr, vec![value]),
@@ -765,7 +728,7 @@ impl Checker<'_> {
                 | Type::Bytes
                 | Type::None
                 | Type::Exception
-                | Type::ExceptionField
+                | Type::ObjectValue
                 | Type::ImportException
                 | Type::TimeoutExpired
         ) {

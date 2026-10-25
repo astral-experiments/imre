@@ -151,6 +151,9 @@ impl Checker<'_> {
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
+            return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
+        }
         match self.resolve(expression) {
             Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => {
                 return Ok(vec![InstanceType::ForwardRef]);
@@ -370,10 +373,7 @@ impl Checker<'_> {
     /// Tests for derived records or exception kinds can require runtime inspection.
     /// A stored builtin exception can be either a SystemExit or an Exception.
     fn instance_member_matches(&self, ty: Type, classes: &[InstanceType]) -> Option<bool> {
-        if matches!(
-            ty,
-            Type::ModuleMember | Type::ExceptionField | Type::StringIterable
-        ) {
+        if matches!(ty, Type::ObjectValue | Type::StringIterable) {
             return None;
         }
         let mut unknown = false;

@@ -324,7 +324,13 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 
 `str.translate(table)` looks up each Unicode ordinal in an exact plain dictionary. A missing ordinal keeps the character; `None` deletes it; an integer selects a code point, and a string can replace the character with any number of characters. An invalid value raises only when its key is hit. Tables use supported homogeneous or optional value layouts, and integer keys or provably distinct string, bytes or tuple keys. An inline ordinal table may mix strings, integers and `None`; the same value layout handles a closed string-or-integer result (such as `logging.getLevelName(name)`). User lookup callbacks, sequence tables, `str.maketrans`, and surrogate output are outside this subset.
 
-The bundled `string` module exports its nine ASCII character sets in CPython order (`ascii_letters`, `ascii_lowercase`, `ascii_uppercase`, `digits`, `hexdigits`, `octdigits`, `punctuation`, `printable`, `whitespace`). `string.capwords(s, sep=None)` accepts native strings, collapses Python whitespace by default, and preserves empty fields with an explicit separator. `Formatter`, `Template`, `string.templatelib`, and arbitrary module reflection are outside this subset.
+The bundled `string` module exports its nine ASCII character sets in CPython order (`ascii_letters`, `ascii_lowercase`, `ascii_uppercase`, `digits`, `hexdigits`, `octdigits`, `punctuation`, `printable`, `whitespace`). `string.capwords(s, sep=None)` accepts native strings, collapses Python whitespace by default, and preserves empty fields with an explicit separator.
+
+`string.Template` supports its default ASCII dollar grammar, a writable string `template`, `substitute`, `safe_substitute`, `is_valid`, `get_identifiers`, and its shared compiled `pattern`. Substitution accepts positional native string-key dictionaries and typed keyword values: None, bool, int, str, bytes, and fixed tuples of these types. Only referenced values are rendered; keywords override mapping entries. Passing `None` as the mapping is distinct from omitting it. Custom mapping callbacks, arbitrary placeholder objects, customized subclass patterns, `Formatter`, `string.templatelib`, and arbitrary module reflection are outside this subset. `Pattern.finditer(text)` streams native `Match` objects for fixed patterns proved to consume input; zero-width patterns are rejected.
+
+The `object` annotation is shared by concrete scalar/tuple values, structured exception fields, and dynamic native module attributes. Metadata and mutable dictionary aliases retain their existing owners.
+
+Native `Mapping[str, object]` is a read-only view of supported concrete dictionaries. It provides string-key lookup, membership, length and truth tests. Typed `**name: T` parameters on a direct source call receive an insertion-ordered dictionary; values are evaluated left to right, and positional-only names can occur as keys. Such functions are not first-class callables in this subset.
 
 `str.split(sep=None, maxsplit=-1)` and `str.rsplit(sep=None, maxsplit=-1)` accept both positional and named arguments. With no separator, they group Python whitespace and omit empty fields; an explicit string separator preserves empty fields and must be nonempty. The split limit follows Python's left or right scanning rules. `str.strip([chars])`, `str.lstrip([chars])`, and `str.rstrip([chars])` accept an optional positional string or `None`: omitted/`None` removes Python whitespace, while a string names a set of Unicode scalar values to remove.
 
@@ -669,6 +675,13 @@ for path in sorted(root.glob("*.json"), key=lambda path: path.name):
 ```
 
 `exists()`, `is_file()`, and `is_dir()` follow symlinks and return false for failed filesystem queries, matching Python 3.14, including invalid NUL-containing paths.
+
+`Path.stat(*, follow_symlinks=True)` and `Path.lstat()` return a native
+`os.stat_result`. Its ten tuple entries include integral timestamps; the
+named time attributes include fractions, and their `_ns` counterparts retain
+nanoseconds. Linux and macOS also expose block size, blocks and device type.
+macOS exposes birth time, file flags and generation. OS failures retain the
+original path spelling in `OSError.filename`.
 
 `Path.read_text(encoding=None, errors=None, newline=None)` and `write_text(data, encoding=None, errors=None, newline=None)` use the same native file backend as binary reads and writes. UTF-8 is the default; UTF-8 with signature, Latin-1 and ASCII are also supported. Strict, ignore, replace and backslash-replace error modes work for these encodings; single-byte writes also support XML character references. With no newline override, reads translate CRLF and CR to LF. Empty or explicit newline strings keep the input line endings; on POSIX, write-side CR and CRLF overrides replace each LF. Writes return the number of input Unicode scalars, independent of encoded length. Data of the wrong type raises `TypeError` before opening the target. An invalid newline or codec name on an otherwise valid write is diagnosed after opening and truncating the file.
 
@@ -1036,6 +1049,10 @@ the empty dictionary; a `Counter` still returns zero for a missing key, and a
 methods `Counter.clear(mapping)` and `defaultdict.clear(mapping)` do the same.
 
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
+
+`mapping.copy()` on a plain typed dictionary returns a fresh dictionary in
+insertion order. Each key and value is shared with the source; inserting or
+deleting an entry in the copy leaves the source dictionary unchanged.
 
 `dict.fromkeys(iterable, value)` builds a fresh dictionary in first-key order.
 It evaluates the value once, defaults it to `None`, and shares that object
