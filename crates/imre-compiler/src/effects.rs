@@ -497,6 +497,17 @@ def indirect(value: str) -> int:
     }
 
     #[test]
+    fn splitlines_allocation_errors_escape_user_functions() {
+        let source = "def lines(text: str) -> list[str]:\n    return text.splitlines()\ndef count(text: str) -> int:\n    return len(lines(text))\n";
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        for call in ["call ptr @imre_str_splitlines(", "call ptr @fn_0("] {
+            let (_, following) = llvm.split_once(call).unwrap();
+            let (body, _) = following.split_once("\n}").unwrap();
+            assert!(body.contains("call i32 @imre_error_pending()"));
+        }
+    }
+
+    #[test]
     fn loop_else_errors_are_part_of_the_function_summary() {
         let source = r#"
 def range_error() -> None:

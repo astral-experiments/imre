@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_argparse",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_argparse.py": "627e395c49b194f67566bbaa7bba9a567b71edd9",
+    "Lib/test/translationdata/argparse/msgids.txt": "ae89ac74726ecfc702d0d24f23e96901f1ea2158"
+  }
+}
