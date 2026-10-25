@@ -12,6 +12,8 @@ from comprehensions import require_result, run
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "text"
 STDLIB = FIXTURES.parents[2] / "benchmarks" / "cpython_stdlib"
 REJECTED = {
+    "isalnum_union_descriptor_receiver": "def test(value: str | int) -> bool:\n    return str.isalnum(value)",
+    "isalnum_nested_descriptor_argument": "def required(value: int) -> int:\n    return value\nstr.isalnum(required())",
     "ord_bytearray": 'ord(bytearray(b"x"))',
     "ord_memoryview": 'ord(memoryview(b"x"))',
     "ord_nested_argument": 'def required(x: str) -> str:\n    return x\nord(c=required())',

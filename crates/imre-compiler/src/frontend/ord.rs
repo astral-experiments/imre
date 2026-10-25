@@ -40,7 +40,7 @@ impl Checker<'_> {
         } else {
             "ord() takes no keyword arguments".to_owned()
         };
-        Ok(Self::ordinal_error(values, message))
+        Ok(calls::type_error(Type::Int, values, message))
     }
 
     /// Prepare one conversion; the same expression runs on each pull inside map.
@@ -59,56 +59,16 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::Ord, vec![value]),
             });
         }
-        let actual = match value.ty {
-            Type::None => "NoneType",
-            Type::Int => "int",
-            Type::Bool => "bool",
-            Type::Float => "float",
-            Type::PlainObject => "object",
-            Type::List(_) | Type::ListInt | Type::ByteOutput => "list",
-            Type::Set(_) => "set",
-            Type::Dict(_)
-                if !self.types.is_counter(value.ty)
-                    && !self.types.is_default_list_dict(value.ty) =>
-            {
-                "dict"
-            }
-            Type::Tuple(_) if self.types.namedtuple_definition(value.ty).is_none() => "tuple",
-            Type::Class(id)
-                if self
-                    .types
-                    .concrete_subclasses(id)
-                    .iter()
-                    .all(|child| *child == Type::Class(id)) =>
-            {
-                &self.classes.declarations.definitions[id].name
-            }
-            Type::Enum(id) => &self.classes.declarations.definitions[id].name,
-            _ => {
-                return Err(error(
-                    self.source,
-                    at,
-                    "ord requires a supported character or an exact argument type",
-                ));
-            }
+        let Some(actual) = self.exact_argument_type_name(value.ty) else {
+            return Err(error(
+                self.source,
+                at,
+                "ord requires a supported character or an exact argument type",
+            ));
         };
         // CPython's %.200s type-name display discards a partial UTF-8 code point.
         let actual = &actual[..actual.floor_char_boundary(200)];
         let message = format!("ord() expected string of length 1, but {actual} found");
-        Ok(Self::ordinal_error(vec![value], message))
-    }
-
-    fn ordinal_error(mut values: Vec<Expr>, message: String) -> Expr {
-        values.push(Expr {
-            ty: Type::Exception,
-            kind: ExprKind::Exception {
-                kind: exception_kind("TypeError").unwrap(),
-                message: Some(Box::new(unpacking::string(message))),
-            },
-        });
-        Expr {
-            ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::RaiseException, values),
-        }
+        Ok(calls::type_error(Type::Int, vec![value], message))
     }
 }
