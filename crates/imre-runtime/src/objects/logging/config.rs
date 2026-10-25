@@ -1,10 +1,11 @@
 //! Apply public dictionary and INI configuration to live native logger objects.
 
-use super::super::exceptions::{Result, push_string_repr, string_repr};
+use super::super::exceptions::{Result, push_string_repr, string_repr, write_string_repr};
 use super::super::json::readonly::document::Value;
 use super::{Error, Int, Kind, LOGGERS, Object, Str, finish, levels, name, object};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Write};
 use std::rc::Rc;
 
 #[derive(Clone, Copy)]
@@ -378,13 +379,40 @@ pub unsafe extern "C" fn imre_log_typed_dict_config(map: *const Object, kind: us
     finish(configure(pairs), ());
 }
 
+struct Quoted<'a>(&'a str);
+
+impl fmt::Display for Quoted<'_> {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_string_repr(self.0, out)
+    }
+}
+
+#[derive(Default)]
+struct IniDiagnostic(String);
+
+impl Write for IniDiagnostic {
+    fn write_str(&mut self, value: &str) -> fmt::Result {
+        self.0.try_reserve(value.len()).map_err(|_| fmt::Error)?;
+        self.0.push_str(value);
+        Ok(())
+    }
+}
+
+fn ini_error(args: fmt::Arguments<'_>) -> Error {
+    let mut message = IniDiagnostic::default();
+    match message.write_fmt(args) {
+        Ok(()) => Error::new(Kind::RuntimeError, message.0),
+        Err(_) => Error::allocation(),
+    }
+}
+
 type Sections = HashMap<String, HashMap<String, String>>;
 
 fn ini(source: &str, filename: &str) -> Result<Sections> {
     let mut sections = Sections::new();
     let mut section = String::new();
     let mut last = None::<(String, usize)>;
-    let mut errors = Vec::new();
+    let mut errors = IniDiagnostic::default();
     for (i, raw) in source.split_inclusive('\n').enumerate() {
         let text = raw.trim();
         if text.is_empty() || text.starts_with(['#', ';']) {
@@ -405,15 +433,12 @@ fn ini(source: &str, filename: &str) -> Result<Sections> {
             .map(|(h, _)| h)
         {
             if sections.contains_key(header) {
-                return Err(Error::new(
-                    Kind::RuntimeError,
-                    format!(
-                        "{filename} is invalid: While reading from {} [line {:2}]: section {} already exists",
-                        string_repr(filename),
-                        i + 1,
-                        string_repr(header)
-                    ),
-                ));
+                return Err(ini_error(format_args!(
+                    "{filename} is invalid: While reading from {} [line {:2}]: section {} already exists",
+                    Quoted(filename),
+                    i + 1,
+                    Quoted(header)
+                )));
             }
             section = header.to_owned();
             sections.insert(section.clone(), HashMap::new());
@@ -421,15 +446,12 @@ fn ini(source: &str, filename: &str) -> Result<Sections> {
             continue;
         }
         if section.is_empty() {
-            return Err(Error::new(
-                Kind::RuntimeError,
-                format!(
-                    "{filename} is invalid: File contains no section headers.\nfile: {}, line: {}\n{}",
-                    string_repr(filename),
-                    i + 1,
-                    string_repr(raw)
-                ),
-            ));
+            return Err(ini_error(format_args!(
+                "{filename} is invalid: File contains no section headers.\nfile: {}, line: {}\n{}",
+                Quoted(filename),
+                i + 1,
+                Quoted(raw)
+            )));
         }
         if let Some(pos) = text.find(['=', ':'])
             && pos != 0
@@ -437,33 +459,32 @@ fn ini(source: &str, filename: &str) -> Result<Sections> {
             let key = text[..pos].trim_end().to_lowercase();
             let options = sections.get_mut(&section).unwrap();
             if options.contains_key(&key) {
-                return Err(Error::new(
-                    Kind::RuntimeError,
-                    format!(
-                        "{filename} is invalid: While reading from {} [line {:2}]: option {} in section {} already exists",
-                        string_repr(filename),
-                        i + 1,
-                        string_repr(&key),
-                        string_repr(&section)
-                    ),
-                ));
+                return Err(ini_error(format_args!(
+                    "{filename} is invalid: While reading from {} [line {:2}]: option {} in section {} already exists",
+                    Quoted(filename),
+                    i + 1,
+                    Quoted(&key),
+                    Quoted(&section)
+                )));
             }
             options.insert(key.clone(), text[pos + 1..].trim_start().to_owned());
             last = Some((key, indent));
         } else {
-            errors.push(format!("\t[line {:2}]: {}", i + 1, string_repr(raw)));
+            if errors.0.is_empty() {
+                write!(
+                    errors,
+                    "{filename} is invalid: Source contains parsing errors: {}",
+                    Quoted(filename)
+                )
+                .map_err(|_| Error::allocation())?;
+            }
+            write!(errors, "\n\t[line {:2}]: {}", i + 1, Quoted(raw))
+                .map_err(|_| Error::allocation())?;
             last = None;
         }
     }
-    if !errors.is_empty() {
-        return Err(Error::new(
-            Kind::RuntimeError,
-            format!(
-                "{filename} is invalid: Source contains parsing errors: {}\n{}",
-                string_repr(filename),
-                errors.join("\n")
-            ),
-        ));
+    if !errors.0.is_empty() {
+        return Err(Error::new(Kind::RuntimeError, errors.0));
     }
     Ok(sections)
 }
