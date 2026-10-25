@@ -88,7 +88,7 @@ pub extern "C" fn imre_sys_thread_text(version: u32) -> *const Str {
             if (2..=buffer.len()).contains(&length)
                 && let Ok(value) = std::str::from_utf8(&buffer[..length - 1])
             {
-                return Rc::into_raw(Rc::new(Str::new(value)));
+                return StrOwner::into_raw(StrOwner::new(Str::new(value)));
             }
         }
         return std::ptr::null();
@@ -103,7 +103,7 @@ pub extern "C" fn imre_sys_thread_text(version: u32) -> *const Str {
     } else {
         return std::ptr::null();
     };
-    Rc::into_raw(Rc::new(Str::new(name)))
+    StrOwner::into_raw(StrOwner::new(Str::new(name)))
 }
 
 /// Return the OS interface Python exposes on the target that built this runtime.

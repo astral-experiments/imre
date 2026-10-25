@@ -88,12 +88,21 @@ def main() -> None:
                 else:
                     raise AssertionError("would-block reported EOF")
                 assert client.send(b"abc") == 3
+                # A successful peer send can precede delivery on loopback.
+                # Wait for the payload and allow TCP to split it across reads.
+                server.setblocking(True)
                 assert server.recv(1, socket.MSG_PEEK) == b"a"
                 first = server.recv(1)
-                assert server.recv(4) == b"bc"
+                tail = b""
+                while len(tail) < 2:
+                    part = server.recv(4)
+                    assert len(part) > 0
+                    tail += part
+                assert tail == b"bc"
                 assert first == b"a"
                 assert client.send(b"") == 0
                 # This peer deliberately does not read. Exact counts vary by kernel.
+                server.setblocking(False)
                 server.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
                 block = b"x"
                 for i in range(22):
