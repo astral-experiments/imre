@@ -31,6 +31,20 @@ fn position(at: usize) -> (usize, u64) {
 }
 
 impl Overrides {
+    /// Called for a potential new exception. Spread matters: a scan can reuse
+    /// one row pointer across neighboring edits but must seek between outliers.
+    pub(super) fn should_pack_after_insert(&self, at: usize, len: usize) -> bool {
+        let changed = self.len + 1;
+        if changed > len / 4 {
+            return true;
+        }
+        if changed <= len / BLOCK {
+            return false;
+        }
+        let blocks = self.blocks.len() + usize::from(!self.blocks.contains_key(&(at / BLOCK)));
+        blocks >= len.div_ceil(BLOCK).div_ceil(2)
+    }
+
     pub(super) fn get(&self, at: usize, width: usize) -> Option<&[usize]> {
         if self.len == 0 || at < self.first || at > self.last {
             return None;

@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "benchmarks/fixtures/struct_edit_density.py"
-FIELDS = ("build_ms", "edits_ms", "scans_ms", "probes_ms")
+FIELDS = ("build_ms", "edits_ms", "last_edit_ms", "scans_ms", "probes_ms")
 LAYOUTS = ("adaptive", "packed")
 PATTERNS = {"clustered": 1, "scattered": 65_537}
 

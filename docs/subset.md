@@ -1039,10 +1039,13 @@ is supported. The enclosing list still has normal identity and mutation semantic
 Imre normally stores the scalar fields of consecutive elements of `list[Point]` contiguously.
 Each field occupies an eight-byte slot; the example uses 16 bytes per element.
 There is no record header, pointer, or reference count per element in that buffer.
-For `[p] * n`, Imre can store one immutable point and the logical length. Reads,
-slices, and pops need no dense buffer. Replacing a slot or appending a point with
-different field bits materializes the packed buffer in O(n) time. This includes
-changing `-0.0` to `+0.0`: reading the field preserves its sign.
+For `points = [p] * n`, Imre can store one immutable point and the logical length.
+Assigning `points[i] = q` changes that slot alone. Imre stores only slots whose
+field bits differ from `p`; writing the original bits back removes the exception.
+This includes the sign of zero, even though the two zeros compare equal. Copies,
+slices, and pops can preserve sparse storage. When sufficiently many slots differ,
+one write can reserve and fill a packed buffer in O(n); subsequent writes to it
+update individual rows. These storage choices are private to Imre.
 A point taken out of the list remains valid after replacement, growth or clearing.
 The compiler can project fields directly or copy them to a stack temporary; uses that
 need an independently owned record can allocate one. This layout is private to Imre.

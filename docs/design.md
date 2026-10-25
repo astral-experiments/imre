@@ -144,14 +144,29 @@ explored dedicated declaration syntax; Imre keeps existing Python syntax and opt
 different *identity and storage* rules through the decorator. [PEP 585](https://peps.python.org/pep-0585/#objects-created-with-bare-types-and-parameterized-types-are-exactly-the-same)
 explains why ordinary CPython erases the element argument when creating a list.
 The compatibility module therefore implements value behavior, while the Imre compiler uses
-the checked element type to select native row storage. Repeating a singleton list stores
-one owned immutable record and a count. A read-only scan snapshots the data pointer
-and an index mask once: dense rows use their ordinary index; every repeated index
-selects row zero. A different write reserves and fills dense rows before replacing
-the shared representation. A direct scan of either layout needs no per-row boxes.
-When a value escapes it gets an owned snapshot; legacy word-based consumers can request a
-boxed view, which is discarded on mutation. A repeated list supplies that view with pointers
-to the same record. The list handle itself is never replaced.
+the checked element type to select native row storage.
+
+Repeating a singleton stores one immutable record and a count. A different slot
+needs only an entry in a touched 64-slot block: the bitmap identifies changed
+positions, and its set bits index consecutive scalar payloads in that block.
+Writing back the default bits removes the entry; deleting the last one frees the
+table. The list handle stays the same. An escaped value owns its snapshot.
+Legacy consumers can request a boxed pointer array; unchanged slots reuse the
+same immutable record, and mutation invalidates the array.
+
+The runtime considers packing when inserting a new exception. It packs when over
+one quarter of the slots differ, or when over 1/64 differ and at least half of
+the blocks contain an exception. It counts distinct changed slots, including a
+newly appended slot, against the resulting length. The [density benchmark](../benchmarks/results/2026-10-25-struct-edit-density.md)
+compares clustered and scattered edits. A successful conversion takes O(n) work
+and stays dense thereafter; a failed reservation can still fall back to a sparse
+write. Replacing an existing exception or reading the list never triggers packing.
+
+A proven read-only scan hoists its view of dense or uniform storage. For sparse
+lists it caches a run in the loop frame: an untouched run broadcasts one row,
+and adjacent edits within a block use consecutive rows. Neither needs per-row
+boxes. Indexed reads can look up their block directly; slices map touched
+positions through the normalized stride without building an array of length n.
 
 Ordinary floats use LLVM `double` values and double fields; homogeneous containers carry their raw binary64 bits under one shared descriptor. They need no reference ownership. LLVM receives no fast-math permission. Mixed arithmetic explicitly checks integer conversion, while mixed comparisons compare an exact truncated-float integer and fractional sign. Integer true division scales the arbitrary-precision ratio and rounds once to nearest-even, including subnormals, instead of converting both operands independently. Optional floats own nullable `Rc<f64>` payloads so signed zero and every NaN bit pattern remain distinct from None.
 

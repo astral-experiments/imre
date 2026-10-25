@@ -44,9 +44,12 @@ def main(n: int, k: int, stride: int, dense: bool, passes: int, probes: int) -> 
     start = time()
     rows = seed(n, p, dense)
     ready = time()
-    for i in range(k):
+    for i in range(k - 1):
         at = (i * stride + n // 2) % n
         rows[at] = q
+    before_last = time()
+    if k > 0:
+        rows[((k - 1) * stride + n // 2) % n] = q
     changed = time()
     total = 0.0
     for i in range(passes):
@@ -59,6 +62,7 @@ def main(n: int, k: int, stride: int, dense: bool, passes: int, probes: int) -> 
     print(random_total)
     print(ready - start)
     print(changed - ready)
+    print(changed - before_last)
     print(scanned - changed)
     print(done - scanned)
 

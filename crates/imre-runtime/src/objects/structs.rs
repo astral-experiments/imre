@@ -41,10 +41,6 @@ fn tile(words: &mut Vec<usize>, target: usize) {
     }
 }
 
-// A sparse edit has a lookup cost as well as a payload. The benchmark report
-// records the measured crossover for scattered and clustered writes.
-const SPARSE_DIVISOR: usize = 2;
-
 fn base_row(base: &OwnedWord, width: usize) -> &[usize] {
     // SAFETY: the shared owner roots a complete record of the list's exact layout.
     unsafe { std::slice::from_raw_parts(base.word as *const usize, width) }
@@ -237,7 +233,7 @@ impl Rows {
         // Storage must preserve them: fields can expose the original float bits.
         if row == base_row(base, width) {
             edits.remove(at, width);
-        } else if edits.len < len / SPARSE_DIVISOR || edits.get(at, width).is_some() {
+        } else if !edits.should_pack_after_insert(at, len) || edits.get(at, width).is_some() {
             edits.put(at, row)?;
         } else {
             let append = at == self.len;
@@ -634,6 +630,33 @@ mod tests {
     }
 
     #[test]
+    fn scattered_slots_promote_earlier_than_clustered_slots() {
+        let mut seed = Rows::new(POINT);
+        ok(seed.append(&[0, 0]));
+        let n = 4096;
+        let mut clustered = ok(seed.repeat(n));
+        let mut scattered = ok(seed.repeat(n));
+        for i in 0..64 {
+            ok(clustered.rows_mut().unwrap().set(i, &[1, 1]));
+            ok(scattered.rows_mut().unwrap().set(i * 64, &[1, 1]));
+        }
+        // At exactly 1/64 neither promotes, even after touching every block.
+        assert!(scattered.rows().unwrap().direct_view().is_none());
+        ok(scattered.rows_mut().unwrap().set(0, &[2, 1]));
+        assert!(scattered.rows().unwrap().direct_view().is_none());
+        ok(scattered.rows_mut().unwrap().set(1, &[3, 1]));
+        ok(clustered.rows_mut().unwrap().set(64, &[3, 1]));
+        assert_eq!(
+            scattered.rows().unwrap().direct_view().unwrap().1,
+            usize::MAX
+        );
+        assert!(clustered.rows().unwrap().direct_view().is_none());
+        for (at, expected) in [(0, [2, 1]), (1, [3, 1]), (2, [0, 0]), (4032, [1, 1])] {
+            assert_eq!(scattered.rows().unwrap().row(at), expected);
+        }
+    }
+
+    #[test]
     #[cfg(target_pointer_width = "64")]
     fn sparse_edits_above_u32_survive_reversal_and_allocation_failure() {
         let mut seed = Rows::new(POINT);
@@ -685,7 +708,7 @@ mod tests {
         assert_eq!(copy.rows().unwrap().row(1000), minus);
         assert!(rows.set(1000, &minus).is_ok());
         assert_eq!(rows.direct_view().unwrap().1, 0);
-        let cutoff = rows.len / SPARSE_DIVISOR;
+        let cutoff = rows.len / 4;
         for at in 0..cutoff {
             assert!(rows.set(at, &plus).is_ok());
         }
