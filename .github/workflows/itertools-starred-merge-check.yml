@@ -1,0 +1,271 @@
+name: Verify starred tuples and every original itertools occurrence
+on:
+  push:
+    branches: [codex/itertools-starred-merge-check]
+permissions:
+  contents: read
+jobs:
+  iterator-audit:
+    runs-on: github-ubuntu-24.04-x86_64-4
+    timeout-minutes: 50
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify tested source matches the intended feature tree
+        run: |
+          git rev-parse HEAD^ HEAD
+          git diff --exit-code HEAD^ HEAD -- crates Cargo.lock Cargo.toml
+      - id: gil
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14.5'
+      - name: Install Clang 18
+        run: sudo apt-get update && sudo apt-get install -y clang-18
+      - name: Build the combined compiler and runtime
+        id: build
+        run: |
+          cargo fmt --all -- --check
+          cargo build --locked -j 2 -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-stdlib-reference
+          sparse-checkout: |
+            Lib
+            Modules/itertoolsmodule.c
+          persist-credentials: false
+      - name: Run every complete original primary method, checking operations and fixture roles
+        id: primary
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools
+          python3 -B "$dir/coverage.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --baseline "$dir/evidence-linux.json" --result "$RUNNER_TEMP/itertools-all.json"
+          python3 -B benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-linux.json" "$RUNNER_TEMP/itertools-all.json"
+      - name: Save the exact per-occurrence report
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          python3 - "$RUNNER_TEMP/itertools-all.json" <<'PY'
+          import base64,gzip,hashlib,pathlib,sys
+          data=pathlib.Path(sys.argv[1]).read_bytes()
+          encoded=base64.b64encode(gzip.compress(data,mtime=0)).decode()
+          print('ITERTOOLS_REPORT_SHA256='+hashlib.sha256(data).hexdigest())
+          for i in range(0,len(encoded),3000): print('ITERTOOLS_REPORT_PART='+encoded[i:i+3000])
+          PY
+      - name: Compare four native tuple executions and the untouched original entry points
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools
+          python3 -B "$dir/tuple_spread_audit.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/tuple-spreads.json"
+          python3 -c 'import base64,gzip,pathlib,sys; print("ITERTOOLS_TUPLE_RECEIPT="+base64.b64encode(gzip.compress(pathlib.Path(sys.argv[1]).read_bytes(),mtime=0)).decode())' "$RUNNER_TEMP/tuple-spreads.json"
+      - name: Verify every stored occurrence against the tested integration source
+        if: "${{ !cancelled() && steps.primary.outcome == 'success' }}"
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools
+          diff -u "$dir/evidence-linux.json" "$RUNNER_TEMP/itertools-all.json" || true
+          cmp "$dir/evidence-linux.json" "$RUNNER_TEMP/itertools-all.json"
+      - name: Compare native tuple ownership under ASan and LSan
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          src=benchmarks/cpython_stdlib/full/itertools/tuple_spreads.py
+          python3 -B "$src" > "$RUNNER_TEMP/starred-ref"
+          for opt in 0 3; do
+            target/debug/imre build "$src" --quiet --no-cache --sanitize --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" -o "$RUNNER_TEMP/starred"
+            ASAN_OPTIONS=detect_leaks=1 "$RUNNER_TEMP/starred" > "$RUNNER_TEMP/starred-out"
+            diff -u "$RUNNER_TEMP/starred-ref" "$RUNNER_TEMP/starred-out"
+          done
+      - name: Build both unchanged itertools files in all four modes
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools
+          python3 -B "$dir/whole_files.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-git .cpython-stdlib-reference --result "$RUNNER_TEMP/whole-files.json"
+          python3 -c 'import json,sys; a,b=(json.load(open(p)) for p in sys.argv[1:]); assert a["suites"] == b["suites"]; print("ITERTOOLS_WHOLE_FILES="+json.dumps(b,separators=(",",":")))' "$dir/whole-files-linux.json" "$RUNNER_TEMP/whole-files.json"
+      - name: Compare NullHandler lock overrides and the original logging method
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          root=benchmarks/cpython_stdlib/full
+          args=(--imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18)
+          python3 -B "$root/logging/null_handler.py" "${args[@]}" --result "$RUNNER_TEMP/null-handler.json"
+      - name: Refuse native record, dict and boxed tuple comparisons
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        run: |
+          cat > "$RUNNER_TEMP/key_refusal.py" <<'STARRED_KEY_REFUSAL_PY'
+          """Check refusal, recovery and ownership where a tuple display meets typed equality."""
+          from pathlib import Path
+          import argparse, json, os, resource, subprocess, sys, tempfile
+
+          SOURCES = {
+          "record": '''import sys
+
+          def compare(a: str, b: str) -> None:
+              ai = [(a, 0)]
+              bi = [(b, 0)]
+              left = (*ai, ("tail", 0))
+              right = (*bi, ("tail", 0))
+              try:
+                  print(left == right)
+              except MemoryError:
+                  print("memory-error")
+              print(len(left))
+              print(len(right))
+              print(left == right)
+
+          compare(sys.argv[1], sys.argv[2])
+          ''',
+          "dict": '''import sys
+
+          def pop(a: str, b: str) -> None:
+              ai = [(a, 0)]
+              bi = [(b, 0)]
+              left = ((*ai, ("tail", 0))[0], 0)
+              right = ((*bi, ("tail", 0))[0], 0)
+              values = {left: 7}
+              try:
+                  first = values.pop(right, None)
+                  if first is None:
+                      print("missing")
+                  else:
+                      print(first)
+              except MemoryError:
+                  print("memory-error")
+              print(len(values))
+              print(values.get(left, -1))
+              second = values.pop(right, None)
+              if second is None:
+                  print("missing")
+              else:
+                  print(second)
+              print(len(values))
+
+          pop(sys.argv[1], sys.argv[2])
+          ''',
+          "boxed": '''import sys
+          from collections.abc import Mapping
+          def compare(left: Mapping[str, object], right: Mapping[str, object]) -> None:
+              try:
+                  print(left["x"] == right["x"])
+              except MemoryError:
+                  print("memory-error")
+              print(len(left))
+              print(len(right))
+              print(left["x"] == right["x"])
+          def prepare(a: str, b: str) -> None:
+              ai = [(a, 0)]
+              bi = [(b, 0)]
+              left = ((*ai, ("tail", 0))[0], 0)
+              right = ((*bi, ("tail", 0))[0], 0)
+              compare({"x": left, "y": left}, {"x": right, "y": right})
+              deep_left = (((left, 0), 0), 0)
+              deep_right = (((right, 0), 0), 0)
+              compare({"x": deep_left, "y": deep_left}, {"x": deep_right, "y": deep_right})
+          prepare(sys.argv[1], sys.argv[2])
+          ''',
+          }
+          WRAP = r'''
+          #include <errno.h>
+          #include <stdint.h>
+          #include <stdlib.h>
+          #include <string.h>
+          static unsigned active, refused;
+          static int enter(const char *operation) {
+              const char *setting = getenv("IMRE_REFUSE_TUPLE_WORKLIST");
+              unsigned old = active;
+              active = active || (setting && strcmp(setting, operation) == 0);
+              return old;
+          }
+          static int deny(size_t size) {
+              if (!active || refused || size < 128) return 0;
+              refused = 1; errno = ENOMEM; return 1;
+          }
+          extern void *__real_malloc(size_t);
+          extern void *__real_realloc(void *, size_t);
+          extern void *__real_calloc(size_t, size_t);
+          void *__wrap_malloc(size_t n) {return deny(n) ? NULL : __real_malloc(n);}
+          void *__wrap_realloc(void *p,size_t n) {return deny(n) ? NULL : __real_realloc(p,n);}
+          void *__wrap_calloc(size_t n,size_t s) {return deny(n*s) ? NULL : __real_calloc(n,s);}
+          extern uint32_t __real_imre_record_equal(const void *, const void *);
+          uint32_t __wrap_imre_record_equal(const void *a,const void *b) {
+              int old=enter("record"); uint32_t out=__real_imre_record_equal(a,b); active=old; return out;
+          }
+          extern uint32_t __real_imre_dict_try_pop(void *, uintptr_t, void *);
+          uint32_t __wrap_imre_dict_try_pop(void *a,uintptr_t b,void *out) {
+              int old=enter("dict"); uint32_t found=__real_imre_dict_try_pop(a,b,out); active=old; return found;
+          }
+          extern uint32_t __real_imre_system_exit_code_equal(const void *, uint32_t, uintptr_t);
+          uint32_t __wrap_imre_system_exit_code_equal(const void *a,uint32_t k,uintptr_t b) {
+              int old=enter("boxed"); uint32_t out=__real_imre_system_exit_code_equal(a,k,b); active=old; return out;
+          }
+          '''
+
+          def run(argv, *, env=None):
+              return subprocess.run(argv, capture_output=True, env=env, timeout=90,
+                                    preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_CORE, (0, 0)))
+
+          def main():
+              parser=argparse.ArgumentParser()
+              for name in ('imre','runtime','clang'):parser.add_argument('--'+name,type=Path,required=True)
+              parser.add_argument('--negative',action='store_true')
+              parser.add_argument('--boxed',action='store_true')
+              parser.add_argument('--boxed-only',action='store_true')
+              parser.add_argument('--reachable-only',action='store_true')
+              parser.add_argument('--result',type=Path,required=True)
+              opts=parser.parse_args()
+              report=[]
+              with tempfile.TemporaryDirectory(prefix='imre-itertools-starred-key-') as directory:
+                  temp=Path(directory); c=temp/'wrap.c'; obj=temp/'wrap.o'; c.write_text(WRAP)
+                  subprocess.run([opts.clang,'-c','-O1',c,'-o',obj],check=True)
+                  for mode,src in SOURCES.items():
+                      if opts.boxed_only and mode!='boxed':continue
+                      if mode=='boxed' and not (opts.boxed or opts.boxed_only):continue
+                      path=temp/(mode+'.py'); path.write_text(src)
+                      for level in (0,3):
+                          exe=temp/'run'
+                          args=[opts.imre.resolve(),'build',path,'--no-cache','--quiet','--runtime',opts.runtime.resolve(),
+                                '--clang',opts.clang,'--opt-level',str(level),'-o',exe,'-C',f'link-arg={obj}']
+                          if opts.reachable_only:args.append('--reachable-only')
+                          for sym in ('malloc','calloc','realloc','imre_record_equal','imre_dict_try_pop','imre_system_exit_code_equal'):
+                              args+=['-C','link-arg=-Wl,--wrap='+sym]
+                          build=run(args)
+                          if build.returncode:raise AssertionError((mode,level,'build',build.stderr.decode()))
+                          for secondary in (('A','B') if mode!='dict' else ('A',)):
+                              inputs=['A',secondary]
+                              ref=run([sys.executable,'-B',path,*inputs]); normal=run([exe,*inputs])
+                              if (normal.returncode,normal.stdout,normal.stderr)!=(0,ref.stdout,ref.stderr) or ref.returncode:raise AssertionError((mode,'normal',ref,normal))
+                              refused=run([exe,*inputs],env=dict(os.environ,IMRE_REFUSE_TUPLE_WORKLIST=mode))
+                              if mode!='dict':wanted=b'memory-error\n2\n2\n'+(b'True\n' if secondary=='A' else b'False\n')
+                              else:wanted=b'memory-error\n1\n7\n7\n0\n'
+                              if mode=='boxed':
+                                  truth=b'True\n' if secondary=='A' else b'False\n'
+                                  wanted=truth+b'2\n2\n'+truth+wanted
+                              seen=(refused.returncode,refused.stdout,refused.stderr)==(0,wanted,b'')
+                              report.append(dict(mode=mode,level=level,reachable_only=opts.reachable_only,inputs=inputs,reference=ref.stdout.decode(),exit=refused.returncode,stdout=refused.stdout.decode(),stderr=refused.stderr.decode(),caught_and_retried=seen))
+                              print(mode,level,inputs,report[-1],flush=True)
+              opts.result.write_text(json.dumps(report,indent=2)+'\n')
+              if opts.negative:assert all(x['exit']==-6 and 'memory allocation of' in x['stderr'] for x in report), report
+              else:assert all(x['caught_and_retried'] for x in report), report
+
+          if __name__=='__main__':main()
+          STARRED_KEY_REFUSAL_PY
+          for mode in ordinary reachable; do
+            extra=(); if [[ "$mode" == reachable ]]; then extra=(--reachable-only); fi
+            python3 -B "$RUNNER_TEMP/key_refusal.py" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 "${extra[@]}" --boxed --result "$RUNNER_TEMP/keys-$mode.json"
+          done
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        id: freethreaded
+        if: "${{ !cancelled() && steps.build.outcome == 'success' }}"
+        with:
+          python-version: '3.14.5t'
+      - name: Verify the separate free-threaded companion with its GIL guard
+        if: "${{ !cancelled() && steps.freethreaded.outcome == 'success' }}"
+        env:
+          GIL_INTERPRETER: "${{ steps.gil.outputs.python-path }}"
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools
+          PYTHONPATH="$PWD/.cpython-stdlib-reference/Lib" python3 -B "$dir/free_threading.py" --gil-python "$GIL_INTERPRETER" --imre target/debug/imre --runtime target/debug/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/itertools-companion.json"
+          python3 -B benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-free-threading-linux.json" "$RUNNER_TEMP/itertools-companion.json"
+          python3 -c 'import json,sys;print("ITERTOOLS_COMPANION="+json.dumps(json.load(open(sys.argv[1])),sort_keys=True,separators=(",",":")))' "$RUNNER_TEMP/itertools-companion.json"
+          cmp "$dir/evidence-free-threading-linux.json" "$RUNNER_TEMP/itertools-companion.json"
