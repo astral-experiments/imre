@@ -1,4 +1,4 @@
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 def later(log: list[int], fail: bool) -> str:
@@ -23,3 +23,15 @@ def path(value: str | None, fail: bool) -> None:
 path("head", False)
 path(None, False)
 path(None, True)
+
+
+def pure(parts: str | None) -> None:
+    try:
+        print(str(PurePosixPath("one", parts)))  # ty: ignore[invalid-argument-type]
+        print(str(PureWindowsPath("one", parts)))  # ty: ignore[invalid-argument-type]
+    except TypeError as error:
+        print(str(error))
+
+
+pure("two")
+pure(None)
