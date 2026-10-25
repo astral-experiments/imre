@@ -293,9 +293,6 @@ impl IntrinsicModule {
         if self == Self::Imre && name == "toml" {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
-        if let Some(binding) = declarations::symbol(self, name) {
-            return Some(binding);
-        }
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
@@ -446,7 +443,7 @@ impl IntrinsicModule {
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
-            _ => return None,
+            _ => return declarations::symbol(self, name),
         };
         Some(Binding::Intrinsic(symbol))
     }
