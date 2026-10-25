@@ -39,19 +39,22 @@ argparse companion test module. The earlier [generated parse](NATIVE.md) and
 | Unchanged routines on Linux | -O0 | -O3 |
 | --- | ---: | ---: |
 | Fully native, including fixtures | 0 | 0 |
-| Native body and operation with host fixtures | 5 | 5 |
-| Host body and assertions with native operations | 925 | 925 |
+| Native body and operation with host fixtures | 6 | 6 |
+| Host body and assertions with native operations | 987 | 987 |
 | Completed with no parser operation (empty input table) | 12 | 12 |
-| Blocked | 951 | 951 |
+| Blocked | 888 | 888 |
 | Mixed, reference-only, failed, skipped or excluded | 0 | 0 |
 | **Total** | **1,893** | **1,893** |
 
-The compiler and runtime come from merged main at
-`8c29f1ac2d63f4040bd7cca2ab92d7d03337f08a`. Each report accounts for all
-417 source-defined methods and all 1,476 generated methods (1,236 parsing and
-240 formatting). Four native bodies each call `parse_args` and have no explicit assertion.
-The fifth, `TestBooleanOptionalAction.test_invalid_name`, checks the exception
-type and message natively. All five use CPython fixtures.
+The [measured source](https://github.com/astral-sh/imre/commit/478c97baa1fe8fa8d2e6ae45f8c74f9a1b256925)
+includes the mutually exclusive groups and the fixture attribution. Each
+report accounts for all 417 source-defined methods and all 1,476 generated
+methods (1,236 parsing and 240 formatting). Four native bodies each call
+`parse_args` and contain no explicit assertion. A fifth,
+`TestBooleanOptionalAction.test_invalid_name`, checks the exception type and
+message natively. The sixth checks the exact wrapped usage text. Each uses a
+CPython fixture; [the wrapped-usage receipt](wrapped-usage-linux.json) records
+the native operation and the terminal width supplied by the host.
 
 | Native operations driven by complete CPython routines | Routines per level | Calls per level |
 | --- | ---: | ---: |
@@ -64,6 +67,16 @@ type and message natively. All five use CPython fixtures.
 | [Builtin classes as constants and defaults](https://github.com/astral-sh/imre/pull/895) | 900 | 3,623 |
 | [Boolean optional actions](https://github.com/astral-sh/imre/pull/926) | 924 | 3,683 |
 | [Argument registration errors](https://github.com/astral-sh/imre/pull/968) | 925 | 3,684 |
+| [Mutually exclusive groups](https://github.com/astral-sh/imre/pull/1145) | 987 | 3,831 |
+
+The [main baseline](https://github.com/astral-sh/imre/actions/runs/40220318898)
+and [mutex run](https://github.com/astral-sh/imre/actions/runs/40220315415)
+use the same 1,893 original IDs. At each optimization level 62 previously blocked
+routines completed: 111 native parses, 20 help calls and 16 usage calls. CPython ran
+their original bodies, assertions and fixtures. Another 32 group routines entered their
+host bodies and stayed blocked. The wrapped-usage method is a separate gain: its unchanged
+body, equality assertion and `format_usage` operation run under Imre at both
+levels with the CPython width fixture.
 
 The [run on merged #968](https://github.com/astral-sh/imre/actions/runs/40213144597)
 adds two previously blocked routines from `TestBooleanOptionalAction`.
@@ -74,8 +87,8 @@ Imre runs the failing `add_argument` operation. The
 same classifications and call counts. Two blocked `TestExitOnError` methods
 have different compiler diagnostics on merged main.
 
-Of the 3,684 host-driven native calls at each level, 3,622 call `parse_args`,
-16 call `parse_known_args`, 14 call `format_help`, 11 call `format_usage`,
+Of the 3,831 host-driven native calls at each level, 3,733 call `parse_args`,
+34 call `format_help`, 27 call `format_usage`, 16 call `parse_known_args`,
 10 each call `print_help` and `print_usage`, and one calls `add_argument`.
 The process comparison checks exit status, stdout and stderr; the original
 assertions receive the native result. Each host-driven source method retains
@@ -90,7 +103,7 @@ unchanged CPython reference before combining it with other suites.
 ```sh
 python3.14 -B benchmarks/cpython_stdlib/full/argparse/evidence.py \
   --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang clang-18 \
-  --imre-revision 8c29f1ac2d63f4040bd7cca2ab92d7d03337f08a --result /tmp/argparse-evidence.json
+  --imre-revision 478c97baa1fe8fa8d2e6ae45f8c74f9a1b256925 --result /tmp/argparse-evidence.json
 python3 benchmarks/cpython_stdlib/suite_evidence.py \
   benchmarks/cpython_stdlib/full/argparse/reference-linux.json /tmp/argparse-evidence.json
 ```
