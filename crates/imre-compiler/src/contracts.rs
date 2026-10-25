@@ -453,6 +453,7 @@ impl Builtin {
             | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
+            | Self::SysGetRecursionLimit
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
             | Self::IsBuiltinSubclass
@@ -571,6 +572,8 @@ impl Builtin {
             | Self::SysDisplayHook
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
+            | Self::SysGetFrameModuleName
+            | Self::SysSetRecursionLimit
             | Self::RaiseException
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
@@ -1020,6 +1023,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_sys_displayhook"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
+                | "imre_sys_getframemodulename"
+                | "imre_sys_setrecursionlimit"
                 | "imre_path_as_posix"
                 | "imre_path_join"
                 | "imre_path_join_object"
