@@ -60,7 +60,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `socket` | Yes | No API example recorded. | — | — | — |
 | `stat` | Yes | POSIX mode constants and predicates, permission masks and `filemode`. [Evidence](../benchmarks/cpython_stdlib/full/stat/README.md) | [0 / 22](../benchmarks/cpython_stdlib/full/stat/) | 0 | 18 |
 | `string` | Yes | Selected `Template` substitution, validation and identifier operations. [Evidence](../benchmarks/cpython_stdlib/full/string/README.md) | [15 / 54](../benchmarks/cpython_stdlib/full/string/) | 0 | 0 |
-| `subprocess` | Yes | Launch with `Popen` and `run`, capture streams and handle deadlines. `getoutput` and `getstatusoutput` capture combined shell output. [Evidence](../benchmarks/cpython_stdlib/full/subprocess/README.md) | [0 / 353](../benchmarks/cpython_stdlib/full/subprocess/) | 32 | 82 |
+| `subprocess` | Yes | Launch with `Popen` and `run`, capture streams and handle deadlines. `getoutput` and `getstatusoutput` capture combined shell output. [Evidence](../benchmarks/cpython_stdlib/full/subprocess/README.md) | [0 / 353](../benchmarks/cpython_stdlib/full/subprocess/) | 54 | 95 |
 | `sys` | Yes | Process arguments, streams, interpreter flags and selected attributes. [Evidence](../benchmarks/cpython_stdlib/full/sys/README.md) | [0 / 97](../benchmarks/cpython_stdlib/full/sys/) | 2 | 4 |
 | `sysconfig` | Yes | `get_path("scripts")`. [Evidence](../tests/fixtures/paths/executables.py) | — | — | — |
 | `tempfile` | Yes | Scoped `TemporaryDirectory` workspaces. [Evidence](../tests/fixtures/workspaces/arguments.py) | — | — | — |
