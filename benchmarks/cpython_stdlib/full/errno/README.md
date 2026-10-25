@@ -12,8 +12,12 @@ same SDK generation, while a source build deliberately reflects its own target h
 The [native runner](../../../../tests/errno.py) verifies the source's pinned
 Git blob, compiles the complete module, and invokes each original method in a
 fresh process. The original frozen fixture and unittest assertions execute
-natively. The host schedules methods; native unittest discovery and its
-command-line runner are outside this result.
+natively; the host schedules them for this per-method ledger. A separate
+[whole-file gate](../../../../tests/unittest_main.py) verifies the same pinned
+blob and matching CPython version, compiles the unchanged entry point in
+ordinary and reachable-only modes, and compares its native unittest output
+with CPython. Linux runs O0/O3 and Apple Silicon runs O3. Both gates exercise
+the same three IDs.
 
 Two additional runs deliberately cause original assertions to fail. Removing
 `EDOM` from `errorcode` must fail reverse membership; inserting a name that is
@@ -34,6 +38,10 @@ python3.14 benchmarks/cpython_stdlib/suite_inventory.py \
 python3.14 tests/errno.py --compiler target/release/imre \
   --runtime target/release/libimre_runtime.a --clang clang --opt-levels 0 3 \
   --evidence benchmarks/cpython_stdlib/full/errno/evidence-linux.json
+python3.14 tests/unittest_main.py --compiler target/release/imre \
+  --runtime target/release/libimre_runtime.a --clang clang \
+  --manifest benchmarks/cpython_stdlib/full/errno/UPSTREAM.json \
+  --upstream-source benchmarks/cpython_stdlib/full/errno/upstream/Lib/test/test_errno.py
 ```
 
 [Linux reference](reference-linux.json) · [native O0](native-linux-O0.json) ·
