@@ -82,6 +82,13 @@ def select(toolchain, work, source, module):
         raise AssertionError(identity)
     if not lines[3].startswith("namespace(name='imre', cache_tag=None, version=sys.version_info("):
         raise AssertionError(lines[3])
+    # A cache tag assigned through either alias must also reach importlib and namespace repr.
+    command = ["cache_alias", "shared-cache-unit"]
+    native = subprocess.run([impl, *command], capture_output=True, check=True, timeout=15)
+    control = subprocess.run([sys.executable, "-I", HERE / "metadata_driver.py", *command],
+                             capture_output=True, check=True, timeout=15)
+    if (native.stdout, native.stderr) != (control.stdout, control.stderr):
+        raise AssertionError((native, control))
 
     # Both implementations check internal consistency using their own language version.
     metadata = HERE / "version_info.py"

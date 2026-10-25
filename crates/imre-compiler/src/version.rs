@@ -49,6 +49,7 @@ pub(crate) const IMPLEMENTATION: &[&str] = &[
     "hexversion",
     "supports_isolated_interpreters",
 ];
+pub(crate) const CACHE_TAG_FIELD: usize = 1;
 
 pub(crate) fn info_type(types: &crate::types::Types) -> Type {
     types.struct_sequence(
@@ -61,7 +62,7 @@ pub(crate) fn info_type(types: &crate::types::Types) -> Type {
 pub(crate) fn implementation_fields(types: &crate::types::Types) -> Vec<Type> {
     vec![
         Type::Str,
-        Type::None,
+        types.optional(Type::Str),
         info_type(types),
         Type::Int,
         Type::Bool,
@@ -75,8 +76,11 @@ pub(crate) fn implementation_values(types: &crate::types::Types) -> Vec<Expr> {
             kind: ExprKind::Str("imre".into()),
         },
         Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
+            ty: types.optional(Type::Str),
+            kind: ExprKind::Builtin(
+                crate::ir::Builtin::CachePath(crate::ir::CachePathOperation::Get(false)),
+                vec![],
+            ),
         },
         Expr {
             ty: info_type(types),

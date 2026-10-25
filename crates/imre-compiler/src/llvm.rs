@@ -6372,6 +6372,14 @@ impl Emitter<'_, '_> {
                     }
                     Op::Set(prefix) => {
                         let word = self.word(&args[0].value);
+                        if !prefix {
+                            // Aliases and namespace repr read this slot; importlib reads the runtime setting.
+                            self.set_field(
+                                &args[1].value,
+                                crate::version::CACHE_TAG_FIELD,
+                                &args[0].value,
+                            );
+                        }
                         self.line(format!(
                             "call void @imre_cache_config_set(i32 {}, i64 {word})",
                             u32::from(prefix)
