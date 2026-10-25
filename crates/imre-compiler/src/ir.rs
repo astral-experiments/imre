@@ -59,6 +59,8 @@ pub(crate) enum Type {
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
     Logger,
+    TimedFileHandler,
+    ClockTime,
     Sha256,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
@@ -150,6 +152,8 @@ impl std::fmt::Display for Type {
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
             Self::Logger => "logging.Logger",
+            Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
+            Self::ClockTime => "datetime.time",
             Self::Sha256 => "SHA-256 hash",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
@@ -470,6 +474,7 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     Logging(LogOperation),
+    Timed(TimedOperation),
     Input,
     Int,
     Float,
@@ -851,6 +856,31 @@ pub(crate) enum PosixPathOperation {
     Splitext,
     Normpath,
     Abspath,
+}
+
+/// Operations on a timed file handler and its immutable wall-clock time.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TimedOperation {
+    New,
+    Clock,
+    ClockPart,
+    Close,
+    Flush,
+    Stream,
+    Filename,
+    Interval,
+    RolloverAt,
+    When,
+    Suffix,
+    BackupCount,
+    Utc,
+    Delay,
+    AtTime,
+    ComputeInt,
+    ComputeFloat,
+    FilesToDelete,
+    ShouldRollover,
+    DoRollover,
 }
 
 /// Operations on the native logging registry and its named loggers.

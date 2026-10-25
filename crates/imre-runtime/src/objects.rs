@@ -76,6 +76,8 @@ enum Storage {
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
     Logger(Rc<Str>),
+    TimedFileHandler(Box<logging::timed::Handler>),
+    ClockTime(logging::timed::Clock),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
 }

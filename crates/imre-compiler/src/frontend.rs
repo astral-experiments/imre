@@ -48,6 +48,7 @@ mod stdlib;
 mod string_lists;
 mod sys;
 mod text;
+mod timed_handlers;
 mod truthiness;
 mod unions;
 mod unpacking;
@@ -1256,6 +1257,8 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
         Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
+        Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
+        Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(crate::ir::ProcessCapture::TEXT));
@@ -4592,7 +4595,7 @@ impl<'a> Checker<'a> {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
-                        || ty == Type::Bytes
+                        || matches!(ty, Type::Bytes | Type::ClockTime)
                         || matches!(ty, Type::Tuple(_)) && self.types.ordered_key(ty);
                     let op = match op {
                         ast::CmpOp::Eq => Compare::Equal,
@@ -4829,6 +4832,9 @@ impl<'a> Checker<'a> {
                 }
                 if receiver.ty == Type::Sha256 {
                     return self.sha256_attribute(receiver, attribute);
+                }
+                if matches!(receiver.ty, Type::TimedFileHandler | Type::ClockTime) {
+                    return self.timed_attribute(receiver, attribute);
                 }
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
@@ -5219,6 +5225,10 @@ impl<'a> Checker<'a> {
                 | Intrinsic::GetLevelName
                 | Intrinsic::LevelNamesMapping),
             )) => return self.logging_levels(symbol, call),
+            Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => {
+                return self.timed_handler(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return self.clock_time(call),
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
             }
@@ -5450,6 +5460,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::ZipFile {
                 return self.zipfile_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::TimedFileHandler {
+                return self.timed_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);

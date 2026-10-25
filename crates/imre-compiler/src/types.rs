@@ -98,6 +98,8 @@ impl Types {
             | Type::Semaphore
             | Type::Document(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -411,6 +413,8 @@ impl Types {
             | Type::Semaphore
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo

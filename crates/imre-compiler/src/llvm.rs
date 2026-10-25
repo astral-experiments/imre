@@ -75,6 +75,8 @@ impl Type {
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::Logger
+            | Self::TimedFileHandler
+            | Self::ClockTime
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -121,6 +123,8 @@ impl Type {
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::Logger
+            | Self::TimedFileHandler
+            | Self::ClockTime
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -694,6 +698,8 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -3199,6 +3205,13 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp {predicate} i32 {order}, 0"))
                 }
+                Type::ClockTime => {
+                    let order = self.instruction(format!(
+                        "call i32 @imre_log_clock_compare(ptr {}, ptr {})",
+                        left.operand, right.operand
+                    ));
+                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                }
                 Type::Class(class)
                     if self
                         .module
@@ -3240,6 +3253,7 @@ impl Emitter<'_, '_> {
                 Type::Bool
                 | Type::None
                 | Type::Class(_)
+                | Type::TimedFileHandler
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
@@ -3599,6 +3613,44 @@ impl Emitter<'_, '_> {
             }
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
             Builtin::RegexCompile(pattern) => self.pooled_literal(pattern.as_bytes(), returns),
+            Builtin::Timed(operation) => {
+                use crate::ir::TimedOperation::*;
+                let name = match operation {
+                    New => "imre_log_file_new",
+                    Clock => "imre_log_clock_new",
+                    ClockPart => "imre_log_clock_part",
+                    Close => "imre_log_file_close",
+                    Flush => "imre_log_file_flush",
+                    Stream => "imre_log_file_stream",
+                    Filename => "imre_log_file_filename",
+                    Interval => "imre_log_file_interval",
+                    RolloverAt => "imre_log_file_rollover_at",
+                    When => "imre_log_file_when",
+                    Suffix => "imre_log_file_suffix",
+                    BackupCount => "imre_log_file_count",
+                    Utc => "imre_log_file_utc",
+                    Delay => "imre_log_file_delay",
+                    AtTime => "imre_log_file_at_time",
+                    ComputeInt => "imre_log_file_compute_int",
+                    ComputeFloat => "imre_log_file_compute_float",
+                    FilesToDelete => "imre_log_file_deletions",
+                    ShouldRollover => "imre_log_file_should_roll",
+                    DoRollover => "imre_log_file_roll",
+                };
+                // A timed handler evaluates the record argument but decides solely from the clock.
+                let args = if matches!(operation, ShouldRollover) {
+                    &args[..1]
+                } else {
+                    &args[..]
+                };
+                let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
+                if returns == Type::None {
+                    self.void_call(name, &values);
+                    none()
+                } else {
+                    self.call(name, returns, &values)
+                }
+            }
             Builtin::Logging(operation) => {
                 use crate::ir::LogOperation::*;
                 let name = match operation {
@@ -4801,6 +4853,8 @@ impl Emitter<'_, '_> {
                     | Type::Semaphore
                     | Type::AsyncProcess(_)
                     | Type::Logger
+                    | Type::TimedFileHandler
+                    | Type::ClockTime
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -5022,6 +5076,8 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -5079,6 +5135,8 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -5635,6 +5693,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Semaphore
         | Type::AsyncProcess(_)
         | Type::Logger
+        | Type::TimedFileHandler
+        | Type::ClockTime
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -6136,6 +6196,27 @@ declare ptr @imre_regex_compile(ptr, i64)
 declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
+declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)
+declare ptr @imre_log_clock_new(i64, i64, i64, i64, i8, i64)
+declare i32 @imre_log_clock_compare(ptr, ptr)
+declare i64 @imre_log_clock_part(ptr, i64)
+declare void @imre_log_file_close(ptr)
+declare void @imre_log_file_flush(ptr)
+declare i64 @imre_log_file_stream(ptr)
+declare ptr @imre_log_file_filename(ptr)
+declare i64 @imre_log_file_interval(ptr)
+declare i64 @imre_log_file_rollover_at(ptr)
+declare ptr @imre_log_file_when(ptr)
+declare ptr @imre_log_file_suffix(ptr)
+declare i64 @imre_log_file_count(ptr)
+declare i1 @imre_log_file_utc(ptr)
+declare i1 @imre_log_file_delay(ptr)
+declare i64 @imre_log_file_at_time(ptr)
+declare i64 @imre_log_file_compute_int(ptr, i64)
+declare double @imre_log_file_compute_float(ptr, double)
+declare ptr @imre_log_file_deletions(ptr)
+declare i1 @imre_log_file_should_roll(ptr)
+declare void @imre_log_file_roll(ptr)
 declare ptr @imre_log_get(i64)
 declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)

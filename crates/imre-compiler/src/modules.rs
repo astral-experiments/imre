@@ -59,6 +59,8 @@ pub(crate) enum IntrinsicModule {
     Dataclasses,
     Difflib,
     Logging,
+    LoggingHandlers,
+    Datetime,
     Abc,
     Asyncio,
     Contextlib,
@@ -155,6 +157,8 @@ pub(crate) enum Intrinsic {
     Logger,
     LogRoot,
     LogEmit(Option<u8>),
+    TimedFileHandler,
+    ClockTime,
     TextIO,
     BinaryIO,
     Union,
@@ -227,6 +231,8 @@ impl IntrinsicModule {
         match name {
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
+            "logging.handlers" => Some(Self::LoggingHandlers),
+            "datetime" => Some(Self::Datetime),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
             "contextlib" => Some(Self::Contextlib),
@@ -272,6 +278,9 @@ impl IntrinsicModule {
     }
 
     fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Logging && name == "handlers" {
+            return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
+        }
         if self == Self::Os && name == "path" {
             return Some(Binding::IntrinsicModule(Self::PosixPath));
         }
@@ -343,6 +352,8 @@ impl IntrinsicModule {
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
             (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
             (Self::Sys, "exit") => Intrinsic::SysExit,
+            (Self::LoggingHandlers, "TimedRotatingFileHandler") => Intrinsic::TimedFileHandler,
+            (Self::Datetime, "time") => Intrinsic::ClockTime,
             (Self::Logging, "Logger") => Intrinsic::Logger,
             (Self::Logging, "root") => Intrinsic::LogRoot,
             (Self::Logging, "log") => Intrinsic::LogEmit(None),
