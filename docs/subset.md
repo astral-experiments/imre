@@ -1084,8 +1084,11 @@ User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent
 Python method resolution order. A class that carries fields can use an ordinary
 typed initializer or a dataclass initializer with `__post_init__`. Its constructor
-must call `super().__init__(message)` once with a string. Keyword arguments,
-typed fields, `.args` on the concrete exception, and custom `__str__` and
+must initialize its base exactly once. An explicit `Exception.__init__(self, ...)`
+or `BaseException.__init__(self, ...)` keeps the positional arguments in `.args`,
+including `None`, booleans, integers, strings, bytes, and fixed tuples of those
+values. The `super().__init__` form accepts zero arguments, one string, or
+multiple supported values. Constructor keyword arguments, typed fields, and custom `__str__` and
 `__repr__` methods use the same object after a raise. A class attribute can name
 such a constructor. Inheriting a user payload layout, dynamic constructors, and
 reinitializing an exception are outside this subset.

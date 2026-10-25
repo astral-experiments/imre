@@ -161,6 +161,9 @@ impl ClassInfo {
                     .fields
                     .iter()
                     .map(|field| {
+                        if field.name == crate::classes::EXCEPTION_ARGS_SLOT {
+                            return Ok(Type::ExceptionField);
+                        }
                         annotation_in_class(
                             &field.annotation,
                             graph,
@@ -5432,6 +5435,16 @@ impl<'a> Checker<'a> {
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
+                    let field = self.classes.fields[class].len() - 1;
+                    if self.classes.fields[class][field] == Type::ExceptionField {
+                        return Ok(Expr {
+                            ty: Type::ExceptionField,
+                            kind: ExprKind::Field(
+                                Box::new(Self::exception_record(receiver)),
+                                field,
+                            ),
+                        });
+                    }
                     let message = Expr {
                         ty: self.types.optional(Type::Str),
                         kind: ExprKind::Field(
@@ -5790,6 +5803,9 @@ impl<'a> Checker<'a> {
         }
         if crate::classes::super_init(call) {
             return self.call_super_initializer(call);
+        }
+        if let Some(expr) = self.explicit_exception_initializer(call)? {
+            return Ok(expr);
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "most_common"
