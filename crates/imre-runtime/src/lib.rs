@@ -794,7 +794,8 @@ pub extern "C" fn imre_none_str() -> *const Str {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler supplies the readable constant span.
-    Rc::into_raw(Rc::new(Str::new(unsafe { text(data, length) })))
+    let literal = unsafe { text(data, length) };
+    Rc::into_raw(objects::literal_string(literal))
 }
 
 /// # Safety
@@ -804,7 +805,11 @@ pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *co
 pub unsafe extern "C" fn imre_str_static_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler's string globals have static storage duration.
     let literal: &'static str = unsafe { text(data, length) };
-    Rc::into_raw(Rc::new(Str::const_new(literal)))
+    Rc::into_raw(if literal.len() <= 2 {
+        objects::literal_string(literal)
+    } else {
+        Rc::new(Str::const_new(literal))
+    })
 }
 
 /// # Safety
@@ -1026,6 +1031,27 @@ fn index(raw: isize, length: usize) -> Result<usize> {
 #[inline(never)]
 fn big_index(value: &BigInt) -> Option<isize> {
     value.to_isize()
+}
+
+/// Empty an integer list in place, detaching its allocation before releasing owners.
+///
+/// # Safety
+/// The caller roots a live integer list for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_clear(list: *const List) {
+    // SAFETY: the handle stays rooted; the exclusive borrow only moves its buffer.
+    let list = unsafe { &*list };
+    // SAFETY: no element is destroyed while the storage is borrowed.
+    let previous = unsafe {
+        list.0
+            .with_mut(|values| (!is_sorting_empty_ints(values)).then(|| std::mem::take(values)))
+    };
+    if let Some(mut values) = previous {
+        list.release_range_hint();
+        while let Some(value) = values.pop() {
+            drop(value);
+        }
+    }
 }
 
 /// Returns an owned nonzero integer word, or raw zero with a pending error.
