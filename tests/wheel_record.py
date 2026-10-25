@@ -49,6 +49,10 @@ def make_wheel(path, compression, case):
         writer.writerow((name, "sha256=" + digest, size))
     writer.writerow((record, "", ""))
     members[record] = buf.getvalue().encode()
+    if case == "missing-record":
+        del members[record]
+    elif case == "undecodable-record":
+        members[record] = b"\xff"
     if case == "tampered":
         members[QUOTED] = b"C" + members[QUOTED][1:]
     with ZipFile(path, "w", compression=compression) as out:
@@ -104,15 +108,20 @@ def main():
         parser.error("native checks require --compiler and --runtime")
     verify_vendor()
     env = dict(os.environ, PYTHONPATH=str(UPSTREAM), PYTHONNOUSERSITE="1")
-    expected_issue = {"valid": "", "tampered": "didn't match RECORD", "wrong-size": "didn't match RECORD",
-                      "missing-row": "is not mentioned in RECORD", "invalid-size": "invalid"}
+    expected_issue = {
+        "valid": ("", ""), "tampered": ("didn't match RECORD", QUOTED),
+        "wrong-size": ("didn't match RECORD", QUOTED),
+        "missing-row": ("is not mentioned in RECORD", QUOTED), "invalid-size": ("invalid", QUOTED),
+        "missing-record": ("KeyError(", f"{DIST}/RECORD"),
+        "undecodable-record": ("UnicodeDecodeError(", "utf-8"),
+    }
     with tempfile.TemporaryDirectory(prefix="imre-wheel-record-") as tmp:
         root = Path(tmp)
         cases = []
         for fmt, compression in [("stored", ZIP_STORED), ("deflated", ZIP_DEFLATED)]:
-            for case, issue in expected_issue.items():
+            for case, (issue, member) in expected_issue.items():
                 path = root / (fmt + "-" + case) / "demo-1.0-py3-none-any.whl"
-                cases.append((make_wheel(path, compression, case), issue, QUOTED))
+                cases.append((make_wheel(path, compression, case), issue, member))
         if args.real_wheel:
             wheel = args.real_wheel.resolve()
             bad = root / "real-tampered" / wheel.name
