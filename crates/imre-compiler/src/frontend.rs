@@ -5505,6 +5505,12 @@ impl<'a> Checker<'a> {
             return self.call_super_initializer(call);
         }
         if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "most_common"
+            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+        {
+            return self.counter_most_common(call, None);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
             && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
             && matches!(method.attr.as_str(), "subtract" | "update")
             && !calls::starred(call)
@@ -6021,6 +6027,7 @@ impl<'a> Checker<'a> {
             }
             if self.types.is_counter(receiver.ty) {
                 match attribute.attr.as_str() {
+                    "most_common" => return self.counter_most_common(call, Some(receiver)),
                     "update" => return self.counter(call, Some(receiver), None),
                     "subtract" => {
                         return self.counter_counts(call, Some(receiver), None, Binary::Subtract);

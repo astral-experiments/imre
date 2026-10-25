@@ -764,6 +764,7 @@ pub(crate) enum Builtin {
     DefaultListDict,
     CounterNew,
     CounterTotal,
+    CounterMostCommon,
     CounterUpdate,
     DictSumValues,
     /// Widens a defaultdict owner to its ordinary dictionary interface.

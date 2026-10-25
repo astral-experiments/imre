@@ -7,6 +7,7 @@
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
+mod ranking;
 mod record_hash;
 mod sorted_rows;
 
