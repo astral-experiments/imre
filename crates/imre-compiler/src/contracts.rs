@@ -271,6 +271,9 @@ impl Builtin {
                 | ProcessOperation::IgnorePatterns
                 | ProcessOperation::TreeErrorArgs
                 | ProcessOperation::Copy(_)
+                | ProcessOperation::FastCopy(_)
+                | ProcessOperation::FastCopyBlocksize
+                | ProcessOperation::FastCopyFlag { .. }
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)

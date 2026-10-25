@@ -179,6 +179,18 @@ impl Checker<'_> {
         target: &ast::Expr,
         value: Expr,
     ) -> Result<Statement, String> {
+        if matches!(target, ast::Expr::Attribute(_))
+            && let Some(Binding::Intrinsic(Intrinsic::FastCopyFlag(method))) = self.resolve(target)
+        {
+            let value = self.coerce(value, Type::Bool, target)?;
+            return Ok(Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::Process(ir::ProcessOperation::FastCopyFlag { method, set: true }),
+                    vec![value],
+                ),
+            }));
+        }
         match target {
             ast::Expr::Name(_) => self.assign(target, value),
             ast::Expr::Subscript(subscript) => {

@@ -1,5 +1,6 @@
 //! POSIX executable lookup shares the caller's credentials and current working directory.
 mod copy;
+mod fastcopy;
 mod rmtree;
 
 use std::borrow::Cow;

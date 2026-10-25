@@ -3,6 +3,53 @@
 use super::*;
 
 impl Checker<'_> {
+    pub(super) fn shutil_fastcopy(
+        &mut self,
+        call: &ast::ExprCall,
+        method: Option<u32>,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let names: &[(&str, Type)] = match method {
+            None => &[("infd", Type::Int)],
+            Some(2) => &[
+                ("fsrc", Type::BinaryIO),
+                ("fdst", Type::BinaryIO),
+                ("flags", Type::Int),
+            ],
+            Some(_) => &[("fsrc", Type::BinaryIO), ("fdst", Type::BinaryIO)],
+        };
+        let params: Vec<_> = names
+            .iter()
+            .map(|&(name, ty)| Parameter {
+                name: name.into(),
+                ty,
+                kind: ParameterKind::PositionalOrKeyword,
+                default: None,
+                sign_only: false,
+            })
+            .collect();
+        let args = self.arguments_with(call, &params, None, |checker, i, expr| {
+            if names[i].1 == Type::Int {
+                return checker.expr_expected(expr, Type::Int);
+            }
+            let value = checker.expr(expr)?;
+            if matches!(value.ty, Type::TextIO | Type::BinaryIO) {
+                Ok(value)
+            } else {
+                Err(error(
+                    checker.source,
+                    expr,
+                    "fast copy requires a file object",
+                ))
+            }
+        })?;
+        let (op, returns) = match method {
+            Some(method) => (ir::ProcessOperation::FastCopy(method), Type::None),
+            None => (ir::ProcessOperation::FastCopyBlocksize, Type::Int),
+        };
+        Ok(self.ordered_builtin(Builtin::Process(op), returns, args))
+    }
+
     /// Emit a native function value with the same ownership and indirect-call ABI as a def.
     fn shutil_helper(
         &mut self,

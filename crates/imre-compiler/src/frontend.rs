@@ -4374,6 +4374,7 @@ impl<'a> Checker<'a> {
                 Some(self.classes.declarations.exceptions[&def])
             }
             Some(Binding::Intrinsic(Intrinsic::ShutilError)) => Some(64),
+            Some(Binding::Intrinsic(Intrinsic::GiveupOnFastCopy)) => Some(69),
             Some(Binding::Intrinsic(Intrinsic::SameFileError)) => Some(65),
             Some(Binding::Intrinsic(Intrinsic::SpecialFileError)) => Some(66),
             Some(Binding::Intrinsic(Intrinsic::CancelledError)) => Some(33),
@@ -5076,6 +5077,24 @@ impl<'a> Checker<'a> {
                         Type::Bool,
                         vec![logging::number(mask)],
                     ));
+                }
+                Intrinsic::FastCopyFlag(method) => {
+                    return Ok(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::FastCopyFlag {
+                                method,
+                                set: false,
+                            }),
+                            vec![],
+                        ),
+                    });
+                }
+                Intrinsic::CopyBufsize => {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Int("262144".into()),
+                    });
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
@@ -6731,6 +6750,12 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::DestInSrc)) => return self.shutil_move(call, true),
             Some(Binding::Intrinsic(Intrinsic::IgnorePatterns)) => {
                 return self.shutil_ignore_patterns(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::FastCopy(method))) => {
+                return self.shutil_fastcopy(call, Some(method));
+            }
+            Some(Binding::Intrinsic(Intrinsic::FastCopyBlocksize)) => {
+                return self.shutil_fastcopy(call, None);
             }
             Some(Binding::Intrinsic(Intrinsic::Copy(op))) => return self.shutil_copy(op, call),
             Some(Binding::Intrinsic(symbol @ (Intrinsic::FsPath | Intrinsic::PosixNormcase))) => {

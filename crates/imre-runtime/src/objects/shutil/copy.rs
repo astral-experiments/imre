@@ -2,7 +2,8 @@
 
 use std::ffi::OsStr;
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, BufRead, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, symlink};
 use std::path::Path;
@@ -102,7 +103,34 @@ fn copy_data(src: &Name, dst: &Name) -> Result<()> {
                 dst.error(e)
             }
         })?;
-        let copied = io::copy(&mut input, &mut output).map_err(errno_error);
+        let copied = (|| {
+            use super::fastcopy::{self, FCOPYFILE, RANGE, SENDFILE};
+            for method in [FCOPYFILE, RANGE, SENDFILE] {
+                if !fastcopy::enabled(method) {
+                    continue;
+                }
+                let transfer =
+                    fastcopy::copy_fds(method, input.as_raw_fd(), output.as_raw_fd(), 8, |e| {
+                        errno_with_filenames(e, Some(src.filename()), Some(dst.filename()))
+                    });
+                match transfer {
+                    Err(e) if e.is_kind(Kind::GiveupOnFastCopy) => {}
+                    result => return result,
+                }
+            }
+            // Explicit buffered fallback: std::io::copy may select exactly the
+            // kernel operation which has just failed or been disabled.
+            let mut reader = io::BufReader::with_capacity(256 * 1024, &mut input);
+            loop {
+                let buf = reader.fill_buf().map_err(errno_error)?;
+                if buf.is_empty() {
+                    return Ok(());
+                }
+                output.write_all(buf).map_err(errno_error)?;
+                let size = buf.len();
+                reader.consume(size);
+            }
+        })();
         close_file(output)
             .map_err(errno_error)
             .and(copied)
