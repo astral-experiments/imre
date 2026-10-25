@@ -1,0 +1,21 @@
+{
+  "imre_commit": "bed5112283fa03c3b21e759c9a28d18d4ec8fe08",
+  "raw_O0": "70aded39c1aca1ae5f4a74926252f47eebad3c6481ecbffd7599a8ae66d8a171",
+  "first_O3_progress": "1378687fb63826b94d63e4334b8bfb55cbde7e0cda38b31ed6990cd7c38e5039",
+  "selection": "fec0fa66543a88dd5a58abb93d8ba287f53108c96b7974b84fb27a72e69ca970",
+  "recovery_O3": "f379b51f148128a924a76364c634543344c9118596007f9ca34ac575c69cf7a5",
+  "combined_O3": "036cb3be551d8a39e450c2796470e197dfb5fa68d7da0339c3a2a0e463457ca9",
+  "O0": {
+    "compile blocker": 818,
+    "native candidate": 121,
+    "original fixture wrapper": 39
+  },
+  "O3": {
+    "compile blocker": 818,
+    "native candidate": 121,
+    "original fixture wrapper": 39
+  },
+  "missing_first_O3": 112,
+  "repeated_O3": 126,
+  "level_differences": []
+}
