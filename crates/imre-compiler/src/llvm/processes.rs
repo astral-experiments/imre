@@ -443,7 +443,7 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
-            ProcessOperation::CopyFile => {
+            ProcessOperation::Copy(op) => {
                 let tag = |ty| match ty {
                     Type::Str => 0,
                     Type::Bytes => 1,
@@ -455,17 +455,14 @@ impl Emitter<'_, '_> {
                 };
                 let follow = self.instruction(format!("zext i1 {} to i32", follow.value.operand));
                 let operand = self.checked_instruction(format!(
-                    "call ptr @imre_shutil_copyfile(ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
+                    "call i64 @imre_shutil_copy(i32 {}, ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
+                    op as u32,
                     src.value.operand,
                     tag(src.value.ty),
                     dst.value.operand,
                     tag(dst.value.ty)
                 ));
-                self.owned(Value {
-                    ty: returns,
-                    operand,
-                    small_integer: false,
-                })
+                self.unpack_word(operand, returns)
             }
             ProcessOperation::Which => {
                 let path =

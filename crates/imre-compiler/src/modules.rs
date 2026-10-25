@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedOverload, Session};
-use crate::ir::PosixPathOperation;
+use crate::ir::{CopyOperation, PosixPathOperation};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -227,7 +227,7 @@ pub(crate) enum Intrinsic {
     Path,
     PurePath(crate::ir::PathFlavor),
     Which,
-    CopyFile,
+    Copy(CopyOperation),
     ShutilError,
     SameFileError,
     SpecialFileError,
@@ -461,7 +461,12 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Shutil, "which") => Intrinsic::Which,
-            (Self::Shutil, "copyfile") => Intrinsic::CopyFile,
+            (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
+            (Self::Shutil, "copymode") => Intrinsic::Copy(CopyOperation::Mode),
+            (Self::Shutil, "copystat") => Intrinsic::Copy(CopyOperation::Stat),
+            (Self::Shutil, "_copyxattr") => Intrinsic::Copy(CopyOperation::Xattr),
+            (Self::Shutil, "copy") => Intrinsic::Copy(CopyOperation::Copy),
+            (Self::Shutil, "copy2") => Intrinsic::Copy(CopyOperation::Copy2),
             (Self::Shutil, "Error") => Intrinsic::ShutilError,
             (Self::Shutil, "SameFileError") => Intrinsic::SameFileError,
             (Self::Shutil, "SpecialFileError") => Intrinsic::SpecialFileError,

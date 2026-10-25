@@ -980,6 +980,18 @@ pub(crate) enum LogOperation {
     Emit,
 }
 
+/// Filesystem copy operations using the same ordered pair of path operands.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub(crate) enum CopyOperation {
+    File = 0,
+    Mode = 1,
+    Stat = 2,
+    Xattr = 3,
+    Copy = 4,
+    Copy2 = 5,
+}
+
 /// Synchronous process operations cannot invoke language callbacks.
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
@@ -1058,7 +1070,7 @@ pub(crate) enum ProcessOperation {
     EnvironGet,
     GetCwd,
     Which,
-    CopyFile,
+    Copy(CopyOperation),
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,
