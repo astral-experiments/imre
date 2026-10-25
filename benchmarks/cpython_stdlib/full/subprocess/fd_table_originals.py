@@ -11,18 +11,22 @@ import select
 import subprocess
 import sys
 import tempfile
+import warnings
 from types import SimpleNamespace
 from unittest.mock import patch
 
-HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE), str(HERE.parents[1])]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from attempt_bodies import SOURCE, fixture
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_native import Toolchain, native_method, run_in_fixtures
 
+HERE = Path(__file__).resolve().parent
+
 IDS = {
     f"test.test_subprocess.POSIXProcessTestCase.{name}"
     for name in (
+        "test_pass_fds",
         "test_close_fds",
         "test_pass_fds_inheritable",
         "test_pass_fds_redirected",
@@ -59,10 +63,12 @@ def read(stream):
     return line.rstrip(b"\n")
 
 
-def program(options, inherited):
+def program(options, inherited, command=None):
     # The compiler knows which return slots are pipes. Each actual fixture fd
     # is still installed by the transport and verified in the target process.
     source = ["import os", "import subprocess", "import sys"]
+    if command is not None:
+        source.append("import warnings")
     for fd, (_, cloexec) in sorted(inherited.items()):
         source.append(f"os.set_inheritable({fd}, {not cloexec!r})")
     params = []
@@ -81,6 +87,29 @@ def program(options, inherited):
         else:
             raise AssertionError(("unexpected original option", name, value))
         params.append(name + "=" + expr)
+    if command is not None:
+        if type(command) is not tuple or not command:
+            raise AssertionError(command)
+        # Preserve the exact argument tuple used by the host module fixture.
+        args = (
+            "("
+            + "".join(f"sys.argv[{index}]," for index in range(1, len(command) + 1))
+            + ")"
+        )
+        source.extend(
+            [
+                'warnings.simplefilter("always", RuntimeWarning)',
+                'print("ready")',
+                'assert input()=="go"',
+                "result=subprocess.call(" + args + ", " + ", ".join(params) + ")",
+                'print("returned")',
+                'assert input()=="result"',
+                "print(result)",
+                'print("reaped")',
+                'assert input()=="release"',
+            ]
+        )
+        return ("\n".join(source) + "\n").encode()
     source.extend(
         [
             'print("ready")',
@@ -106,7 +135,7 @@ def program(options, inherited):
     return ("\n".join(source) + "\n").encode()
 
 
-def exercise(tc, directory, case, original):
+def exercise(tc, directory, case, original, forward_warning=warnings.warn_explicit):
     from test import test_subprocess as upstream
 
     base = table("self")
@@ -128,8 +157,12 @@ def exercise(tc, directory, case, original):
     controls = set()
 
     class Native:
-        def __init__(self, args, **options):
-            if type(args) is not list or not all(type(s) is str for s in args):
+        def __init__(self, args, *, original_call=False, **options):
+            self.original_call = original_call
+            self.warning = None
+            if type(args) is not (tuple if original_call else list) or not all(
+                type(s) is str for s in args
+            ):
                 raise AssertionError(args)
             self.directory = directory / str(len(actors))
             self.directory.mkdir()
@@ -145,8 +178,11 @@ def exercise(tc, directory, case, original):
             if set(keep) - self.inherited.keys():
                 raise AssertionError(("unknown keep descriptors", keep))
             self.options = options
-            self.args = args.copy()
-            self.binary = tc.build(program(options, self.inherited), self.directory)
+            self.args = args[:]
+            self.binary = tc.build(
+                program(options, self.inherited, args if original_call else None),
+                self.directory,
+            )
             self.actor = subprocess.Popen(
                 [
                     "strace",
@@ -157,7 +193,7 @@ def exercise(tc, directory, case, original):
                     "-e",
                     "signal=none",
                     "-e",
-                    "trace=execve,fcntl,close_range,clone,clone3,fork,vfork,wait4,poll,ppoll,select,pselect6",
+                    "trace=execve,fcntl,close_range,clone,clone3,fork,vfork,wait4,poll,ppoll,select,pselect6,write,writev",
                     "-o",
                     self.directory / "pid",
                     "--",
@@ -197,7 +233,9 @@ def exercise(tc, directory, case, original):
                     )
                 )
             self.actor.stdin.write(b"go\n")
-            if read(self.actor.stdout) != b"spawned":
+            if read(self.actor.stdout) != (
+                b"returned" if original_call else b"spawned"
+            ):
                 raise AssertionError("Popen did not return")
 
         def __enter__(self):
@@ -216,6 +254,8 @@ def exercise(tc, directory, case, original):
                 out = ast.literal_eval(read(self.actor.stdout).decode())
                 if read(self.actor.stdout) != b"True":
                     raise AssertionError("unexpected stderr pipe")
+            if request == "result":
+                out = int(read(self.actor.stdout))
             if read(self.actor.stdout) != b"reaped":
                 raise AssertionError("context did not reap")
             if table(self.pid) != self.before:
@@ -223,8 +263,30 @@ def exercise(tc, directory, case, original):
                     "Popen changed a borrowed parent fd or descriptor flag"
                 )
             self.actor.stdin.write(b"release\n")
-            if self.actor.wait(timeout=15) or self.actor.stderr.read():
-                raise AssertionError("native parent failed")
+            status = self.actor.wait(timeout=15)
+            stderr = self.actor.stderr.read()
+            if status:
+                raise AssertionError(("native parent failed", status, stderr))
+            if self.original_call:
+                recognizable = re.fullmatch(
+                    rb"(subprocess\.py):(\d+): (RuntimeWarning): ([^\n]+)\n", stderr
+                )
+                if recognizable is None:
+                    raise AssertionError(
+                        ("native parent did not emit its warning", stderr)
+                    )
+                filename, line, category, text = recognizable.groups()
+                self.warning = dict(
+                    file=filename.decode(),
+                    line=int(line),
+                    category=category.decode(),
+                    message=text.decode(),
+                )
+                forward_warning(
+                    text.decode(), RuntimeWarning, filename.decode(), int(line)
+                )
+            elif stderr:
+                raise AssertionError(("unexpected Popen stderr", stderr))
             self.finished = True
             self.close()
             return out, None
@@ -294,6 +356,24 @@ def exercise(tc, directory, case, original):
                     line.startswith(f"fcntl({fd}, F_SETFD, 0)") for line in before_exec
                 ):
                     raise AssertionError(("missing child-only CLOEXEC removal", fd))
+            if self.original_call:
+                [warned] = [
+                    i
+                    for i, s in enumerate(parent)
+                    if re.match(r"writev?\(2,", s)
+                    and "RuntimeWarning: pass_fds overriding close_fds." in s
+                ]
+                [created] = [
+                    i
+                    for i, s in enumerate(parent)
+                    if re.match(r"(?:clone3?|vfork|fork)\(", s)
+                    and s.endswith(f"= {child}")
+                ]
+                if warned >= created:
+                    raise AssertionError(
+                        "warning did not precede the native child launch"
+                    )
+                self.warning["before_child_creation"] = True
             return dict(
                 native_parent_sha256=digest(self.binary),
                 original_open_fds=len(self.inherited),
@@ -305,23 +385,53 @@ def exercise(tc, directory, case, original):
                 if "pass_fds" in self.options
                 else None,
                 kept_descriptors=len(keep),
+                kept_numbers=keep,
+                data_executable=self.args[0],
                 borrowed_stdio=sum(
                     name in self.options and self.options[name] >= 0
                     for name in ("stdin", "stdout", "stderr")
                 ),
                 child_bulk_cloexec=marked,
                 parent_table_unchanged=True,
-                data_child="original CPython fd_status.py",
+                data_child="original ZERO_RETURN_CMD"
+                if self.original_call
+                else "original CPython fd_status.py",
+                native_warning=self.warning,
+                argument_type=type(self.args).__name__,
                 native_reaps=1,
             )
 
+    def native_call(args, **options):
+        if args is not upstream.ZERO_RETURN_CMD:
+            raise AssertionError(
+                "the test did not pass the module fixture's original command"
+            )
+        if warnings.filters[0] != ("always", None, RuntimeWarning, None, 0):
+            raise AssertionError(
+                ("unexpected original assertWarns filter", warnings.filters[0])
+            )
+        actor = Native(args, original_call=True, **options)
+        code, _ = actor.finish("result")
+        return code
+
     try:
         with patch.object(
-            upstream, "subprocess", SimpleNamespace(Popen=Native, PIPE=subprocess.PIPE)
+            upstream,
+            "subprocess",
+            SimpleNamespace(Popen=Native, call=native_call, PIPE=subprocess.PIPE),
         ):
             original()
         if not actors:
             raise AssertionError("no native launch")
+        if case._testMethodName == "test_pass_fds":
+            if len(actors) != 20 or sum(a.original_call for a in actors) != 10:
+                raise AssertionError("not every descriptor reached both native APIs")
+            if [a.options["pass_fds"] for a in actors[::2]] != [
+                a.options["pass_fds"] for a in actors[1::2]
+            ]:
+                raise AssertionError(
+                    "each original descriptor must reach both native calls"
+                )
         return dict(
             body_attempt=attempt,
             roles=dict(
@@ -343,7 +453,22 @@ def main():
     for field in ("imre", "runtime", "clang", "result"):
         p.add_argument("--" + field, type=Path, required=True)
     p.add_argument("--opt-level", type=int, choices=(0, 3), required=True)
+    p.add_argument(
+        "--only",
+        choices=sorted(IDS),
+        action="append",
+        help="Select original IDs within this driver",
+    )
+    p.add_argument(
+        "--withhold-warning",
+        action="store_true",
+        help="Withhold the captured native warning to exercise the original assertion",
+    )
     args = p.parse_args()
+    selected = set(args.only or IDS)
+    warning_id = "test.test_subprocess.POSIXProcessTestCase.test_pass_fds"
+    if args.withhold_warning and selected != {warning_id}:
+        p.error("--withhold-warning requires --only " + warning_id)
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
     verify_files(HERE / "upstream", manifest["files"])
     verify_interpreter_tests(manifest)
@@ -352,16 +477,43 @@ def main():
         tempfile.TemporaryDirectory() as tmp,
         patch.dict(os.environ, IMRE_PYTHON=sys.executable),
     ):
+        withheld = []
+
+        def capture(text, category, filename, lineno):
+            withheld.append(
+                dict(
+                    message=text, category=category.__name__, file=filename, line=lineno
+                )
+            )
 
         def execute(case, original):
             directory = Path(tmp) / case._testMethodName
             directory.mkdir()
-            return exercise(tc, directory, case, original)
+            return exercise(
+                tc,
+                directory,
+                case,
+                original,
+                capture if args.withhold_warning else warnings.warn_explicit,
+            )
 
         rows, failed, skipped = run_in_fixtures(
-            load_suite(manifest["module"]), dict.fromkeys(IDS, execute)
+            load_suite(manifest["module"]), dict.fromkeys(selected, execute)
         )
-        if rows.keys() != IDS or failed or skipped:
+        control = {}
+        if args.withhold_warning:
+            if rows or skipped or len(failed) != 1 or failed[0][0] != warning_id:
+                raise AssertionError((rows, failed, skipped))
+            diagnostic = failed[0][1].strip().splitlines()[-1]
+            if (
+                diagnostic != "AssertionError: RuntimeWarning not triggered"
+                or len(withheld) != 1
+            ):
+                raise AssertionError((diagnostic, withheld))
+            control["withheld_warning"] = dict(
+                original_failure=diagnostic, native_warning=withheld[0]
+            )
+        elif rows.keys() != selected or failed or skipped:
             raise AssertionError((failed, skipped))
     args.result.write_text(
         json.dumps(
@@ -372,6 +524,7 @@ def main():
                     n: digest(getattr(args, n)) for n in ("imre", "runtime", "clang")
                 },
                 rows=rows,
+                **control,
             ),
             indent=2,
         )
