@@ -65,6 +65,7 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -83,6 +84,7 @@ impl Builtin {
             Self::Text(operation) => Contract::new(
                 match operation {
                     TextOperation::SplitLineEnds
+                    | TextOperation::ExpandTabs
                     | TextOperation::Lower
                     | TextOperation::Capitalize
                     | TextOperation::Split(_)
@@ -253,6 +255,9 @@ impl Builtin {
                 | ProcessOperation::Strerror
                 | ProcessOperation::Which
                 | ProcessOperation::RmTree
+                | ProcessOperation::CopyTree(_)
+                | ProcessOperation::IgnorePatterns
+                | ProcessOperation::TreeErrorArgs
                 | ProcessOperation::Copy(_)
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
@@ -276,6 +281,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::BytesGet
+            | Self::WrapperAttributes(_)
             | Self::Chr
             | Self::IntegerPower
             | Self::ModularPower
@@ -558,6 +564,9 @@ impl Builtin {
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
+            Self::WrapperAttributes(fields) => {
+                args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
+            }
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).is_some_and(|wrapper| wrapper.frame == result))
             }
@@ -885,6 +894,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice"
                 | "imre_list_slice_sum"
                 | "imre_str_get"
+                | "imre_str_expandtabs"
                 | "imre_str_lower"
                 | "imre_str_capitalize"
                 | "imre_str_slice"
