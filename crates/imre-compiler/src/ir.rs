@@ -603,7 +603,10 @@ pub(crate) enum Builtin {
     RStrip,
     SysArgv,
     /// The child layout descriptors follow the literal subcommand order.
-    ParseArgs(Vec<usize>),
+    ParseArgs {
+        children: Vec<usize>,
+        process_argv: bool,
+    },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
     ExactRecord(usize),

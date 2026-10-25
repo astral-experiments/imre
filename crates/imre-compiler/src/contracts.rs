@@ -304,7 +304,7 @@ impl Builtin {
             | Self::ZipNamelist
             | Self::ZipClose
             | Self::Input
-            | Self::ParseArgs(_)
+            | Self::ParseArgs { .. }
             | Self::Pop
             | Self::Print
             | Self::SortRestore

@@ -3944,7 +3944,10 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::ParseArgs(children) => {
+            Builtin::ParseArgs {
+                children,
+                process_argv,
+            } => {
                 let Type::Class(class) = returns else {
                     unreachable!()
                 };
@@ -3973,7 +3976,7 @@ impl Emitter<'_, '_> {
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @imre_argparse_parse(ptr @{layout}, ptr {child_layouts}, ptr {}, ptr {}, ptr {})",
+                        "call ptr @imre_argparse_parse(ptr @{layout}, ptr {child_layouts}, ptr {}, ptr {}, ptr {}, i1 {process_argv})",
                         schema.value.operand, description.value.operand, argv.value.operand,
                     )),
                     small_integer: false,
@@ -6100,7 +6103,7 @@ declare i32 @imre_text_flush(ptr)
 declare i32 @imre_text_close(ptr)
 declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
-declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr)
+declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_platform()
 declare i64 @imre_sys_stream_write(i32, ptr)
