@@ -452,7 +452,8 @@ pub(crate) enum Builtin {
     SystemExitCodeEqual {
         reversed: bool,
     },
-    SysExit,
+    /// Evaluates and roots all arguments, then raises the last (an exception).
+    RaiseException,
     WallTime,
     Logging(LogOperation),
     Input,

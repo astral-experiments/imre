@@ -296,7 +296,7 @@ impl Builtin {
             | Self::StderrLine
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
-            | Self::SysExit
+            | Self::RaiseException
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
