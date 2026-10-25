@@ -1025,9 +1025,8 @@ pub unsafe extern "C" fn imre_list_clear(list: *const List) {
     let list = unsafe { &*list };
     // SAFETY: no element is destroyed while the storage is borrowed.
     let previous = unsafe {
-        list.0.with_mut(|values| {
-            (!is_sorting_empty_ints(values)).then(|| std::mem::take(values))
-        })
+        list.0
+            .with_mut(|values| (!is_sorting_empty_ints(values)).then(|| std::mem::take(values)))
     };
     if let Some(mut values) = previous {
         list.release_range_hint();
