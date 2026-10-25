@@ -7,6 +7,11 @@ use std::rc::Rc;
 pub(crate) enum ClassValue {
     Binding(Binding),
     String(String),
+    /// A plain value computed once while its defining class body executes.
+    Runtime {
+        owner: DefinitionId,
+        ordinal: usize,
+    },
     Strings {
         // An alias or inherited class member reads the original global.
         owner: DefinitionId,
@@ -14,6 +19,28 @@ pub(crate) enum ClassValue {
         values: Rc<[String]>,
         literal: bool,
     },
+}
+
+/// The ordinary expression checker still verifies the type and all operands.
+/// Nested scopes have different name lookup in a Python class body.
+pub(super) fn runtime_expression(expr: &ast::Expr) -> bool {
+    matches!(
+        expr,
+        ast::Expr::Name(_)
+            | ast::Expr::Attribute(_)
+            | ast::Expr::Call(_)
+            | ast::Expr::List(_)
+            | ast::Expr::Set(_)
+            | ast::Expr::Dict(_)
+            | ast::Expr::NumberLiteral(_)
+            | ast::Expr::BooleanLiteral(_)
+            | ast::Expr::NoneLiteral(_)
+            | ast::Expr::BytesLiteral(_)
+            | ast::Expr::BinOp(_)
+            | ast::Expr::UnaryOp(_)
+            | ast::Expr::Subscript(_)
+            | ast::Expr::If(_)
+    )
 }
 
 /// A class body can concatenate a tuple it declared earlier with a literal

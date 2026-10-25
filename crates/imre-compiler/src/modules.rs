@@ -1570,6 +1570,13 @@ impl<'a> Loader<'a> {
                         self.initialization.push((id, segment..index));
                         segment = index;
                         executable = false;
+                    } else if parsed.syntax().body[segment..index]
+                        .iter()
+                        .any(|s| matches!(s, ast::Stmt::ClassDef(_)))
+                    {
+                        // A class body can call arbitrary helpers before the imported module starts.
+                        self.initialization.push((id, segment..index));
+                        segment = index;
                     }
                     self.import(id, statement)
                         .map_err(|error| self.modules[id].error(statement, &error))?;

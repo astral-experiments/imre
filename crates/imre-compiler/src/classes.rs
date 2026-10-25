@@ -78,11 +78,12 @@ pub(crate) struct Field {
 }
 
 impl Classes {
-    /// Even an entry module with no ordinary globals must initialize its owned class tuples.
-    pub(crate) fn owns_class_tuples(&self, module: usize) -> bool {
+    /// The entry module may need to execute class bodies even without module globals.
+    pub(crate) fn has_class_values(&self, module: usize) -> bool {
         self.definitions.iter().any(|class| {
             class.definition.module == module && class.static_bindings.values().any(|value| {
-                matches!(value, ClassValue::Strings { owner, .. } if *owner == class.definition)
+                matches!(value, ClassValue::Runtime { .. })
+                    || matches!(value, ClassValue::Strings { owner, .. } if *owner == class.definition)
             })
         })
     }
@@ -249,9 +250,15 @@ fn collect_class(
                 .map(|n| n.id.as_str()),
             _ => None,
         };
-        if member
-            .is_some_and(|name| base.is_some_and(|(_, b)| b.static_bindings.contains_key(name)))
-        {
+        if member.is_some_and(|name| {
+            base.and_then(|(_, b)| b.static_bindings.get(name))
+                .is_some_and(|binding| {
+                    !matches!(
+                        (binding, statement),
+                        (ClassValue::Runtime { .. }, ast::Stmt::Assign(_))
+                    )
+                })
+        }) {
             return Err(module.error(statement, "overriding a fixed class binding is unsupported"));
         }
         match statement {
@@ -510,7 +517,23 @@ fn collect_class(
                         &assign.value,
                         &class_bindings,
                         &static_bindings,
-                    )? =>
+                    )?
+                    .or_else(|| {
+                        (dataclass.is_none()
+                            && !exception_layout
+                            && constants::runtime_expression(&assign.value)
+                            && exceptions::alias(
+                                graph,
+                                definition.module,
+                                &assign.value,
+                                exceptions,
+                            )
+                            .is_none())
+                        .then_some(ClassValue::Runtime {
+                            owner: definition,
+                            ordinal,
+                        })
+                    }) =>
             {
                 if !names.insert(name.id.to_string())
                     || name.id.starts_with("__")
