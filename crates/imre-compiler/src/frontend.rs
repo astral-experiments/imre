@@ -5018,6 +5018,15 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
+                if list.ty == Type::BuiltinClass {
+                    // Python evaluates type arguments before invoking __class_getitem__.
+                    self.expr(&subscript.slice)?;
+                    return Err(error(
+                        self.source,
+                        subscript,
+                        "runtime generic aliases of builtin classes are unsupported",
+                    ));
+                }
                 let list = match list.ty {
                     documents::LIST => self.document_list(list),
                     Type::Document(_) => self.document_map(list),
