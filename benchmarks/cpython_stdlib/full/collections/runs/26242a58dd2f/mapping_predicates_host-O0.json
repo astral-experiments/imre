@@ -1,0 +1,137 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_revision": "26242a58dd2f04fc15c03a171cdfe658792cadea",
+  "opt_level": 0,
+  "tests": {
+    "test.test_collections.TestCollectionABCs.test_Mapping": [
+      {
+        "observation": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "mixed",
+            "fixture": "cpython"
+          },
+          "evidence": {
+            "method_sha256": "c2345e7f93593a34110e598d0cde39b70861deca9a15ccbc3093aa59d39b8fb8",
+            "opt_level": 0,
+            "native_calls": {
+              "isinstance": 1,
+              "issubclass": 1
+            },
+            "host_calls": {
+              "type(name, bases, methods)": 4,
+              "reflected comparison": 5,
+              "reversed(MyMapping())": 1
+            },
+            "operation": "Imre checked the original dict instance and dict class against the ABC. CPython constructed and instantiated the abstract/concrete classes, and performed the remaining operations.",
+            "fixture": "Original method, helper, assertions and unittest fixtures run by CPython.",
+            "host_method_dictionaries": [
+              [
+                "__iter__",
+                "__len__",
+                "__getitem__"
+              ],
+              [
+                "__len__",
+                "__getitem__"
+              ],
+              [
+                "__iter__",
+                "__getitem__"
+              ],
+              [
+                "__iter__",
+                "__len__"
+              ]
+            ],
+            "host_reflected_operators": [
+              "__lt__",
+              "__gt__",
+              "__le__",
+              "__ge__",
+              "__ne__"
+            ]
+          }
+        }
+      }
+    ],
+    "test.test_collections.TestCollectionABCs.test_MutableMapping": [
+      {
+        "observation": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "mixed",
+            "fixture": "cpython"
+          },
+          "evidence": {
+            "method_sha256": "8648b315c57f534a57b8df883acfe9cf1d48c30da57af08f15a7bee766baf34e",
+            "opt_level": 0,
+            "native_calls": {
+              "isinstance": 1,
+              "issubclass": 1
+            },
+            "host_calls": {
+              "type(name, bases, methods)": 6
+            },
+            "operation": "Imre checked the original dict instance and dict class against the ABC. CPython constructed and instantiated the abstract/concrete classes, and performed the remaining operations.",
+            "fixture": "Original method, helper, assertions and unittest fixtures run by CPython.",
+            "host_method_dictionaries": [
+              [
+                "__iter__",
+                "__len__",
+                "__getitem__",
+                "__setitem__",
+                "__delitem__"
+              ],
+              [
+                "__len__",
+                "__getitem__",
+                "__setitem__",
+                "__delitem__"
+              ],
+              [
+                "__iter__",
+                "__getitem__",
+                "__setitem__",
+                "__delitem__"
+              ],
+              [
+                "__iter__",
+                "__len__",
+                "__setitem__",
+                "__delitem__"
+              ],
+              [
+                "__iter__",
+                "__len__",
+                "__getitem__",
+                "__delitem__"
+              ],
+              [
+                "__iter__",
+                "__len__",
+                "__getitem__",
+                "__setitem__"
+              ]
+            ],
+            "host_reflected_operators": []
+          }
+        }
+      }
+    ]
+  },
+  "controls": {
+    "test.test_collections.TestCollectionABCs.test_Mapping": {
+      "isinstance": "AssertionError: {} is not an instance of <class 'collections.abc.Mapping'>",
+      "issubclass": "AssertionError: <class 'dict'> is not a subclass of <class 'collections.abc.Mapping'>"
+    },
+    "test.test_collections.TestCollectionABCs.test_MutableMapping": {
+      "isinstance": "AssertionError: {} is not an instance of <class 'collections.abc.MutableMapping'>",
+      "issubclass": "AssertionError: <class 'dict'> is not a subclass of <class 'collections.abc.MutableMapping'>"
+    }
+  },
+  "failures": [],
+  "skips": []
+}

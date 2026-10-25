@@ -69,6 +69,13 @@ fn optional(value: OwnedWord, schema: &Schema) -> OwnedWord {
     unsafe { OwnedWord::from_owned(word, schema.storage()) }
 }
 
+fn copy_string(value: &str, allocation: &mut Option<Error>) -> Result<Rc<Str>, String> {
+    Str::try_new(value).map(Rc::new).map_err(|_| {
+        *allocation = Some(Error::allocation());
+        String::new()
+    })
+}
+
 fn convert(
     value: &DeValue<'_>,
     schema: &Schema,
@@ -88,7 +95,7 @@ fn convert(
                 .ok_or("invalid TOML integer")?;
             integer.into_raw()
         }
-        (STRING, DeValue::String(value)) => Rc::into_raw(Rc::new(Str::new(value))) as usize,
+        (STRING, DeValue::String(value)) => Rc::into_raw(copy_string(value, allocation)?) as usize,
         (BOOLEAN, DeValue::Boolean(value)) => usize::from(*value),
         (FLOAT, DeValue::Float(value)) => value
             .as_str()
@@ -97,17 +104,25 @@ fn convert(
             .to_bits() as usize,
         (LIST, DeValue::Array(values)) => {
             let child = schema.child();
+            let mut allocation_error = || {
+                *allocation = Some(Error::allocation());
+                String::new()
+            };
             if schema.word_kind == 4 {
-                let values = values
-                    .iter()
-                    .map(|value| {
-                        convert(value.get_ref(), child, allocation)
-                            .map(|value| Int(value.into_word()))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                crate::new_list(values) as usize
+                let mut result = Vec::new();
+                result
+                    .try_reserve_exact(values.len())
+                    .map_err(|_| allocation_error())?;
+                for value in values {
+                    result.push(Int(convert(value.get_ref(), child, allocation)?.into_word()));
+                }
+                crate::new_list(result) as usize
             } else {
                 let mut result = Words::new(child.word_kind);
+                result
+                    .values
+                    .try_reserve_exact(values.len())
+                    .map_err(|_| allocation_error())?;
                 for value in values {
                     result
                         .values
@@ -121,7 +136,7 @@ fn convert(
             let mut result = super::super::mappings::Mapping::new(3, child.word_kind);
             for (name, value) in values {
                 let value = convert(value.get_ref(), child, allocation)?;
-                let word = Rc::into_raw(Rc::new(Str::new(name.get_ref()))) as usize;
+                let word = Rc::into_raw(copy_string(name.get_ref(), allocation)?) as usize;
                 // SAFETY: the key transfers one newly allocated string owner.
                 let key = unsafe { OwnedWord::from_owned(word, WordKind::new(3)) };
                 assert!(

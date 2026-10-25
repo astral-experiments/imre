@@ -28,6 +28,36 @@ struct References<'a> {
     found: &'a mut Reachable,
 }
 
+impl References<'_> {
+    /// Root an implicit index method only if argument binding can reach conversion.
+    fn invokes_index(&self, call: &ast::ExprCall) -> bool {
+        let arity = match self.graph.resolve(self.module, &call.func) {
+            Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
+                Some(super::credential_arity(name))
+            }
+            Some(Binding::Intrinsic(Intrinsic::Fd(crate::ir::FdOperation::Pipe2))) => Some(1),
+            _ => None,
+        };
+        if let Some(arity) = arity {
+            return arity != 0
+                && call.arguments.keywords.is_empty()
+                && (call.arguments.args.len() == arity
+                    || call
+                        .arguments
+                        .args
+                        .iter()
+                        .any(|arg| matches!(arg, ast::Expr::Starred(_))));
+        }
+        matches!(call.func.as_ref(), ast::Expr::Attribute(attr) if attr.attr.as_str() == "expandtabs")
+            && call.arguments.args.len() + call.arguments.keywords.len() == 1
+            && call
+                .arguments
+                .keywords
+                .first()
+                .is_none_or(|kw| kw.arg.as_deref() == Some("tabsize"))
+    }
+}
+
 impl<'a> Visitor<'a> for References<'_> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         if !self
@@ -48,16 +78,8 @@ impl<'a> Visitor<'a> for References<'_> {
             self.found.attributes.insert("__copy__".to_owned());
             self.found.instance_attributes.insert("__copy__".to_owned());
         }
-        // Only a supplied, successfully bound width can invoke __index__.
         if let ast::Expr::Call(call) = expr
-            && let ast::Expr::Attribute(attr) = call.func.as_ref()
-            && attr.attr.as_str() == "expandtabs"
-            && call.arguments.args.len() + call.arguments.keywords.len() == 1
-            && call
-                .arguments
-                .keywords
-                .first()
-                .is_none_or(|kw| kw.arg.as_deref() == Some("tabsize"))
+            && self.invokes_index(call)
         {
             self.found.attributes.insert("__index__".to_owned());
             self.found
@@ -75,8 +97,19 @@ impl<'a> Visitor<'a> for References<'_> {
         {
             self.found.root_unittest(self.graph, id.module);
         }
-        if let ast::Expr::Attribute(attr) = expr {
+        // Literal text has its exact builtin class, even if a source class defines
+        // the same method name. The call visitor still follows its arguments and
+        // implicit callbacks, such as the __index__ used by str.expandtabs.
+        if let ast::Expr::Attribute(attr) = expr
+            && !matches!(
+                attr.value.as_ref(),
+                ast::Expr::StringLiteral(_) | ast::Expr::BytesLiteral(_)
+            )
+        {
             let name = attr.attr.to_string();
+            if name == "getTestCaseNames" {
+                self.found.attributes.insert("_getTestCaseNames".into());
+            }
             if matches!(
                 name.as_str(),
                 "assertEqual" | "assertListEqual" | "assertRaises"
@@ -747,6 +780,37 @@ run()
         let source = "from pathlib import Path\nclass Local:\n    def __init__(self) -> None:\n        pass\n    def exists(self):\n        return globals()\nlocal = Local()\nprint(Path('.').exists())\n";
         reachable(source).unwrap();
         assert!(reachable(&source.replace("Path('.').exists()", "local.exists()")).is_err());
+    }
+
+    #[test]
+    fn literal_text_methods_do_not_root_unrelated_source_methods() {
+        let source = r#"
+class Token:
+    def strip(self, *args):
+        return args
+    def decode(self, *args):
+        return args
+    def expandtabs(self, *args):
+        return args
+    def __index__(self) -> int:
+        return 3
+    def clean(self):
+        return " padded ".strip() + b"!".decode() + "x\ty".expandtabs(self)
+print(Token().clean())
+"#;
+        reachable(source).unwrap();
+        for (before, after) in [
+            (r#"" padded ".strip()"#, "self.strip()"),
+            (r#"b"!".decode()"#, "self.decode()"),
+            (r#""x\ty".expandtabs(self)"#, "self.expandtabs()"),
+            (r#"" padded ".strip()"#, r#"" padded ".strip(self.strip())"#),
+        ] {
+            assert!(
+                reachable(&source.replace(before, after))
+                    .unwrap_err()
+                    .contains("variadic parameters")
+            );
+        }
     }
 
     #[test]

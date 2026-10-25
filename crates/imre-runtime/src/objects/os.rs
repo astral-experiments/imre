@@ -1,6 +1,8 @@
 //! POSIX descriptors are integers in the program's descriptor table. A call
 //! can observe a closed number or a number subsequently reused by the kernel.
 
+mod credentials;
+
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
 use super::{Bytes, Int, Str, c_int};
@@ -63,6 +65,8 @@ descriptor_constants! {
     imre_os_o_nofollow = O_NOFOLLOW, imre_os_o_nonblock = O_NONBLOCK,
     imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
     imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
+    imre_os_pollin = POLLIN, imre_os_pollpri = POLLPRI, imre_os_pollout = POLLOUT,
+    imre_os_pollerr = POLLERR, imre_os_pollhup = POLLHUP, imre_os_pollnval = POLLNVAL,
 }
 
 /// Return a kernel path and the filesystem-protocol value to keep on OSError.
@@ -315,41 +319,58 @@ fn set_cloexec(fd: i32) -> Result<()> {
 /// The caller supplies two writable word slots in a fresh tuple.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_os_pipe(out: *mut usize) {
+    // SAFETY: the caller supplies the two uninitialized integer slots.
+    finish(unsafe { make_pipe(out, libc::O_CLOEXEC) }, ());
+}
+
+/// Atomically create a pipe with the caller's flags, including inheritable ends for zero.
+///
+/// # Safety
+/// The caller supplies two writable word slots in a fresh tuple.
+#[cfg(target_os = "linux")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_pipe2(out: *mut usize, flags: usize) {
+    // SAFETY: no descriptor is published until both ends were created successfully.
     finish(
-        (|| {
-            let mut fds = [-1; 2];
-            // SAFETY: both pipe variants initialize the two writable int slots.
-            let result = unsafe {
-                #[cfg(target_os = "linux")]
-                {
-                    libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC)
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    libc::pipe(fds.as_mut_ptr())
-                }
-            };
-            checked(result)?;
-            #[cfg(not(target_os = "linux"))]
-            if let Err(error) = set_cloexec(fds[0]).and_then(|()| set_cloexec(fds[1])) {
-                // SAFETY: the fresh pipe owns both descriptors until publication.
-                unsafe {
-                    libc::close(fds[0]);
-                    libc::close(fds[1]);
-                }
-                return Err(error);
-            }
-            for (index, fd) in fds.into_iter().enumerate() {
-                // SAFETY: each initialized slot takes one immediate integer.
-                unsafe {
-                    out.add(index)
-                        .write(Int::from_usize(fd as usize).into_raw())
-                };
-            }
-            Ok(())
-        })(),
+        c_int(flags).and_then(|flags| unsafe { make_pipe(out, flags) }),
         (),
     );
+}
+
+/// Initialize the caller's two tuple slots only after establishing the requested flags.
+unsafe fn make_pipe(out: *mut usize, flags: libc::c_int) -> Result<()> {
+    let mut fds = [-1; 2];
+    // SAFETY: both pipe variants initialize the two writable int slots.
+    let result = unsafe {
+        #[cfg(target_os = "linux")]
+        {
+            libc::pipe2(fds.as_mut_ptr(), flags)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            libc::pipe(fds.as_mut_ptr())
+        }
+    };
+    checked(result)?;
+    #[cfg(not(target_os = "linux"))]
+    if flags & libc::O_CLOEXEC != 0
+        && let Err(error) = set_cloexec(fds[0]).and_then(|()| set_cloexec(fds[1]))
+    {
+        // SAFETY: the fresh pipe owns both descriptors until publication.
+        unsafe {
+            libc::close(fds[0]);
+            libc::close(fds[1]);
+        }
+        return Err(error);
+    }
+    for (index, fd) in fds.into_iter().enumerate() {
+        // SAFETY: each initialized slot takes one immediate integer.
+        unsafe {
+            out.add(index)
+                .write(Int::from_usize(fd as usize).into_raw())
+        };
+    }
+    Ok(())
 }
 
 #[unsafe(no_mangle)]

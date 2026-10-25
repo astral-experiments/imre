@@ -1,0 +1,27 @@
+{
+  "revision": "431da8fbc0a8c37ac3bbe15adbddc8042a6f3c3b",
+  "fixture_sha256": "a6b696e627c1f72bcae21db60a2439e4c4d9e15e73c75c5a70d222f42b6269bf",
+  "reference": "first argument must be callable or None\nfirst argument must be callable or None\nfirst argument must be callable or None\nfactory\npositional\nkeyword\nfirst argument must be callable or None\nfactory before raising argument\nlater argument\nbefore factory validation\nfirst argument must be callable or None\nfirst argument must be callable or None\nfirst argument must be callable or None\n8\nboth callback invocations raised TypeError\n[42]\n",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "stdout": "first argument must be callable or None\nfirst argument must be callable or None\nfirst argument must be callable or None\nfactory\npositional\nkeyword\nfirst argument must be callable or None\nfactory before raising argument\nlater argument\nbefore factory validation\nfirst argument must be callable or None\nfirst argument must be callable or None\nfirst argument must be callable or None\n8\nboth callback invocations raised TypeError\n[42]\n",
+      "exit": 0
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "stdout": "first argument must be callable or None\nfirst argument must be callable or None\nfirst argument must be callable or None\nfactory\npositional\nkeyword\nfirst argument must be callable or None\nfactory before raising argument\nlater argument\nbefore factory validation\nfirst argument must be callable or None\nfirst argument must be callable or None\nfirst argument must be callable or None\n8\nboth callback invocations raised TypeError\n[42]\n",
+      "exit": 0
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "stdout": "first argument must be callable or None\nfirst argument must be callable or None\nfirst argument must be callable or None\nfactory\npositional\nkeyword\nfirst argument must be callable or None\nfactory before raising argument\nlater argument\nbefore factory validation\nfirst argument must be callable or None\nfirst argument must be callable or None\nfirst argument must be callable or None\n8\nboth callback invocations raised TypeError\n[42]\n",
+      "exit": 0
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "stdout": "first argument must be callable or None\nfirst argument must be callable or None\nfirst argument must be callable or None\nfactory\npositional\nkeyword\nfirst argument must be callable or None\nfactory before raising argument\nlater argument\nbefore factory validation\nfirst argument must be callable or None\nfirst argument must be callable or None\nfirst argument must be callable or None\n8\nboth callback invocations raised TypeError\n[42]\n",
+      "exit": 0
+    }
+  }
+}
