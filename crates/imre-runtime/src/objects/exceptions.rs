@@ -728,6 +728,10 @@ impl Error {
         }
     }
 
+    pub(super) fn into_exception(self) -> Rc<Object> {
+        self.into_object()
+    }
+
     /// Installs this error only after any runtime storage access has ended.
     /// Keep exception allocation and cleanup out of successful access paths.
     #[cold]
@@ -932,14 +936,14 @@ pub(super) fn kind_of(error: &Object) -> Kind {
     unsafe { error.0.with(Storage::exception_kind) }
 }
 
-/// PEP 479 converts an escaping StopIteration into RuntimeError at the generator boundary.
-pub(super) fn generator_error(error: Rc<Object>) -> Rc<Object> {
+/// Wrap an escaping StopIteration with the RuntimeError message for its frame kind.
+pub(super) fn wrap_stop_iteration(error: Rc<Object>, message: &str) -> Rc<Object> {
     if kind_of(&error) != Kind::StopIteration {
         return error;
     }
     exception_with_cause(
         Kind::RuntimeError,
-        Payload::Message(Rc::new("generator raised StopIteration".into())),
+        Payload::Message(Rc::new(message.into())),
         Some(error),
     )
 }
