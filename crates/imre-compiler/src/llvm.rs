@@ -3360,7 +3360,6 @@ impl Emitter<'_, '_> {
                 | Type::ImportException
                 | Type::TimeoutExpired
                 | Type::TextIO
-                | Type::ModuleSpec(_)
                 | Type::CompletedProcess(..)
                 | Type::BinaryIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
@@ -3394,6 +3393,7 @@ impl Emitter<'_, '_> {
                 | Type::JsonObject
                 | Type::RegexMatch
                 | Type::Union(_)
+                | Type::ModuleSpec(_)
                 | Type::StringIterable => {
                     unreachable!("container comparison is rejected by the frontend")
                 }

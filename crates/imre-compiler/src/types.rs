@@ -65,6 +65,7 @@ pub(crate) struct NamedTuple {
 #[derive(Default)]
 struct Storage {
     shapes: Vec<Shape>,
+    has_module_spec: bool,
     named_tuples: HashMap<DefinitionId, Rc<NamedTuple>>,
     cache_adapters: HashMap<usize, CachePolicy>,
     exceptions: Vec<NamedException>,
@@ -607,7 +608,9 @@ impl Types {
     }
 
     pub(crate) fn module_spec(&self, fields: Vec<Type>) -> Type {
-        Type::ModuleSpec(self.intern(Shape::ModuleSpec(fields)))
+        let id = self.intern(Shape::ModuleSpec(fields));
+        self.0.borrow_mut().has_module_spec = true;
+        Type::ModuleSpec(id)
     }
     pub(crate) fn module_spec_fields(&self, id: usize) -> Vec<Type> {
         let storage = self.0.borrow();
@@ -633,6 +636,13 @@ impl Types {
     }
     /// The type can also appear inside a tuple or optional without an annotation.
     pub(crate) fn contains_module_spec(&self, ty: Type) -> bool {
+        if matches!(ty, Type::ModuleSpec(_)) {
+            return true;
+        }
+        // Ordinary programs need no recursive scan for this nominal protocol.
+        if !self.0.borrow().has_module_spec {
+            return false;
+        }
         if !matches!(
             ty,
             Type::ModuleSpec(_)
