@@ -3,6 +3,247 @@
 use super::*;
 
 impl Checker<'_> {
+    /// Capture keyword values before constructing their dictionary. A later
+    /// argument may mutate a previously captured value or raise an exception.
+    fn keyword_dictionary(
+        &mut self,
+        call: &ast::ExprCall,
+        mut value: Option<Type>,
+    ) -> Result<Expr, String> {
+        let mut scope = calls::ArgumentScope::default();
+        let mut entries = Vec::with_capacity(call.arguments.keywords.len());
+        for kw in &call.arguments.keywords {
+            let name = kw.arg.as_ref().ok_or_else(|| {
+                error(
+                    self.source,
+                    kw,
+                    "dictionary keyword unpacking is unsupported",
+                )
+            })?;
+            let item = match value {
+                Some(ty) => self.expr_expected(&kw.value, ty)?,
+                None => self.expr(&kw.value)?,
+            };
+            value.get_or_insert(item.ty);
+            entries.push((
+                Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str(name.to_string()),
+                },
+                scope.hold(self, item),
+            ));
+        }
+        let value = value.expect("at least one keyword or a contextual value type");
+        Ok(scope.finish(Expr {
+            ty: self.types.dict(Type::Str, value),
+            kind: ExprKind::Dict {
+                key: Type::Str,
+                value,
+                entries,
+            },
+        }))
+    }
+
+    /// Copy stored entries into a fresh plain dictionary. A Counter's zero
+    /// and a defaultdict's factory belong to the source rather than its copy.
+    pub(super) fn dict_constructor(
+        &mut self,
+        call: &ast::ExprCall,
+        mut shape: Option<(Type, Type)>,
+    ) -> Result<Expr, String> {
+        if let Some(zip) = self.dict_from_zip(call)? {
+            return Ok(zip);
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let mut sources = Vec::new();
+        match call.arguments.args.as_ref() {
+            [] => {}
+            [source] => {
+                let input = if matches!(source, ast::Expr::Dict(_)) {
+                    if shape.is_none()
+                        && !call.arguments.keywords.is_empty()
+                        && matches!(source, ast::Expr::Dict(dict) if dict.items.is_empty())
+                    {
+                        let keywords = self.keyword_dictionary(call, None)?;
+                        let empty = self.expr_expected(source, keywords.ty)?;
+                        scope.hold(self, empty);
+                        return Ok(scope.finish(keywords));
+                    }
+                    Iteration::Container {
+                        iterable: self
+                            .boolean_operand(source, shape.map(|(k, v)| self.types.dict(k, v)))?,
+                        items: false,
+                        start: None,
+                    }
+                } else {
+                    let pair = shape.map(|(k, v)| self.types.tuple(vec![k, v]));
+                    self.expansion_input(source, pair)?
+                };
+                let Iteration::Container {
+                    ref iterable,
+                    start: None,
+                    ..
+                } = input
+                else {
+                    return self.dictionary_from_pairs(call, source, input, shape);
+                };
+                let Some(fields) = self.types.mapping(iterable.ty) else {
+                    return self.dictionary_from_pairs(call, source, input, shape);
+                };
+                if let Some((key, value)) = shape {
+                    self.expect(key, fields.0, source)?;
+                    self.expect(value, fields.1, source)?;
+                }
+                shape = Some(fields);
+                sources.push(scope.hold(self, iterable.clone()));
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "dict expects at most one positional source",
+                ));
+            }
+        }
+        if !call.arguments.keywords.is_empty() {
+            if shape.is_some_and(|(key, _)| key != Type::Str) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "dictionary keyword entries require string keys",
+                ));
+            }
+            let kw = self.keyword_dictionary(call, shape.map(|(_, value)| value))?;
+            if sources.is_empty() {
+                return Ok(kw);
+            }
+            sources.push(scope.hold(self, kw));
+        }
+        let (key, value) = shape.ok_or_else(|| {
+            error(
+                self.source,
+                call,
+                "an empty dictionary requires a concrete dict[K, V] context",
+            )
+        })?;
+        let empty = Expr {
+            ty: self.types.dict(key, value),
+            kind: ExprKind::Dict {
+                key,
+                value,
+                entries: Vec::new(),
+            },
+        };
+        if sources.is_empty() {
+            return Ok(empty);
+        }
+        let target = scope.hold(self, empty);
+        sources.insert(0, target.clone());
+        scope.hold(
+            self,
+            Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::DictUpdate, sources),
+            },
+        );
+        Ok(scope.finish(target))
+    }
+
+    /// A generator acquires its outer iterator on creation. Its first item,
+    /// like the first item of an ordinary iterable, is pulled after keywords.
+    fn dictionary_from_pairs(
+        &mut self,
+        call: &ast::ExprCall,
+        source: &ast::Expr,
+        input: Iteration,
+        shape: Option<(Type, Type)>,
+    ) -> Result<Expr, String> {
+        let mut input = self.prepare_iteration(input, source, false)?;
+        self.hint_empty_iteration(&input, shape.map(|(k, v)| self.types.tuple(vec![k, v])));
+        let pair = self.types.fields(self.locals[input.value]);
+        let Some(&[key, value]) = pair.as_deref() else {
+            return Err(error(
+                self.source,
+                source,
+                "dict requires an iterable of key/value pairs",
+            ));
+        };
+        let (key_type, value_type) = shape.unwrap_or((key, value));
+        if !self.types.hashable_key(key_type) {
+            return Err(error(
+                self.source,
+                source,
+                "dict requires supported immutable keys",
+            ));
+        }
+        let ty = self.types.dict(key_type, value_type);
+        let target = self.hidden(ty);
+        let mut clear = vec![target];
+        let keywords = if call.arguments.keywords.is_empty() {
+            None
+        } else {
+            if key_type != Type::Str {
+                return Err(error(
+                    self.source,
+                    call,
+                    "dictionary keyword entries require string keys",
+                ));
+            }
+            let owner = self.hidden(ty);
+            let entries = self.keyword_dictionary(call, Some(value_type))?;
+            input.evaluate.push(Statement::Assign(owner, entries));
+            clear.push(owner);
+            Some(owner)
+        };
+        input.evaluate.push(Statement::Assign(
+            target,
+            Expr {
+                ty,
+                kind: ExprKind::Dict {
+                    key: key_type,
+                    value: value_type,
+                    entries: Vec::new(),
+                },
+            },
+        ));
+        let mut body = self.expand_items(Iteration::Prepared(input), source, |c, item| {
+            let key = c.coerce(
+                Expr {
+                    ty: key,
+                    kind: ExprKind::Field(Box::new(item.clone()), 0),
+                },
+                key_type,
+                source,
+            )?;
+            let value = c.coerce(
+                Expr {
+                    ty: value,
+                    kind: ExprKind::Field(Box::new(item), 1),
+                },
+                value_type,
+                source,
+            )?;
+            Ok(vec![Statement::SetItem(c.local(target), key, value)])
+        })?;
+        if let Some(owner) = keywords {
+            body.push(Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::DictUpdate,
+                    vec![self.local(target), self.local(owner)],
+                ),
+            }));
+        }
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(self.local(target)),
+                clear,
+            },
+        })
+    }
+
     /// Evaluate the receiver, source, and keyword arguments before updating any entry.
     pub(super) fn dict_update(
         &mut self,
@@ -32,31 +273,7 @@ impl Checker<'_> {
                     "dict.update keyword entries require string keys",
                 ));
             }
-            let mut entries = Vec::new();
-            for kw in &call.arguments.keywords {
-                let Some(name) = &kw.arg else {
-                    return Err(error(
-                        self.source,
-                        kw,
-                        "dict.update keyword unpacking is unsupported",
-                    ));
-                };
-                entries.push((
-                    Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str(name.to_string()),
-                    },
-                    self.expr_expected(&kw.value, value)?,
-                ));
-            }
-            args.push(Expr {
-                ty: mapping,
-                kind: ExprKind::Dict {
-                    key,
-                    value,
-                    entries,
-                },
-            });
+            args.push(self.keyword_dictionary(call, Some(value))?);
         }
         Ok(Expr {
             ty: Type::None,
