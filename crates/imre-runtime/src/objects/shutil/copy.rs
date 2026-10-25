@@ -8,26 +8,26 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt, symlink};
 use std::path::Path;
 use std::rc::Rc;
 
-use super::super::exceptions::{Error, Filename, Kind, finish, push_string_repr};
-use super::super::files::{close_file, errno_error, errno_with_filenames};
-use super::super::{Bytes, Object, Str, acquire_rc, bytes, paths};
+use super::super::exceptions::{Error, Kind, finish, push_string_repr};
+use super::super::files::{close_file, errno_error, errno_with_paths};
+use super::super::{Bytes, Object, Str, bytes, paths};
 
 type Result<T> = std::result::Result<T, Error>;
 
-enum Name {
-    Text(Rc<Str>),
-    Bytes(Rc<Bytes>),
+enum Name<'a> {
+    Text(&'a str),
+    Bytes(&'a [u8]),
     Path(Rc<Str>),
 }
 
-impl Name {
+impl<'a> Name<'a> {
     /// The call retains all three possible handle kinds until the operation finishes.
     unsafe fn from_handle(value: *const (), tag: u32) -> Self {
         // SAFETY: the compiler supplies the tag for the exact live allocation.
         unsafe {
             match tag {
-                0 => Self::Text(acquire_rc(value as usize)),
-                1 => Self::Bytes(acquire_rc(value as usize)),
+                0 => Self::Text(&*value.cast::<Str>()),
+                1 => Self::Bytes(&*value.cast::<Bytes>()),
                 2 => Self::Path(Rc::from_raw(paths::imre_path_text(value.cast()))),
                 _ => unreachable!(),
             }
@@ -36,7 +36,7 @@ impl Name {
 
     fn path(&self) -> &Path {
         match self {
-            Self::Text(text) => Path::new(text.as_str()),
+            Self::Text(text) => Path::new(text),
             Self::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
             Self::Path(text) => Path::new(text.as_str()),
         }
@@ -63,21 +63,17 @@ impl Name {
         }
     }
 
-    fn filename(&self) -> Filename {
-        match self {
-            Self::Text(s) | Self::Path(s) => Filename::Str(Rc::clone(s)),
-            Self::Bytes(b) => Filename::Bytes(Rc::clone(b)),
-        }
-    }
-
     fn error(&self, error: io::Error) -> Error {
-        errno_with_filenames(error, Some(self.filename()), None)
+        errno_with_paths(error, |out| {
+            out.push_str(": ");
+            out.push_str(&self.repr(false));
+        })
     }
 }
 
 /// Match nested Python file context managers: open the source first, close the
 /// destination first, and let an explicit close error supersede the copy error.
-fn copy_data(src: &Name, dst: &Name) -> Result<()> {
+fn copy_data(src: &Name<'_>, dst: &Name<'_>) -> Result<()> {
     let mut input = File::open(src.path()).map_err(|e| src.error(e))?;
     let result = (|| {
         if input.metadata().map_err(errno_error)?.is_dir() {
@@ -103,7 +99,7 @@ fn copy_data(src: &Name, dst: &Name) -> Result<()> {
     close_file(input).map_err(errno_error).and(result)
 }
 
-fn copyfile(src: &Name, dst: &Name, follow: bool) -> Result<()> {
+fn copyfile(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<()> {
     let source = fs::metadata(src.path()).ok();
     let target = fs::metadata(dst.path()).ok();
     if let (Some(source), Some(target)) = (&source, &target)
@@ -130,22 +126,23 @@ fn copyfile(src: &Name, dst: &Name, follow: bool) -> Result<()> {
     if !follow && src.path().is_symlink() {
         let target = fs::read_link(src.path()).map_err(|e| src.error(e))?;
         return symlink(&target, dst.path()).map_err(|e| {
-            let target = if matches!(src, Name::Bytes(_)) {
-                Filename::Bytes(Rc::new(target.into_os_string().into_vec()))
-            } else {
-                match paths::path_utf8(target.into_os_string()) {
-                    Ok(s) => Filename::Str(Rc::new(s)),
-                    Err(error) => return error,
+            errno_with_paths(e, |message| {
+                message.push_str(": ");
+                if matches!(src, Name::Bytes(_)) {
+                    bytes::write_repr(message, target.as_os_str().as_bytes());
+                } else {
+                    push_string_repr(&target.to_string_lossy(), message);
                 }
-            };
-            errno_with_filenames(e, Some(target), Some(dst.filename()))
+                message.push_str(" -> ");
+                message.push_str(&dst.repr(false));
+            })
         });
     }
     copy_data(src, dst)
 }
 
 /// Keep os.path.basename's empty final component for sources ending in a slash.
-fn destination(src: &Name, dst: &Name) -> Result<std::path::PathBuf> {
+fn destination(src: &Name<'_>, dst: &Name<'_>) -> Result<std::path::PathBuf> {
     if matches!(src, Name::Bytes(_)) != matches!(dst, Name::Bytes(_)) {
         return Err(Error::new(
             Kind::TypeError,
@@ -162,24 +159,27 @@ fn destination(src: &Name, dst: &Name) -> Result<std::path::PathBuf> {
     Ok(dst.path().join(OsStr::from_bytes(name)))
 }
 
-impl Name {
-    fn joined(&self, path: &Path) -> Result<Name> {
+impl Name<'_> {
+    fn joined<'a>(&self, path: &'a Path) -> Result<Name<'a>> {
         if matches!(self, Name::Bytes(_)) {
-            Ok(Name::Bytes(Rc::new(path.as_os_str().as_bytes().to_vec())))
+            Ok(Name::Bytes(path.as_os_str().as_bytes()))
         } else {
-            path.to_str()
-                .map(|s| Name::Text(Rc::new(Str::from(s))))
-                .ok_or_else(|| {
-                    Error::new(
-                        Kind::UnicodeDecodeError,
-                        "filesystem path is not valid UTF-8",
-                    )
-                })
+            path.to_str().map(Name::Text).ok_or_else(|| {
+                Error::new(
+                    Kind::UnicodeDecodeError,
+                    "filesystem path is not valid UTF-8",
+                )
+            })
         }
     }
 }
 
-fn run(op: u32, src: &Name, dst: &Name, follow: bool) -> Result<Option<std::path::PathBuf>> {
+fn run(
+    op: u32,
+    src: &Name<'_>,
+    dst: &Name<'_>,
+    follow: bool,
+) -> Result<Option<std::path::PathBuf>> {
     if [src, dst]
         .iter()
         .any(|n| n.path().as_os_str().as_bytes().contains(&0))
@@ -273,39 +273,4 @@ pub unsafe extern "C" fn imre_shutil_copy(
         }),
         0,
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn copy_errors_retain_the_original_bytes_filenames() {
-        let dir = std::env::temp_dir().join(format!("imre-shutil-{}", getrandom::u64().unwrap()));
-        fs::create_dir(&dir).unwrap();
-        let source = Rc::new(dir.join("missing").into_os_string().into_vec());
-        let destination = Rc::new(dir.join("existing").into_os_string().into_vec());
-        fs::write(dir.join("existing"), []).unwrap();
-        symlink("missing", dir.join("link")).unwrap();
-        let missing = copyfile(
-            &Name::Bytes(Rc::clone(&source)),
-            &Name::Bytes(Rc::clone(&destination)),
-            true,
-        )
-        .unwrap_err();
-        let exists = copyfile(
-            &Name::Bytes(Rc::new(dir.join("link").into_os_string().into_vec())),
-            &Name::Bytes(Rc::clone(&destination)),
-            false,
-        )
-        .unwrap_err();
-        fs::remove_dir_all(dir).unwrap();
-        // The calls' temporary Name handles have dropped. Only the exceptions'
-        // filename and filename2 fields can retain these two original objects.
-        assert_eq!(Rc::strong_count(&source), 2);
-        assert_eq!(Rc::strong_count(&destination), 2);
-        drop((missing, exists));
-        assert_eq!(Rc::strong_count(&source), 1);
-        assert_eq!(Rc::strong_count(&destination), 1);
-    }
 }
