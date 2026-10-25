@@ -159,6 +159,7 @@ pub fn compile_file(
     let (mut module, _) = checked_lower(&mut graph)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
+    let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
     Ok(Compilation {
         llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
         extension_archives: graph
@@ -166,13 +167,8 @@ pub fn compile_file(
             .iter()
             .filter_map(|m| m.archive.clone())
             .collect(),
-        source_inputs: graph.inputs,
-        input_paths: graph
-            .modules
-            .into_iter()
-            .map(|module| module.path)
-            .chain(options.entry_profile.iter().cloned())
-            .collect(),
+        source_inputs,
+        input_paths,
     })
 }
 
@@ -287,6 +283,7 @@ fn compile_file_units_with(
         .iter()
         .map(|m| m.name.clone())
         .collect::<Vec<_>>();
+    let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
     Ok(UnitCompilation {
         units: llvm::emit_units(
             &module,
@@ -301,13 +298,8 @@ fn compile_file_units_with(
             .iter()
             .filter_map(|m| m.archive.clone())
             .collect(),
-        input_paths: graph
-            .modules
-            .into_iter()
-            .map(|m| m.path)
-            .chain(options.entry_profile.iter().cloned())
-            .collect(),
-        source_inputs: graph.inputs,
+        input_paths,
+        source_inputs,
     })
 }
 
@@ -316,10 +308,8 @@ fn checked_lower(
     graph: &mut modules::SourceGraph,
 ) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
     let lowered = frontend::lower_with_owners(graph)?;
-    let (skipped, decorators) = graph.diagnostic_scopes();
-    graph
-        .session
-        .check_scopes(skipped.as_deref(), &decorators)?;
+    let (skipped, overloads) = graph.diagnostic_scopes();
+    graph.session.check_scopes(skipped.as_deref(), &overloads)?;
     Ok(lowered)
 }
 
@@ -334,12 +324,12 @@ fn checked_lower_with(
     let lowered = frontend::lower_with_owners(graph);
     cache.retain_hints(graph, lowered.is_ok());
     let lowered = lowered?;
-    let (skipped, decorators) = graph.diagnostic_scopes();
+    let (skipped, overloads) = graph.diagnostic_scopes();
     cache.check_scopes(
         &mut graph.session,
         &graph.inputs,
         skipped.as_deref(),
-        &decorators,
+        &overloads,
     )?;
     Ok(lowered)
 }
@@ -486,6 +476,16 @@ mod tests {
         }
         let flat = format!("print(len([{}]))\n", "(1 + 2),".repeat(256));
         compile(&flat, &CompileOptions::default()).unwrap();
+
+        let fields = "{1 + 2} ".repeat(256);
+        super::check(&format!("print(f'{fields}')\n")).unwrap();
+        for fields in [
+            format!("{fields}{{{}}}", "1+".repeat(256) + "1"),
+            format!("{{{}}}{fields}", "1+".repeat(256) + "1"),
+        ] {
+            let error = super::check(&format!("print(f'{fields}')\n")).unwrap_err();
+            assert!(error.contains("syntax complexity limit"), "{error}");
+        }
     }
 
     #[test]

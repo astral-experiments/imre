@@ -1,4 +1,8 @@
 //! Process-local logging state for the native single-threaded runtime.
+mod levels;
+pub(super) mod timed;
+
+pub(super) mod record;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -179,19 +183,6 @@ fn timestamp(format: Option<&str>) -> String {
     }
 }
 
-fn level_name(level: &Int) -> String {
-    match level.as_small() {
-        Some(0) => "NOTSET",
-        Some(10) => "DEBUG",
-        Some(20) => "INFO",
-        Some(30) => "WARNING",
-        Some(40) => "ERROR",
-        Some(50) => "CRITICAL",
-        _ => return format!("Level {}", level.big()),
-    }
-    .into()
-}
-
 unsafe fn name(handle: *const Object) -> Rc<Str> {
     // SAFETY: each caller supplies a rooted native Logger; the name acquires its own owner.
     unsafe {
@@ -341,7 +332,7 @@ pub unsafe extern "C" fn imre_log_emit(logger: *const Object, level: usize, mess
                     ),
                     Field::Message => line.push_str(message),
                     Field::LevelNo => line.push_str(&level.big().to_string()),
-                    Field::LevelName => line.push_str(&level_name(&level)),
+                    Field::LevelName => line.push_str(&levels::level_name(&level)),
                     Field::Name => line.push_str(&name),
                 }
             }

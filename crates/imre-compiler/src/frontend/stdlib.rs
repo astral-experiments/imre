@@ -528,6 +528,42 @@ impl Checker<'_> {
             };
         }
         if !specification.is_empty() {
+            if let Some(digits) = specification.strip_suffix(['x', 'X'])
+                && digits.bytes().all(|b| b.is_ascii_digit())
+                && let Some(width) = if digits.is_empty() {
+                    Some(0)
+                } else {
+                    digits.parse::<u32>().ok()
+                }
+                && width <= 1000
+            {
+                if field.conversion != ast::ConversionFlag::None
+                    || !matches!(value.ty, Type::Int | Type::Bool)
+                {
+                    return Err(error(
+                        self.source,
+                        field,
+                        "hexadecimal formats require an unconverted int or bool",
+                    ));
+                }
+                if value.ty == Type::Bool {
+                    value = Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                    };
+                }
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(
+                        Builtin::HexFormat {
+                            width,
+                            zero: digits.starts_with('0'),
+                            upper: specification.ends_with('X'),
+                        },
+                        vec![value],
+                    ),
+                });
+            }
             let sign = specification.strip_suffix('d').unwrap_or(&specification);
             if matches!(sign, "" | "-" | "+" | " ") {
                 if field.conversion != ast::ConversionFlag::None
@@ -580,6 +616,17 @@ impl Checker<'_> {
                 ),
             });
         }
+        if matches!(value.ty, Type::Exception | Type::NamedException(_)) {
+            let op = if field.conversion == ast::ConversionFlag::Repr {
+                Builtin::ExceptionRepr
+            } else {
+                Builtin::ExceptionMessage
+            };
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(op, vec![value]),
+            });
+        }
         if field.conversion != ast::ConversionFlag::Repr
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(_))
         {
@@ -604,7 +651,7 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::Repr, vec![value]),
             });
         }
-        if value.ty == Type::Path {
+        if value.ty.is_path() {
             return Ok(paths::operation(
                 ir::PathOperation::Text,
                 Type::Str,

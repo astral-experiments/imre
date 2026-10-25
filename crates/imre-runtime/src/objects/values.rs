@@ -300,11 +300,16 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Document(left), Storage::Document(right)) => {
-                    Comparison::Done(left.view().equal(&right.view()))
+                    let result = left.view().and_then(|left| Ok(left.equal(&right.view()?)));
+                    Comparison::Done(result.unwrap_or_else(|error| {
+                        error.raise();
+                        false
+                    }))
                 }
-                (left @ Storage::Path { .. }, right @ Storage::Path { .. }) => {
-                    Comparison::Done(left.path() == right.path())
-                }
+                (
+                    left @ (Storage::Path { .. } | Storage::PurePath(_)),
+                    right @ (Storage::Path { .. } | Storage::PurePath(_)),
+                ) => Comparison::Done(left.path_equal(right)),
                 _ => Comparison::Done(false),
             })
         })
@@ -321,6 +326,9 @@ pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
     let mut output = String::new();
     // SAFETY: the caller supplies the exact checked representation and root.
     unsafe { write_repr(&mut output, word, WordKind::new(kind)) };
+    if super::exceptions::imre_error_pending() != 0 {
+        return std::ptr::null();
+    }
     Rc::into_raw(Rc::new(Str::from(output)))
 }
 
@@ -350,6 +358,23 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::IteratorAdapter(adapter) => {
+                            adapter.write_repr(output, owner);
+                            None
+                        }
+                        Storage::Repeat(repeat) => {
+                            if position == 0 {
+                                output.push_str("repeat(");
+                                pending.push(ReprTask::Object(owner, 1));
+                                Some(ReprTask::Word(repeat.value.word, repeat.value.kind))
+                            } else {
+                                if let Some(count) = repeat.remaining {
+                                    write!(output, ", {count}").unwrap();
+                                }
+                                output.push(')');
+                                None
+                            }
+                        }
                         Storage::Sequence(values) => {
                             let values = values.resolved();
                             if position == 0 {
@@ -380,7 +405,17 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                             None
                         }
                         Storage::Document(value) => {
-                            value.view().write_repr(output);
+                            match value.view() {
+                                Ok(view) => view.write_repr(output),
+                                Err(error) => error.raise(),
+                            }
+                            None
+                        }
+                        Storage::PurePath(path) => {
+                            output.push_str(path.class());
+                            output.push('(');
+                            super::exceptions::push_string_repr(&storage.posix_spelling(), output);
+                            output.push(')');
                             None
                         }
                         path @ Storage::Path { .. } => {

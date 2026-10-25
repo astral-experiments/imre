@@ -98,7 +98,7 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
                 output.push(c);
                 can_repeat = c == '.';
             }
-            '$' if input.peek().is_none() => {
+            '$' if input.peek().is_none() || verbose && verbose_tail(input.clone()) => {
                 // Remember a consumed final newline so the runtime can exclude it
                 // from group zero. Dots are not valid in Python group names.
                 output.push_str(r"(?P<imre.eol>\n)?\z");
@@ -312,6 +312,30 @@ fn count(input: &mut Input<'_>, output: &mut String) -> Result<bool, String> {
     Ok(true)
 }
 
+/// A terminal dollar may be followed by ignored layout and comments in VERBOSE mode.
+fn verbose_tail(mut input: Input<'_>) -> bool {
+    while let Some(c) = input.next() {
+        if verbose_space(c) {
+            continue;
+        }
+        if c != '#' {
+            return false;
+        }
+        while let Some(c) = input.next() {
+            match c {
+                '\\' => {
+                    if input.next().is_none() {
+                        return false;
+                    }
+                }
+                '\n' => break,
+                _ => {}
+            }
+        }
+    }
+    true
+}
+
 fn verbose_space(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0b' | '\x0c')
 }
@@ -336,6 +360,17 @@ enum Escape {
 fn escaped(input: &mut Input<'_>, output: &mut String, in_class: bool) -> Result<Escape, String> {
     let c = input.next().ok_or("incomplete regex escape")?;
     let value = match c {
+        'w' | 'W' => {
+            // Python uses Unicode letters, numbers and the literal underscore.
+            // Rust's shorthand additionally includes marks, connector characters,
+            // and join controls, all of which Python treats as non-word.
+            output.push_str(if c == 'w' {
+                r"[\p{L}\p{N}_]"
+            } else {
+                r"[^\p{L}\p{N}_]"
+            });
+            return Ok(Escape::Class);
+        }
         'd' | 'D' => {
             output.push_str(if c == 'd' { r"\p{Nd}" } else { r"\P{Nd}" });
             return Ok(Escape::Class);
@@ -504,7 +539,6 @@ mod tests {
         for source in [
             r"a$b",
             r"\1",
-            r"\w",
             r"\b",
             r"(?=a)",
             r"(?P<a>x)(?P=a)",
@@ -528,6 +562,8 @@ mod tests {
             r"[a-z]{2,4}?",
             r"[\-\]]+",
             r"(?P<empty>x*)?",
+            r"\w",
+            r"[^\W]",
             r"(a)+",
         ] {
             assert!(translate(source, false).is_ok(), "{source}");

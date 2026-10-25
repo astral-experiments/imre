@@ -23,6 +23,7 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
 pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     match ty {
         Type::Exception
+        | Type::NamedException(_)
         | Type::StringKeys
         | Type::TimeoutExpired
         | Type::EventLoop
@@ -32,8 +33,12 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::GeneratorContext
         | Type::DirectoryContext(_)
         | Type::Semaphore
+        | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::LogRecord
         | Type::Logger
+        | Type::TimedFileHandler
+        | Type::ClockTime
         | Type::Sha256
         | Type::RegexPattern
         | Type::RegexMatch
@@ -102,7 +107,15 @@ pub(super) fn validate(
                     "generated dataclass equality cannot compare opaque standard-library objects; use field(compare=False) or dataclass(eq=False)",
                 ));
             }
-            if !graph.reachable_only() && options.repr && field.repr && !repr_supported(ty, types) {
+            if (!graph.reachable_only()
+                || classes
+                    .declarations
+                    .exceptions
+                    .contains_key(&declaration.definition))
+                && options.repr
+                && field.repr
+                && !repr_supported(ty, types)
+            {
                 return Err(module.error(
                     &field.annotation,
                     "generated dataclass repr does not support resource or callable fields; use field(repr=False) or dataclass(repr=False)",
@@ -116,7 +129,14 @@ pub(super) fn validate(
 fn contains_opaque(ty: Type, types: &Types) -> bool {
     matches!(
         ty,
-        Type::Logger | Type::Sha256 | Type::RegexPattern | Type::RegexMatch | Type::StringKeys
+        Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
+            | Type::LogRecord
+            | Type::Sha256
+            | Type::RegexPattern
+            | Type::RegexMatch
+            | Type::StringKeys
     ) || types
         .children(ty)
         .into_iter()

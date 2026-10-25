@@ -31,12 +31,6 @@ struct OptionField {
     option: Value,
 }
 
-impl OptionField {
-    fn many_positional(&self) -> bool {
-        self.option["flag"] == self.name && self.option["many"] == true
-    }
-}
-
 fn literal<'a>(expr: &'a ast::Expr, module: &SourceModule) -> Result<&'a str, String> {
     let ast::Expr::StringLiteral(value) = expr else {
         return Err(module.error(expr, "argparse declarations require literal strings"));
@@ -45,16 +39,20 @@ fn literal<'a>(expr: &'a ast::Expr, module: &SourceModule) -> Result<&'a str, St
     Ok(value.value.to_str())
 }
 
-fn method<'a>(expr: &'a ast::Expr, receiver: &str, name: &str) -> Option<&'a ast::ExprCall> {
+fn method_receiver<'a>(expr: &'a ast::Expr, name: &str) -> Option<(&'a str, &'a ast::ExprCall)> {
     let ast::Expr::Call(call) = expr else {
         return None;
     };
     let ast::Expr::Attribute(attribute) = &*call.func else {
         return None;
     };
-    (attribute.attr.as_str() == name
-        && matches!(&*attribute.value, ast::Expr::Name(name) if name.id == receiver))
-    .then_some(call)
+    let receiver = attribute.value.as_name_expr()?;
+    (attribute.attr.as_str() == name).then_some((receiver.id.as_str(), call))
+}
+
+fn method<'a>(expr: &'a ast::Expr, receiver: &str, name: &str) -> Option<&'a ast::ExprCall> {
+    let (owner, call) = method_receiver(expr, name)?;
+    (owner == receiver).then_some(call)
 }
 
 fn names(expr: &ast::Expr, name: &str) -> bool {
@@ -171,19 +169,12 @@ fn option(
     let kw = keywords(
         call,
         &[
-            "type", "nargs", "help", "action", "default", "required", "choices",
+            "type", "nargs", "help", "action", "default", "const", "required", "choices",
         ],
         module,
     )?;
-    if positional
-        && ["required", "action", "default"]
-            .iter()
-            .any(|k| kw.contains_key(k))
-    {
-        return Err(module.error(
-            call,
-            "argparse positionals do not accept required, action, or default",
-        ));
+    if positional && kw.contains_key("required") {
+        return Err(module.error(call, "argparse positionals do not accept required"));
     }
     let mut element = Type::Str;
     if let Some(&ty) = kw.get("type") {
@@ -193,34 +184,57 @@ fn option(
             return Err(module.error(ty, "argparse type must be str or pathlib.Path"));
         }
     }
-    let mut required = positional;
+    let nargs = match kw.get("nargs").copied() {
+        None | Some(ast::Expr::NoneLiteral(_)) => json!("one"),
+        Some(ast::Expr::StringLiteral(s)) => match s.value.to_str() {
+            "?" => json!("optional"),
+            "*" => json!("zero_or_more"),
+            "+" => json!("one_or_more"),
+            _ => return Err(module.error(call, "unsupported argparse nargs")),
+        },
+        Some(ast::Expr::NumberLiteral(n))
+            if let ast::Number::Int(value) = &n.value
+                && let Some(count) = value.as_i64().and_then(|n| usize::try_from(n).ok())
+                && count > 0 =>
+        {
+            json!({"fixed": count})
+        }
+        Some(value) => {
+            return Err(module.error(
+                value,
+                "argparse nargs requires a positive count, '?', '*' or '+'",
+            ));
+        }
+    };
+    let many = nargs != "one" && nargs != "optional";
+    let mut required = positional && nargs != "optional" && nargs != "zero_or_more";
     if let Some(&expr) = kw.get("required") {
         let ast::Expr::BooleanLiteral(value) = expr else {
             return Err(module.error(expr, "argparse required must be a literal bool"));
         };
         required = value.value;
     }
-    let many = if let Some(&value) = kw.get("nargs") {
-        if literal(value, module)? != "+" {
-            return Err(module.error(value, "argparse supports nargs='+'"));
-        }
-        true
-    } else {
-        false
-    };
     if let Some(&action) = kw.get("action") {
-        if literal(action, module)? != "store_true"
-            || kw.contains_key("type")
-            || many
-            || kw.contains_key("choices")
-        {
-            return Err(module.error(
-                action,
-                "argparse store_true takes no type, choices, or nargs",
-            ));
+        match literal(action, module)? {
+            "store" => {}
+            "store_true"
+                if !positional
+                    && !kw.contains_key("type")
+                    && !kw.contains_key("nargs")
+                    && !kw.contains_key("const")
+                    && !kw.contains_key("choices") =>
+            {
+                element = Type::Bool
+            }
+            _ => return Err(module.error(action, "unsupported argparse action or action keywords")),
         }
-        element = Type::Bool;
     }
+    let constant = match kw.get("const").copied() {
+        None if element == Type::Bool => Some("True"),
+        None | Some(ast::Expr::NoneLiteral(_)) => None,
+        Some(value) if nargs == "optional" => Some(literal(value, module)?),
+        Some(value) => return Err(module.error(value, "argparse const requires nargs='?'")),
+    };
     let choices = if let Some(&choices) = kw.get("choices") {
         let choices = match choices {
             ast::Expr::ListComp(comp)
@@ -272,7 +286,9 @@ fn option(
     let default = match kw.get("default").copied() {
         None if element == Type::Bool => Some("False"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
-        Some(expr @ ast::Expr::StringLiteral(_)) if !many && element != Type::Bool => {
+        Some(expr @ ast::Expr::StringLiteral(_))
+            if element == Type::Str || !many && element == Type::Path =>
+        {
             Some(literal(expr, module)?)
         }
         Some(ast::Expr::BooleanLiteral(value)) if element == Type::Bool => {
@@ -324,7 +340,7 @@ fn option(
     if !template(
         help,
         &[
-            "prog", "dest", "type", "default", "choices", "required", "nargs",
+            "prog", "dest", "type", "default", "const", "choices", "required", "nargs",
         ],
     ) {
         return Err(module.error(call, "unsupported argparse help substitution"));
@@ -338,9 +354,18 @@ fn option(
         Type::Bool => "bool",
         _ => unreachable!(),
     };
-    let optional = !required && default.is_none();
+    let optional = (!required && default.is_none() && !(positional && nargs == "zero_or_more"))
+        || (!positional && nargs == "optional" && constant.is_none());
+    let list_default = many && !required && default.is_some();
     let ty = if many {
-        types.list(element)
+        let list = types.list(element);
+        if list_default {
+            types.union(&[Type::Str, list]).ok_or_else(|| {
+                module.error(call, "argparse list and default need a representable union")
+            })?
+        } else {
+            list
+        }
     } else if let Some((class, _)) = enum_default {
         types
             .union(&[Type::Str, Type::Enum(class)])
@@ -350,6 +375,7 @@ fn option(
             .iter()
             .map(|s| s.to_string())
             .chain(default.map(str::to_owned))
+            .chain(constant.map(str::to_owned))
             .collect();
         types.string_literal(values)
     } else {
@@ -359,7 +385,7 @@ fn option(
         name: dest,
         annotation: flag.clone(),
         ty: if optional { types.optional(ty) } else { ty },
-        option: json!({ "flag": flag_name, "aliases": aliases, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "many": many, "required": required,
+        option: json!({ "flag": flag_name, "aliases": aliases, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
             "choices": choices, "converter": converter, "default": default, "path_default": path_default, "help": help, "optional": optional }),
     })
 }
@@ -368,6 +394,29 @@ struct Subcommand {
     name: String,
     help: Option<String>,
     options: Vec<OptionField>,
+    groups: Vec<Value>,
+}
+
+fn argument_group(call: &ast::ExprCall, module: &SourceModule) -> Result<Value, String> {
+    let kw = keywords(call, &["title", "description"], module)?;
+    if call.arguments.args.len() > 2 {
+        return Err(module.error(call, "argparse groups accept a title and a description"));
+    }
+    let text = |index, name| match (call.arguments.args.get(index), kw.get(name).copied()) {
+        (Some(_), Some(_)) => Err(module.error(call, "repeated argparse group argument")),
+        (Some(value), None) | (None, Some(value))
+            if !matches!(value, ast::Expr::NoneLiteral(_)) =>
+        {
+            literal(value, module).map(Some)
+        }
+        _ => Ok(None),
+    };
+    let title = text(0, "title")?;
+    let description = text(1, "description")?;
+    if description.is_some_and(|s| s.contains("%(prog)") && !template(s, &["prog"])) {
+        return Err(module.error(call, "unsupported argparse group description substitution"));
+    }
+    Ok(json!({"title": title, "description": description}))
 }
 
 /// Each descriptor uses the same order for storage, parsing, and destruction.
@@ -381,6 +430,8 @@ fn namespace_class(
     let class = classes.definitions.len();
     layouts.push(fields.iter().map(|field| field.ty).collect());
     classes.definitions.push(Class {
+        exception_aliases: Default::default(),
+        static_bindings: Default::default(),
         name: "Namespace".into(),
         definition,
         node: ast::StmtClassDef {
@@ -485,10 +536,24 @@ impl Parsers {
     ) -> Result<Self, String> {
         let mut parsers = Self::default();
         for (module_id, module) in graph.modules.iter().enumerate() {
-            for (statement, node) in module.parsed.syntax().body.iter().enumerate() {
-                let ast::Stmt::FunctionDef(function) = node else {
-                    continue;
-                };
+            let functions =
+                module
+                    .parsed
+                    .syntax()
+                    .body
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(statement, node)| {
+                        let declarations = match node {
+                            ast::Stmt::ClassDef(class) => class.body.as_ref(),
+                            _ => std::slice::from_ref(node),
+                        };
+                        declarations.iter().filter_map(move |node| match node {
+                            ast::Stmt::FunctionDef(function) => Some((statement, function)),
+                            _ => None,
+                        })
+                    });
+            for (statement, function) in functions {
                 for (start, stmt) in function.body.iter().enumerate() {
                     let ast::Stmt::Assign(assign) = stmt else {
                         continue;
@@ -541,9 +606,9 @@ impl Parsers {
                             .error(expr, "argparse description requires a literal or __doc__"));
                     }
                     let builder = name.id.as_str();
-                    let mut builders = Vec::<&str>::new();
+                    let mut builders = Vec::<String>::new();
                     let register =
-                        |name: &ast::ExprName, builders: &[&str]| -> Result<(), String> {
+                        |name: &ast::ExprName, builders: &[String]| -> Result<(), String> {
                             let name = name.id.as_str();
                             if reserved(name)
                                 || module.bindings.contains_key(name)
@@ -551,7 +616,7 @@ impl Parsers {
                                     .parameters
                                     .iter_non_variadic_params()
                                     .any(|param| param.name() == name)
-                                || builders.contains(&name)
+                                || builders.iter().any(|builder| builder == name)
                             {
                                 return Err(module
                                     .error(ctor, "argparse builder requires a fresh local name"));
@@ -559,45 +624,65 @@ impl Parsers {
                             Ok(())
                         };
                     register(name, &builders)?;
-                    builders.push(builder);
-                    let read_options = |builder: &str,
-                                        index: &mut usize,
-                                        mut names: HashSet<String>|
-                     -> Result<Vec<OptionField>, String> {
-                        let mut options: Vec<OptionField> = Vec::new();
-                        let mut spellings = HashSet::new();
-                        while let Some(ast::Stmt::Expr(stmt)) = function.body.get(*index)
-                            && let Some(add) = method(&stmt.value, builder, "add_argument")
-                        {
-                            let field = option(add, graph, module_id, types, classes)?;
-                            if field.option["flag"] == field.name
-                                && options.iter().any(OptionField::many_positional)
-                            {
-                                return Err(module.error(
-                                    add,
-                                    "a positional with nargs='+' must be the last positional",
-                                ));
-                            }
-                            for value in &add.arguments.args {
-                                let name = literal(value, module)?;
-                                if !spellings.insert(name) {
-                                    return Err(module
-                                        .error(value, "argparse option spellings must be unique"));
+                    builders.push(builder.to_owned());
+                    let read_options =
+                        |builder: &str,
+                         index: &mut usize,
+                         mut names: HashSet<String>,
+                         builders: &mut Vec<String>|
+                         -> Result<(Vec<OptionField>, Vec<Value>), String> {
+                            let mut options: Vec<OptionField> = Vec::new();
+                            let mut spellings = HashSet::new();
+                            let mut groups = Vec::new();
+                            let mut group_names = HashMap::new();
+                            while let Some(stmt) = function.body.get(*index) {
+                                if let Some((group, call)) =
+                                    assigned_call(Some(stmt), builder, "add_argument_group")
+                                {
+                                    register(group, builders)?;
+                                    builders.push(group.id.to_string());
+                                    group_names.insert(group.id.as_str(), groups.len());
+                                    groups.push(argument_group(call, module)?);
+                                    *index += 1;
+                                    continue;
                                 }
+                                let ast::Stmt::Expr(stmt) = stmt else { break };
+                                let Some((owner, add)) =
+                                    method_receiver(&stmt.value, "add_argument")
+                                else {
+                                    break;
+                                };
+                                let group = group_names.get(owner);
+                                if owner != builder && group.is_none() {
+                                    break;
+                                }
+                                let mut field = option(add, graph, module_id, types, classes)?;
+                                if let Some(group) = group {
+                                    field.option["group"] = json!(group);
+                                }
+                                for value in &add.arguments.args {
+                                    let name = literal(value, module)?;
+                                    if !spellings.insert(name) {
+                                        return Err(module.error(
+                                            value,
+                                            "argparse option spellings must be unique",
+                                        ));
+                                    }
+                                }
+                                if !names.insert(field.name.clone()) {
+                                    return Err(module.error(
+                                        add,
+                                        "argparse arguments require unique destination fields",
+                                    ));
+                                }
+                                options.push(field);
+                                *index += 1;
                             }
-                            if !names.insert(field.name.clone()) {
-                                return Err(module.error(
-                                    add,
-                                    "argparse arguments require unique destination fields",
-                                ));
-                            }
-                            options.push(field);
-                            *index += 1;
-                        }
-                        Ok(options)
-                    };
+                            Ok((options, groups))
+                        };
                     let mut index = start + 1;
-                    let options = read_options(builder, &mut index, HashSet::new())?;
+                    let (options, groups) =
+                        read_options(builder, &mut index, HashSet::new(), &mut builders)?;
                     let mut root_names = options
                         .iter()
                         .map(|field| field.name.clone())
@@ -607,14 +692,8 @@ impl Parsers {
                     if let Some((group, add)) =
                         assigned_call(function.body.get(index), builder, "add_subparsers")
                     {
-                        if options.iter().any(OptionField::many_positional) {
-                            return Err(module.error(
-                                add,
-                                "a positional with nargs='+' cannot precede a subcommand",
-                            ));
-                        }
                         register(group, &builders)?;
-                        builders.push(group.id.as_str());
+                        builders.push(group.id.to_string());
                         let kw = keywords(add, &["dest", "required"], module)?;
                         let Some(dest) = kw.get("dest") else {
                             return Err(
@@ -637,7 +716,7 @@ impl Parsers {
                             assigned_call(function.body.get(index), group.id.as_str(), "add_parser")
                         {
                             register(child, &builders)?;
-                            builders.push(child.id.as_str());
+                            builders.push(child.id.to_string());
                             let [name] = call.arguments.args.as_ref() else {
                                 return Err(module.error(
                                     call,
@@ -667,12 +746,17 @@ impl Parsers {
                                 ));
                             }
                             index += 1;
-                            let options =
-                                read_options(child.id.as_str(), &mut index, root_names.clone())?;
+                            let (options, groups) = read_options(
+                                child.id.as_str(),
+                                &mut index,
+                                root_names.clone(),
+                                &mut builders,
+                            )?;
                             children.push(Subcommand {
                                 name: name.into(),
                                 help: help.map(str::to_owned),
                                 options,
+                                groups,
                             });
                         }
                         if children.is_empty() {
@@ -687,18 +771,14 @@ impl Parsers {
                         });
                     }
                     let parse = match function.body.get(index) {
+                        Some(ast::Stmt::Expr(stmt)) => Some(&*stmt.value),
                         Some(ast::Stmt::Assign(stmt)) if stmt.targets.len() == 1 && stmt.targets[0].as_name_expr().is_some() => Some(&*stmt.value),
                         Some(ast::Stmt::Return(stmt)) => stmt.value.as_deref(),
                         _ => None,
                     }.and_then(|expr| method(expr, builder, "parse_args"))
-                        .ok_or_else(|| module.error(ctor, "literal add_argument declarations must be followed by an assignment or return of parse_args()"))?;
-                    if !parse.arguments.args.is_empty() || !parse.arguments.keywords.is_empty() {
-                        return Err(
-                            module.error(parse, "argparse parse_args() reads process arguments")
-                        );
-                    }
+                        .ok_or_else(|| module.error(ctor, "literal add_argument declarations must be followed by a parse_args() call"))?;
                     for builder in builders {
-                        let mut outside = ContainsName(builder, false);
+                        let mut outside = ContainsName(&builder, false);
                         outside.visit_body(&function.body[..start]);
                         outside.visit_body(&function.body[index + 1..]);
                         if outside.1 {
@@ -731,8 +811,9 @@ impl Parsers {
                         tags.insert(child.name.clone(), variant);
                         child_schemas.push(json!({
                             "name": child.name, "help": child.help,
-                            "prog": format!("{prog} {}", child.name), "raw": false,
+                            "raw": false,
                             "options": child.options.iter().map(|f| &f.option).collect::<Vec<_>>(),
+                            "groups": child.groups,
                         }));
                     }
                     let subcommands = command.as_ref().map(|field| {
@@ -746,7 +827,7 @@ impl Parsers {
                         .into_iter()
                         .map(|field| field.option)
                         .collect::<Vec<_>>();
-                    let schema = json!({"prog": prog, "raw": raw, "options": options, "subcommands": subcommands}).to_string();
+                    let schema = json!({"prog": prog, "raw": raw, "options": options, "groups": groups, "subcommands": subcommands}).to_string();
                     parsers.calls.insert(
                         (module_id, parse.start()),
                         Parser {
@@ -801,20 +882,56 @@ impl Checker<'_> {
                 kind: ExprKind::Str(String::new()),
             },
         };
+        let explicit = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([], []) => None,
+            ([value], []) => Some(value),
+            ([], [keyword]) if keyword.arg.as_ref().is_some_and(|name| name == "args") => {
+                Some(&keyword.value)
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "argparse parse_args accepts one argument list",
+                ));
+            }
+        };
+        let explicit = explicit.filter(|value| !matches!(value, ast::Expr::NoneLiteral(_)));
+        let argv_type = self.types.list(Type::Str);
+        let argv = match explicit {
+            Some(ast::Expr::Tuple(tuple)) => Expr {
+                ty: argv_type,
+                kind: ExprKind::List(
+                    tuple
+                        .elts
+                        .iter()
+                        .map(|value| self.expr_expected(value, Type::Str))
+                        .collect::<Result<_, _>>()?,
+                ),
+            },
+            Some(value) => self.expr_expected(value, argv_type)?,
+            None => Expr {
+                ty: argv_type,
+                kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
+            },
+        };
         Ok(Some(Expr {
             ty: Type::Class(parser.class),
             kind: ExprKind::Builtin(
-                Builtin::ParseArgs(parser.children.clone()),
+                Builtin::ParseArgs {
+                    children: parser.children.clone(),
+                    process_argv: explicit.is_none(),
+                },
                 vec![
                     Expr {
                         ty: Type::Str,
                         kind: ExprKind::Str(parser.schema.clone()),
                     },
                     description,
-                    Expr {
-                        ty: self.types.list(Type::Str),
-                        kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
-                    },
+                    argv,
                 ],
             ),
         }))

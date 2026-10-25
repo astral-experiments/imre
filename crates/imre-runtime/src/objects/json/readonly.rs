@@ -555,7 +555,7 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
     .into_handle())
 }
 
-fn loads(text: &str) -> Result<*const Object, Error> {
+pub(super) fn loads(text: &str, owner: impl FnOnce() -> Rc<Str>) -> Result<*const Object, Error> {
     check_depth(text).map_err(|message| Error::new(Kind::ValueError, message))?;
     build(Source {
         text,
@@ -569,9 +569,9 @@ fn loads(text: &str) -> Result<*const Object, Error> {
                 original: Some(text),
                 shared: None,
             })
-            .map_err(|error| super::syntax::decode_error(text, error))
+            .map_err(|error| super::syntax::decode_error(text, error, owner))
         } else {
-            Err(super::syntax::decode_error(text, error))
+            Err(super::syntax::decode_error(text, error, owner))
         }
     })
 }
@@ -581,7 +581,21 @@ fn loads(text: &str) -> Result<*const Object, Error> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_json_loads(text: *const Str) -> *const Object {
     // SAFETY: text is a live immutable string for the entire parse.
-    finish(loads(unsafe { &*text }), std::ptr::null())
+    let source = unsafe { &*text };
+    // The str entry rejects its BOM before scanning. The binary entry already
+    // consumed its encoding marker; a second one is ordinary invalid JSON.
+    // SAFETY: the caller roots this immutable string while the error takes its own reference.
+    let owner = || unsafe { crate::objects::acquire_rc(text as usize) };
+    let result = if source.starts_with('\u{feff}') {
+        Err(super::syntax::at_error(
+            owner(),
+            0,
+            "Unexpected UTF-8 BOM (decode using utf-8-sig)",
+        ))
+    } else {
+        loads(source, owner)
+    };
+    finish(result, std::ptr::null())
 }
 
 /// # Safety

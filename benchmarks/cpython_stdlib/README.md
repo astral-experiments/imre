@@ -15,7 +15,7 @@ Run `tests/text.py` with the compiler, runtime, Python oracle and clang paths.
 
 `native_hashlib.py` takes the same arguments as the JSON runner. In each of CPython’s four `test_case_sha256_*` vectors, the original unittest checks the hex digest, raw digest and digest size from a single native hash object. Alternate constructors and `file_digest` run on CPython and are counted separately.
 
-The runner also compiles the unchanged `test_sha256_gil` and `test_sha256_update_over_4gb` method bodies and their equality checks. CPython supplies the private extension threshold for the first fixture. The second updates the same object with a 1 MiB buffer 4,096 times, then adds a final 11 bytes and checks CPython’s expected digest.
+The runner also compiles the unchanged `test_sha256_gil`, `test_sha256_update_over_4gb`, and `test_new_upper_to_lower` method bodies and their equality checks. CPython supplies the private extension threshold for the first fixture. The second updates the same object with a 1 MiB buffer 4,096 times, then adds a final 11 bytes and checks CPython’s expected digest.
 
 ## Native POSIX path cases
 
@@ -80,6 +80,10 @@ reference_python=/path/to/cpython-3.14.5/python
 This run records what upstream passes and skips on the host. Native compatibility uses the separate Imre results. An infrastructure error in a stripped interpreter is visible until it is reproduced with a test-enabled CPython build.
 
 `native_zip_members.py` drives the original stored and deflated bad-CRC test methods. The host makes fixtures and runs unittest assertions; the child opens its own `BytesIO`, reads members, checks CRCs, and returns the sequence of reads and errors. A separate control checks duplicate entries, metadata, independent readers and caller-owned stream lifetimes.
+
+## Native Base64 cases
+
+`native_base64.py` runs CPython's unchanged `BaseXYTestCase.test_b64encode`. Its exact-bytes URL-safe call runs in Imre; the other encoders, non-bytes buffers, and type errors run in CPython and are recorded separately. Additional native controls check output padding and strict ASCII decode errors against CPython.
 
 ## Native Counter cases
 

@@ -485,6 +485,11 @@ pub unsafe extern "C" fn imre_str_encode(value: *const Str) -> *const Bytes {
 
 /// Renders Python's strict UTF-8 decode error from the invalid sequence bounds.
 pub(super) fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
+    decode_owned_error(Rc::new(value.to_vec()), error)
+}
+
+/// Most decoders already own the immutable input. Retain it only on the failing path.
+fn decode_owned_error(value: Rc<Bytes>, error: std::str::Utf8Error) -> Error {
     let start = error.valid_up_to();
     let end = error
         .error_len()
@@ -501,8 +506,11 @@ pub(super) fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
     } else {
         format!("bytes in position {start}-{}", end - 1)
     };
-    Error::new(
-        Kind::UnicodeDecodeError,
+    Error::unicode_decode(
+        value,
+        start,
+        end,
+        reason,
         format!("'utf-8' codec can't decode {location}: {reason}"),
     )
 }
@@ -512,10 +520,56 @@ pub(super) fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_decode(value: *const Bytes) -> *const Str {
     // SAFETY: immutable bytes remain rooted throughout decoding and error rendering.
-    let value = unsafe { &*value };
-    let result = std::str::from_utf8(value)
+    let bytes = unsafe { &*value };
+    let result = std::str::from_utf8(bytes)
         .map(|text| Rc::into_raw(Rc::new(Str::from(text))))
-        .map_err(|error| decode_error(value, error));
+        // SAFETY: this caller still roots the exact byte object passed to the failing decode.
+        .map_err(|error| decode_owned_error(unsafe { super::acquire_rc(value as usize) }, error));
+    finish(result, std::ptr::null())
+}
+
+/// Decode strict ASCII, reporting the first offending byte as CPython does.
+///
+/// # Safety
+/// The caller roots the immutable input through validation and copying.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_decode_ascii(value: *const Bytes) -> *const Str {
+    // SAFETY: the exact bytes remain owned by the caller.
+    let data = unsafe { &*value };
+    let result = if let Some((i, byte)) = data.iter().enumerate().find(|(_, b)| !b.is_ascii()) {
+        Err(Error::new(
+            Kind::UnicodeDecodeError,
+            format!(
+                "'ascii' codec can't decode byte 0x{byte:02x} in position {i}: ordinal not in range(128)"
+            ),
+        ))
+    } else {
+        let text = std::str::from_utf8(data).expect("ASCII is valid UTF-8");
+        Str::try_new(text)
+            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map_err(|_| Error::allocation())
+    };
+    finish(result, std::ptr::null())
+}
+
+/// Encode bytes with the URL-safe alphabet and include standard Base64 padding.
+///
+/// # Safety
+/// The caller roots the immutable byte input. The result owns its bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_urlsafe_b64encode(value: *const Bytes) -> *const Bytes {
+    use base64::{Engine, engine::general_purpose::URL_SAFE};
+    // SAFETY: the exact bytes remain rooted until encoding finishes.
+    let data = unsafe { &*value };
+    let result = (|| {
+        let n = base64::encoded_len(data.len(), true).ok_or_else(Error::allocation)?;
+        let mut encoded = allocate(n)?;
+        encoded.resize(n, 0);
+        URL_SAFE
+            .encode_slice(data, &mut encoded)
+            .expect("exact Base64 capacity");
+        Ok(Rc::into_raw(Rc::new(encoded)))
+    })();
     finish(result, std::ptr::null())
 }
 
@@ -528,7 +582,8 @@ pub unsafe extern "C" fn imre_bytes_decode_splitlines(value: *const Bytes) -> *c
     // SAFETY: the caller roots the immutable bytes through the split.
     let bytes = unsafe { &*value };
     let result = std::str::from_utf8(bytes)
-        .map_err(|error| decode_error(bytes, error))
+        // SAFETY: this caller still roots the exact byte object passed to the failing decode.
+        .map_err(|error| decode_owned_error(unsafe { super::acquire_rc(value as usize) }, error))
         .and_then(|text| super::split_lines(text, |range| super::text::owned_string(&text[range])));
     finish(result, std::ptr::null())
 }
@@ -545,7 +600,9 @@ pub unsafe extern "C" fn imre_bytes_validate_utf8(value: *const Bytes) -> *const
     // SAFETY: the caller roots immutable bytes throughout validation and errors.
     let bytes = unsafe { &*value };
     if let Err(error) = std::str::from_utf8(bytes) {
-        return decode_error(bytes, error).returning(std::ptr::null());
+        // SAFETY: the validator's caller roots this exact immutable byte owner.
+        return decode_owned_error(unsafe { super::acquire_rc(value as usize) }, error)
+            .returning(std::ptr::null());
     }
     // SAFETY: the rooted exact Rc<Bytes> allocation provides the returned owner.
     unsafe { retained(value) }
@@ -717,6 +774,10 @@ mod tests {
                 );
                 let message = Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)));
                 assert_eq!(message, expected);
+                // Both failures own the original bytes for exception repr, without copying them.
+                assert_eq!(Rc::strong_count(&source), 3);
+                drop(error);
+                drop(ordinary);
                 assert_eq!(Rc::strong_count(&source), 1);
                 assert_eq!(imre_error_pending(), 0);
             }

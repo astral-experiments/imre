@@ -149,16 +149,34 @@ impl Checker<'_> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if types.contains(&Type::StringIterable) && types == [left.ty, right.ty] {
+            // Both operands must reach identity with the same pointer tag.
+            let left = self.coerce(left, Type::StringIterable, node)?;
+            let right = self.coerce(right, Type::StringIterable, node)?;
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if !(types
             .iter()
             .all(|ty| matches!(ty, Type::StrEnum(_) | Type::Enum(_)))
+            || types.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_) | Type::None
+                )
+            })
+            || types == [Type::LogRecord; 2]
             || types == [Type::Logger; 2]
+            || types == [Type::TimedFileHandler; 2]
+            || types == [Type::ClockTime; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(
                 self.source,
                 node,
-                "identity comparisons require None, enum members, loggers, or hash objects",
+                "identity comparisons require None, exceptions, enum members, loggers, or hash objects",
             ));
         }
         Ok(Self::identity_result(
