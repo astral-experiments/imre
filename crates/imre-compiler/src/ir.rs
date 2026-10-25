@@ -109,8 +109,11 @@ pub(crate) enum Type {
     SimpleNamespace(usize),
     /// Nominal ModuleSpec backed by a record whose loader and state keep their exact types.
     ModuleSpec(usize),
+    CodecInfo,
     /// A POSIX IPv4 stream socket with shared descriptor ownership.
     Socket,
+    CodecWriterClass,
+    CodecWriter,
     Sha256,
     Poll,
     JsonDecoder,
@@ -314,8 +317,11 @@ impl std::fmt::Display for Type {
             Self::ProcessSelectorClass => "subprocess selector class",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
+            Self::CodecInfo => "codecs.CodecInfo",
             Self::Poll => "select.poll",
             Self::Socket => "socket.socket",
+            Self::CodecWriterClass => "type[codecs.StreamWriter]",
+            Self::CodecWriter => "codecs.StreamWriter",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -973,7 +979,12 @@ pub(crate) enum Builtin {
     Decode,
     DecodeAscii,
     UrlsafeB64encode,
+    CodecLookup,
+    CodecName,
+    CodecEncode,
+    CodecDecode,
     Socket(SocketOp),
+    CodecWriter(WriterOperation),
     Sha256Hex,
     Sha256New,
     HashNew,
@@ -987,6 +998,7 @@ pub(crate) enum Builtin {
     },
     Sha256Copy,
     BytesIo,
+    BytesIoValue,
     StringIo(StringIoOperation),
     BinarySeek,
     BinaryTell,
@@ -1554,6 +1566,21 @@ pub(crate) enum LogRecordOperation {
     SetFlag,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WriterOperation {
+    Class,
+    New,
+    Write,
+    Flush,
+    Close,
+    Reset,
+    Encoding,
+    SetEncoding,
+    Stream,
+    Errors,
+    SetErrors,
+}
+
 /// Operations on the native logging registry and its named loggers.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
@@ -1829,7 +1856,7 @@ impl InstanceType {
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
-            Self::Tuple => matches!(ty, Type::Tuple(_)),
+            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::CodecInfo),
             Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::ModuleSpec => matches!(ty, Type::ModuleSpec(_)),
             Self::Exception(_) => matches!(

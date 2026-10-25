@@ -451,10 +451,14 @@ impl Checker<'_> {
                         .is_some_and(|p| matches!(p, Type::Calendar(_)))
             })
             || types == [Type::PathInfo; 2]
+            || types == [Type::CodecInfo; 2]
             || types == [Type::JsonDecoder; 2]
             || types == [Type::Poll; 2]
             || types == [Type::Socket; 2]
             || types == [Type::ProcessSelectorClass; 2]
+            || types == [Type::CodecWriterClass; 2]
+            || types == [Type::CodecWriter; 2]
+            || types == [Type::BinaryIO; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(
