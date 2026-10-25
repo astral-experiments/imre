@@ -152,5 +152,8 @@ On the combined compiler head `03977539` both check modes reached the
 without running child initialization. Published main `c306c73` confirmed that stop for
 both entry points. After annotationlib landed in #586, all four checks on walking
 head `ea9845a` reached `inspect` in `test/support/__init__.py:9`. The prospective
-walk merge against main `13759fb` confirmed the same four outcomes. These
-checks execute no upstream method.
+walk merge against main `13759fb` confirmed the same four outcomes. Once #784
+landed, both entry points in both check modes reached `_opcode` at
+`test/support/__init__.py:11`. The published [walk merge](https://github.com/astral-sh/imre/pull/785)
+confirmed that result on main `4fe38f6`. None
+of these startup checks executed an upstream method.
