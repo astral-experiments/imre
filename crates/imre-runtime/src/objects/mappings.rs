@@ -7,6 +7,7 @@
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
+mod counters;
 mod record_hash;
 mod sorted_rows;
 
@@ -310,13 +311,18 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     }
 
     fn reserve(&mut self, additional: usize) {
+        self.try_reserve(additional)
+            .unwrap_or_else(|_| fail("MemoryError", "mapping allocation failed"));
+    }
+
+    fn try_reserve(&mut self, additional: usize) -> Result<(), Error> {
         let entries = &self.entries;
         self.index
             .try_reserve(additional, |&i| entries[i].as_ref().unwrap().hash)
-            .unwrap_or_else(|_| fail("MemoryError", "mapping allocation failed"));
+            .map_err(|_| Error::allocation())?;
         self.entries
             .try_reserve(additional)
-            .unwrap_or_else(|_| fail("MemoryError", "mapping allocation failed"));
+            .map_err(|_| Error::allocation())
     }
 
     fn insert_absent(&mut self, hash: u64, key: K, value: V) {
@@ -482,6 +488,17 @@ macro_rules! table {
 }
 
 impl<V: Copy> Tables<V> {
+    fn try_for_each(
+        &self,
+        mut visit: impl FnMut(usize, V) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        table!(self, table => table.entries.iter().flatten().try_for_each(|entry| visit(entry.key.word(), entry.value)))
+    }
+
+    fn try_reserve(&mut self, additional: usize) -> Result<(), Error> {
+        table!(self, table => table.try_reserve(additional))
+    }
+
     /// Visits borrowed key/value words in insertion order without acquiring keys.
     /// The predicate may inspect other immutable acyclic containers, not mutate
     /// this table or retain a storage reference after the visit.

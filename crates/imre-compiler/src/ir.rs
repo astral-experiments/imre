@@ -407,6 +407,18 @@ pub(crate) enum Compare {
     GreaterEqual,
 }
 
+/// Native multiset arithmetic over integer counts. Values match the runtime ABI.
+#[repr(u32)]
+#[derive(Clone, Copy)]
+pub(crate) enum CounterOp {
+    Add,
+    Subtract,
+    Union,
+    Intersection,
+    Positive,
+    Negative,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     DirectoryContextView,
@@ -645,6 +657,10 @@ pub(crate) enum Builtin {
     CounterNew,
     CounterTotal,
     CounterUpdate,
+    CounterMath {
+        op: CounterOp,
+        inplace: bool,
+    },
     DictSumValues,
     /// Widens a defaultdict owner to its ordinary dictionary interface.
     DictAsBase,

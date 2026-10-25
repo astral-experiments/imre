@@ -4437,6 +4437,17 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_counter_update", &[&args[0].value, &args[1].value]);
                 none()
             }
+            Builtin::CounterMath { op, inplace } => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_counter_math(ptr {}, ptr {}, i32 {}, i32 {})",
+                    args[0].value.operand,
+                    args.last().unwrap().value.operand,
+                    *op as u32,
+                    u32::from(*inplace)
+                )),
+                small_integer: false,
+            },
             Builtin::KeyUnion
             | Builtin::KeySet
             | Builtin::KeyIntersection
@@ -5917,6 +5928,7 @@ declare ptr @imre_dict_new(i32, i32)
 declare ptr @imre_default_list_dict_new(i32, i32)
 declare ptr @imre_counter_new(i32)
 declare void @imre_counter_update(ptr, ptr)
+declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
 declare ptr @imre_key_union(ptr, ptr)
