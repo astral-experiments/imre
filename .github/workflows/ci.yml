@@ -198,8 +198,20 @@ jobs:
                       if row["classification"] == "failed":
                           print(level["opt_level"], row["id"], row.get("reason", row.get("evidence")))
           PYTHON
+      - name: Preserve the full per-occurrence JSON in this run log
+        if: (success() || failure()) && inputs.audit == 'logging'
+        run: |
+          python3 - <<'PYTHON'
+          import base64, gzip, hashlib, os, textwrap
+          from pathlib import Path
+          data = (Path(os.environ['RUNNER_TEMP']) / 'logging-results/evidence-linux.json').read_bytes()
+          print('LOGGING-JSON-SHA256:', hashlib.sha256(data).hexdigest())
+          encoded = base64.b64encode(gzip.compress(data, mtime=0)).decode('ascii')
+          for part in textwrap.wrap(encoded, 2000):
+              print('LOGGING-JSON-GZIP:', part)
+          PYTHON
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: success() || failure()
+        if: (success() || failure()) && inputs.audit != 'logging'
         with:
           name: logging-${{ inputs.audit }}-${{ inputs.source }}
           path: ${{ runner.temp }}/logging-results
