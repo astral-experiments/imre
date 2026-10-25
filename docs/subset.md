@@ -1252,8 +1252,19 @@ including `None`, booleans, integers, strings, bytes, and fixed tuples of those
 values. The `super().__init__` form accepts zero arguments, one string, or
 multiple supported values. Constructor keyword arguments, typed fields, and custom `__str__` and
 `__repr__` methods use the same object after a raise. A class attribute can name
-such a constructor. Inheriting a user payload layout, dynamic constructors, and
-reinitializing an exception are outside this subset.
+such a constructor. A subclass can extend one inherited payload or inherit its
+constructor unchanged. A base handler sees its original fields, argument tuple
+and formatter; a sibling exception remains distinct. Two independent payload
+layouts, dynamic constructor selection and reinitializing a payload are unsupported.
+
+An unannotated variadic exception initializer can store named parameters in
+fields and call `super().__init__` once, forwarding parameters or its positional
+tail. A subclass can do the same with fixed or variadic parameters. Supported
+values include None, bool, int, float, str, bytes, fixed tuples and typed lists
+of these values. Lists preserve identity and mutations in stored fields and
+in `.args`. A list whose elements contain `object` cannot be stored this way: a later mutation could create a reference cycle. Scalar literal defaults and keyword-only parameters are supported;
+computed or mutable defaults, positional-only parameters, `**kwargs`, arbitrary
+objects, and arbitrary code inside these unannotated initializers are unsupported.
 
 The constructible builtin categories are `Exception`, `ArithmeticError`, `ZeroDivisionError`, `OverflowError`, `LookupError`, `IndexError`, `KeyError`, `ValueError`, `AssertionError`, `RuntimeError`, `StopIteration`, `EOFError`, `OSError`, `TypeError`, `AttributeError`, `MemoryError`, `SystemError`, `UnicodeError`, `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`, plus the imported `io.UnsupportedOperation`. A constructor takes zero arguments or one supported argument (a string, number, bytes, container, or `None`). Mutable arguments remain live through `.args` and formatting. `raise Category` constructs the zero-argument form; `raise value` requires an exception instance. The annotation `Exception` admits this sealed family and can be used in parameters, returns, fields, containers, and optional values. Specific subclass annotations are currently rejected rather than erasing their narrower contracts. `BaseException` and `UnicodeDecodeError` are supported as handler categories, but not as constructors or storage annotations.
 

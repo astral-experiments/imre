@@ -34,6 +34,7 @@ mod doctest;
 mod documents;
 mod enums;
 mod errno;
+mod exception_forwarders;
 mod expandtabs;
 mod expansions;
 mod fixed_tuples;
@@ -101,6 +102,7 @@ mod warnings;
 mod zip_sums;
 mod zipfile;
 use assignments::LocalState;
+pub(crate) use calls::scalar_literal;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
 use module_values::{Initialization, ModuleValues};
@@ -199,7 +201,9 @@ impl ClassInfo {
                     .fields
                     .iter()
                     .map(|field| {
-                        if field.name == crate::classes::EXCEPTION_ARGS_SLOT {
+                        if field.name == crate::classes::EXCEPTION_ARGS_SLOT
+                            || class.forwarder.is_some()
+                        {
                             return Ok(Type::ObjectValue);
                         }
                         annotation_in_class(
@@ -651,6 +655,9 @@ pub(crate) fn lower_with_owners(
         }
         let mut instance_signatures = HashMap::<_, Signature>::new();
         for (index, method) in class.methods.iter().enumerate() {
+            if class.forwarder.is_some() && method.name.as_str() == "__init__" {
+                continue;
+            }
             let module_id = class.method_origins[index].module;
             let module = &graph.modules[module_id];
             let context = records::MethodContext {
@@ -2005,6 +2012,7 @@ struct Checker<'a> {
     super_method_base: Option<usize>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
+    exception_formatter: Option<bool>,
     initializing: bool,
 }
 
@@ -2066,6 +2074,7 @@ impl<'a> Checker<'a> {
             super_method_base: None,
             iterator_source: None,
             super_initializer: None,
+            exception_formatter: None,
             initializing: false,
         }
     }
@@ -4120,7 +4129,20 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::Return(return_) if !self.module_scope => {
                 let value = if let Some(value) = &return_.value {
-                    if self.inferred_returns.is_some() {
+                    if let Some(repr) = self.exception_formatter {
+                        let value = self.expr(value)?;
+                        if value.ty == Type::ObjectValue {
+                            Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Builtin(
+                                    Builtin::ExceptionFormatterResult(repr),
+                                    vec![value],
+                                ),
+                            }
+                        } else {
+                            self.coerce(value, Type::Str, statement)?
+                        }
+                    } else if self.inferred_returns.is_some() {
                         self.expr(value)?
                     } else {
                         self.expr_expected(value, self.returns)?
@@ -5561,6 +5583,16 @@ impl<'a> Checker<'a> {
                                 Builtin::Document(ir::DocumentOp::IsNull),
                                 vec![value],
                             ),
+                            _ if value.ty == Type::ObjectValue => ExprKind::Builtin(
+                                Builtin::ExceptionFieldIdentity { reversed: false },
+                                vec![
+                                    value,
+                                    Expr {
+                                        ty: Type::None,
+                                        kind: ExprKind::None,
+                                    },
+                                ],
+                            ),
                             _ => ExprKind::Builtin(Builtin::IsNone, vec![value]),
                         },
                     };
@@ -5681,8 +5713,7 @@ impl<'a> Checker<'a> {
                 if values.iter().any(|value| value.ty == Type::ObjectValue) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                         || !values.iter().all(|v| {
-                            v.ty == Type::ObjectValue
-                                || v.ty == Type::ListInt
+                            self.forwarding_value_supported(v.ty)
                                 || self.object_value_supported(v.ty)
                                 || self.types.mapping(v.ty) == Some((Type::Int, Type::Str))
                         })
@@ -5690,7 +5721,7 @@ impl<'a> Checker<'a> {
                         return Err(error(
                             self.source,
                             expression,
-                            "object values support equality with concrete scalars, fixed tuples, eligible dataclasses or integer-to-string dictionaries",
+                            "object values support equality with scalars, tuples, typed lists, eligible dataclasses, or integer-to-string dictionaries",
                         ));
                     }
                     let reversed = values[0].ty != Type::ObjectValue;
@@ -5698,14 +5729,16 @@ impl<'a> Checker<'a> {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::SystemExitCodeEqual { reversed }, values),
                     };
-                    return Ok(if compare.ops[0] == ast::CmpOp::NotEq {
-                        Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Not(Box::new(eq)),
-                        }
-                    } else {
-                        eq
-                    });
+                    return Ok(
+                        if matches!(compare.ops[0], ast::CmpOp::NotEq | ast::CmpOp::IsNot) {
+                            Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Not(Box::new(eq)),
+                            }
+                        } else {
+                            eq
+                        },
+                    );
                 }
                 // Python StrEnum compares by its underlying str value, even
                 // against raw str or a member of another enum. A same-class
@@ -6034,7 +6067,8 @@ impl<'a> Checker<'a> {
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
-                    let field = self.classes.fields[class].len() - 1;
+                    let field =
+                        self.classes.declarations.definitions[class].exception_argument_slot();
                     if self.exception_tuple_slot(class) {
                         return Ok(Expr {
                             ty: Type::ObjectValue,
