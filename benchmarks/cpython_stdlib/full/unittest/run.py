@@ -104,7 +104,7 @@ def run(args, level, root):
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
     families = dict.fromkeys(["protocol", "import", "csv", *args.exception_family])
     for name in ["equality_protocol", "mapping_protocol", "mock_protocol", "mock_reset", "callable_protocol", "bound_assertions",
-                 "callable_binding", *("context_" + family for family in families)]:
+                 "callable_binding", "context_regex", *("context_" + family for family in families)]:
         control = root / name
         control.mkdir()
         program = HERE / (name + ".py")
@@ -136,6 +136,8 @@ def run(args, level, root):
                          "testAssertMultiLineEqual", *EQUALITY_BLOCKERS)),
         ("testmock.testmock", "MockTest", "test_assert_not_called", "unittest.mock.Mock.assert_not_called"),
         ("testmock.testmock", "MockTest", "test_assert_called", "unittest.mock.Mock.assert_called"),
+        ("testmock.testmock", "MockTest", "test_assert_called_exception_message",
+         "unittest.TestCase.assertRaisesRegex and unittest.mock.Mock.assert_called"),
         ("testmock.testmock", "MockTest", "test_assert_called_once", "unittest.mock.Mock.assert_called_once"),
         ("testmock.testmock", "MockTest", "test_ordered_call_signature", "unittest.mock.Mock.call_args and its representation"),
         *(("testmock.testmock", "MockTest", method, "unittest.TestCase.assertRaises and unittest.mock.Mock." + assertion)
@@ -160,6 +162,9 @@ def run(args, level, root):
             observation["reason"] = str(exc).strip().replace(str(directory) + "/", "<case>/")
             expected = (MOCK_BLOCKERS.get(method) if module == "testmock.testmock"
                         else EQUALITY_BLOCKERS.get(method) or CALLABLE_BLOCKERS.get(method))
+            if module == "testmock.testmock" and method == "test_assert_called_exception_message":
+                # The original pattern formats positional {0} before entering assertRaisesRegex.
+                expected = (533, "8:53: Imre: str.format requires named arguments")
             if expected:
                 line, diagnostic = expected
                 if observation["reason"].endswith("<case>/case.py:" + diagnostic):

@@ -2,6 +2,7 @@
 
 
 import difflib
+import re
 from types import ModuleType
 from typing import ClassVar
 
@@ -348,13 +349,24 @@ class _AssertRaisesContext:
     _expected: list[int]
     _label: str
     _caught: Exception | None
+    _regex: re.Pattern[str] | None
+    _spelling: str
 
-    def __init__(self, case: TestCase, kinds: list[int], label: str, msg: str | None, error: str | None) -> None:
+    def __init__(self, case: TestCase, kinds: list[int], label: str, msg: str | None, error: str | None,
+                 pattern: re.Pattern[str] | None, spelling: str) -> None:
         self.test_case = case
         self._expected = _checked_expected(kinds, error)
         self._label = label
         self.msg = msg
         self._caught = None
+        self._regex = pattern
+        self._spelling = spelling
+
+    def _check_regex(self, exc: Exception) -> None:
+        pattern = self._regex
+        if pattern is not None and pattern.search(str(exc)) is None:
+            standard = '"' + self._spelling + '" does not match "' + str(exc) + '"'
+            raise self.test_case.failureException(self.test_case._formatMessage(self.msg, standard))
 
     def _missing(self) -> None:
         raise self.test_case.failureException(self.test_case._formatMessage(self.msg, self._label + " not raised"))
