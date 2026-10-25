@@ -88,6 +88,7 @@ pub(crate) enum IntrinsicModule {
     Tomli,
     TomliW,
     Shutil,
+    Random,
     Sysconfig,
     Signal,
     Opcode,
@@ -324,6 +325,8 @@ pub(crate) enum Intrinsic {
     DestInSrc,
     IgnorePatterns,
     ShutilError,
+    RandomChoice,
+    Random(crate::ir::RandomOperation),
     SameFileError,
     SpecialFileError,
     TemporaryDirectory,
@@ -387,6 +390,7 @@ impl IntrinsicModule {
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
+            "random" => Some(Self::Random),
             "sysconfig" => Some(Self::Sysconfig),
             "signal" => Some(Self::Signal),
             "_opcode" => Some(Self::Opcode),
@@ -723,6 +727,12 @@ impl IntrinsicModule {
             (Self::Pathlib, "PureWindowsPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
+            (Self::Random, "choice") => Intrinsic::RandomChoice,
+            (Self::Random, "seed") => Intrinsic::Random(crate::ir::RandomOperation::Seed),
+            (Self::Random, "random") => Intrinsic::Random(crate::ir::RandomOperation::Float),
+            (Self::Random, "getrandbits") => Intrinsic::Random(crate::ir::RandomOperation::Bits),
+            (Self::Random, "randint") => Intrinsic::Random(crate::ir::RandomOperation::Randint),
+            (Self::Random, "randrange") => Intrinsic::Random(crate::ir::RandomOperation::Randrange),
             (Self::Shutil, "rmtree") => Intrinsic::RmTree,
             (Self::Shutil, "copytree") => Intrinsic::CopyTree,
             (Self::Shutil, "move") => Intrinsic::Move,
