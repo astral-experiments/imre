@@ -2346,6 +2346,12 @@ impl<'a> Checker<'a> {
             }
         }
         if matches!(concrete, Type::Callable(_)) {
+            if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
+                self.resolve(expression)
+            {
+                let value = self.shutil_function_value(op, Some(concrete), expression)?;
+                return self.coerce(value, expected, expression);
+            }
             if let Some(Binding::Definition(definition)) = self.resolve(expression)
                 && let Some(signature) = self.functions.get(&definition).cloned()
             {
@@ -4838,11 +4844,15 @@ impl<'a> Checker<'a> {
                 &format!("no native implementation for {symbol}"),
             ));
         }
-        if let Some(target @ (Binding::Module(_) | Binding::IntrinsicModule(_))) =
-            self.resolve(expression)
-            && let Some(module) = self.module_docs(target, expression)?
-        {
-            return Ok(module);
+        if let Some(target) = self.resolve(expression) {
+            if matches!(target, Binding::Module(_) | Binding::IntrinsicModule(_))
+                && let Some(module) = self.module_docs(target, expression)?
+            {
+                return Ok(module);
+            }
+            if let Some(value) = self.errno_value(target, expression) {
+                return Ok(value);
+            }
         }
         if let Some(Binding::Intrinsic(
             Intrinsic::LogLevel(level)
@@ -4868,8 +4878,10 @@ impl<'a> Checker<'a> {
         {
             return self.callable_value(&signature, None, None, expression);
         }
-        if let Some(value) = self.errno_value(expression) {
-            return Ok(value);
+        if let Some(Binding::Intrinsic(op @ (Intrinsic::Copy(_) | Intrinsic::RmTree))) =
+            self.resolve(expression)
+        {
+            return self.shutil_function_value(op, None, expression);
         }
         if let Some(Binding::Value(definition)) = self.resolve(expression) {
             let (slot, ty) = self.globals.get(definition).ok_or_else(|| {
@@ -5850,6 +5862,23 @@ impl<'a> Checker<'a> {
                     receiver.ty,
                     Type::Exception | Type::ImportException | Type::TimeoutExpired
                 ) {
+                    if attribute.attr.as_str() == "args"
+                        && let ExprKind::Local(slot) = receiver.kind
+                        && let Some(issue) = self
+                            .captured_process_errors
+                            .iter()
+                            .rev()
+                            .find(|capture| capture.slot == slot)
+                            .and_then(|capture| capture.tree_issue)
+                    {
+                        return Ok(Expr {
+                            ty: self.types.tuple(vec![self.types.list(issue)]),
+                            kind: ExprKind::Builtin(
+                                Builtin::Process(ir::ProcessOperation::TreeErrorArgs),
+                                vec![receiver],
+                            ),
+                        });
+                    }
                     let field = if receiver.ty == Type::TimeoutExpired {
                         self.timeout_error_attribute(&receiver, attribute)?
                     } else {
@@ -6467,6 +6496,10 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
+            Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
+            Some(Binding::Intrinsic(Intrinsic::IgnorePatterns)) => {
+                return self.shutil_ignore_patterns(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Copy(op))) => return self.shutil_copy(op, call),
             Some(Binding::Intrinsic(symbol @ (Intrinsic::FsPath | Intrinsic::PosixNormcase))) => {
                 return self.public_fspath(call, symbol == Intrinsic::PosixNormcase);

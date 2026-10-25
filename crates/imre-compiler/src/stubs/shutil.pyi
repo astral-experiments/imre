@@ -34,3 +34,9 @@ class _RmTree(Protocol):
     def __call__(self, path: _Path, ignore_errors: bool = False, onerror: Callable | None = None, *, onexc: Callable | None = None, dir_fd: int | None = None) -> None: ...
 
 rmtree: _RmTree
+
+def ignore_patterns(*patterns: _S) -> Callable[[_S, list[_S]], set[_S]]: ...
+
+def copytree(src: _Path, dst: _D, symlinks: bool = False, ignore: Callable | None = None,
+             copy_function: Callable = ..., ignore_dangling_symlinks: bool = False,
+             dirs_exist_ok: bool = False) -> _D: ...

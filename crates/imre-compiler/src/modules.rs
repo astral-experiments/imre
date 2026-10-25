@@ -292,6 +292,8 @@ pub(crate) enum Intrinsic {
     Which,
     Copy(CopyOperation),
     RmTree,
+    CopyTree,
+    IgnorePatterns,
     ShutilError,
     SameFileError,
     SpecialFileError,
@@ -656,6 +658,8 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Shutil, "rmtree") => Intrinsic::RmTree,
+            (Self::Shutil, "copytree") => Intrinsic::CopyTree,
+            (Self::Shutil, "ignore_patterns") => Intrinsic::IgnorePatterns,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
             (Self::Shutil, "copymode") => Intrinsic::Copy(CopyOperation::Mode),

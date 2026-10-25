@@ -3896,6 +3896,8 @@ impl Emitter<'_, '_> {
                     FileConfig => "imre_log_file_config",
                     Disabled => "imre_log_disabled",
                     Propagate => "imre_log_propagate",
+                    SetPropagate => "imre_log_set_propagate",
+                    HasHandlers => "imre_log_has_handlers",
                     Name => "imre_log_name",
                     Parent => "imre_log_parent",
                     Children => "imre_log_children",
@@ -7034,6 +7036,9 @@ declare ptr @imre_shutil_confstr_cs_path()
 declare ptr @imre_shutil_os_defpath()
 declare void @imre_shutil_rmtree(ptr, i32, i32, i64, i32, ptr, ptr, ptr, ptr)
 declare i64 @imre_shutil_copy(i32, ptr, i32, ptr, i32, i32)
+declare i64 @imre_shutil_copytree(ptr, i32, ptr, i32, i32, i32, i32, i32, ptr, ptr, ptr, i32, ptr, ptr, i32)
+declare ptr @imre_shutil_tree_error_args(ptr, ptr)
+declare ptr @imre_shutil_ignore_patterns_call(ptr, ptr, ptr)
 declare void @imre_os_unlink(ptr, i32, i64, i32)
 declare void @imre_subprocess_check(ptr)
 declare i64 @imre_subprocess_error_field(ptr, i32)
@@ -7526,6 +7531,8 @@ declare void @imre_log_typed_dict_config(ptr, i64)
 declare void @imre_log_file_config(ptr, i8, i1, i64)
 declare i1 @imre_log_disabled(ptr)
 declare i1 @imre_log_propagate(ptr)
+declare void @imre_log_set_propagate(i1, ptr)
+declare i1 @imre_log_has_handlers(ptr)
 declare i1 @imre_log_is_enabled(ptr, i64)
 declare void @imre_log_routed_emit(ptr, i64, ptr)
 declare ptr @imre_log_name(ptr)

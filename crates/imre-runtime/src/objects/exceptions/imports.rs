@@ -1,4 +1,6 @@
 //! ImportError retains its positional arguments separately from its named attributes.
+mod suggestions;
+
 use super::*;
 use crate::objects::boxed_values::{checked_text, concrete, tuple_item, word_text};
 use crate::objects::{records, values};
@@ -32,7 +34,7 @@ impl Import {
             return None;
         }
         let wrong = text(&self.fields[2])?;
-        super::suggestions::closest(wrong, crate::objects::errno::exported_names())
+        suggestions::closest(wrong, crate::objects::errno::exported_names())
     }
 }
 

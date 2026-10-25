@@ -14,8 +14,8 @@ pub(super) fn module() -> Expr {
 
 impl Checker<'_> {
     /// All import spellings project the same module object and target registry.
-    pub(super) fn errno_value(&self, expression: &ast::Expr) -> Option<Expr> {
-        match self.resolve(expression)? {
+    pub(super) fn errno_value(&self, target: Binding, expression: &ast::Expr) -> Option<Expr> {
+        match target {
             Binding::IntrinsicModule(crate::modules::IntrinsicModule::Errno) => Some(module()),
             Binding::Intrinsic(Intrinsic::ErrnoFrom(slot)) => {
                 Some(self.errno_attribute(module(), &self.graph.errno_names[slot]))
