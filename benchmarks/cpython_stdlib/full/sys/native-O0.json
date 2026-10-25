@@ -11,6 +11,27 @@
       "fixture_execution": "CPython module/class/instance hooks; native instance in child",
       "method_sha256": "e9ae316ea5c7f6dcc265f3be947387d10898624e8534aaa215d750a46d69e351"
     },
+    "test.test_sys.DisplayHookTest.test_original_displayhook": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "original CPython unittest fixture and support.captured_stdout contexts",
+      "calls": [
+        "display-int",
+        "get-last",
+        "delete-last",
+        "display-none",
+        "get-last",
+        "display-no-args",
+        "save-stdout",
+        "delete-stdout",
+        "display-int",
+        "restore-stdout"
+      ],
+      "fixture": "original CPython unittest fixture and support.captured_stdout contexts",
+      "operation": "one Imre process displays the object, reads and deletes builtins._, and deletes and restores its actual sys.stdout"
+    },
     "test.test_sys.SysModuleTest.test_43581": {
       "status": "pass",
       "execution": "native-body",
