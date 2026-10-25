@@ -50,3 +50,9 @@ try:
 except IsADirectoryError as exc:
     print(str(exc))
     print(f"{exc!r}")
+
+for src, dst in [("input\x00", "copied"), ("input.txt", "copied\x00")]:
+    try:
+        copyfile(src, dst)
+    except ValueError as exc:
+        print(str(exc))

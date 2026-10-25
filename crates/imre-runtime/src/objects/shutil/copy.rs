@@ -104,7 +104,10 @@ fn copyfile(src: &Name<'_>, dst: &Name<'_>, follow: bool) -> Result<()> {
         .iter()
         .any(|name| name.path().as_os_str().as_bytes().contains(&0))
     {
-        return Err(Error::new(Kind::ValueError, "embedded null byte"));
+        return Err(Error::new(
+            Kind::ValueError,
+            "stat: embedded null character in path",
+        ));
     }
     let source = fs::metadata(src.path()).ok();
     let target = fs::metadata(dst.path()).ok();
