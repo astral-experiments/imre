@@ -1048,6 +1048,7 @@ pub(crate) enum LogOperation {
     Configure,
     ConfigureName,
     DictConfig,
+    DictConfigTyped,
     FileConfig,
     Disabled,
     Propagate,

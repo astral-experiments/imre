@@ -5,6 +5,18 @@ import logging.config
 import sys
 
 
+def apply(config: dict[str, int]) -> None:
+    logging.config.dictConfig(config=config)
+
+
+mutable = {"version": 2}
+try:
+    apply(mutable)
+except ValueError as err:
+    print(str(err))
+mutable["version"] = 1
+apply(mutable)
+
 app = logging.getLogger("service")
 worker = logging.getLogger("service.worker")
 other = logging.getLogger("other")
@@ -39,6 +51,10 @@ except ValueError as e:
     print(str(e))
 try:
     logging.config.dictConfig({"version": "2"})
+except ValueError as e:
+    print(str(e))
+try:
+    logging.config.dictConfig({"version": [{"quoted": [False, "two"]}, 2.0]})
 except ValueError as e:
     print(str(e))
 try:

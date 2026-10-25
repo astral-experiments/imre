@@ -174,6 +174,7 @@ impl Builtin {
                     crate::ir::LogOperation::Configure
                         | crate::ir::LogOperation::ConfigureName
                         | crate::ir::LogOperation::DictConfig
+                        | crate::ir::LogOperation::DictConfigTyped
                         | crate::ir::LogOperation::FileConfig
                         | crate::ir::LogOperation::CheckLevel
                 ),
@@ -690,6 +691,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_logrecord_message"
                 | "imre_log_config"
                 | "imre_log_dict_config"
+                | "imre_log_typed_dict_config"
                 | "imre_log_file_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"

@@ -63,8 +63,35 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let parameters = [required("config", documents::MAP)];
-        let args = self.arguments(call, &parameters, None)?;
-        Ok(self.ordered_builtin(Builtin::Logging(Log::DictConfig), Type::None, args))
+        let mut scalar = None;
+        let mut args = self.arguments_with(call, &parameters, None, |checker, _, argument| {
+            if matches!(argument, ast::Expr::Dict(_)) {
+                return checker.expr_expected(argument, documents::MAP);
+            }
+            let value = checker.expr(argument)?;
+            if let Some((Type::Str, ty)) = checker.types.mapping(value.ty) {
+                scalar = match ty {
+                    Type::None => Some(0),
+                    Type::Bool => Some(1),
+                    Type::Int => Some(2),
+                    Type::Str => Some(3),
+                    Type::Float => Some(7),
+                    _ => None,
+                };
+                if scalar.is_some() {
+                    return Ok(value);
+                }
+            }
+            checker.document_coerce(value, documents::MAP, argument)
+        })?;
+        let op = if let Some(kind) = scalar {
+            args.order.push(args.values.len());
+            args.values.push(number(kind));
+            Log::DictConfigTyped
+        } else {
+            Log::DictConfig
+        };
+        Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args))
     }
 
     /// Read the configuration path only after evaluating all call arguments.

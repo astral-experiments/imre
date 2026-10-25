@@ -1,6 +1,6 @@
 //! Apply public dictionary and INI configuration to live native logger objects.
 
-use super::super::exceptions::{Result, string_repr};
+use super::super::exceptions::{Result, push_string_repr, string_repr};
 use super::super::json::readonly::document::Value;
 use super::{Error, Int, Kind, LOGGERS, Object, Str, finish, levels, name, object};
 use std::cell::RefCell;
@@ -88,11 +88,14 @@ pub unsafe extern "C" fn imre_log_routed_emit(
     }
 }
 
-type Pairs = Vec<(Rc<Str>, Rc<Object>)>;
+type Pairs = Vec<(Rc<Str>, Value)>;
 
 fn pairs(mapping: &Value) -> Result<Pairs> {
     match mapping {
-        Value::Table(obj) => Ok(Value::items(obj)),
+        Value::Table(obj) => Ok(Value::items(obj)
+            .into_iter()
+            .map(|(k, v)| (k, Value::read(&v)))
+            .collect()),
         _ => Err(Error::new(
             Kind::TypeError,
             "expected a configuration mapping",
@@ -104,7 +107,7 @@ fn get(pairs: &Pairs, key: &str) -> Option<Value> {
     pairs
         .iter()
         .find(|(name, _)| name.as_str() == key)
-        .map(|(_, value)| Value::read(value))
+        .map(|(_, value)| value.clone())
 }
 
 fn unsupported(what: &str) -> Error {
@@ -114,32 +117,53 @@ fn unsupported(what: &str) -> Error {
     )
 }
 
-fn display(value: &Value, nested: bool) -> String {
-    match value {
-        Value::Null => "None".into(),
-        Value::Bool(b) => if *b { "True" } else { "False" }.into(),
-        Value::Integer(i) => i.big().to_string(),
-        Value::Float(f) => format!("{f:?}"),
-        Value::String(s) if nested => string_repr(s).to_string(),
-        Value::String(s) => s.to_string(),
-        Value::Datetime(s) => s.to_string(),
-        Value::Array(a) => format!(
-            "[{}]",
-            Value::elements(a)
-                .iter()
-                .map(|v| display(&Value::read(v), true))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Value::Table(t) => format!(
-            "{{{}}}",
-            Value::items(t)
-                .iter()
-                .map(|(k, v)| format!("{}: {}", string_repr(k), display(&Value::read(v), true)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+/// Format the rejected version using Python's str rules, including repr of
+/// nested strings. User-provided containers must not consume the Rust stack.
+fn display(value: Value) -> String {
+    if let Value::String(s) = value {
+        return s.to_string();
     }
+    enum Part {
+        Value(Value),
+        Text(&'static str),
+        Key(Rc<Str>),
+    }
+    let mut pending = vec![Part::Value(value)];
+    let mut out = String::new();
+    while let Some(part) = pending.pop() {
+        match part {
+            Part::Text(s) => out.push_str(s),
+            Part::Key(s) | Part::Value(Value::String(s)) => push_string_repr(&s, &mut out),
+            Part::Value(Value::Null) => out.push_str("None"),
+            Part::Value(Value::Bool(b)) => out.push_str(if b { "True" } else { "False" }),
+            Part::Value(Value::Integer(i)) => out.push_str(&i.big().to_string()),
+            Part::Value(Value::Float(f)) => out.push_str(&crate::floats::render(f)),
+            Part::Value(Value::Datetime(s)) => out.push_str(&s),
+            Part::Value(Value::Array(a)) => {
+                out.push('[');
+                pending.push(Part::Text("]"));
+                for (i, v) in Value::elements(&a).into_iter().enumerate().rev() {
+                    pending.push(Part::Value(Value::read(&v)));
+                    if i != 0 {
+                        pending.push(Part::Text(", "));
+                    }
+                }
+            }
+            Part::Value(Value::Table(t)) => {
+                out.push('{');
+                pending.push(Part::Text("}"));
+                for (i, (k, v)) in Value::items(&t).into_iter().enumerate().rev() {
+                    pending.push(Part::Value(Value::read(&v)));
+                    pending.push(Part::Text(": "));
+                    pending.push(Part::Key(k));
+                    if i != 0 {
+                        pending.push(Part::Text(", "));
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 fn level(value: &Value) -> Result<Int> {
@@ -217,8 +241,7 @@ fn previous_loggers(configured: &HashSet<String>, old: &[String], disable: bool)
     }
 }
 
-fn configure(configuration: &Value) -> Result<()> {
-    let cfg = pairs(configuration)?;
+fn configure(cfg: Pairs) -> Result<()> {
     let version = get(&cfg, "version")
         .ok_or_else(|| Error::new(Kind::ValueError, "dictionary doesn't specify a version"))?;
     if !(matches!(&version, Value::Integer(i) if i.as_small() == Some(1))
@@ -226,7 +249,7 @@ fn configure(configuration: &Value) -> Result<()> {
     {
         return Err(Error::new(
             Kind::ValueError,
-            format!("Unsupported version: {}", display(&version, false)),
+            format!("Unsupported version: {}", display(version)),
         ));
     }
     let incremental = get(&cfg, "incremental").is_some_and(|v| v.truth());
@@ -258,7 +281,10 @@ fn configure(configuration: &Value) -> Result<()> {
     let mut configured = HashSet::new();
     if let Some(loggers) = get(&cfg, "loggers") {
         for (name, spec) in pairs(&loggers)? {
-            configure_logger(&name, &Value::read(&spec), incremental, false).map_err(|_| {
+            configure_logger(&name, &spec, incremental, false).map_err(|err| {
+                if err.is_kind(Kind::NotImplementedError) {
+                    return err;
+                }
                 Error::new(
                     Kind::ValueError,
                     format!("Unable to configure logger {}", string_repr(&name)),
@@ -277,8 +303,13 @@ fn configure(configuration: &Value) -> Result<()> {
     if let Some(root) = get(&cfg, "root")
         && root.truth()
     {
-        configure_logger("root", &root, incremental, true)
-            .map_err(|_| Error::new(Kind::ValueError, "Unable to configure root logger"))?;
+        configure_logger("root", &root, incremental, true).map_err(|err| {
+            if err.is_kind(Kind::NotImplementedError) {
+                err
+            } else {
+                Error::new(Kind::ValueError, "Unable to configure root logger")
+            }
+        })?;
     }
     Ok(())
 }
@@ -289,7 +320,35 @@ fn configure(configuration: &Value) -> Result<()> {
 pub unsafe extern "C" fn imre_log_dict_config(configuration: *const Object) {
     // SAFETY: the caller roots an exact document until configuration completes.
     let value = unsafe { Value::read(object(configuration)) };
-    finish(configure(&value), ());
+    finish(pairs(&value).and_then(configure), ());
+}
+
+/// # Safety
+/// The caller roots a string-keyed dictionary whose homogeneous scalar values
+/// match the native kind. Shallow reads acquire owners before configuration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_log_typed_dict_config(map: *const Object, kind: usize) {
+    // SAFETY: the compiler supplies the scalar kind as a tagged small integer.
+    let pairs = unsafe {
+        let kind = Int::borrow(kind).as_small().unwrap();
+        object(map).0.with(|s| {
+            s.dictionary()
+                .string_entries()
+                .map(|(k, word)| {
+                    let value = match kind {
+                        0 => Value::Null,
+                        1 => Value::Bool(word != 0),
+                        2 => Value::Integer((*Int::borrow(word)).clone()),
+                        3 => Value::String(super::super::acquire_rc(word)),
+                        7 => Value::Float(f64::from_bits(word as u64)),
+                        _ => unreachable!("compiler checked the configuration value kind"),
+                    };
+                    (Rc::new(k.clone()), value)
+                })
+                .collect()
+        })
+    };
+    finish(configure(pairs), ());
 }
 
 type Sections = HashMap<String, HashMap<String, String>>;
@@ -396,11 +455,17 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
         .map(|s| s.to_ascii_lowercase())
         .unwrap_or_else(|| "utf-8".into());
     let source = match encoding.as_str() {
-        "utf-8" | "utf8" | "utf_8" => std::str::from_utf8(&bytes)
-            .map_err(|_| unsupported("invalid UTF-8 in fileConfig"))?
-            .to_owned(),
+        "utf-8" | "utf8" | "utf_8" => String::from_utf8(bytes).map_err(|err| {
+            let reason = err.utf8_error();
+            super::super::bytes::decode_owned_error(Rc::new(err.into_bytes()), reason)
+        })?,
         "latin-1" | "latin1" | "iso-8859-1" => bytes.iter().map(|&b| char::from(b)).collect(),
         _ => return Err(unsupported(&format!("file encoding {encoding}"))),
+    };
+    let source = if source.contains('\r') {
+        source.replace("\r\n", "\n").replace('\r', "\n")
+    } else {
+        source
     };
     let sections = ini(&source, path)?;
     let section = |name: &str| {
