@@ -4104,6 +4104,12 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
+                Intrinsic::HashAvailable => {
+                    return Ok(Expr {
+                        ty: self.types.set(Type::Str),
+                        kind: ExprKind::Builtin(Builtin::HashAvailable, vec![]),
+                    });
+                }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::SysExecutable | Intrinsic::SysPlatform => {
                     let operation = match symbol {
@@ -5115,7 +5121,9 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
-            Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
+            Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
+                return self.sha256_constructor(call, op == Intrinsic::HashNew);
+            }
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
