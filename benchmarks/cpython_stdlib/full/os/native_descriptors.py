@@ -13,7 +13,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
-from suite_inventory import load_suite, verify_files
+from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_native import Toolchain, method_bytes, run_in_fixtures
 
 CASES = {
@@ -98,15 +98,11 @@ def verify_sources(source=None):
 
 
 def import_sources():
-    import test
-
     modules = {}
     for suite in ("os", "posix"):
         manifest = json.loads((HERE / f"{suite}.json").read_text())
         verify_files(HERE / "upstream", manifest["files"])
-        verify_files(Path(test.__file__).resolve().parent,
-                     {path.removeprefix("Lib/test/"): blob for path, blob in manifest["files"].items()
-                      if path.startswith("Lib/test/")})
+        verify_interpreter_tests(manifest)
         modules["test_" + suite] = importlib.import_module(manifest["module"])
     return modules, manifest["commit"]
 
