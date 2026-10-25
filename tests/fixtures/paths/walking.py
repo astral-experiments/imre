@@ -1,3 +1,4 @@
+from itertools import cycle, islice
 from pathlib import Path
 
 
@@ -49,3 +50,15 @@ while dirs:
     dirs.pop()
 dirs.append('walktree/a')
 print(str(next(dot)[0]))
+
+# An islice must expose the walk's live directory list; cycle then retains
+# that same row after the slice and the walk have advanced independently.
+source = root.walk()
+one = cycle(islice(source, 1))
+held = next(one)
+while held[1]:
+    held[1].pop()
+held[1].append('b')
+print(str(next(source)[0]))
+print('|'.join(next(one)[1]))
+print(len(list(source)))
