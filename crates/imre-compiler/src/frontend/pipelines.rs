@@ -760,24 +760,23 @@ impl Checker<'_> {
         }
     }
 
-    /// Consume the cursor from its current position. Acquire the operand before
-    /// allocating the result, and release both owners if a later pull fails.
-    pub(super) fn collect_cursor_set(
+    /// Consume one prepared iterator into a fresh set and release the partial
+    /// result if evaluating the source or pulling an element raises.
+    pub(super) fn collect_set(
         &mut self,
-        cursor: Expr,
-        element: Type,
+        source: Prepared,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        let element = self.locals[source.value];
         if !self.types.hashable_key(element) {
             return Err(error(
                 self.source,
                 node,
-                "set() requires hashable cursor elements",
+                "set() requires hashable iterator elements",
             ));
         }
         let ty = self.types.set(element);
         let result = self.hidden(ty);
-        let input = Iteration::Prepared(self.prepare_cursor(cursor, element));
         let empty = Expr {
             ty,
             kind: ExprKind::Set {
@@ -786,7 +785,7 @@ impl Checker<'_> {
             },
         };
         let body = self.expand_items_after(
-            input,
+            Iteration::Prepared(source),
             node,
             vec![Statement::Assign(result, empty)],
             |checker, value| {

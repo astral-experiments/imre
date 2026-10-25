@@ -196,6 +196,10 @@ jobs:
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
         run: python3 tests/text_line_methods_upstream.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+      - name: Check native dictionary translation against CPython
+        env:
+          PYTHONPATH: .cpython-stdlib-reference/Lib
+        run: python3 tests/text_translate_upstream.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Run pinned unittest methods against native Imre
         run: |
           python3 benchmarks/cpython_stdlib/test_suite_evidence.py
@@ -310,6 +314,7 @@ jobs:
             python3 benchmarks/cpython_stdlib/full/logging/native_records.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-records-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_hierarchy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-children-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_formatters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-formatters-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/logging/native_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-files-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/native_filters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-filters-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/descriptor_seek.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-descriptor-seek-O$opt.json"
           done

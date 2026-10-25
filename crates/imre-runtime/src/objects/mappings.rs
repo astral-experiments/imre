@@ -834,6 +834,17 @@ impl Mapping {
             .map(|entry| (&entry.key.0, entry.value))
     }
 
+    /// A character ordinal probes only an exact integer-key table. Returned words
+    /// borrow this immutable mapping; string, bytes, and tuple keys never match.
+    pub(super) fn translation_entry(&self, ch: char) -> Option<(WordKind, usize)> {
+        let Tables::Int(table) = &self.tables else {
+            return None;
+        };
+        let key = Int::small(i64::from(u32::from(ch))).unwrap().into_raw();
+        // SAFETY: every Unicode ordinal is a tagged immediate of this table's key type.
+        unsafe { table.lookup(key) }.map(|entry| (self.value_kind, entry.value))
+    }
+
     /// Transfers two exact owners only for a new key. Duplicate inputs are
     /// dropped together, preserving existing entries during strict decoding.
     pub(super) fn insert_unique(
