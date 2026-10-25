@@ -12,7 +12,7 @@ import sys
 import tempfile
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1]))
+sys.path[:0] = [str(HERE), str(HERE.parents[1])]
 from projection_audit import PIN, TEST_TREE, method_metadata, stage_test_tree
 from run import reference_skips
 from suite_evidence import build_report, occurrence_keys, reference_cases, roles, validate_pair
