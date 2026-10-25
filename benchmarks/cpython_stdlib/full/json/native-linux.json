@@ -2,8 +2,8 @@
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
   "execution": "host unittest, native JSON calls",
   "sha256": {
-    "imre": "2402adb995936146efbe6a38a4ea70d0be362ae19bd1ada0587d32d8734a774e",
-    "runtime": "f8ff86dae5e61c32da964799a61343478c8a5359ed86c4bcd948f77700a77420",
+    "imre": "ee3c5c3212deaf3e2c0a177d01af4f9966470e68c24ef9b91a70d84730b5f73b",
+    "runtime": "afbddc093b5746e80e3010d08ddcb833fdc69bfa8ee728e9673a752c276e62f4",
     "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
     "driver": "1158b7869c657942e04afd67e84c0a25a88bd3f4ddec021b519d60fe55b055a6"
   },
