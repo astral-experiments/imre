@@ -1,4 +1,4 @@
-name: Argparse 926 prospective runtime
+name: Argparse 968 prospective runtime
 on:
   workflow_dispatch:
 permissions:
@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 4c68a78174db25c6db1efb6293d6be6dccdd42ef
+          ref: 033cb48f08e3877cc0003866086fd4a947109d36
           fetch-depth: 0
           persist-credentials: true
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           base_checkout="$PWD"
-          pr=4c68a78174db25c6db1efb6293d6be6dccdd42ef
+          pr=033cb48f08e3877cc0003866086fd4a947109d36
           cat > "$RUNNER_TEMP/argparse-driver" <<'SH'
           #!/bin/sh
           if test "$1" = build; then
@@ -55,11 +55,16 @@ jobs:
                        "tests/fixtures/classes/constant_strings.py",
                        "tests/fixtures/files/string_io.py",
                        "tests/fixtures/primitives/clear_record_buffer.py",
-                       "tests/fixtures/containers/dict_fromkeys.py")
+                       "tests/fixtures/containers/dict_fromkeys.py",
+                       "tests/fixtures/classes/fixed_lineage.py", "tests/fixtures/text/ord.py",
+                       "benchmarks/cpython_stdlib/full/sys/version_info.py",
+                       "benchmarks/cpython_stdlib/full/sys/stream_buffer.py")
           optional = ("tests/fixtures/classes/initializer_hook.py",)
           for name in (*required, *(path for path in optional if (root / path).is_file())):
               source = root / name
-              local_imports = name.endswith(("/wrapper_attributes/main.py", "/classes/constant_strings.py"))
+              local_imports = name.endswith(("/wrapper_attributes/main.py", "/classes/constant_strings.py", "/sys/version_info.py"))
+              samples = (("1","1","LF","1"), ("2","1","LF","1"),
+                         ("1","8191","1","LF"), ("2","4096","CR","2")) if name.endswith("/sys/stream_buffer.py") else ((),)
               with TemporaryDirectory() as tmp:
                   directory = Path(tmp)
                   ref_dir = directory / "cpython"
@@ -70,8 +75,8 @@ jobs:
                           env["PYTHONPATH"] = str(source.parent)
                       p = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, timeout=90)
                       return p.returncode, p.stdout, p.stderr
-                  expected = observed([sys.executable, "-B", source], ref_dir)
-                  assert expected[0] == 0, (name, expected)
+                  expected = [observed([sys.executable, "-B", source, *args], ref_dir) for args in samples]
+                  assert all(result[0] == 0 for result in expected), (name, expected)
                   for level in ("0", "3"):
                       output = directory / ("native-" + level)
                       native_dir = directory / ("case-" + level)
@@ -79,15 +84,16 @@ jobs:
                       subprocess.run([driver, "build", source, "--runtime", runtime, "--clang", "/usr/bin/clang-18",
                                       *(["--module-root", source.parent] if local_imports else []),
                                       "--quiet", "--opt-level", level, "-o", output], check=True)
-                      actual = observed([output], native_dir)
-                      assert actual == expected, (name, level, expected, actual)
+                      for args, reference in zip(samples, expected, strict=True):
+                          actual = observed([output, *args], native_dir)
+                          assert actual == reference, (name, args, level, reference, actual)
               print(name, "O0/O3 exit, stdout, stderr matched", flush=True)
           PY
           for attempt in 1 2 3 4 5; do
             git fetch --no-tags origin refs/heads/main
             base=$(git rev-parse FETCH_HEAD)
             tree=$(git merge-tree --write-tree "$base" "$pr")
-            candidate=$(git -c user.name='Argparse preflight' -c user.email='noreply@github.com' commit-tree "$tree" -p "$base" -p "$pr" -m 'Hosted validation of PR #926')
+            candidate=$(git -c user.name='Argparse preflight' -c user.email='noreply@github.com' commit-tree "$tree" -p "$base" -p "$pr" -m 'Hosted validation of PR #968')
             git checkout --detach "$candidate"
             test "$(git rev-parse HEAD^{tree})" = "$tree"
             echo "Attempt $attempt: base=$base pr=$pr tree=$tree"
@@ -98,7 +104,15 @@ jobs:
             echo "Passed: base=$base pr=$pr tree=$tree (-O0 and -O3 stdout, stderr and exit; runtime ownership)." >> "$GITHUB_STEP_SUMMARY"
             git fetch --no-tags origin refs/heads/main
             latest=$(git rev-parse FETCH_HEAD)
-            if git diff --quiet "$base" "$latest" -- crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py tests/fixtures/classes/constant_strings.py tests/fixtures/classes/_constant_strings.py tests/fixtures/files/string_io.py tests/fixtures/primitives/clear_record_buffer.py tests/fixtures/containers/dict_fromkeys.py tests/fixtures/classes/initializer_hook.py; then
+            inputs=(crates Cargo.toml Cargo.lock rust-toolchain.toml tests/argparse_cli.py tests/fixtures/argparse
+                    tests/fixtures/paths/walking.py tests/fixtures/processes/file_redirects.py tests/fixtures/text/line_methods.py
+                    benchmarks/cpython_stdlib/full/types/namespaces.py benchmarks/cpython_stdlib/full/inspect/static_attributes.py
+                    tests/fixtures/module_values/wrapper_attributes benchmarks/cpython_stdlib/full/logging/hierarchy_values.py
+                    tests/fixtures/classes/constant_strings.py tests/fixtures/classes/_constant_strings.py tests/fixtures/files/string_io.py
+                    tests/fixtures/primitives/clear_record_buffer.py tests/fixtures/containers/dict_fromkeys.py tests/fixtures/classes/initializer_hook.py
+                    tests/fixtures/classes/fixed_lineage.py tests/fixtures/text/ord.py benchmarks/cpython_stdlib/full/sys/version_info.py
+                    benchmarks/cpython_stdlib/full/sys/version_info_owner.py benchmarks/cpython_stdlib/full/sys/stream_buffer.py)
+            if git diff --quiet "$base" "$latest" -- "${inputs[@]}"; then
               echo "Verified product source through main=$latest; tree=$tree (base=$base, pr=$pr)."
               exit 0
             fi
