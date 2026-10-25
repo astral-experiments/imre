@@ -26,6 +26,7 @@ mod copying;
 mod counter;
 mod csv;
 mod dataclass_values;
+mod defaultdict_factory;
 mod deque;
 mod dispatch;
 mod doctest;
@@ -54,6 +55,7 @@ mod local_functions;
 mod logging;
 mod logging_formatters;
 mod logging_records;
+mod mapping_abc;
 mod matching;
 mod module_values;
 mod namedtuples;
@@ -149,11 +151,12 @@ impl ClassInfo {
                 .iter()
                 .enumerate()
                 .filter_map(|(id, class)| {
-                    class
-                        .methods
-                        .iter()
-                        .any(|method| method.name.as_str() == "__bool__")
-                        .then_some(id)
+                    (class.mapping
+                        || class
+                            .methods
+                            .iter()
+                            .any(|method| method.name.as_str() == "__bool__"))
+                    .then_some(id)
                 })
                 .collect(),
         );
@@ -414,6 +417,8 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
         "RecursionError" => return Some(43),
+        "Warning" => return Some(80),
+        "RuntimeWarning" => return Some(81),
         _ => {}
     }
     if name == "ImportError" {
@@ -1574,8 +1579,10 @@ fn annotation_with_aliases(
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
         ast::Expr::Subscript(subscript)
-            if graph.resolve_type(module, &subscript.value)
-                == Some(Binding::Intrinsic(Intrinsic::Mapping)) =>
+            if matches!(
+                graph.resolve_type(module, &subscript.value),
+                Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+            ) =>
         {
             if let ast::Expr::Tuple(types) = &*subscript.slice
                 && let [key, value] = types.elts.as_slice()
@@ -2407,6 +2414,11 @@ impl<'a> Checker<'a> {
         self.reject_class_receiver_value(expression)?;
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
         if let ast::Expr::Call(call) = expression
+            && let Some(raised) = self.defaultdict_factory_error(call, expected)?
+        {
+            return Ok(raised);
+        }
+        if let ast::Expr::Call(call) = expression
             && let Some(shape) = self.types.mapping(concrete)
             && let Some(result) = self.fromkeys_call(call, Some(shape))?
         {
@@ -2532,9 +2544,7 @@ impl<'a> Checker<'a> {
             {
                 self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
             }
-            ast::Expr::Call(call)
-                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
-            {
+            ast::Expr::Call(call) if self.is_defaultdict_constructor(&call.func) => {
                 let (key, value) = self.types.mapping(concrete).ok_or_else(|| {
                     error(
                         self.source,
@@ -2543,7 +2553,8 @@ impl<'a> Checker<'a> {
                     )
                 })?;
                 if self.types.element(value).is_none()
-                    || !matches!(call.arguments.args.as_slice(), [ast::Expr::Name(name)] if name.id == "list")
+                    || !matches!(call.arguments.args.as_slice(), [factory @ ast::Expr::Name(name)]
+                        if name.id == "list" && !self.names.contains_key("list") && self.resolve(factory).is_none())
                     || !call.arguments.keywords.is_empty()
                 {
                     return Err(error(
@@ -5337,6 +5348,17 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
+                    if self.mapping_class(receiver.ty).is_some() {
+                        let found = self.mapping_membership(key, receiver, expression)?;
+                        return Ok(if compare.ops[0] == ast::CmpOp::NotIn {
+                            Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Not(Box::new(found)),
+                            }
+                        } else {
+                            found
+                        });
+                    }
                     if receiver.ty == Type::Bytes {
                         return self.bytes_membership(key, receiver, compare.ops[0], expression);
                     }
@@ -5658,6 +5680,10 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
+                if self.mapping_class(list.ty).is_some() {
+                    let key = self.expr(&subscript.slice)?;
+                    return self.mapping_primitive(list, "__getitem__", &[key], expression);
+                }
                 if list.ty == Type::BuiltinClass {
                     // Python evaluates type arguments before invoking __class_getitem__.
                     self.expr(&subscript.slice)?;
@@ -6266,6 +6292,11 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if receiver.is_none()
+            && let Some(raised) = self.defaultdict_factory_error(call, Type::None)?
+        {
+            return Ok(raised);
+        }
         if receiver.is_none()
             && let Some(result) = self.fromkeys_call(call, None)?
         {
@@ -6964,6 +6995,11 @@ impl<'a> Checker<'a> {
         );
         if gzip || matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
             return self.open(call, gzip);
+        }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "issubclass" && !self.names.contains_key("issubclass") && self.resolve(&call.func).is_none())
+            && let Some(answer) = self.mapping_issubclass(call)?
+        {
+            return Ok(answer);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance") {
             return self.isinstance(call);
@@ -7904,6 +7940,12 @@ impl<'a> Checker<'a> {
                     }
                 });
             }
+        }
+        if name.id == "len"
+            && let [value] = args.as_slice()
+            && self.mapping_class(value.ty).is_some()
+        {
+            return self.mapping_length(value.clone(), call);
         }
         if name.id.as_str() == "len"
             && matches!(args.as_slice(), [m] if m.ty == Type::ReadOnlyObjectMapping)

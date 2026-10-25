@@ -181,6 +181,13 @@ For ThinLTO, select the allocator with `--runtime`. [ThinLTO build instructions]
 Imre removes unused code when linking executables. Pass `--no-gc-sections` to keep it,
 or `--verbose-link` to see the Clang command. [Link options and environment variables](docs/subset.md#link-options)
 
+## Running CI
+
+CI runs automatically on pull requests. Packaging changes also build the release archives and installer;
+runtime and code generation changes also run the full AddressSanitizer suites.
+To run all checks on a branch (including `main`), select **CI → Run workflow** and enable
+`release_artifacts`, `full_asan`, and `full_thinlto`. Each can also be selected independently.
+
 ## Releasing
 
 Run **Prepare release** on `main` to open the version and changelog PR. Approve its CI and merge it.

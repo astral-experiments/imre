@@ -59,6 +59,8 @@ pub(crate) struct Class {
     pub(crate) bases: Vec<usize>,
     pub(crate) abstract_methods: HashSet<String>,
     pub(crate) abc: bool,
+    /// This layout inherits the collections.abc.Mapping primitives and mixins.
+    pub(crate) mapping: bool,
     pub(crate) toml_hash: bool,
     pub(crate) dataclass: Option<DataclassOptions>,
     pub(crate) enum_members: Option<enums::Members>,
@@ -174,6 +176,31 @@ impl Classes {
     }
 }
 
+/// Resolve the origin of a Mapping base, including aliases and its two static type arguments.
+pub(crate) fn mapping_base(graph: &SourceGraph, module: usize, expression: &ast::Expr) -> bool {
+    let origin = match expression {
+        ast::Expr::Subscript(subscript) => {
+            let ast::Expr::Tuple(args) = &*subscript.slice else {
+                return false;
+            };
+            if args.elts.len() != 2 || !args.elts.iter().all(|arg| match graph.resolve(module, arg) {
+                Some(Binding::Definition(id)) => matches!(graph.modules[id.module].parsed.syntax().body[id.statement], ast::Stmt::ClassDef(_)),
+                None => matches!(arg, ast::Expr::Name(n) if matches!(n.id.as_str(), "int" | "bool" | "float" | "str" | "bytes" | "list" | "tuple" | "dict" | "set" | "object")),
+                _ => false,
+            })
+            {
+                return false;
+            }
+            subscript.value.as_ref()
+        }
+        origin => origin,
+    };
+    matches!(
+        graph.resolve(module, origin),
+        Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+    )
+}
+
 fn collect_class(
     graph: &SourceGraph,
     module: &SourceModule,
@@ -187,7 +214,14 @@ fn collect_class(
         matches!(arguments.args.as_ref(), [base] if matches!(graph.resolve(definition.module, base), Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))))
             && arguments.keywords.is_empty()
     });
-    let abc = base.is_some_and(|(_, parent)| parent.abc)
+    let direct_mapping = node.arguments.as_ref().is_some_and(|args| {
+        args.args
+            .iter()
+            .any(|arg| mapping_base(graph, definition.module, arg))
+    });
+    let mapping = direct_mapping || base.is_some_and(|(_, parent)| parent.mapping);
+    let abc = mapping
+        || base.is_some_and(|(_, parent)| parent.abc)
         || node.arguments.as_ref().is_some_and(|args| {
             args.args.iter().any(|arg| {
                 graph.resolve(definition.module, arg) == Some(Binding::Intrinsic(Intrinsic::Abc))
@@ -221,6 +255,15 @@ fn collect_class(
     let mut abstract_methods = base
         .map(|(_, parent)| parent.abstract_methods.clone())
         .unwrap_or_default();
+    if direct_mapping {
+        for primitive in ["__getitem__", "__iter__", "__len__"] {
+            if !base.is_some_and(|(_, parent)| {
+                parent.methods.iter().any(|m| m.name.as_str() == primitive)
+            }) {
+                abstract_methods.insert(primitive.to_owned());
+            }
+        }
+    }
     let mut exception_aliases =
         base.map_or_else(HashMap::new, |(_, b)| b.exception_aliases.clone());
     let mut static_bindings = base.map_or_else(HashMap::new, |(_, b)| b.static_bindings.clone());
@@ -377,10 +420,11 @@ fn collect_class(
                 let unary_protocol = matches!(
                     name,
                     "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__" | "__fspath__"
-                );
+                ) || (mapping && name == "__len__");
                 if name.starts_with("__")
                     && name != "__init__"
                     && !unary_protocol
+                    && !(mapping && matches!(name, "__getitem__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())
                     && !(name == "__repr__" && exception_layout)
                 {
@@ -689,6 +733,7 @@ fn collect_class(
         bases,
         abstract_methods,
         abc,
+        mapping,
         dataclass,
         enum_members,
         exception_aliases,
