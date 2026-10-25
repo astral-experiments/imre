@@ -9,6 +9,37 @@ use super::{Str, exceptions::string_repr};
 type Member = [*const *const Str; 3];
 thread_local! { static MEMBERS: Cell<(*const Member, usize)> = const { Cell::new((ptr::null(), 0)) }; }
 
+// Optional parallel rows share the canonical tags and lifetime of MEMBERS.
+#[repr(C)]
+pub struct HttpMember {
+    code: usize,
+    phrase: *const *const Str,
+    description: *const *const Str,
+}
+
+thread_local! { static HTTP: Cell<*const HttpMember> = const { Cell::new(ptr::null()) }; }
+
+/// Installs optional HTTP fields for the current enum table.
+///
+/// # Safety
+/// A non-null table must have a row per registered member and live until cleared.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_http_enum_table(rows: *const HttpMember) {
+    HTTP.set(rows);
+}
+
+// None is an ordinary enum; Some(0) is HTTPMethod; HTTPStatus stores its tagged int.
+fn http_code(tag: usize) -> Option<usize> {
+    let rows = HTTP.get();
+    if rows.is_null() {
+        return None;
+    }
+    assert!((1..=MEMBERS.get().1).contains(&tag));
+    // SAFETY: the registered parallel table has the same index range as MEMBERS.
+    let row = unsafe { &*rows.add(tag - 1) };
+    (!row.description.is_null()).then_some(row.code)
+}
+
 /// Installs one module's read-only member table after its string pool is initialized.
 ///
 /// # Safety
@@ -36,7 +67,7 @@ pub unsafe extern "C" fn imre_enum_lookup(text: *const Str, first: usize, count:
     // SAFETY: the caller roots the immutable lookup value.
     let text = unsafe { &*text };
     for tag in first..first + count {
-        if with_member(tag, |[_, _, value]| value == text) {
+        if http_code(tag).unwrap_or(0) == 0 && with_member(tag, |[_, _, value]| value == text) {
             return tag;
         }
     }
@@ -44,6 +75,29 @@ pub unsafe extern "C" fn imre_enum_lookup(text: *const Str, first: usize, count:
         super::exceptions::Error::new(
             super::exceptions::Kind::ValueError,
             format!("{} is not a valid {class}", string_repr(text)),
+        )
+        .raise();
+    });
+    0
+}
+
+/// Looks up a rooted Python integer without equating its decimal text to a string.
+///
+/// # Safety
+/// The caller roots the canonical integer and supplies the class's member range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_enum_lookup_int(word: usize, first: usize, count: usize) -> usize {
+    for tag in first..first + count {
+        if http_code(tag) == Some(word) {
+            return tag;
+        }
+    }
+    // SAFETY: the caller roots word, and int_str returns one owned string reference.
+    let text = unsafe { std::rc::Rc::from_raw(crate::imre_int_str(word)) };
+    with_member(first, |[class, _, _]| {
+        super::exceptions::Error::new(
+            super::exceptions::Kind::ValueError,
+            format!("{text} is not a valid {class}"),
         )
         .raise();
     });
@@ -68,8 +122,17 @@ pub(super) fn write_repr(output: &mut String, tag: usize) {
         output.push_str(class);
         output.push('.');
         output.push_str(name);
-        output.push_str(": ");
-        output.push_str(&string_repr(value));
+        match http_code(tag) {
+            Some(0) => {}
+            Some(_) => {
+                output.push_str(": ");
+                output.push_str(value);
+            }
+            None => {
+                output.push_str(": ");
+                output.push_str(&string_repr(value));
+            }
+        }
         output.push('>');
     });
 }

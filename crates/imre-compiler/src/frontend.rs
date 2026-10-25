@@ -2506,7 +2506,11 @@ impl<'a> Checker<'a> {
                     return self.coerce(value, expected, expression);
                 }
                 let receiver = self.expr(&attribute.value)?;
-                if let Type::Class(class) | Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
+                if let Type::Class(class)
+                | Type::IntEnum(class)
+                | Type::StrEnum(class)
+                | Type::Enum(class) = receiver.ty
+                {
                     let value =
                         self.class_attribute(attribute, class, Some(receiver), Some(concrete))?;
                     return self.coerce(value, expected, expression);
@@ -5669,7 +5673,7 @@ impl<'a> Checker<'a> {
                     && matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                     && (self.types.payload(left.ty).is_some()
                         || self.types.payload(right.ty).is_some())
-                    && let ty @ (Type::StrEnum(_) | Type::Enum(_)) =
+                    && let ty @ (Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_)) =
                         self.types.payload(left.ty).unwrap_or(left.ty)
                     && self.types.payload(right.ty).unwrap_or(right.ty) == ty
                 {
@@ -5717,6 +5721,13 @@ impl<'a> Checker<'a> {
                     && !values.iter().all(|v| v.ty == values[0].ty)
                 {
                     values = values.into_iter().map(Self::string_value).collect();
+                }
+                if values.iter().any(|v| matches!(v.ty, Type::IntEnum(_)))
+                    && values
+                        .iter()
+                        .all(|v| matches!(v.ty, Type::IntEnum(_) | Type::Int | Type::Float))
+                {
+                    values = values.into_iter().map(Self::enum_integer).collect();
                 }
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
@@ -5787,6 +5798,9 @@ impl<'a> Checker<'a> {
                 (Type::Bool, ExprKind::Compare(values, ops))
             }
             ast::Expr::Subscript(subscript) => {
+                if let Some(member) = self.enum_name_lookup(subscript)? {
+                    return Ok(member);
+                }
                 if let ast::Expr::Attribute(attr) = &*subscript.value
                     && attr.attr.as_str() == "exceptions"
                 {
@@ -6064,12 +6078,36 @@ impl<'a> Checker<'a> {
                     Self::exception_record(receiver)
                 };
                 let receiver = self.checked_record_receiver(receiver, attribute);
-                if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
+                if let Type::IntEnum(class) | Type::StrEnum(class) | Type::Enum(class) = receiver.ty
+                {
                     match attribute.attr.as_str() {
                         "name" => {
                             return Ok(Expr {
                                 ty: Type::Str,
                                 kind: ExprKind::Builtin(Builtin::StrEnumName, vec![receiver]),
+                            });
+                        }
+                        "value" if matches!(receiver.ty, Type::IntEnum(_)) => {
+                            return Ok(Self::enum_integer(receiver));
+                        }
+                        "phrase" if matches!(receiver.ty, Type::IntEnum(_)) => {
+                            return Ok(Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Builtin(Builtin::HttpEnumPhrase, vec![receiver]),
+                            });
+                        }
+                        "description"
+                            if self.classes.declarations.definitions[class]
+                                .enum_members
+                                .as_ref()
+                                .is_some_and(|m| m.http.is_some()) =>
+                        {
+                            return Ok(Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Builtin(
+                                    Builtin::HttpEnumDescription,
+                                    vec![receiver],
+                                ),
                             });
                         }
                         "value" => {
@@ -6596,7 +6634,10 @@ impl<'a> Checker<'a> {
                     Some(value) => value,
                     None => self.expr(&method.value)?,
                 };
-                if let Type::Class(class) | Type::StrEnum(class) | Type::Enum(class) = object.ty
+                if let Type::Class(class)
+                | Type::IntEnum(class)
+                | Type::StrEnum(class)
+                | Type::Enum(class) = object.ty
                     && self.classes.methods[class].contains_key(method.attr.as_str())
                 {
                     return self.class_method_call(call, method, class, Some(object));
@@ -7217,7 +7258,7 @@ impl<'a> Checker<'a> {
                 }
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
-            if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty
+            if let Type::IntEnum(class) | Type::StrEnum(class) | Type::Enum(class) = receiver.ty
                 && self.classes.methods[class].contains_key(attribute.attr.as_str())
             {
                 return self.class_method_call(call, attribute, class, Some(receiver));
@@ -7821,6 +7862,16 @@ impl<'a> Checker<'a> {
                 }
             });
         }
+        if name.id == "int"
+            && args.len() == 1
+            && matches!(args[0].ty, Type::Union(_))
+            && let Some(value) = self.int_enum_union_value(args[0].clone())
+        {
+            return Ok(value);
+        }
+        if args.len() == 1 && matches!(args[0].ty, Type::IntEnum(_)) && name.id == "int" {
+            return Ok(Self::enum_integer(args.into_iter().next().unwrap()));
+        }
         if args.len() == 1
             && matches!(args[0].ty, Type::Enum(_) | Type::BuiltinClass)
             && matches!(name.id.as_str(), "str" | "print")
@@ -7844,10 +7895,15 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1
-            && matches!(args[0].ty, Type::StrEnum(_))
-            && matches!(name.id.as_str(), "str" | "print" | "len")
+            && (matches!(args[0].ty, Type::StrEnum(_))
+                && matches!(name.id.as_str(), "str" | "print" | "len")
+                || matches!(args[0].ty, Type::IntEnum(_))
+                    && matches!(name.id.as_str(), "str" | "print"))
         {
-            let text = Self::enum_text(args.into_iter().next().unwrap());
+            let text = Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::StrEnumValue, args),
+            };
             return Ok(match name.id.as_str() {
                 "str" => text,
                 "print" => Expr {

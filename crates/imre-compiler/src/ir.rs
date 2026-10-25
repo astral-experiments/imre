@@ -16,6 +16,7 @@ pub(crate) enum Type {
     StrLiteral(usize),
     /// A nominal enum with an unboxed, nonzero canonical member tag.
     StrEnum(usize),
+    IntEnum(usize),
     /// An ordinary Enum with a closed set of string-valued members.
     Enum(usize),
     Bytes,
@@ -175,6 +176,7 @@ impl std::fmt::Display for Type {
         }
         match self {
             Self::StrLiteral(id) => return write!(f, "string-literal#{id}"),
+            Self::IntEnum(id) => return write!(f, "integer-enum#{id}"),
             Self::StrEnum(id) => return write!(f, "string-enum#{id}"),
             Self::Enum(id) => return write!(f, "enum#{id}"),
             Self::Cursor(id) => return write!(f, "iterator#{id}"),
@@ -253,6 +255,7 @@ impl std::fmt::Display for Type {
             Self::Document(DocumentShape::Map) => "mutable dict[str, Any]",
             Self::Document(DocumentShape::List) => "mutable list[Any]",
             Self::StrLiteral(_)
+            | Self::IntEnum(_)
             | Self::StrEnum(_)
             | Self::Enum(_)
             | Self::Class(_)
@@ -288,11 +291,20 @@ pub(crate) struct Module {
     pub entry: Function,
 }
 
+/// Fields initialized by the sealed enum constructors in the bundled http module.
+#[derive(Clone)]
+pub(crate) struct HttpMember {
+    pub code: Option<u16>,
+    pub phrase: String,
+    pub description: String,
+}
+
 pub(crate) struct ClassMetadata {
     pub name: String,
     pub qualified_name: String,
     /// Canonical members of a string enum, in declaration order.
     pub enum_members: Vec<(String, String)>,
+    pub http_members: Vec<HttpMember>,
     /// A closed frozen layout whose generated constructor only stores its fields.
     pub frozen_initializer: Option<usize>,
     pub value_struct: bool,
@@ -636,6 +648,9 @@ pub(crate) enum Builtin {
     NewForwardRef,
     ForwardRefField(usize),
     StrEnumValue,
+    IntEnumValue,
+    HttpEnumPhrase,
+    HttpEnumDescription,
     EnumLookup(usize),
     EnumString,
     NominalIdentity,
@@ -1586,6 +1601,7 @@ pub(crate) enum InstanceType {
     ForwardRef,
     SimpleNamespace,
     StrEnum,
+    IntEnum,
     List,
     Dict,
     Set,
@@ -1597,13 +1613,14 @@ impl InstanceType {
     pub(crate) fn accepts(self, ty: Type) -> bool {
         match self {
             Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
-            Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
+            Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool | Type::IntEnum(_)),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
             Self::Exact(expected) => expected == ty,
             Self::ForwardRef => matches!(ty, Type::ForwardRef(_)),
             Self::StrEnum => matches!(ty, Type::StrEnum(_)),
+            Self::IntEnum => matches!(ty, Type::IntEnum(_)),
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),

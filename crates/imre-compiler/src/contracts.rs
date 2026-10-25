@@ -373,10 +373,10 @@ impl Builtin {
             | Self::StringReplace
             | Self::StringGet
             | Self::StringIntList
+            | Self::EnumLookup(_)
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::Bool
-            | Self::EnumLookup(_)
             | Self::DictSumValues
             | Self::Encode
             | Self::CsvLineNumber
@@ -439,6 +439,9 @@ impl Builtin {
             | Self::ForwardRefField(_)
             | Self::NewForwardRef
             | Self::ClassNameView
+            | Self::IntEnumValue
+            | Self::HttpEnumPhrase
+            | Self::HttpEnumDescription
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
@@ -852,6 +855,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_check_level"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
+                | "imre_enum_lookup_int"
                 | "imre_str_unquote"
                 | "imre_string_iterable_list"
                 | "imre_str_join"

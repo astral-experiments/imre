@@ -248,6 +248,11 @@ ready:
             )
             .unwrap();
         }
+        if !self.http_members.is_empty() {
+            self.output
+                .entry_buffer()
+                .push_str("  call void @imre_http_enum_table(ptr @http_enum_members)\n");
+        }
         self.output.entry_buffer().push_str("  ret void\n}\n");
         self.output.common().push('\n');
         writeln!(
@@ -259,6 +264,11 @@ ready:
             self.output
                 .entry_buffer()
                 .push_str("  call void @imre_str_enum_table(ptr null, i64 0)\n");
+        }
+        if !self.http_members.is_empty() {
+            self.output
+                .entry_buffer()
+                .push_str("  call void @imre_http_enum_table(ptr null)\n");
         }
         for (_, id, ty, _, release) in literals {
             let repr = ty.llvm();

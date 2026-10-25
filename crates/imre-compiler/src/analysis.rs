@@ -133,6 +133,15 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // CPython's _simple_enum builds the public enum classes from private member
+        // factories. Check callers against typeshed's IntEnum/StrEnum declarations.
+        let http = vendored
+            .read_to_string("stdlib/http/__init__.pyi")
+            .map_err(|e| e.to_string())?;
+        system
+            .fs()
+            .write_file_all(SystemPathBuf::from(root).join("http/__init__.pyi"), http)
+            .map_err(|e| e.to_string())?;
         // typeshed omits inspect's private default; preserve all its public signatures.
         let inspect = vendored
             .read_to_string("stdlib/inspect.pyi")
