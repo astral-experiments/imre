@@ -23,7 +23,7 @@ impl WordKind {
     const DEFERRED: Self = Self(u16::MAX);
 
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 11 {
+        if kind & !NULLABLE > 12 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind as u16)
@@ -31,6 +31,10 @@ impl WordKind {
 
     pub(super) fn raw(self) -> u32 {
         u32::from(self.0)
+    }
+
+    pub(super) fn can_queue_release(self) -> bool {
+        matches!(self.base(), 5 | 6 | 9)
     }
 
     pub(super) fn base(self) -> u32 {
@@ -46,7 +50,7 @@ impl WordKind {
     /// `field` is an aligned, readable record slot stored using this descriptor's
     /// LLVM representation, or its initial all-zero state.
     pub(super) unsafe fn read_record_field(self, field: *const usize) -> usize {
-        if matches!(self.0, 3..=6 | 8 | 11) {
+        if matches!(self.0, 3..=6 | 8 | 11 | 12) {
             // SAFETY: this exact descriptor denotes a pointer-typed field.
             unsafe { field.cast::<*const ()>().read() as usize }
         } else if self.0 == 7 {
@@ -65,7 +69,7 @@ impl WordKind {
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
-            2..=6 | 8..=11 => word != 0 || nullable,
+            2..=6 | 8..=12 => word != 0 || nullable,
             7 => true,
             _ => unreachable!(),
         };
@@ -102,7 +106,7 @@ impl WordKind {
                 3 | 11 => Rc::increment_strong_count(word as *const Str),
                 4 => Rc::increment_strong_count(word as *const List),
                 5 => Rc::increment_strong_count(word as *const Object),
-                6 => records::imre_record_retain(word as *const usize),
+                6 | 12 => records::imre_record_retain(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::increment_strong_count(word as *const Bytes),
@@ -127,7 +131,7 @@ impl WordKind {
                 3 | 11 => Rc::decrement_strong_count(word as *const Str),
                 4 => crate::imre_list_release(word as *const List),
                 5 => records::release_object_word(Rc::from_raw(word as *const Object)),
-                6 => records::imre_record_release(word as *const usize),
+                6 | 12 => records::imre_record_release(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::decrement_strong_count(word as *const Bytes),
@@ -204,6 +208,7 @@ pub(super) struct Words {
     pub(super) kind: WordKind,
     // Fits beside the nine-bit word kind without growing a sequence handle.
     string_order: Cell<StringOrder>,
+    pub(super) mock_call_list: Cell<bool>,
     pub(super) values: SmallVec<[usize; 3]>,
 }
 
@@ -213,6 +218,7 @@ impl Words {
             header: 1,
             kind: WordKind::new(kind),
             string_order: Cell::new(StringOrder::Unknown),
+            mock_call_list: Cell::new(false),
             values: SmallVec::new(),
         }
     }
@@ -424,7 +430,7 @@ impl Drop for Words {
             drop(unsafe { Box::from_raw(self.values[0] as *mut Deferred) });
             return;
         }
-        if self.values.spilled() && matches!(self.kind.base(), 5 | 6 | 9) {
+        if self.values.spilled() && self.kind.can_queue_release() {
             records::release_sequence_words(self.kind, std::mem::take(&mut self.values).into_vec());
             return;
         }

@@ -3,6 +3,19 @@
 use super::*;
 
 impl ClassInfo {
+    /// Concrete layouts whose objects can inhabit a slot typed as the base class.
+    pub(super) fn concrete_layouts(&self, base: usize) -> Vec<usize> {
+        self.declarations
+            .definitions
+            .iter()
+            .enumerate()
+            .filter(|(id, class)| {
+                (*id == base || class.bases.contains(&base)) && class.abstract_methods.is_empty()
+            })
+            .map(|(id, _)| id)
+            .collect()
+    }
+
     pub(super) fn has_concrete_subclasses(&self, class: usize) -> bool {
         self.declarations
             .definitions
@@ -21,17 +34,7 @@ impl Checker<'_> {
         at: &impl Ranged,
         mut invoke: impl FnMut(&mut Self, usize, Expr) -> Result<Expr, String>,
     ) -> Result<Expr, String> {
-        let candidates = self
-            .classes
-            .declarations
-            .definitions
-            .iter()
-            .enumerate()
-            .filter(|(id, c)| {
-                (*id == base || c.bases.contains(&base)) && c.abstract_methods.is_empty()
-            })
-            .map(|(id, _)| id)
-            .collect::<Vec<_>>();
+        let candidates = self.classes.concrete_layouts(base);
         let slot = self.hidden(Type::Class(base));
         let mut alternatives = Vec::with_capacity(candidates.len());
         for class in candidates {

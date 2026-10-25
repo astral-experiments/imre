@@ -117,7 +117,8 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
 
 /// The handler slot and any argument or capture layout shared by its producers.
 pub(super) struct CapturedFields {
-    slot: usize,
+    pub(super) slot: usize,
+    pub(super) tree_issue: Option<Type>,
     argv: Option<Type>,
     capture: Option<ProcessCapture>,
     timeout: bool,
@@ -159,8 +160,21 @@ pub(super) fn process_error_view(
     let mut argv = HashSet::new();
     let mut precise = !raises.0;
     let mut timed = false;
+    let mut tree_issue = None;
+    let mut other_shutil = false;
     ir::walk_expressions(body, &mut |value| {
         let (origin, command) = match &value.kind {
+            ExprKind::Builtin(Builtin::Process(ProcessOperation::CopyTree(issue)), _) => {
+                tree_issue = Some(*issue);
+                return;
+            }
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::Copy(_) | ProcessOperation::Move(_)),
+                _,
+            ) => {
+                other_shutil = true;
+                return;
+            }
             ExprKind::Call(..)
             | ExprKind::Invoke { .. }
             | ExprKind::Construct { .. }
@@ -248,6 +262,11 @@ pub(super) fn process_error_view(
     });
     CapturedFields {
         slot,
+        tree_issue: if precise && !other_shutil && kinds == [64] {
+            tree_issue
+        } else {
+            None
+        },
         argv: (precise && argv.len() == 1).then(|| *argv.iter().next().unwrap()),
         capture: (precise && captures.len() == 1).then(|| *captures.iter().next().unwrap()),
         // These exception categories include TimeoutExpired.
@@ -255,9 +274,37 @@ pub(super) fn process_error_view(
     }
 }
 
-/// The fixed streams are the only accepted non-value arguments. Their descriptor
-/// choices have no Python evaluation effects. All ordinary expressions still run
-/// in source order, even when conflicting capture arguments will raise.
+/// Modes 6 and 7 borrow an integer descriptor or file object. The final choice
+/// between them is made after checking the argument's type.
+fn stream_mode(graph: &SourceGraph, module: ModuleId, value: &ast::Expr) -> u32 {
+    if matches!(value, ast::Expr::NoneLiteral(_)) {
+        return 0;
+    }
+    if let ast::Expr::UnaryOp(unary) = value
+        && unary.op == ast::UnaryOp::USub
+        && let ast::Expr::NumberLiteral(number) = &*unary.operand
+        && let ast::Number::Int(number) = &number.value
+    {
+        return match number.to_string().as_str() {
+            "1" => 1, // PIPE
+            "2" => 5, // STDOUT
+            "3" => 2, // DEVNULL
+            _ => 6,
+        };
+    }
+    match graph.resolve(module, value) {
+        Some(Binding::Intrinsic(Intrinsic::Pipe)) => 1,
+        Some(Binding::Intrinsic(Intrinsic::Devnull)) => 2,
+        Some(Binding::Intrinsic(Intrinsic::Stdout)) => 3,
+        Some(Binding::Intrinsic(Intrinsic::Stderr)) => 4,
+        Some(Binding::Intrinsic(Intrinsic::SubprocessStdout)) => 5,
+        Some(Binding::Intrinsic(Intrinsic::Stdin)) => 8,
+        _ => 6,
+    }
+}
+
+/// Capture determines the returned layout. Ordinary stream expressions are
+/// evaluated in source order, including ones rejected by run/check_output.
 fn stream_plan(
     graph: &SourceGraph,
     module: ModuleId,
@@ -279,22 +326,7 @@ fn stream_plan(
                     continue;
                 }
                 let index = usize::from(name == "stderr");
-                streams[index] = if matches!(value, ast::Expr::NoneLiteral(_)) {
-                    0
-                } else {
-                    match graph.resolve(module, value) {
-                        Some(Binding::Intrinsic(Intrinsic::Pipe)) => 1,
-                        Some(Binding::Intrinsic(Intrinsic::Devnull)) => 2,
-                        Some(Binding::Intrinsic(Intrinsic::Stdout)) => 3,
-                        Some(Binding::Intrinsic(Intrinsic::Stderr)) => 4,
-                        Some(Binding::Intrinsic(Intrinsic::SubprocessStdout)) => 5,
-                        _ => {
-                            return Err(
-                                "process streams require None, PIPE, DEVNULL, a standard output stream, or stderr=STDOUT",
-                            );
-                        }
-                    }
-                };
+                streams[index] = stream_mode(graph, module, value);
             }
             Some(name @ ("capture_output" | "text" | "universal_newlines")) => {
                 let flag = match value {
@@ -803,26 +835,12 @@ impl Checker<'_> {
         let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
         let (streams, capture) = stream_plan(self.graph, self.module, call)
             .map_err(|message| error(self.source, call, message))?;
-        let stdin = match call
+        let stdin = call
             .arguments
             .keywords
             .iter()
             .find(|kw| kw.arg.as_deref() == Some("stdin"))
-            .map(|kw| &kw.value)
-        {
-            None | Some(ast::Expr::NoneLiteral(_)) => 0,
-            Some(arg) => match self.resolve(arg) {
-                Some(Binding::Intrinsic(Intrinsic::Pipe)) => 1,
-                Some(Binding::Intrinsic(Intrinsic::Devnull)) => 2,
-                _ => {
-                    return Err(error(
-                        self.source,
-                        arg,
-                        "stdin requires None, PIPE, or DEVNULL",
-                    ));
-                }
-            },
-        };
+            .map_or(0, |kw| stream_mode(self.graph, self.module, &kw.value));
         let keyword = |name: &str| {
             call.arguments
                 .keywords
@@ -855,7 +873,7 @@ impl Checker<'_> {
             0
         };
         let stdin = if input_given { 1 } else { stdin };
-        let streams = streams | (stdin << 12) | (u32::from(capture.text) << 16);
+        let mut streams = streams | (stdin << 12) | (u32::from(capture.text) << 16);
         let default_bufsize = || Expr {
             ty: Type::Int,
             kind: ExprKind::Int("-1".into()),
@@ -923,20 +941,23 @@ impl Checker<'_> {
                 0 => checker.command_argument(arg),
                 1 if matches!(arg, ast::Expr::NoneLiteral(_)) => Ok(default_bufsize()),
                 2 | 10 => checker.optional_exec_path(arg),
-                5 if api == LaunchApi::CheckOutput => {
-                    if matches!(
-                        checker.resolve(arg),
-                        Some(Binding::Intrinsic(
-                            Intrinsic::Pipe
-                                | Intrinsic::Devnull
-                                | Intrinsic::Stdout
-                                | Intrinsic::Stderr
-                                | Intrinsic::SubprocessStdout
-                        ))
-                    ) {
-                        Ok(boolean(false))
+                4..=6 if stream_mode(checker.graph, checker.module, arg) == 6 => {
+                    if let ast::Expr::BooleanLiteral(flag) = arg {
+                        return Ok(Expr { ty: Type::Int, kind: ExprKind::Int(u8::from(flag.value).to_string()) });
+                    }
+                    let value = checker.expr(arg)?;
+                    // Keep arbitrary integers out of the fixed stream layout: a
+                    // dynamic -1 would create a pipe and change the returned type.
+                    if (index == 5 && api == LaunchApi::CheckOutput)
+                        || validation != 0
+                        || matches!(value.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
+                        || integer_deadline(arg)
+                        || matches!(&value.kind, ExprKind::Builtin(Builtin::FileFileno, _))
+                    {
+                        Ok(value)
                     } else {
-                        checker.expr(arg)
+                        Err(error(checker.source, arg,
+                            "process redirection requires a file, a literal descriptor, or file.fileno()"))
                     }
                 }
                 4..=8 => Ok(boolean(false)), // effect-free literals checked by stream_plan
@@ -948,6 +969,16 @@ impl Checker<'_> {
                 _ => checker.expr_expected(arg, params[index].ty),
             }
         })?;
+        for (param, shift) in [(4, 12), (5, 0), (6, 4)] {
+            if (streams >> shift) & 15 == 6
+                && matches!(
+                    args.values[args.order[param]].ty,
+                    Type::BinaryIO | Type::TextIO | Type::StringIO
+                )
+            {
+                streams |= 1 << shift;
+            }
+        }
         let (op, ty) = match api {
             LaunchApi::CheckOutput => (
                 ProcessOperation::CheckOutput {

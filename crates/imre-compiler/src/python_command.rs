@@ -11,6 +11,7 @@ pub(super) fn parse(
     args: &mut impl Iterator<Item = OsString>,
 ) -> Result<PythonCommand, String> {
     let mut isolated = false;
+    let mut optimize: i32 = 0;
     let mut dont_write_bytecode = false;
     let mut utf8 = None;
     let source = 'options: loop {
@@ -22,15 +23,18 @@ pub(super) fn parse(
         while let Some(flag) = flags.next() {
             match flag {
                 'I' => isolated = true,
+                'O' => optimize = optimize.checked_add(1).ok_or("too many -O options")?,
                 'B' => dont_write_bytecode = true,
                 'c' => break 'options operand(flags.as_str(), args, "-c")?,
                 'X' => {
                     let option = operand(flags.as_str(), args, "-X")?;
-                    utf8 = Some(match option.as_str() {
+                    let value = match option.as_str() {
                         "utf8" | "utf8=1" => true,
                         "utf8=0" => false,
                         _ => return Err(format!("unsupported -X option: {option}")),
-                    });
+                    };
+                    // CPython's preconfiguration uses the first matching -X option.
+                    utf8.get_or_insert(value);
                     break;
                 }
                 _ => return Err(format!("unknown interpreter option: -{flag}")),
@@ -51,21 +55,31 @@ pub(super) fn parse(
                 .is_none_or(|locale| locale == "C" || locale == "POSIX"),
         },
     };
-    let enabled = |key| {
-        !isolated
-            && env::var_os(key).is_some_and(|value| {
-                !value.is_empty()
-                    && value
-                        .to_str()
-                        .and_then(|s| s.trim_start().parse::<i32>().ok())
-                        != Some(0)
+    let env_flag = |key| {
+        if isolated {
+            return 0;
+        }
+        env::var_os(key)
+            .filter(|v| !v.is_empty())
+            .map_or(0, |value| {
+                // CPython treats a nonempty value that is not a nonnegative C int as 1.
+                value
+                    .to_str()
+                    .and_then(|s| {
+                        s.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r'])
+                            .parse::<i32>()
+                            .ok()
+                    })
+                    .filter(|&v| v >= 0)
+                    .unwrap_or(1)
             })
     };
     let flags = CommandFlags {
         isolated,
+        optimize: optimize.max(env_flag("PYTHONOPTIMIZE")),
         safe_path: isolated || env::var_os("PYTHONSAFEPATH").is_some_and(|s| !s.is_empty()),
-        no_user_site: isolated || enabled("PYTHONNOUSERSITE"),
-        dont_write_bytecode: dont_write_bytecode || enabled("PYTHONDONTWRITEBYTECODE"),
+        no_user_site: isolated || env_flag("PYTHONNOUSERSITE") != 0,
+        dont_write_bytecode: dont_write_bytecode || env_flag("PYTHONDONTWRITEBYTECODE") != 0,
         utf8_mode,
     };
     let executable = env::current_exe()

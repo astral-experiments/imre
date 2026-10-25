@@ -2,6 +2,21 @@
 
 use super::*;
 
+/// Preserve evaluated arguments when a class or ABC check raises at runtime.
+fn type_error(result: Type, message: String, mut inputs: Vec<Expr>) -> Expr {
+    inputs.push(Expr {
+        ty: Type::Exception,
+        kind: ExprKind::Exception {
+            kind: exception_kind("TypeError").unwrap(),
+            message: Some(Box::new(unpacking::string(message))),
+        },
+    });
+    Expr {
+        ty: result,
+        kind: ExprKind::Builtin(Builtin::RaiseException, inputs),
+    }
+}
+
 impl Checker<'_> {
     /// A statically known abstract Mapping still fails when the call executes.
     pub(super) fn abstract_mapping_call(
@@ -35,18 +50,8 @@ impl Checker<'_> {
             inputs.push(self.expr(&keyword.value)?);
         }
         self.graph
-            .checked_diagnostic(self.module, "call-non-callable", call.range());
-        inputs.push(Expr {
-            ty: Type::Exception,
-            kind: ExprKind::Exception {
-                kind: exception_kind("TypeError").unwrap(),
-                message: Some(Box::new(unpacking::string(message))),
-            },
-        });
-        Ok(Expr {
-            ty: Type::Class(class),
-            kind: ExprKind::Builtin(Builtin::RaiseException, inputs),
-        })
+            .checked_abstract_class_call(self.module, call.range());
+        Ok(type_error(Type::Class(class), message, inputs))
     }
 
     /// Class objects are static here: preserve dict's virtual registration as
@@ -55,16 +60,32 @@ impl Checker<'_> {
         let [child, parent] = call.arguments.args.as_ref() else {
             return Ok(None);
         };
-        if self.resolve(parent) != Some(Binding::Intrinsic(Intrinsic::MappingAbc)) {
+        let Some(Binding::Intrinsic(Intrinsic::Mapping { typing_alias })) = self.resolve(parent)
+        else {
             return Ok(None);
-        }
+        };
         self.reject_builtin_keywords(call)?;
+        if !typing_alias
+            && matches!(
+                self.resolve(child),
+                Some(Binding::Intrinsic(Intrinsic::Mapping {
+                    typing_alias: true
+                }))
+            )
+        {
+            // typing.Mapping is a typing alias, not a class accepted by ABCMeta.
+            return Ok(Some(type_error(
+                Type::Bool,
+                "issubclass() arg 1 must be a class".into(),
+                vec![],
+            )));
+        }
         let matched = if let Some(id) = self.class_reference(child) {
             self.classes.declarations.definitions[id].mapping
         } else if matches!(
             self.resolve(child),
             Some(Binding::Intrinsic(
-                Intrinsic::MappingAbc | Intrinsic::Counter | Intrinsic::DefaultDict
+                Intrinsic::Mapping { .. } | Intrinsic::Counter | Intrinsic::DefaultDict
             ))
         ) {
             true

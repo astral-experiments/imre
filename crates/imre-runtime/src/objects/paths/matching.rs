@@ -212,7 +212,7 @@ pub unsafe extern "C" fn imre_path_match(
                 let pattern = PurePath::new(
                     true,
                     vec![super::super::acquire_rc::<Str>(pattern as usize)],
-                );
+                )?;
                 receiver.matches(Spelling::of_pure(&pattern), case, full != 0)
             } else {
                 let text = normalize(&*pattern);

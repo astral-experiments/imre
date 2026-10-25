@@ -656,7 +656,7 @@ impl Checker<'_> {
         {
             return self.record_text(value, field);
         }
-        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ExceptionField {
+        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
             return Ok(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::ExceptionFieldRepr, vec![value]),
@@ -728,7 +728,7 @@ impl Checker<'_> {
                 | Type::Bytes
                 | Type::None
                 | Type::Exception
-                | Type::ExceptionField
+                | Type::ObjectValue
                 | Type::ImportException
                 | Type::TimeoutExpired
         ) {

@@ -28,6 +28,18 @@ fn control(name: &str) -> Control {
     CONTROLS.with_borrow(|c| c.get(name).copied().unwrap_or_default())
 }
 
+/// The root can handle its own records even if root.propagate is false.
+/// Re-evaluate parents on each walk: creating a logger can reparent its children.
+fn reaches_root(logs: &super::Registry, mut current: &str) -> bool {
+    while let Some(parent) = logs.parent_name(current) {
+        if !control(current).propagate {
+            return false;
+        }
+        current = parent;
+    }
+    true
+}
+
 /// A disabled logger bypasses the level decision, including its cache.
 ///
 /// # Safety
@@ -54,6 +66,30 @@ pub unsafe extern "C" fn imre_log_propagate(logger: *const Object) -> bool {
     control(&unsafe { name(logger) }).propagate
 }
 
+/// Change the same control that fileConfig, dictConfig and emission observe.
+///
+/// # Safety
+/// The caller roots the logger through the update.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_log_set_propagate(value: bool, logger: *const Object) {
+    // SAFETY: the input retains the native logger for this operation.
+    let key = unsafe { name(logger) };
+    CONTROLS
+        .with_borrow_mut(|controls| controls.entry(key.to_string()).or_default().propagate = value);
+}
+
+/// Check reachable installed handlers. The fallback handler is not attached
+/// to a logger and so never makes hasHandlers() true.
+///
+/// # Safety
+/// The caller roots the logger while its current parent chain is traversed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_log_has_handlers(logger: *const Object) -> bool {
+    // SAFETY: the incoming logger stays live for the walk.
+    let key = unsafe { name(logger) };
+    LOGGERS.with_borrow(|logs| logs.format.is_some() && reaches_root(logs, &key))
+}
+
 /// A logger with propagation stopped before root has only the default last-resort handler.
 ///
 /// # Safety
@@ -66,17 +102,7 @@ pub unsafe extern "C" fn imre_log_routed_emit(
 ) {
     // SAFETY: the caller holds each owner through this synchronous call.
     let logger_name = unsafe { name(logger) };
-    let reaches_root = LOGGERS.with_borrow(|logs| {
-        let mut current = logger_name.as_str();
-        while current != "root" {
-            if !control(current).propagate {
-                return false;
-            }
-            current = logs.parent_name(current).unwrap_or("root");
-        }
-        true
-    });
-    if reaches_root {
+    if LOGGERS.with_borrow(|logs| reaches_root(logs, &logger_name)) {
         // SAFETY: all three original owners remain live.
         unsafe { super::imre_log_emit(logger, level, message) };
     } else {

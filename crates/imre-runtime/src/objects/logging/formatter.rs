@@ -242,9 +242,7 @@ impl Formatter {
                     let rest = rest
                         .strip_prefix('(')
                         .ok_or_else(|| Error::new(Kind::TypeError, "format requires a mapping"))?;
-                    let (key, rest) = rest
-                        .split_once(')')
-                        .ok_or_else(|| error("incomplete format key"))?;
+                    let (key, rest) = record::mapping_key(rest)?;
                     let (text, rest) = record::percent_value(rest, &self.get(r, key)?)?;
                     out.push_str(&text);
                     tail = rest;
@@ -270,6 +268,7 @@ impl Formatter {
                     format_spec,
                 } => {
                     let stem = field_name.find(['[', '.']).unwrap_or(field_name.len());
+                    super::super::stdlib::check_keyword_field(&field_name[..stem])?;
                     let mut v = self.get(r, &field_name[..stem])?;
                     let mut parts = &field_name[stem..];
                     while !parts.is_empty() {
@@ -277,15 +276,7 @@ impl Formatter {
                             let (sub, rest) = rest
                                 .split_once(']')
                                 .ok_or_else(|| error("Missing ']' in format string"))?;
-                            v = if let Some(n) = record::tuple_len(&v) {
-                                let index =
-                                    sub.parse::<usize>().ok().filter(|i| *i < n).ok_or_else(
-                                        || Error::new(Kind::IndexError, "tuple index out of range"),
-                                    )?;
-                                record::tuple_item(&v, index)
-                            } else {
-                                record::dict_item(&v, sub)?
-                            };
+                            v = record::brace_item(&v, sub)?;
                             parts = rest;
                         } else {
                             return Err(Error::new(
@@ -313,24 +304,28 @@ impl Formatter {
     }
 
     fn time(&self, r: &Record, date: Option<&str>) -> Result<String> {
-        let created = number(&self.get(r, "created")?)?;
-        if !created.is_finite()
-            || created < libc::time_t::MIN as f64
-            || created >= libc::time_t::MAX as f64
-        {
-            return Err(Error::new(
-                Kind::OverflowError,
-                "timestamp out of range for platform time_t",
-            ));
+        use num_traits::ToPrimitive;
+        let created = self.get(r, "created")?;
+        let seconds = match created.kind.raw() {
+            // SAFETY: a null destination asks time() to return the current epoch seconds.
+            0 => unsafe { libc::time(std::ptr::null_mut()) },
+            1 => i64::from(created.word != 0),
+            // SAFETY: the record field owns this exact integer.
+            2 => unsafe { Int::borrow(created.word) }
+                .big()
+                .to_i64()
+                .ok_or_else(super::timed::overflow)?,
+            7 => super::timed::float_seconds(f64::from_bits(created.word as u64))?,
+            _ => return Err(Error::new(Kind::TypeError, "expected a number")),
+        };
+        let clock = super::timed::civil(seconds, self.utc)?;
+        // Python passes a full C-int year from struct_time back to strftime.
+        if clock.tm_year.checked_add(1900).is_none() {
+            return Err(Error::new(Kind::OverflowError, "year out of range"));
         }
         let custom = date.filter(|s| !s.is_empty());
         let pattern = custom.unwrap_or(self.default_time.as_str());
-        let timestamp = super::timestamp_at(
-            Some(pattern),
-            created.floor() as libc::time_t,
-            Duration::ZERO,
-            self.utc,
-        );
+        let timestamp = super::format_timestamp(Some(pattern), &clock, Duration::ZERO);
         let Some(msec) = self
             .default_msec
             .as_ref()
