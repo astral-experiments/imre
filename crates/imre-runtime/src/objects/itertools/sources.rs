@@ -17,11 +17,13 @@ impl Sequence {
         }
     }
 
-    pub(super) fn next(&self) -> Option<OwnedWord> {
+    pub(super) fn next(&self) -> Result<Option<OwnedWord>, Error> {
         let index = self.index.get();
         let item = {
             let owner = self.owner.borrow();
-            let owner = owner.as_ref()?;
+            let Some(owner) = owner.as_ref() else {
+                return Ok(None);
+            };
             // SAFETY: the constructor roots a list or homogeneous tuple of this exact
             // kind. Copy or acquire the element before releasing any storage borrow.
             unsafe {
@@ -30,9 +32,15 @@ impl Sequence {
                         .0
                         .with(|values| values.get(index).map(|n| WordKind::new(2).acquire(n.0))),
                     5 => object(owner.word as *const Object).0.with(|storage| {
-                        let values = storage.sequence();
-                        values.values.get(index).map(|&v| values.kind.acquire(v))
-                    }),
+                        let values = storage.sequence_storage();
+                        if let Some(rows) = values.rows() {
+                            return (index < rows.len())
+                                .then(|| rows.owned_row(index))
+                                .transpose();
+                        }
+                        let values = values.resolved();
+                        Ok(values.values.get(index).map(|&v| values.kind.acquire(v)))
+                    })?,
                     6 => {
                         let tuple = owner.word as *const usize;
                         let layout = records::descriptor(tuple);
@@ -50,7 +58,7 @@ impl Sequence {
         } else {
             self.owner.take();
         }
-        item
+        Ok(item)
     }
 }
 

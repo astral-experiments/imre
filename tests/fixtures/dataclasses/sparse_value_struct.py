@@ -1,7 +1,8 @@
 from copy import deepcopy
+from itertools import islice
 
 from imre import struct
-from imre.json import encode
+from imre.json import decode, encode
 
 
 @struct
@@ -40,6 +41,11 @@ def main() -> None:
     print(rows[127].x)
     print(rows == dense)
     print(dense == rows)
+    empty = decode("[]", list[Point])
+    print(rows == empty)
+    print(empty == rows)
+    for item in islice(rows, 3):
+        print(item.x)
     print(scan(rows))
     print(scan(dense))
     print(Point(512.0, True) in rows)

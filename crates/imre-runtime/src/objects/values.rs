@@ -304,8 +304,11 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
         object(left).0.with(|left| {
             object(right).0.with(|right| match (left, right) {
                 (Storage::Sequence(left), Storage::Sequence(right)) => {
-                    if let (Some(a), Some(b)) = (left.rows(), right.rows()) {
-                        return Comparison::Done(a.equal(b));
+                    match (left.rows(), right.rows()) {
+                        (Some(a), Some(b)) => return Comparison::Done(a.equal(b)),
+                        (Some(a), None) => return Comparison::Done(a.equal_words(right)),
+                        (None, Some(b)) => return Comparison::Done(b.equal_words(left)),
+                        (None, None) => {}
                     }
                     let (left, right) = (left.resolved(), right.resolved());
                     if left.kind != right.kind || left.values.len() != right.values.len() {

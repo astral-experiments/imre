@@ -117,7 +117,8 @@ impl Rows {
         }
     }
 
-    fn owned_row(&self, at: usize) -> Result<OwnedWord> {
+    pub(super) fn owned_row(&self, at: usize) -> Result<OwnedWord> {
+        debug_assert!(at < self.len);
         if let RowStorage::Repeated(base, edits) = &self.storage
             && edits.get(at, self.layout.length).is_none()
         {
@@ -509,6 +510,21 @@ impl Rows {
         })
     }
 
+    /// A decoder can return an ordinary empty list before seeing a first record.
+    /// Compare its slots in place without boxing every row of the other list.
+    pub(super) fn equal_words(&self, other: &Words) -> bool {
+        other.kind.raw() == 6
+            && self.len == other.values.len()
+            && other.values.iter().enumerate().all(|(at, &word)| {
+                let ptr = word as *const usize;
+                // SAFETY: kind 6 roots each record; check its layout before reading any fields.
+                unsafe {
+                    std::ptr::eq(self.layout, super::records::descriptor(ptr))
+                        && self.equal_row(self.row(at), self.payload(ptr))
+                }
+            })
+    }
+
     pub(super) fn equal(&self, other: &Self) -> bool {
         if !std::ptr::eq(self.layout, other.layout) || self.len != other.len {
             return false;
@@ -627,6 +643,61 @@ mod tests {
 
     fn ok<T>(result: Result<T>) -> T {
         result.unwrap_or_else(|_| panic!("unexpected struct list error"))
+    }
+
+    #[test]
+    fn mixed_equality_and_short_islice_leave_the_boxed_view_unbuilt() {
+        use crate::objects::{itertools, mappings, values};
+
+        let mut seed = Rows::new(POINT);
+        ok(seed.append(&[0, 0]));
+        let mut repeated = ok(seed.repeat(4096));
+        ok(repeated.rows_mut().unwrap().set(0, &[2, 1]));
+        let list = repeated.into_object();
+        let empty = Words::new(6).into_object();
+        let ptr = Rc::as_ptr(&list);
+        // SAFETY: the list and the ordinary empty sequence are rooted; mode 4
+        // is a sequence object, and the stop is a tagged integer.
+        let cursor = unsafe {
+            assert_eq!(values::imre_sequence_equal(ptr, Rc::as_ptr(&empty)), 0);
+            assert_eq!(values::imre_sequence_equal(Rc::as_ptr(&empty), ptr), 0);
+            Rc::from_raw(itertools::imre_islice(
+                4,
+                ptr as usize,
+                0,
+                crate::Int::small(3).unwrap().0,
+                0,
+            ))
+        };
+        let first = ok(mappings::pull(&cursor)).unwrap().0;
+        // SAFETY: the first pull has finished and owns its result independently.
+        unsafe {
+            list.0.with_mut(|s| {
+                let rows = s.sequence_storage_mut().rows_mut().unwrap();
+                assert!(rows.boxed.get().is_none());
+                ok(rows.set(1, &[4, 1]));
+            });
+        }
+        let second = ok(mappings::pull(&cursor)).unwrap().0;
+        let third = ok(mappings::pull(&cursor)).unwrap().0;
+        assert!(ok(mappings::pull(&cursor)).is_none());
+        // SAFETY: no cursor pull or storage borrow overlaps the clear.
+        unsafe {
+            list.0.with_mut(|s| {
+                let rows = s.sequence_storage_mut().rows_mut().unwrap();
+                assert!(rows.boxed.get().is_none());
+                rows.clear();
+            });
+        }
+        assert_eq!(base_row(&first, 2), [2, 1]);
+        assert_eq!(base_row(&second, 2), [4, 1]);
+        assert_eq!(base_row(&third, 2), [0, 0]);
+
+        let mut ordinary = Words::new(6);
+        ordinary.values.push(ok(seed.get(0)));
+        assert!(seed.equal_words(&ordinary));
+        ok(seed.set(0, &[2, 1]));
+        assert!(!seed.equal_words(&ordinary));
     }
 
     #[test]
