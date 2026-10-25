@@ -6,6 +6,9 @@ use std::cmp::Ordering;
 use std::fmt::Write;
 use std::rc::Rc;
 
+use num_traits::ToPrimitive;
+
+use super::exceptions::Error;
 use super::records::descriptor;
 use super::words::{NULLABLE, WordKind};
 use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
@@ -179,6 +182,13 @@ unsafe fn integer_equal(left: usize, right: usize) -> bool {
 /// Each word is rooted and uses `kind`. All descendant ownership graphs are
 /// acyclic and remain immutable throughout this nonreentrant traversal.
 pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
+    // SAFETY: both words remain rooted under the shared descriptor.
+    unsafe { try_equal(left, right, kind) }.unwrap_or_else(|error| error.returning(false))
+}
+
+/// # Safety
+/// The words must remain rooted and match the same concrete or nullable kind.
+pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Result<bool, Error> {
     let mut pending = Vec::new();
     let mut current = (left, right, kind, 0);
     loop {
@@ -197,7 +207,14 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                         let (left, left_kind) = super::unions::member(left);
                         let (right, right_kind) = super::unions::member(right);
                         if left_kind != right_kind {
-                            Comparison::Done(false)
+                            let numbers = match (left_kind.base(), right_kind.base()) {
+                                (1, 2) => Some((left, right)),
+                                (2, 1) => Some((right, left)),
+                                _ => None,
+                            };
+                            Comparison::Done(numbers.is_some_and(|(flag, integer)| {
+                                Int::borrow(integer).big().to_usize() == Some(flag)
+                            }))
                         } else {
                             Comparison::Child {
                                 left,
@@ -212,10 +229,10 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
             }
         };
         match step {
-            Comparison::Done(false) => return false,
+            Comparison::Done(false) => return Ok(false),
             Comparison::Done(true) => match pending.pop() {
                 Some(next) => current = next,
-                None => return true,
+                None => return Ok(true),
             },
             Comparison::Child {
                 left: child_left,
@@ -224,6 +241,7 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                 resume,
             } => {
                 if let Some(position) = resume {
+                    pending.try_reserve(1).map_err(|_| Error::allocation())?;
                     pending.push((left, right, kind, position));
                 }
                 current = (child_left, child_right, child_kind, 0);
@@ -242,6 +260,7 @@ unsafe fn scalar_equal(left: usize, right: usize, kind: WordKind) -> bool {
     // SAFETY: the shared kind selects the exact scalar or rooted allocation.
     unsafe {
         match raw & !NULLABLE {
+            12 => super::annotations::equal(left, right),
             0 | 1 | 10 => left == right,
             2 => integer_equal(left, right),
             3 | 11 => *(left as *const Str) == *(right as *const Str),
@@ -309,10 +328,16 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         resume: (position + 1 < left.values.len()).then_some(position + 1),
                     }
                 }
+                (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
+                    super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
+                ),
                 (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
                     object_element(Rc::as_ptr(left), Rc::as_ptr(right), position)
                 }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
+                    left.compare_entry(right, position)
+                }
+                (Storage::Deque(left), Storage::Deque(right)) => {
                     left.compare_entry(right, position)
                 }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
@@ -376,6 +401,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::ObjectValue(field) => Some(ReprTask::Word(field.word, field.kind)),
                         Storage::Plain => {
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
@@ -427,6 +453,26 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         }
                         Storage::Dictionary(mapping) => {
                             format_entry(owner, mapping.repr_entry(output, position), &mut pending)
+                        }
+                        Storage::ChainMap(maps) => {
+                            if position == 0 {
+                                if pending.iter().any(|task| matches!(task, ReprTask::Object(active, _) if *active == owner)) {
+                                    output.push_str("...");
+                                    return None;
+                                }
+                                output.push_str("ChainMap(");
+                            }
+                            let mapping = maps.0.with(|s| s.sequence().values.get(position).copied());
+                            if let Some(mapping) = mapping {
+                                if position != 0 {
+                                    output.push_str(", ");
+                                }
+                                pending.push(ReprTask::Object(owner, position + 1));
+                                Some(ReprTask::Object(mapping as *const Object, 0))
+                            } else {
+                                output.push(')');
+                                None
+                            }
                         }
                         Storage::SimpleNamespace(dict) => dict
                             .0
@@ -517,6 +563,7 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
         match raw & !NULLABLE {
             0 => output.push_str("None"),
             10 => super::string_enums::write_repr(output, word),
+            12 => super::annotations::write_repr(output, word),
             11 => write!(output, "<class '{}'>", *(word as *const Str)).unwrap(),
             1 => {
                 let value = if raw & NULLABLE != 0 { word - 1 } else { word };

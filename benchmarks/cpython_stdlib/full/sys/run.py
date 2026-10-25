@@ -67,6 +67,17 @@ def select(toolchain, work, source, module):
         executions[case_id] = native_method(toolchain, directory(work, method),
                                              source, cls, case_id, fixture, operation=("imre", operation))
 
+    # Both implementations check internal consistency using their own language version.
+    metadata = HERE / "version_info.py"
+    version_work = directory(work, "language-version")
+    owner = HERE / "version_info_owner.py"
+    (version_work / owner.name).write_bytes(owner.read_bytes())
+    program = toolchain.build(metadata.read_bytes(), version_work)
+    reference = subprocess.run([sys.executable, "-E", "-B", version_work / "case.py"],
+                               capture_output=True, check=True, timeout=15)
+    if (reference.stdout, reference.stderr) != (b"", b"") or output(program) != (b"", b""):
+        raise AssertionError("unexpected output from language version checks")
+
     # Process regressions use the real hooks and retained objects; none adds a test ID.
     for filename in ("active_exception.py", "display_values.py", "codec_lookup.py"):
         exercise = HERE / filename

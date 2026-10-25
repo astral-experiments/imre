@@ -8,6 +8,7 @@
     "Lib/json/__init__.py": "9eaa4f3fbc16793adc061f9f5ee9dd0aab159b20",
     "Lib/json/decoder.py": "92ad635255764098c0feb5aff1a3f4584d92fd90",
     "Lib/json/encoder.py": "5cf6d64f3eade60b65f1324ae394454e97883c45",
+    "Lib/test/test_doctest/sample_doctest_skip.py": "1b83dec1f8c4dcfe6ae24cbb8ac9d4f07f3a79ea",
     "Lib/test/test_itertools.py": "cf579d4da4e0dfb0ab31e4a1a8a5efc36e51331b",
     "Lib/test/test_json/__init__.py": "74b64ed86a3183db5a54166d89cf2fb227281e06",
     "Lib/test/test_json/__main__.py": "e756afbc7acc7b62883f8b098625ab6e82929a53",

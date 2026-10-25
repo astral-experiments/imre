@@ -41,3 +41,25 @@ names, exact encoded/decoded results and consumed lengths, errors, and the five 
 UTF byte-order marks with pinned Python. The stateless registry supports ASCII, Latin-1,
 UTF-8 and UTF-8 with signature. Search-function registration, stream codecs, other
 encodings, mutable CodecInfo attributes, and surrogate-preserving text need further work.
+
+The pinned os and logging suites use different parts of this registry. In
+`test.test_os.DeviceEncodingTests.test_device_encoding` (`test_os.py:3554`),
+the original assertion calls `codecs.lookup` with the encoding of file
+descriptor 0. With redirected stdin the original decorator skips the case before
+lookup. With a pseudo-terminal it runs, passing the host OS's `UTF-8` encoding
+to an Imre child. That child looks up the codec and returns its canonical name
+(`utf-8`) and truth. CPython runs the unchanged method, assertion and fixtures.
+The [Linux observations](codec-device-linux.json) at O0/O3 include a stock run
+for each configuration. They add no sys occurrence and preserve os's canonical
+redirected skip. Reproduce them with the pinned Python on Linux:
+
+```sh
+"$CPYTHON" -B benchmarks/cpython_stdlib/full/sys/codec_device.py \
+  --imre "$IMRE" --runtime "$RUNTIME" --clang "$CLANG" \
+  --cpython-source "$CPYTHON_SOURCE" --result codec-device-linux.json
+```
+
+In `test_logging.py:2306`, `test_encoding_cyrillic_unicode`
+obtains `codecs.getwriter('cp1251')`, sets its class encoding, and logs into a
+wrapped `io.BytesIO`. A stateless UTF-8 or Latin-1 codec cannot implement that
+writer. These consumer occurrences stay with their respective suite reports.

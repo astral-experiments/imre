@@ -1,4 +1,4 @@
-"""CPython 3.14.5's original str assertions with native splitlines and isspace results."""
+"""CPython 3.14.5's str assertions with native splitlines, isspace and isupper results."""
 import argparse
 import ast
 import hashlib
@@ -16,7 +16,7 @@ support.use_resources = ["cpu"]
 from test import test_str
 
 StrTest = test_str.StrTest
-METHODS = ("test_splitlines", "test_isspace")
+METHODS = ("test_splitlines", "test_isspace", "test_isupper")
 
 
 def original(dispatch):
@@ -26,6 +26,9 @@ def original(dispatch):
 
         def isspace(self, *args, **kwargs):
             return dispatch("isspace", str(self), args, kwargs)
+
+        def isupper(self, *args, **kwargs):
+            return dispatch("isupper", str(self), args, kwargs)
 
     class Case(StrTest):
         type2test = Text
@@ -50,6 +53,8 @@ def main():
         (super(StrTest, StrTest).test_isspace, "1baae9886fd88d0328a08474e12e482f45d1aade82b4c09fdb07300f25161fec"),
         (StrTest.test_isspace, "a3e37ce2027882461b5d8c71627f04e96be998a09618183f1c1020b8c67a4e3b"),
         (StrTest.test_isspace_invariant, "9776560d288bc1e931462d8d267f9ee75ac6c036125592fd7e32bf9b3402f143"),
+        (super(StrTest, StrTest).test_isupper, "55b206228a79e15d5e49d6b84e895820288c6f3251532b461d3a2642c5f0e016"),
+        (StrTest.test_isupper, "986f6864830baeb329654321243dbccd37e35992d6a59dfd26cbe616fc41ead2"),
     ):
         assert hashlib.sha256(inspect.getsource(method).encode()).hexdigest() == digest
 
@@ -60,6 +65,10 @@ def main():
     assert original(record).wasSuccessful()
     assert sum(name == "splitlines" for name, *_ in queries) == 11
     assert sum(name == "isspace" for name, *_ in queries) == 12
+    assert sum(name == "isupper" for name, *_ in queries) == 9
+    # One uppercase prefix distinguishes uncased scalars from nonuppercase cased ones.
+    upper = {i for i in range(0x110000) if chr(i).isupper()}
+    blocks_upper = {i for i in range(0x110000) if not ("A" + chr(i)).isupper()}
     with tempfile.TemporaryDirectory() as tmp:
         program = Path(tmp) / "lines.py"
         binary = Path(tmp) / "lines"
@@ -73,8 +82,16 @@ count = 0
 for value in range(0x110000):
     if value < 0xD800 or value > 0xDFFF:
         count += 1
-        if chr(value).isspace():
-            print(value)
+        ch = chr(value)
+        flags = 0
+        if ch.isspace():
+            flags += 1
+        if ch.isupper():
+            flags += 2
+        if not ("A" + ch).isupper():
+            flags += 4
+        if flags:
+            print(value * 8 + flags)
 print(count)
 """)
         for mode in ([], ["--reachable-only"]):
@@ -86,7 +103,10 @@ print(count)
                 rows = run.stdout.splitlines()
                 assert not run.stderr and int(rows[-1]) == 0x110000 - 0x800
                 answers = rows[:len(queries)]
-                positive = {int(item) for item in rows[len(queries):-1]}
+                classes = [divmod(int(item), 8) for item in rows[len(queries):-1]]
+                positive = {i for i, flags in classes if flags & 1}
+                assert {i for i, flags in classes if flags & 2} == upper
+                assert {i for i, flags in classes if flags & 4} == blocks_upper
 
                 def replay(values):
                     items = iter(zip(queries, values, strict=True))
@@ -101,6 +121,10 @@ print(count)
                 assert checked.wasSuccessful(), (checked.errors, checked.failures)
                 # A wrong native split must fail an unchanged assertion.
                 assert replay(["[]", *answers[1:]]).failures
+                wrong = answers.copy()
+                index = next(i for i, q in enumerate(queries) if q[0] == "isupper")
+                wrong[index] = str(not ast.literal_eval(wrong[index]))
+                assert replay(wrong).failures
 
                 class Scalar(str):
                     def isspace(self):
@@ -114,7 +138,8 @@ print(count)
                 assert len(positive) == 29
                 label = "reachable" if mode else "whole"
                 print(f"{label} O{level}: 11 native splitlines; 12 native + 6 host literal isspace; "
-                      "1,112,064 native scalar + 2,048 host surrogate invariant checks")
+                      "9 native + 8 host literal isupper; 1,112,064 native scalar + "
+                      "2,048 host surrogate whitespace checks; all scalar case classifications matched")
 
 
 if __name__ == "__main__":
