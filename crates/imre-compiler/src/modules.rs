@@ -1345,6 +1345,7 @@ pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
 const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
+const SHUTIL_EXPORTS: &str = "__imre_shutil_exports__";
 
 fn textwrap_implementation(name: &str) -> Option<&'static str> {
     match name {
@@ -1361,6 +1362,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
             IntrinsicModule::LoggingHandlers if !name.starts_with('_') => LOGGING_HANDLER_CLASSES,
             IntrinsicModule::Textwrap => textwrap_implementation(name)?,
+            IntrinsicModule::Shutil if name == "__all__" => SHUTIL_EXPORTS,
             _ => return None,
         };
         let (id, source) = modules
@@ -1368,7 +1370,8 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             .enumerate()
             .find(|(_, m)| m.bundled && m.name == implementation)?;
         source.export(name).filter(|b| {
-            matches!(b, Binding::Definition(d) if d.module == id &&
+            matches!(b, Binding::Value(d) if module == IntrinsicModule::Shutil && d.module == id)
+            || matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
                     (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::LoggingHandlers, ast::Stmt::ClassDef(_))
@@ -1991,6 +1994,9 @@ impl<'a> Loader<'a> {
         };
         // A named import loads only the bundled definitions it can call.
         let bundles = [
+            (module == Some(IntrinsicModule::Shutil)
+                && imports.is_none_or(|names| names.iter().any(|alias| alias.name == "__all__")))
+            .then_some((SHUTIL_EXPORTS, include_str!("../stdlib/shutil/exports.py"))),
             (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
                 include_str!("../stdlib/logging/classes.py"),
@@ -2071,6 +2077,9 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
+        if name == SHUTIL_EXPORTS {
+            return Err("the private shutil implementation is not an importable module".into());
+        }
         if matches!(name, LOGGING_CLASSES | LOGGING_HANDLER_CLASSES) {
             return Err("the private logging implementation is not an importable module".into());
         }
