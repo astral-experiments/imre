@@ -617,6 +617,7 @@ impl Builtin {
             | Self::ListDistinct
             | Self::ListExtendUnhinted
             | Self::DequeClear
+            | Self::DequeReverse
             | Self::SetIter
             | Self::SortDetach
             | Self::SplitLinesIter
