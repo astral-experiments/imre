@@ -521,7 +521,10 @@ impl Checker<'_> {
     fn cache_snapshot(&self, capacity: i64, stat: impl Fn(u32) -> Expr) -> Expr {
         let fields = vec![stat(0), stat(1), cache_size(capacity), stat(3)];
         Expr {
-            ty: self.types.tuple(fields.iter().map(|v| v.ty).collect()),
+            ty: self.types.namedtuple_layout(
+                crate::types::CACHE_INFO,
+                fields.iter().map(|v| v.ty).collect(),
+            ),
             kind: ExprKind::Tuple(fields),
         }
     }

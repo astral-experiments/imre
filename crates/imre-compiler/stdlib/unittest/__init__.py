@@ -3,6 +3,7 @@
 
 import difflib
 import re
+from fnmatch import fnmatchcase
 from types import ModuleType
 from typing import ClassVar
 
@@ -394,6 +395,40 @@ class TestResult:
 from typing import Callable
 import sys
 import time
+
+
+class TestLoader:
+    testMethodPrefix: str
+    testNamePatterns: list[str] | None
+    errors: list[str]
+
+    def __init__(self) -> None:
+        self.testMethodPrefix = "test"
+        self.testNamePatterns = None
+        self.errors = []
+
+    def _getTestCaseNames(self, owner: str, names: list[str], descriptors: list[str]) -> list[str]:
+        prefix = self.testMethodPrefix
+        if not prefix or prefix.startswith("_"):
+            raise NotImplementedError("native TestLoader cannot enumerate Python's private class metadata")
+        for name in descriptors:
+            if name.startswith(prefix):
+                raise NotImplementedError("native TestLoader cannot inspect descriptor " + owner + "." + name)
+        patterns = self.testNamePatterns
+        selected: list[str] = []
+        for name in names:
+            if name.startswith(prefix):
+                if patterns is None:
+                    selected.append(name)
+                else:
+                    for pattern in patterns:
+                        if fnmatchcase(owner + "." + name, pattern):
+                            selected.append(name)
+                            break
+        return selected
+
+
+defaultTestLoader = TestLoader()
 
 
 def main() -> None:

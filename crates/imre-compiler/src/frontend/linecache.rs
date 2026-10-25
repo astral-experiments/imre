@@ -4,7 +4,7 @@ use super::*;
 use ir::LinecacheOperation as Op;
 
 impl Checker<'_> {
-    fn linecache_entry(&self) -> Type {
+    pub(super) fn linecache_entry(&self) -> Type {
         self.types.tuple(vec![
             Type::Int,
             Type::Float,
@@ -66,23 +66,12 @@ impl Checker<'_> {
             Op::Lazy => Type::Bool,
             _ => Type::None,
         };
-        let command = self.graph.command_startup.as_ref().map(|(flags, _)| flags);
-        let environment = !command.is_some_and(|flags| flags.isolated);
+        let (root, environment) = self.linecache_search();
         if matches!(op, Op::Getline | Op::Getlines | Op::Update) {
             // A script's own directory precedes the immutable startup PYTHONPATH.
             // -c uses the current directory (already tried by the direct stat).
-            let path = if command.is_none() {
-                // CPython follows script symlinks to find this directory.
-                self.graph.modules[self.graph.entry]
-                    .path
-                    .parent()
-                    .and_then(std::path::Path::to_str)
-                    .unwrap_or("")
-            } else {
-                ""
-            };
             args.order.push(args.values.len());
-            args.values.push(unpacking::string(path));
+            args.values.push(root);
             // CPython's '\n' and '' belong to the same literal pool as a
             // caller's strings; using new equal strings would break identity.
             for value in std::iter::once("\n").chain((op == Op::Getline).then_some("")) {
@@ -92,5 +81,23 @@ impl Checker<'_> {
         }
         let entry = self.linecache_entry();
         Ok(self.ordered_builtin(Builtin::Linecache(op, entry, environment), returns, args))
+    }
+
+    /// Direct linecache calls and implicit warning source lookup search the same paths.
+    pub(super) fn linecache_search(&self) -> (Expr, bool) {
+        let command = self.graph.command_startup.as_ref().map(|(flags, _)| flags);
+        let path = if command.is_none() {
+            self.graph.modules[self.graph.entry]
+                .path
+                .parent()
+                .and_then(std::path::Path::to_str)
+                .unwrap_or("")
+        } else {
+            ""
+        };
+        (
+            unpacking::string(path),
+            !command.is_some_and(|flags| flags.isolated),
+        )
     }
 }
