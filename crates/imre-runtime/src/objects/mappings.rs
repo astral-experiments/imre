@@ -778,13 +778,17 @@ impl Mapping {
         keys
     }
 
-    /// Borrowed document values stay rooted by the unmodified mapping.
-    pub(super) fn document_values(&self) -> impl Iterator<Item = usize> + '_ {
+    /// Borrowed document entries stay rooted by the unmodified mapping.
+    pub(super) fn document_entries(&self) -> impl Iterator<Item = (&Str, usize)> + '_ {
         assert_eq!(self.value_kind.raw(), 5);
         let Tables::Str(table) = &self.tables else {
             unreachable!("expected a string-keyed document");
         };
-        table.entries.iter().flatten().map(|entry| entry.value)
+        table
+            .entries
+            .iter()
+            .flatten()
+            .map(|entry| (entry.key.as_ref(), entry.value))
     }
 
     pub(super) fn document_pairs(&self) -> Vec<(Rc<Str>, Rc<Object>)> {
