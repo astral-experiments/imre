@@ -64,6 +64,14 @@ in normal mode. Reachable mode stops at `_imp` for JSON and at an unbounded
 starred tuple for itertools. The [original module doctest report](unified-doctest-linux.json)
 records the separate direct checks at both optimization levels.
 
+[After the StringIO foundation merged](merged-foundation-startup-linux.json),
+normal and reachable compilation report the same first blocker for each suite.
+For CSV it is `tempfile.TemporaryFile`, for JSON it is `_imp` imported by
+`test.support.import_helper`, and for itertools it is the starred tuple in
+`test.support.threading_helper` at line 277. All twelve checks agree between
+the vendored fixtures and the pinned Git tree. The twenty selected stream
+methods still reproduce the observations above at O0 and O3.
+
 The separate `streams.py` transcript covers all five newline modes, Unicode
 character offsets, shared iteration and reads, EOF followed by seek, retained
 newline-history tuples, NUL padding past the end, and closed-stream errors.
