@@ -1554,7 +1554,7 @@ impl<'a> Loader<'a> {
                 }
                 for alias in &import.names {
                     let name = alias.name.as_str();
-                    if let Some(module) = self.intrinsic_module(name)? {
+                    if let Some(module) = self.intrinsic_module(name, None)? {
                         if alias.asname.is_none()
                             && let Some((local, _)) = name.split_once('.')
                             && let Some(namespace) = IntrinsicModule::named(local)
@@ -1588,7 +1588,7 @@ impl<'a> Loader<'a> {
                 }
                 let name = self.import_name(id, import)?;
                 if import.level == 0
-                    && let Some(module) = self.intrinsic_module(&name)?
+                    && let Some(module) = self.intrinsic_module(&name, Some(&import.names))?
                 {
                     for alias in &import.names {
                         let binding = stdlib_symbol(&self.modules, module, alias.name.as_str())
@@ -1668,7 +1668,11 @@ impl<'a> Loader<'a> {
 
     /// Intrinsic imports use fixed identities, but never silently accept a
     /// first-party file that attempts to shadow the standard-library namespace.
-    fn intrinsic_module(&mut self, name: &str) -> Result<Option<IntrinsicModule>, String> {
+    fn intrinsic_module(
+        &mut self,
+        name: &str,
+        imports: Option<&[ast::Alias]>,
+    ) -> Result<Option<IntrinsicModule>, String> {
         let module = IntrinsicModule::named(name).filter(|module| {
             self.reachable_only || !matches!(module, IntrinsicModule::Declaration(_))
         });
@@ -1680,10 +1684,19 @@ impl<'a> Loader<'a> {
                 LOGGING_CLASSES,
                 include_str!("../stdlib/logging/classes.py"),
             )),
-            (_, Some(IntrinsicModule::Textwrap)) => Some((
-                TEXTWRAP_FUNCTIONS,
-                include_str!("../stdlib/textwrap/functions.py"),
-            )),
+            // A named import of a native operation needs no bundled function definitions.
+            (_, Some(module @ IntrinsicModule::Textwrap))
+                if imports.is_none_or(|names| {
+                    names
+                        .iter()
+                        .any(|alias| module.symbol(alias.name.as_str()).is_none())
+                }) =>
+            {
+                Some((
+                    TEXTWRAP_FUNCTIONS,
+                    include_str!("../stdlib/textwrap/functions.py"),
+                ))
+            }
             _ => None,
         };
         if let Some((implementation, source)) = bundle

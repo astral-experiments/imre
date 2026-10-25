@@ -3,7 +3,7 @@ from textwrap import dedent, indent
 
 
 def visible(line: str) -> bool:
-    print("visit", repr(line))
+    print("visit " + repr(line))
     if line.startswith("stop"):
         raise LookupError("stop here")
     return not line.isspace()
