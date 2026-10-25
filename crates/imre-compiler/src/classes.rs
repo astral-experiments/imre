@@ -8,11 +8,13 @@ use ruff_python_ast::visitor::{Visitor, walk_expr};
 use crate::ir::Type;
 use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule};
 
+mod constants;
 mod dataclasses;
 mod enums;
 mod exceptions;
 mod inheritance;
 mod record_hash;
+pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
 pub(crate) use exceptions::explicit_message_initializer;
 pub(crate) use inheritance::super_init;
@@ -39,12 +41,6 @@ pub(crate) struct Classes {
 pub(crate) enum ExceptionAlias {
     Builtin { kind: u32, name: String },
     Named(DefinitionId),
-}
-
-#[derive(Clone)]
-pub(crate) enum ClassValue {
-    Binding(Binding),
-    String(String),
 }
 
 pub(crate) struct Class {
@@ -82,6 +78,15 @@ pub(crate) struct Field {
 }
 
 impl Classes {
+    /// Even an entry module with no ordinary globals must initialize its owned class tuples.
+    pub(crate) fn owns_class_tuples(&self, module: usize) -> bool {
+        self.definitions.iter().any(|class| {
+            class.definition.module == module && class.static_bindings.values().any(|value| {
+                matches!(value, ClassValue::Strings { owner, .. } if *owner == class.definition)
+            })
+        })
+    }
+
     pub(crate) fn instance(&self, id: usize) -> Type {
         if let Some(members) = &self.definitions[id].enum_members {
             if members.plain {
@@ -231,7 +236,7 @@ fn collect_class(
     let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
     let mut method_kinds = Vec::new();
     let mut initializer = None;
-    for statement in &node.body {
+    for (ordinal, statement) in node.body.iter().enumerate() {
         // A call through an upcast uses its declared layout. Do not erase an
         // override which could select a different callable at runtime.
         let member = match statement {
@@ -498,8 +503,14 @@ fn collect_class(
             }
             ast::Stmt::Assign(assign)
                 if let [ast::Expr::Name(name)] = assign.targets.as_slice()
-                    && let Some(binding) =
-                        class_value(graph, definition.module, &assign.value, &class_bindings)? =>
+                    && let Some(binding) = constants::value(
+                        graph,
+                        definition,
+                        ordinal,
+                        &assign.value,
+                        &class_bindings,
+                        &static_bindings,
+                    )? =>
             {
                 if !names.insert(name.id.to_string())
                     || name.id.starts_with("__")
@@ -679,20 +690,6 @@ pub(crate) fn property_accessors<'a>(
         }
         _ => None,
     }
-}
-
-/// These values can be read through the class or an instance without running a descriptor.
-fn class_value(
-    graph: &SourceGraph,
-    module: usize,
-    expr: &ast::Expr,
-    locals: &HashSet<String>,
-) -> Result<Option<ClassValue>, String> {
-    if let ast::Expr::StringLiteral(value) = expr {
-        crate::frontend::check_string(value, &graph.modules[module].source)?;
-        return Ok(Some(ClassValue::String(value.value.to_str().to_owned())));
-    }
-    Ok(class_static_binding(graph, module, expr, locals).map(ClassValue::Binding))
 }
 
 /// Resolve declarations whose descriptor cannot bind an instance: a sealed

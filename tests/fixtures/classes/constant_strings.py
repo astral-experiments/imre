@@ -1,5 +1,18 @@
+from collections.abc import Iterable
+from dataclasses import dataclass
+
+
 class Defaults:
     text = "déjà " "vu"
+    cases = ("hi", "ß")
+    alias = cases
+    empty_suffix = cases + ()
+    extended = cases + ("!",)
+    repeated = ("hi", "ß")
+    empty = ()
+    suffix_literal = empty + ("hi", "ß")
+    prefix = ("hi",)
+    joined = prefix + ("ß",)
 
     def read(self) -> str:
         return self.text
@@ -13,6 +26,10 @@ class Inherited(Defaults):
     pass
 
 
+class Other:
+    repeated = ("hi", "ß")
+
+
 def make(log: list[str], fail: bool) -> Defaults:
     log.append("make")
     if fail:
@@ -22,6 +39,16 @@ def make(log: list[str], fail: bool) -> Defaults:
 
 def read(value: Defaults) -> str:
     return value.text
+
+
+def cases(value: Defaults) -> tuple[str, str]:
+    return value.cases
+
+
+@dataclass
+class Sequences:
+    left: Iterable[str]
+    right: Iterable[str]
 
 
 log: list[str] = []
@@ -36,3 +63,14 @@ try:
 except ValueError as error:
     print(str(error))
 print(log)
+print(Defaults.text is Inherited().text)
+print(repr(Defaults.extended))
+alias = Sequences(cases(Inherited()), Defaults.alias)
+suffix = Sequences(Defaults.empty_suffix, Inherited.cases)
+extended = Sequences(Defaults.cases, Inherited.extended)
+print(alias.left is alias.right)
+print(suffix.left is suffix.right)
+print(extended.left is extended.right)
+for candidate in [Defaults.repeated, Other.repeated, Defaults.suffix_literal, Defaults.joined]:
+    pair = Sequences(Defaults.cases, candidate)
+    print(pair.left is pair.right)

@@ -31,6 +31,8 @@ REJECTED = {
     "assign_to_class_string": 'class C:\n    label = "fixed"\nC.label = "new"\n',
     "instance_shadows_class_string": 'class C:\n    label = "fixed"\n    def __init__(self, value: str) -> None:\n        self.label = value\nC("instance")\n',
     "subclass_rebinds_fixed_string": 'class C:\n    label = "first"\nclass D(C):\n    label = "second"\n',
+    "inherited_name_in_class_expression": 'class C:\n    words = ("a",)\nclass D(C):\n    longer = words + ("b",)\n',
+    "mutable_class_tuple": 'class C:\n    items = (["not fixed"],)\n',
     "copy_hook_wrong_arity": 'import copy\nclass C:\n    def __copy__(self, extra: int) -> int: return extra\ncopy.copy(C())\n',
     "inherited_copy_reduction": 'import copy\nclass Base:\n    def __reduce_ex__(self, protocol: int) -> int: return 0\nclass Child(Base): pass\ncopy.copy(Child())\n',
     "copy_custom_getstate": 'import copy\nclass C:\n    def __getstate__(self) -> int: return 0\ncopy.copy(C())\n',

@@ -837,14 +837,24 @@ impl Checker<'_> {
         expected: Option<Type>,
     ) -> Result<Expr, String> {
         let owner = &self.classes.declarations.definitions[class];
-        if let Some(crate::classes::ClassValue::String(value)) =
-            owner.static_bindings.get(attribute.attr.as_str())
-        {
-            self.class_reads.borrow_mut().insert(owner.definition);
-            let literal = Expr {
+        let literal = match owner.static_bindings.get(attribute.attr.as_str()) {
+            Some(crate::classes::ClassValue::String(value)) => Some(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Str(value.clone()),
-            };
+            }),
+            Some(crate::classes::ClassValue::Strings { owner, ordinal, .. }) => {
+                Some(self.globals.class_tuple(*owner, *ordinal).ok_or_else(|| {
+                    error(
+                        self.source,
+                        attribute,
+                        "class tuple is read before its declaration",
+                    )
+                })?)
+            }
+            _ => None,
+        };
+        if let Some(literal) = literal {
+            self.class_reads.borrow_mut().insert(owner.definition);
             return Ok(self.evaluated_receiver(receiver, literal));
         }
         if self.classes.has_concrete_subclasses(class)

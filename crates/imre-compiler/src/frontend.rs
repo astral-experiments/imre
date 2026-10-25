@@ -752,11 +752,12 @@ pub(crate) fn lower_with_owners(
         }
     }
     let initializer_start = definitions.len();
-    let helpers = Helpers::new(definitions.len() + graph.initializers().count());
+    let class_globals = classes.declarations.owns_class_tuples(graph.entry);
+    let helpers = Helpers::new(definitions.len() + graph.initializers(class_globals).count());
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
     let mut available = HashSet::new();
-    for (module_id, range) in graph.initializers() {
+    for (module_id, range) in graph.initializers(class_globals) {
         let checker = Checker::new(
             graph,
             module_id,
@@ -5728,7 +5729,10 @@ impl<'a> Checker<'a> {
                             self.classes.declarations.definitions[class]
                                 .static_bindings
                                 .get(attribute.attr.as_str()),
-                            Some(crate::classes::ClassValue::String(_))
+                            Some(
+                                crate::classes::ClassValue::String(_)
+                                    | crate::classes::ClassValue::Strings { .. }
+                            )
                         ))
                 {
                     return self.class_attribute(attribute, class, Some(receiver), None);
